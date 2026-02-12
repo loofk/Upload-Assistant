@@ -1,0 +1,96 @@
+{
+  "code": "0",
+  "message": "SUCCESS",
+  "data": [
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-03-22 14:00:15",
+          "id": "1",
+          "order": "0",
+          "nameChs": "Blu-ray",
+          "nameCht": "Blu-ray",
+          "nameEng": "Blu-ray"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-03-22 14:00:15",
+          "id": "2",
+          "order": "1",
+          "nameChs": "HD DVD",
+          "nameCht": "HD DVD",
+          "nameEng": "HD DVD"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-03-22 14:00:15",
+          "id": "3",
+          "order": "2",
+          "nameChs": "Remux",
+          "nameCht": "Remux",
+          "nameEng": "Remux"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-03-22 14:00:15",
+          "id": "7",
+          "order": "3",
+          "nameChs": "Encode",
+          "nameCht": "Encode",
+          "nameEng": "Encode"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-03-22 14:00:15",
+          "id": "4",
+          "order": "4",
+          "nameChs": "MiniBD",
+          "nameCht": "MiniBD",
+          "nameEng": "MiniBD"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-03-22 14:00:15",
+          "id": "5",
+          "order": "5",
+          "nameChs": "HDTV",
+          "nameCht": "HDTV",
+          "nameEng": "HDTV"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-03-22 14:00:15",
+          "id": "6",
+          "order": "6",
+          "nameChs": "DVDR",
+          "nameCht": "DVDR",
+          "nameEng": "DVDR"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-03-22 14:00:15",
+          "id": "8",
+          "order": "7",
+          "nameChs": "CD",
+          "nameCht": "CD",
+          "nameEng": "CD"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-03-22 14:00:15",
+          "id": "10",
+          "order": "8",
+          "nameChs": "Web-DL",
+          "nameCht": "Web-DL",
+          "nameEng": "Web-DL"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-03-22 14:00:15",
+          "id": "9",
+          "order": "9",
+          "nameChs": "Track",
+          "nameCht": "Track",
+          "nameEng": "Track"
+      }
+  ]
+}

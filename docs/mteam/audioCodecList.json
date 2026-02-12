@@ -1,0 +1,111 @@
+{
+  "code": "0",
+  "message": "SUCCESS",
+  "data": [
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-05-23 20:46:07",
+          "id": "6",
+          "order": "1",
+          "name": "AAC"
+      },
+      {
+          "createdDate": "2024-03-24 21:42:25",
+          "lastModifiedDate": "2024-05-24 11:10:11",
+          "id": "8",
+          "order": "2",
+          "name": "AC3(DD)"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-05-23 20:46:27",
+          "id": "3",
+          "order": "3",
+          "name": "DTS"
+      },
+      {
+          "createdDate": "2024-05-21 15:38:39",
+          "lastModifiedDate": "2024-05-23 20:46:30",
+          "id": "11",
+          "order": "4",
+          "name": "DTS-HD MA"
+      },
+      {
+          "createdDate": "2024-05-21 15:42:59",
+          "lastModifiedDate": "2024-05-24 18:16:32",
+          "id": "12",
+          "order": "5",
+          "name": "E-AC3(DDP)"
+      },
+      {
+          "createdDate": "2024-05-21 15:43:20",
+          "lastModifiedDate": "2024-05-24 18:16:38",
+          "id": "13",
+          "order": "6",
+          "name": "E-AC3 Atoms(DDP Atoms)"
+      },
+      {
+          "createdDate": "2024-05-06 20:37:52",
+          "lastModifiedDate": "2024-05-27 15:17:54",
+          "id": "9",
+          "order": "7",
+          "name": "TrueHD"
+      },
+      {
+          "createdDate": "2024-05-06 20:38:00",
+          "lastModifiedDate": "2024-05-23 20:46:47",
+          "id": "10",
+          "order": "8",
+          "name": "TrueHD Atmos"
+      },
+      {
+          "createdDate": "2024-05-22 23:57:14",
+          "lastModifiedDate": "2024-09-11 18:57:25",
+          "id": "14",
+          "order": "9",
+          "name": "LPCM/PCM"
+      },
+      {
+          "createdDate": "2024-06-08 02:06:19",
+          "lastModifiedDate": "2024-06-08 02:06:33",
+          "id": "15",
+          "order": "19",
+          "name": "WAV"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-05-23 20:46:58",
+          "id": "1",
+          "order": "20",
+          "name": "FLAC"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-05-23 20:47:01",
+          "id": "2",
+          "order": "21",
+          "name": "APE"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-09-11 18:57:11",
+          "id": "4",
+          "order": "22",
+          "name": "MP2/3"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-05-23 20:47:07",
+          "id": "5",
+          "order": "23",
+          "name": "OGG"
+      },
+      {
+          "createdDate": "2024-03-22 14:00:15",
+          "lastModifiedDate": "2024-05-23 20:46:11",
+          "id": "7",
+          "order": "99",
+          "name": "Other"
+      }
+  ]
+}

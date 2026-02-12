@@ -337,9 +337,11 @@ class DiscParse:
                             if idx == 0:
                                 summary_file = f"{save_dir}/BD_SUMMARY_{str(i).zfill(2)}.txt"
                                 extended_summary_file = f"{save_dir}/BD_SUMMARY_EXT_{str(i).zfill(2)}.txt"
+                                full_bdinfo_file = f"{save_dir}/BD_FULL_{str(i).zfill(2)}.txt"
                             else:
                                 summary_file = f"{save_dir}/BD_SUMMARY_{str(i).zfill(2)}_{idx}.txt"
                                 extended_summary_file = f"{save_dir}/BD_SUMMARY_EXT_{str(i).zfill(2)}_{idx}.txt"
+                                full_bdinfo_file = f"{save_dir}/BD_FULL_{str(i).zfill(2)}_{idx}.txt"
 
                             # Strip multiple spaces to single spaces before saving
                             bd_summary_cleaned = re.sub(r' +', ' ', bd_summary.strip())
@@ -347,6 +349,17 @@ class DiscParse:
 
                             await asyncio.to_thread(Path(summary_file).write_text, bd_summary_cleaned, encoding="utf-8", errors="replace")
                             await asyncio.to_thread(Path(extended_summary_file).write_text, ext_bd_summary_cleaned, encoding="utf-8", errors="replace")
+                            
+                            # Also save the full BDInfo file to a fixed filename
+                            # The full file is already generated at bdinfo_text (playlist_report_path)
+                            if os.path.exists(bdinfo_text):
+                                # Read the full BDInfo content
+                                full_bdinfo_content = await asyncio.to_thread(Path(bdinfo_text).read_text, encoding="utf-8", errors="replace")
+                                # Save it to the fixed location: BD_FULL_00.txt (or BD_FULL_00_1.txt for multiple playlists)
+                                await asyncio.to_thread(Path(full_bdinfo_file).write_text, full_bdinfo_content, encoding="utf-8", errors="replace")
+                                console.print(f"[green]Saved full BDInfo file: {os.path.basename(full_bdinfo_file)}[/green]")
+                            else:
+                                console.print(f"[yellow]Warning: Full BDInfo file not found at {bdinfo_text}[/yellow]")
 
                             bdinfo = self.parse_bdinfo(bd_summary_cleaned, files[1], path)
 

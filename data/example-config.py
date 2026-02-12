@@ -767,6 +767,8 @@ config = {
             "link_dir_name": "",
             # API key (Token) from 控制台 → 实验室 → 存取令牌
             "api_key": "",
+            # User ID for profile API requests
+            "uid": 0,
             "img_rehost": False,
             "ptgen_api": "",
             "anon": True,

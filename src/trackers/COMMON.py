@@ -668,58 +668,143 @@ class COMMON:
 
     async def ptgen(self, meta: dict[str, Any], ptgen_site: str = "", ptgen_retry: int = 3) -> str:
         ptgen_text = ""
-        url = 'https://ptgen.zhenzhen.workers.dev'
+        base_url = 'https://ptgen.zhenzhen.workers.dev'
         if ptgen_site != '':
-            url = ptgen_site
-        params: dict[str, Any] = {}
-        data: dict[str, Any] = {}
+            base_url = ptgen_site
+        
+        # Extract API key from URL if present (e.g., https://example.com/api?key=xxx)
+        api_key = None
+        from urllib.parse import urlparse, parse_qs, urlencode
+        parsed = urlparse(base_url)
+        query_params = parse_qs(parsed.query)
+        
+        if 'key' in query_params:
+            api_key = query_params['key'][0]
+            # Remove key from base_url to avoid duplication
+            base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            console.print(f"[yellow]Extracted API key from URL[/yellow]")
+        
+        # Determine API endpoint - if base_url doesn't end with /api, append it
+        # For frontend+backend deployment, API is at /api
+        if '/api' not in base_url and not base_url.endswith('/'):
+            api_url = f"{base_url}/api"
+        elif '/api' not in base_url:
+            api_url = f"{base_url}api"
+        else:
+            api_url = base_url
+        
+        console.print(f"[yellow]PTGEN API URL: {api_url}, API Key present: {bool(api_key)}[/yellow]")
 
         async def fetch_ptgen(client: httpx.AsyncClient, request_url: str, request_params: dict[str, Any]) -> Optional[dict[str, Any]]:
-            """Helper to fetch and parse ptgen response with error handling."""
+            """Helper to fetch and parse ptgen response with error handling.
+            API uses POST with URL query parameters.
+            """
             try:
-                response = await client.get(request_url, params=request_params, timeout=30.0)
+                # Add API key to params if available
+                params = request_params.copy()
+                if api_key:
+                    params['key'] = api_key
+                
+                # POST request with query parameters (not in body)
+                response = await client.post(request_url, params=params, timeout=30.0)
                 json_data: dict[str, Any] = response.json()
                 return json_data
-            except (httpx.RequestError, httpx.TimeoutException, ValueError):
+            except (httpx.RequestError, httpx.TimeoutException, ValueError) as e:
+                console.print(f"[yellow]PTGEN API error: {e}[/yellow]")
                 return None
 
         try:
             async with httpx.AsyncClient() as client:
-                # get douban url
+                # Try to get douban URL first using IMDb
+                douban_url = None
                 if int(meta.get('imdb_id', 0)) != 0:
-                    data['search'] = f"tt{meta['imdb_id']}"
-                    ptgen_json = await fetch_ptgen(client, url, data)
+                    # Use Params parameter format: /api?source=imdb&sid=tt123456
+                    params = {
+                        'source': 'imdb',
+                        'sid': f"tt{meta['imdb_id']}"
+                    }
+                    ptgen_json = await fetch_ptgen(client, api_url, params)
 
                     # Check for error and retry if needed
-                    if ptgen_json is None or ptgen_json.get("error") is not None:
+                    if ptgen_json is None or ptgen_json.get("error") is not None or not ptgen_json.get("success", False):
                         for _retry in range(ptgen_retry):
-                            ptgen_json = await fetch_ptgen(client, url, data)
-                            if ptgen_json is not None and ptgen_json.get("error") is None:
+                            ptgen_json = await fetch_ptgen(client, api_url, params)
+                            if ptgen_json is not None and ptgen_json.get("error") is None and ptgen_json.get("success", False):
                                 break
 
-                    # Try to extract douban link
-                    try:
-                        if ptgen_json and 'data' in ptgen_json and ptgen_json['data']:
-                            params['url'] = ptgen_json['data'][0]['link']
-                        else:
-                            raise KeyError("No data in response")
-                    except (KeyError, IndexError, TypeError):
-                        console.print("[red]Unable to get data from ptgen using IMDb")
-                        params['url'] = console.input("[red]Please enter [yellow]Douban[/yellow] link: ")
-                else:
+                    # Try to extract douban link from response
+                    if ptgen_json and ptgen_json.get("success"):
+                        console.print(f"[yellow]IMDb API response received, checking for douban link...[/yellow]")
+                        # Check if response contains douban link in data
+                        if 'data' in ptgen_json and ptgen_json['data']:
+                            console.print(f"[yellow]Found 'data' field: {type(ptgen_json['data'])}[/yellow]")
+                            if isinstance(ptgen_json['data'], list) and len(ptgen_json['data']) > 0:
+                                douban_url = ptgen_json['data'][0].get('link')
+                                console.print(f"[yellow]Extracted douban_url from data[0].link: {douban_url}[/yellow]")
+                            elif isinstance(ptgen_json['data'], dict):
+                                douban_url = ptgen_json['data'].get('douban') or ptgen_json['data'].get('link')
+                                console.print(f"[yellow]Extracted douban_url from data dict: {douban_url}[/yellow]")
+                        # Also check format field for douban link
+                        format_text = ptgen_json.get('format', '')
+                        if not douban_url and format_text:
+                            douban_match = re.search(r'https?://movie\.douban\.com/subject/(\d+)', format_text)
+                            if douban_match:
+                                douban_url = douban_match.group(0)
+                                console.print(f"[yellow]Extracted douban_url from format text: {douban_url}[/yellow]")
+                        
+                        if not douban_url:
+                            console.print(f"[yellow]No douban URL found in IMDb response. Response keys: {list(ptgen_json.keys())}[/yellow]")
+                            # Print full response for debugging
+                            import json
+                            console.print(f"[yellow]Full IMDb response:\n{json.dumps(ptgen_json, indent=2, ensure_ascii=False)}[/yellow]")
+                            # Ask user to manually enter douban URL
+                            console.print("[yellow]Unable to extract douban link from IMDb response.[/yellow]")
+                            douban_url = console.input("[yellow]Please enter [bold]Douban[/bold] link (e.g., https://movie.douban.com/subject/123456/): [/yellow]")
+                            if not douban_url.strip():
+                                console.print("[red]No douban URL provided, skipping ptgen[/red]")
+                                return ""
+                    else:
+                        console.print(f"[yellow]IMDb API call failed or returned error[/yellow]")
+                        # If IMDb API failed but we have IMDb ID, still try to ask for douban URL
+                        if int(meta.get('imdb_id', 0)) != 0:
+                            console.print("[yellow]IMDb API failed, but IMDb ID exists. Please provide douban link manually.[/yellow]")
+                            douban_url = console.input("[yellow]Please enter [bold]Douban[/bold] link (e.g., https://movie.douban.com/subject/123456/): [/yellow]")
+                            if not douban_url.strip():
+                                console.print("[red]No douban URL provided, skipping ptgen[/red]")
+                                return ""
+
+                # If we have douban URL, fetch full ptgen data using douban
+                if douban_url:
+                    console.print(f"[green]Using douban URL: {douban_url}, fetching full ptgen data...[/green]")
+                    # Use URL parameter format: /api?url=https://movie.douban.com/subject/123456/
+                    params = {'url': douban_url}
+                    ptgen_json = await fetch_ptgen(client, api_url, params)
+                    
+                    if ptgen_json is None or ptgen_json.get("error") is not None or not ptgen_json.get("success", False):
+                        for _retry in range(ptgen_retry):
+                            ptgen_json = await fetch_ptgen(client, api_url, params)
+                            if ptgen_json is not None and ptgen_json.get("error") is None and ptgen_json.get("success", False):
+                                break
+                elif int(meta.get('imdb_id', 0)) == 0:
+                    # No IMDb ID, ask for douban URL
                     console.print("[red]No IMDb id was found.")
-                    params['url'] = console.input("[red]Please enter [yellow]Douban[/yellow] link: ")
+                    douban_url = console.input("[yellow]Please enter [bold]Douban[/bold] link (e.g., https://movie.douban.com/subject/123456/): [/yellow]")
+                    if not douban_url.strip():
+                        console.print("[red]No douban URL provided, skipping ptgen[/red]")
+                        return ""
+                    
+                    params = {'url': douban_url}
+                    ptgen_json = await fetch_ptgen(client, api_url, params)
+                    
+                    if ptgen_json is None or ptgen_json.get("error") is not None or not ptgen_json.get("success", False):
+                        for _retry in range(ptgen_retry):
+                            ptgen_json = await fetch_ptgen(client, api_url, params)
+                            if ptgen_json is not None and ptgen_json.get("error") is None and ptgen_json.get("success", False):
+                                break
 
-                # Fetch with douban URL
-                ptgen_json = await fetch_ptgen(client, url, params)
-                if ptgen_json is None or ptgen_json.get("error") is not None:
-                    for _retry in range(ptgen_retry):
-                        ptgen_json = await fetch_ptgen(client, url, params)
-                        if ptgen_json is not None and ptgen_json.get("error") is None:
-                            break
-
-                if ptgen_json is None:
-                    console.print("[bold red]Failed to get valid ptgen response after retries")
+                if ptgen_json is None or not ptgen_json.get("success", False):
+                    error_msg = ptgen_json.get("error", "Unknown error") if ptgen_json else "No response"
+                    console.print(f"[bold red]Failed to get valid ptgen response: {error_msg}[/bold red]")
                     return ""
 
                 meta['ptgen'] = ptgen_json
@@ -727,9 +812,13 @@ class COMMON:
                     await f.write(json.dumps(meta, indent=4))
 
                 ptgen_text = ptgen_json.get('format', '')
+                # Remove image tag if present (we'll add our own)
                 if "[/img]" in ptgen_text:
                     ptgen_text = ptgen_text.split("[/img]")[1]
-                ptgen_text = f"[img]{meta.get('imdb_info', {}).get('cover', meta.get('cover', ''))}[/img]{ptgen_text}"
+                # Use poster from ptgen_json if available, otherwise fallback to imdb_info cover
+                poster_url = ptgen_json.get('poster', '') or meta.get('imdb_info', {}).get('cover', meta.get('cover', ''))
+                if poster_url:
+                    ptgen_text = f"[img]{poster_url}[/img]{ptgen_text}"
 
         except Exception:
             console.print_exception()
