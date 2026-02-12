@@ -107,23 +107,31 @@ class PTER:
         return dupes
 
     async def get_type_category_id(self, meta: Meta) -> str:
-        cat_id = "EXIT"
+        cat_id = "0"  # Default to "(请选择)"
         category = str(meta.get('category', ''))
 
         if category == 'MOVIE':
-            cat_id = '401'
+            cat_id = '401'  # 电影 (Movie)
 
         if category == 'TV':
-            cat_id = '404'
+            cat_id = '404'  # 电视剧 (TV Series)
+        
         genres_value = meta.get("genres", "")
         genres = ', '.join(cast(list[str], genres_value)) if isinstance(genres_value, list) else str(genres_value)
         keywords_value = meta.get("keywords", "")
         keywords = ', '.join(cast(list[str], keywords_value)) if isinstance(keywords_value, list) else str(keywords_value)
+        
+        # Check for animation
+        if 'animation' in genres.lower() or 'animation' in keywords.lower() or 'anime' in genres.lower():
+            cat_id = '403'  # 动画 (Animation)
+        
+        # Check for variety shows/reality TV
+        if 'variety' in genres.lower() or 'reality' in genres.lower() or 'talk show' in genres.lower():
+            cat_id = '405'  # 综艺 (TV Show)
+        
+        # Check for documentary
         if 'documentary' in genres.lower() or 'documentary' in keywords.lower():
-            cat_id = '402'
-
-        if 'animation' in genres.lower() or 'animation' in keywords.lower():
-            cat_id = '403'
+            cat_id = '402'  # 纪录片 (Documentary)
 
         return cat_id
 
@@ -370,39 +378,27 @@ class PTER:
         return None
 
     async def upload(self, meta: Meta, _disctype: str) -> bool:
-
+        """
+        Submit an offer/candidate to PTER instead of direct upload.
+        PTER requires candidates to be submitted first before approval.
+        """
         common = COMMON(config=self.config)
+        # Still create torrent file for reference, but won't upload it
         await common.create_torrent_for_upload(meta, self.tracker, self.source_flag)
 
         desc_file = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt"
         if not os.path.exists(desc_file):
             await self.edit_desc(meta)
 
-        anon = 'no' if meta.get('anon') == 0 and not self.config['TRACKERS'][self.tracker].get('anon', False) else 'yes'
+        # Check anonymous upload (checkbox format: "yes" if checked, omitted if not)
+        anon = None
+        if meta.get('anon') == 1 or self.config['TRACKERS'][self.tracker].get('anon', False):
+            anon = 'yes'
 
         pter_name = await self.edit_name(meta)
 
-        mi_path = (
-            f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt"
-            if meta['bdinfo'] is not None
-            else f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt"
-        )
-        async with aiofiles.open(mi_path, encoding='utf-8') as mi_dump:
-            _ = await mi_dump.read()
         async with aiofiles.open(desc_file, encoding='utf-8') as desc_handle:
             pter_desc = await desc_handle.read()
-        torrent_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}].torrent"
-
-        async with aiofiles.open(torrent_path, 'rb') as torrentFile:
-            torrent_bytes = await torrentFile.read()
-        filelist = cast(list[Any], meta.get('filelist', []))
-        if len(filelist) == 1:
-            torrentFileName = unidecode(os.path.basename(str(meta.get('video', ''))).replace(' ', '.'))
-        else:
-            torrentFileName = unidecode(os.path.basename(str(meta.get('path', ''))).replace(' ', '.'))
-        files = {
-            'file': (f"{torrentFileName}.torrent", torrent_bytes, "application/x-bittorent"),
-        }
 
         # use chinese small_descr
         ptgen = cast(dict[str, Any], meta.get('ptgen', {}))
@@ -417,58 +413,86 @@ class PTER:
             small_descr = small_descr.replace('/ |', '|')
         else:
             small_descr = str(meta.get('title', ''))
+        
+        # Build form data according to PTER offer form structure
         data: dict[str, Any] = {
             "name": pter_name,
             "small_descr": small_descr,
-            "descr": pter_desc,
+            "body": pter_desc,  # Note: form uses "body" not "descr"
             "type": await self.get_type_category_id(meta),
             "source_sel": await self.get_type_medium_id(meta),
             "team_sel": await self.get_area_id(meta),
-            "uplver": anon,
-            "zhongzi": await self.is_zhongzi(meta)
         }
+        
+        # Add IMDb URL if available
+        imdb_id = int(meta.get('imdb_id', 0) or 0)
+        if imdb_id != 0:
+            data["url"] = f"https://www.imdb.com/title/tt{meta.get('imdb', '')}/"
+        
+        # Add Douban URL if available (extract from ptgen or meta)
+        douban_url = ""
+        if ptgen:
+            douban_value = ptgen.get("douban", "")
+            if douban_value:
+                if isinstance(douban_value, str) and douban_value.startswith("http"):
+                    douban_url = douban_value
+                elif isinstance(douban_value, str) and douban_value.isdigit():
+                    douban_url = f"https://movie.douban.com/subject/{douban_value}/"
+        if douban_url:
+            data["douban"] = douban_url
+        
+        # Add anonymous upload checkbox if needed
+        if anon:
+            data["uplver"] = anon
+        
+        # Add tags based on metadata
+        # Check for Chinese subtitles
+        chinese_sub = await self.is_zhongzi(meta)
+        if chinese_sub == 'yes':
+            data["zhongzi"] = "yes"
+        
+        # Check for personal release
         if meta.get('personalrelease', False) is True:
             data["pr"] = "yes"
 
-        url = "https://pterclub.com/takeupload.php"
+        url = "https://pterclub.com/offers.php?new_offer=1"
 
-        # Submit
+        # Submit offer
         if meta.get('debug'):
             console.print(url)
             console.print(data)
-            meta['tracker_status'][self.tracker]['status_message'] = "Debug mode enabled, not uploading."
-            await common.create_torrent_for_upload(meta, f"{self.tracker}" + "_DEBUG", f"{self.tracker}" + "_DEBUG", announce_url="https://fake.tracker")
+            meta['tracker_status'][self.tracker]['status_message'] = "Debug mode enabled, not submitting offer."
             return True  # Debug mode - simulated success
         else:
             cookiefile = f"{meta['base_dir']}/data/cookies/PTER.txt"
             if os.path.exists(cookiefile):
                 cookies = await common.parseCookieFile(cookiefile)
                 async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
-                    up = await client.post(url=url, data=data, files=files)
+                    up = await client.post(url=url, data=data)
 
-                    if str(up.url).startswith("https://pterclub.com/details.php?id="):
-                        console.print(f"[green]Uploaded to: [yellow]{str(up.url).replace('&uploaded=1', '')}[/yellow][/green]")
+                    # Check if offer was submitted successfully
+                    # Success typically redirects to offer details page or offers list
+                    if str(up.url).startswith("https://pterclub.com/offers.php") or \
+                       str(up.url).startswith("https://pterclub.com/offer.php?id=") or \
+                       "候选已添加" in up.text or \
+                       "offer" in str(up.url).lower():
+                        console.print(f"[green]Offer submitted to PTER: [yellow]{str(up.url)}[/yellow][/green]")
+                        # Try to extract offer ID if available
                         id_match = re.search(r"(id=)(\d+)", urlparse(str(up.url)).query)
-                        if id_match is None:
-                            raise UploadException("Upload succeeded but torrent id was not present in the redirect URL.", 'red')  # noqa: F405
-                        torrent_id = id_match.group(2)
-                        await self.download_new_torrent(torrent_id, torrent_path)
-                        meta['tracker_status'][self.tracker]['status_message'] = str(up.url).replace('&uploaded=1', '')
-                        meta['tracker_status'][self.tracker]['torrent_id'] = torrent_id
+                        if id_match is not None:
+                            offer_id = id_match.group(2)
+                            meta['tracker_status'][self.tracker]['status_message'] = str(up.url)
+                            meta['tracker_status'][self.tracker]['offer_id'] = offer_id
+                        else:
+                            meta['tracker_status'][self.tracker]['status_message'] = "Offer submitted successfully"
                         return True
                     else:
                         console.print(data)
                         console.print("\n\n")
-                        raise UploadException(f"Upload to Pter Failed: result URL {up.url} ({up.status_code}) was not expected", 'red')  # noqa #F405
+                        console.print(f"[yellow]Response URL: {up.url}[/yellow]")
+                        console.print(f"[yellow]Response status: {up.status_code}[/yellow]")
+                        raise UploadException(f"Offer submission to PTER Failed: result URL {up.url} ({up.status_code}) was not expected", 'red')  # noqa #F405
+            else:
+                console.print("[bold red]Missing Cookie File. (data/cookies/PTER.txt)")
+                return False
         return False
-
-    async def download_new_torrent(self, id: str, torrent_path: str) -> None:
-        download_url = f"https://pterclub.com/download.php?id={id}&passkey={self.passkey}"
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            r = await client.get(url=download_url)
-        if r.status_code == 200:
-            async with aiofiles.open(torrent_path, "wb") as tor:
-                await tor.write(r.content)
-        else:
-            console.print("[red]There was an issue downloading the new .torrent from pter")
-            console.print(r.text)

@@ -732,6 +732,55 @@ config = {
             "ptgen_api": "",
             "anon": True,
         },
+        "HDSKY": {
+            # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
+            "link_dir_name": "",
+            "passkey": 'passkey',
+            "img_rehost": False,
+            "username": "",
+            "password": "",
+            "ptgen_api": "",
+            "anon": True,
+        },
+        "TJUPT": {
+            # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
+            "link_dir_name": "",
+            "passkey": 'passkey',
+            "img_rehost": False,
+            "username": "",
+            "password": "",
+            "ptgen_api": "",
+            "anon": True,
+        },
+        "AUDIENCES": {
+            # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
+            "link_dir_name": "",
+            "passkey": 'passkey',
+            "img_rehost": False,
+            "username": "",
+            "password": "",
+            "ptgen_api": "",
+            "anon": True,
+        },
+        "MTEAM": {
+            # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
+            "link_dir_name": "",
+            # API key (Token) from 控制台 → 实验室 → 存取令牌
+            "api_key": "",
+            "img_rehost": False,
+            "ptgen_api": "",
+            "anon": True,
+        },
+        "HHAN": {
+            # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
+            "link_dir_name": "",
+            "passkey": 'passkey',
+            "img_rehost": False,
+            "username": "",
+            "password": "",
+            "ptgen_api": "",
+            "anon": True,
+        },
         "PTP": {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
