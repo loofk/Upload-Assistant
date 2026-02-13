@@ -885,6 +885,203 @@ async def update_metadata_from_tracker(
                 console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
             found_match = False
 
+    elif tracker_name == "AUDIENCES":
+        bbcode = BBCODE()
+        if meta.get('audiences') is not None:
+            meta[manual_key] = meta[tracker_key]
+            console.print(f"[cyan]{tracker_name} ID found in meta, reusing existing ID: {meta[tracker_key]}[/cyan]")
+            
+            audiences_info = await tracker_instance.get_info_from_torrent_id(meta[tracker_key], meta)
+            imdb, tmdb, audiences_name, meta['ext_torrenthash'], audiences_description = cast(
+                tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
+                audiences_info,
+            )
+            
+            if imdb or tmdb or audiences_description:
+                meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
+                if tmdb:
+                    meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
+                meta['audiences_name'] = audiences_name
+                found_match = True
+                if audiences_description and not only_id:
+                    description, image_list = await parse_nexusphp_description(audiences_description, meta)
+                    if description and len(description) > 0:
+                        console.print(f"Description content:\n{description[:500]}...", markup=False)
+                        meta['description'] = description
+                        meta['saved_description'] = True
+                    if image_list and meta.get('keep_images'):
+                        valid_images = await check_images_concurrently(image_list, meta)
+                        if valid_images:
+                            meta['image_list'] = valid_images
+                            await handle_image_list(meta, tracker_name, valid_images)
+                    else:
+                        meta['image_list'] = []
+                
+                console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TMDb ID: {tmdb}, Name: {audiences_name}[/green]")
+            else:
+                console.print(f"[yellow]{tracker_name} data not found for ID: {meta[tracker_key]}[/yellow]")
+                found_match = False
+        else:
+            if meta['debug']:
+                console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
+            found_match = False
+
+    elif tracker_name == "HHAN":
+        bbcode = BBCODE()
+        if meta.get('hhan') is not None:
+            meta[manual_key] = meta[tracker_key]
+            console.print(f"[cyan]{tracker_name} ID found in meta, reusing existing ID: {meta[tracker_key]}[/cyan]")
+            
+            hhan_info = await tracker_instance.get_info_from_torrent_id(meta[tracker_key], meta)
+            imdb, tmdb, hhan_name, meta['ext_torrenthash'], hhan_description = cast(
+                tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
+                hhan_info,
+            )
+            
+            if imdb or tmdb or hhan_description:
+                meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
+                if tmdb:
+                    meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
+                meta['hhan_name'] = hhan_name
+                found_match = True
+                if hhan_description and not only_id:
+                    description, image_list = await parse_nexusphp_description(hhan_description, meta)
+                    if description and len(description) > 0:
+                        console.print(f"Description content:\n{description[:500]}...", markup=False)
+                        meta['description'] = description
+                        meta['saved_description'] = True
+                    if image_list and meta.get('keep_images'):
+                        valid_images = await check_images_concurrently(image_list, meta)
+                        if valid_images:
+                            meta['image_list'] = valid_images
+                            await handle_image_list(meta, tracker_name, valid_images)
+                    else:
+                        meta['image_list'] = []
+                
+                console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TMDb ID: {tmdb}, Name: {hhan_name}[/green]")
+            else:
+                console.print(f"[yellow]{tracker_name} data not found for ID: {meta[tracker_key]}[/yellow]")
+                found_match = False
+        else:
+            if meta['debug']:
+                console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
+            found_match = False
+
+    elif tracker_name == "HDSKY":
+        bbcode = BBCODE()
+        if meta.get('hdsky') is not None:
+            meta[manual_key] = meta[tracker_key]
+            console.print(f"[cyan]{tracker_name} ID found in meta, reusing existing ID: {meta[tracker_key]}[/cyan]")
+            
+            hdsky_info = await tracker_instance.get_info_from_torrent_id(meta[tracker_key], meta)
+            imdb, tmdb, hdsky_name, meta['ext_torrenthash'], hdsky_description = cast(
+                tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
+                hdsky_info,
+            )
+            
+            if imdb or tmdb or hdsky_description:
+                meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
+                if tmdb:
+                    meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
+                meta['hdsky_name'] = hdsky_name
+                found_match = True
+                if hdsky_description and not only_id:
+                    description, image_list = await parse_nexusphp_description(hdsky_description, meta)
+                    if description and len(description) > 0:
+                        console.print(f"Description content:\n{description[:500]}...", markup=False)
+                        meta['description'] = description
+                        meta['saved_description'] = True
+                    if image_list and meta.get('keep_images'):
+                        valid_images = await check_images_concurrently(image_list, meta)
+                        if valid_images:
+                            meta['image_list'] = valid_images
+                            await handle_image_list(meta, tracker_name, valid_images)
+                    else:
+                        meta['image_list'] = []
+                
+                console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TMDb ID: {tmdb}, Name: {hdsky_name}[/green]")
+            else:
+                console.print(f"[yellow]{tracker_name} data not found for ID: {meta[tracker_key]}[/yellow]")
+                found_match = False
+        else:
+            if meta['debug']:
+                console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
+            found_match = False
+
+    elif tracker_name == "TJUPT":
+        bbcode = BBCODE()
+        if meta.get('tjupt') is not None:
+            meta[manual_key] = meta[tracker_key]
+            console.print(f"[cyan]{tracker_name} ID found in meta, reusing existing ID: {meta[tracker_key]}[/cyan]")
+            
+            tjupt_info = await tracker_instance.get_info_from_torrent_id(meta[tracker_key], meta)
+            imdb, tmdb, tjupt_name, meta['ext_torrenthash'], tjupt_description = cast(
+                tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
+                tjupt_info,
+            )
+            
+            if imdb or tmdb or tjupt_description:
+                meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
+                if tmdb:
+                    meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
+                meta['tjupt_name'] = tjupt_name
+                found_match = True
+                if tjupt_description and not only_id:
+                    description, image_list = await parse_nexusphp_description(tjupt_description, meta)
+                    if description and len(description) > 0:
+                        console.print(f"Description content:\n{description[:500]}...", markup=False)
+                        meta['description'] = description
+                        meta['saved_description'] = True
+                    if image_list and meta.get('keep_images'):
+                        valid_images = await check_images_concurrently(image_list, meta)
+                        if valid_images:
+                            meta['image_list'] = valid_images
+                            await handle_image_list(meta, tracker_name, valid_images)
+                    else:
+                        meta['image_list'] = []
+                
+                console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TMDb ID: {tmdb}, Name: {tjupt_name}[/green]")
+            else:
+                console.print(f"[yellow]{tracker_name} data not found for ID: {meta[tracker_key]}[/yellow]")
+                found_match = False
+        else:
+            if meta['debug']:
+                console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
+            found_match = False
+
+    elif tracker_name == "MTEAM":
+        if meta.get('mteam') is not None:
+            meta[manual_key] = meta[tracker_key]
+            console.print(f"[cyan]{tracker_name} ID found in meta, reusing existing ID: {meta[tracker_key]}[/cyan]")
+            
+            mteam_info = await tracker_instance.get_info_from_torrent_id(meta[tracker_key], meta)
+            imdb, tmdb, mteam_name, meta['ext_torrenthash'], mteam_description = cast(
+                tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
+                mteam_info,
+            )
+            
+            if imdb or tmdb or mteam_description:
+                meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
+                if tmdb:
+                    meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
+                meta['mteam_name'] = mteam_name
+                found_match = True
+                if mteam_description and not only_id:
+                    # MTEAM description is already clean text from API
+                    if mteam_description and len(mteam_description) > 0:
+                        console.print(f"Description content:\n{mteam_description[:500]}...", markup=False)
+                        meta['description'] = mteam_description
+                        meta['saved_description'] = True
+                
+                console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TMDb ID: {tmdb}, Name: {mteam_name}[/green]")
+            else:
+                console.print(f"[yellow]{tracker_name} data not found for ID: {meta[tracker_key]}[/yellow]")
+                found_match = False
+        else:
+            if meta['debug']:
+                console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
+            found_match = False
+
     return meta, found_match
 
 

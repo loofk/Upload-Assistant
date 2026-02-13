@@ -118,34 +118,91 @@ class U2:
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'lxml')
                     
-                    # Extract IMDb ID
+                    # Check if logged in - U2 may show login page if not authenticated
+                    page_text = response.text.lower()
+                    if 'login' in page_text and ('username' in page_text or 'password' in page_text or '未登录' in response.text):
+                        console.print(f"[red]U2: Not logged in. Cookie may be expired or invalid. Please update data/cookies/U2.txt[/red]")
+                        return u2_imdb, u2_tmdb, u2_name, u2_torrenthash, u2_description
+                    
+                    # Extract IMDb ID - try multiple selectors
                     imdb_link = soup.select_one('a[href*="imdb.com/title/tt"]')
+                    if not imdb_link:
+                        for link in soup.find_all('a', href=True):
+                            href = link.get('href', '')
+                            if 'imdb.com/title/tt' in href:
+                                imdb_link = link
+                                break
                     if imdb_link:
                         imdb_href = imdb_link.get('href', '')
                         imdb_match = re.search(r'tt(\d+)', imdb_href)
                         if imdb_match:
                             u2_imdb = int(imdb_match.group(1))
                     
-                    # Extract TMDb ID
+                    # Extract TMDb ID - try multiple selectors
                     tmdb_link = soup.select_one('a[href*="themoviedb.org"]')
+                    if not tmdb_link:
+                        for link in soup.find_all('a', href=True):
+                            href = link.get('href', '')
+                            if 'themoviedb.org' in href:
+                                tmdb_link = link
+                                break
                     if tmdb_link:
                         tmdb_href = tmdb_link.get('href', '')
                         tmdb_match = re.search(r'/(movie|tv)/(\d+)', tmdb_href)
                         if tmdb_match:
                             u2_tmdb = int(tmdb_match.group(2))
                     
-                    # Extract torrent name
-                    name_elem = soup.select_one('h1, .torrentname, td.torrentname, b.torrentname')
+                    # Extract Douban ID - try multiple selectors
+                    douban_link = soup.select_one('a[href*="movie.douban.com/subject/"]')
+                    if not douban_link:
+                        for link in soup.find_all('a', href=True):
+                            href = link.get('href', '')
+                            if 'movie.douban.com/subject/' in href or 'douban.com/subject/' in href:
+                                douban_link = link
+                                break
+                    if douban_link:
+                        douban_href = douban_link.get('href', '')
+                        douban_match = re.search(r'/subject/(\d+)', douban_href)
+                        if douban_match and meta:
+                            douban_id = douban_match.group(1)
+                            meta['douban_id'] = meta['douban'] = douban_id
+                            console.print(f"[green]U2: Found Douban ID: {douban_id}[/green]")
+                    # Also search in description text for douban URLs
+                    if not douban_link and meta:
+                        douban_url_match = re.search(r'https?://movie\.douban\.com/subject/(\d+)', response.text)
+                        if douban_url_match:
+                            douban_id = douban_url_match.group(1)
+                            meta['douban_id'] = meta['douban'] = douban_id
+                            console.print(f"[green]U2: Found Douban ID in page text: {douban_id}[/green]")
+                    
+                    # Extract torrent name - try multiple selectors
+                    name_elem = soup.select_one('h1, .torrentname, td.torrentname, b.torrentname, table.torrentname')
+                    if not name_elem:
+                        for row in soup.find_all('tr'):
+                            cells = row.find_all('td')
+                            for cell in cells:
+                                text = cell.get_text(strip=True)
+                                if text and len(text) > 10:
+                                    name_elem = cell
+                                    break
+                            if name_elem:
+                                break
                     if name_elem:
                         u2_name = name_elem.get_text(strip=True)
                     
-                    # Extract description
-                    desc_elem = soup.select_one('#desctext, .desctext, td[colspan="2"], .nfo')
+                    # Extract description - try multiple selectors
+                    desc_elem = soup.select_one('#desctext, .desctext, td[colspan="2"], .nfo, table.torrentname + table td')
+                    if not desc_elem:
+                        desc_tables = soup.find_all('table')
+                        for table in desc_tables:
+                            if 'desctext' in str(table.get('id', '')) or 'desctext' in str(table.get('class', [])):
+                                desc_elem = table
+                                break
                     if desc_elem:
                         u2_description = str(desc_elem)
                     
                     # Extract torrent hash (if available in page)
-                    hash_elem = soup.select_one('input[name="hash"], code, .hash')
+                    hash_elem = soup.select_one('input[name="hash"], code, .hash, font[color="red"]')
                     if hash_elem:
                         hash_text = hash_elem.get_text(strip=True)
                         if len(hash_text) == 40:  # SHA1 hash length

@@ -97,6 +97,111 @@ class HDSKY:
 
         return dupes
 
+    async def get_info_from_torrent_id(self, hdsky_id: Union[int, str], meta: Optional[Meta] = None) -> tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]]:
+        """
+        Fetch metadata from HDSKY torrent details page using torrent ID.
+        Returns: (imdb_id, tmdb_id, name, torrenthash, description)
+        """
+        hdsky_imdb = hdsky_tmdb = hdsky_name = hdsky_torrenthash = hdsky_description = None
+        common = COMMON(config=self.config)
+        base_dir = meta.get('base_dir', '') if meta else ''
+        cookiefile = f"{base_dir}/data/cookies/HDSKY.txt"
+        
+        if not os.path.exists(cookiefile):
+            console.print("[bold red]Missing Cookie File. (data/cookies/HDSKY.txt)[/bold red]")
+            return hdsky_imdb, hdsky_tmdb, hdsky_name, hdsky_torrenthash, hdsky_description
+        
+        cookies = await common.parseCookieFile(cookiefile)
+        url = f"https://hdsky.me/details.php?id={hdsky_id}"
+        
+        try:
+            async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(url)
+                
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'lxml')
+                    
+                    # Extract IMDb ID
+                    imdb_link = soup.select_one('a[href*="imdb.com/title/tt"]')
+                    if not imdb_link:
+                        for link in soup.find_all('a', href=True):
+                            href = link.get('href', '')
+                            if 'imdb.com/title/tt' in href:
+                                imdb_link = link
+                                break
+                    if imdb_link:
+                        imdb_href = imdb_link.get('href', '')
+                        imdb_match = re.search(r'tt(\d+)', imdb_href)
+                        if imdb_match:
+                            hdsky_imdb = int(imdb_match.group(1))
+                    
+                    # Extract TMDb ID
+                    tmdb_link = soup.select_one('a[href*="themoviedb.org"]')
+                    if not tmdb_link:
+                        for link in soup.find_all('a', href=True):
+                            href = link.get('href', '')
+                            if 'themoviedb.org' in href:
+                                tmdb_link = link
+                                break
+                    if tmdb_link:
+                        tmdb_href = tmdb_link.get('href', '')
+                        tmdb_match = re.search(r'/(movie|tv)/(\d+)', tmdb_href)
+                        if tmdb_match:
+                            hdsky_tmdb = int(tmdb_match.group(2))
+                    
+                    # Extract Douban ID
+                    douban_link = soup.select_one('a[href*="movie.douban.com/subject/"]')
+                    if not douban_link:
+                        for link in soup.find_all('a', href=True):
+                            href = link.get('href', '')
+                            if 'movie.douban.com/subject/' in href or 'douban.com/subject/' in href:
+                                douban_link = link
+                                break
+                    if douban_link:
+                        douban_href = douban_link.get('href', '')
+                        douban_match = re.search(r'/subject/(\d+)', douban_href)
+                        if douban_match and meta:
+                            douban_id = douban_match.group(1)
+                            meta['douban_id'] = meta['douban'] = douban_id
+                            console.print(f"[green]HDSKY: Found Douban ID: {douban_id}[/green]")
+                    if not douban_link and meta:
+                        douban_url_match = re.search(r'https?://movie\.douban\.com/subject/(\d+)', response.text)
+                        if douban_url_match:
+                            douban_id = douban_url_match.group(1)
+                            meta['douban_id'] = meta['douban'] = douban_id
+                            console.print(f"[green]HDSKY: Found Douban ID in page text: {douban_id}[/green]")
+                    
+                    # Extract torrent name
+                    name_elem = soup.select_one('h1, .torrentname, td.torrentname, b.torrentname, table.torrentname')
+                    if name_elem:
+                        hdsky_name = name_elem.get_text(strip=True)
+                    
+                    # Extract description
+                    desc_elem = soup.select_one('#desctext, .desctext, td[colspan="2"], .nfo')
+                    if desc_elem:
+                        hdsky_description = str(desc_elem)
+                    
+                    # Extract torrent hash
+                    hash_elem = soup.select_one('input[name="hash"], code, .hash')
+                    if hash_elem:
+                        hash_text = hash_elem.get_text(strip=True)
+                        if len(hash_text) == 40:
+                            hdsky_torrenthash = hash_text
+                    
+                else:
+                    console.print(f"[yellow]Failed to fetch HDSKY details page. Status: {response.status_code}[/yellow]")
+                    
+        except httpx.RequestError as e:
+            console.print(f"[red]Request error fetching HDSKY details: {e}[/red]")
+        except Exception as e:
+            console.print(f"[red]Unexpected error fetching HDSKY details: {e}[/red]")
+            if meta and meta.get('debug', False):
+                console.print_exception()
+            elif self.config.get('DEFAULT', {}).get('debug', False):
+                console.print_exception()
+        
+        return hdsky_imdb, hdsky_tmdb, hdsky_name, hdsky_torrenthash, hdsky_description
+
     async def get_type_category_id(self, meta: Meta) -> str:
         cat_id = "0"  # Default to "(请选择)"
         category = str(meta.get('category', ''))

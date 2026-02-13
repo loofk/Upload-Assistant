@@ -234,6 +234,67 @@ class MTEAM:
             dupes.append(entry)
         return dupes
 
+    async def get_info_from_torrent_id(self, mteam_id: Union[int, str], meta: Optional[Meta] = None) -> tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]]:
+        """
+        Fetch metadata from MTEAM torrent details using API.
+        Returns: (imdb_id, tmdb_id, name, torrenthash, description)
+        """
+        mteam_imdb = mteam_tmdb = mteam_name = mteam_torrenthash = mteam_description = None
+        
+        if not self.api_key:
+            console.print("[bold red]MTEAM API key not configured[/bold red]")
+            return mteam_imdb, mteam_tmdb, mteam_name, mteam_torrenthash, mteam_description
+        
+        url = "https://api.m-team.cc/api/torrent/detail"
+        payload = {"id": int(mteam_id)}
+        
+        try:
+            data = await self._request(url, json=payload)
+            
+            if isinstance(data, dict):
+                # Extract IMDb ID from imdb link
+                imdb_link = data.get('imdb', '')
+                if imdb_link and isinstance(imdb_link, str):
+                    imdb_match = re.search(r'tt(\d+)', imdb_link)
+                    if imdb_match:
+                        mteam_imdb = int(imdb_match.group(1))
+                
+                # Extract Douban ID from douban link
+                douban_link = data.get('douban', '')
+                if douban_link and isinstance(douban_link, str) and meta:
+                    douban_match = re.search(r'/subject/(\d+)', douban_link)
+                    if douban_match:
+                        douban_id = douban_match.group(1)
+                        meta['douban_id'] = meta['douban'] = douban_id
+                        console.print(f"[green]MTEAM: Found Douban ID: {douban_id}[/green]")
+                
+                # Extract TMDb ID (if available in API response)
+                tmdb_link = data.get('tmdb', '')
+                if tmdb_link and isinstance(tmdb_link, str):
+                    tmdb_match = re.search(r'/(movie|tv)/(\d+)', tmdb_link)
+                    if tmdb_match:
+                        mteam_tmdb = int(tmdb_match.group(2))
+                
+                # Extract torrent name
+                mteam_name = data.get('name') or data.get('title', '')
+                
+                # Extract description
+                mteam_description = data.get('descr') or data.get('description', '')
+                
+                # Extract torrent hash (if available)
+                mteam_torrenthash = data.get('hash') or data.get('infoHash', '')
+                
+        except MTEAMRequestError as e:
+            console.print(f"[red]MTEAM API request failed: {e.message}[/red]")
+        except Exception as e:
+            console.print(f"[red]Unexpected error fetching MTEAM details: {e}[/red]")
+            if meta and meta.get('debug', False):
+                console.print_exception()
+            elif self.config.get('DEFAULT', {}).get('debug', False):
+                console.print_exception()
+        
+        return mteam_imdb, mteam_tmdb, mteam_name, mteam_torrenthash, mteam_description
+
     async def get_category_id(self, meta: Meta) -> Optional[int]:
         """Get category ID for MTEAM form (returns integer ID)"""
         category = str(meta.get('category', ''))

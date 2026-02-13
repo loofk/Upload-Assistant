@@ -131,6 +131,11 @@ class TrackerDataManager:
                     'pter': 'PTER',
                     'chd': 'CHD',
                     'u2': 'U2',
+                    'audiences': 'AUDIENCES',
+                    'hhan': 'HHAN',
+                    'hdsky': 'HDSKY',
+                    'tjupt': 'TJUPT',
+                    'mteam': 'MTEAM',
                 }
             else:
                 # Preference trackers with lesser overall torrents
@@ -155,6 +160,11 @@ class TrackerDataManager:
                     'pter': 'PTER',
                     'chd': 'CHD',
                     'u2': 'U2',
+                    'audiences': 'AUDIENCES',
+                    'hhan': 'HHAN',
+                    'hdsky': 'HDSKY',
+                    'tjupt': 'TJUPT',
+                    'mteam': 'MTEAM',
                 }
 
             specific_tracker: list[str] = [tracker_keys[key] for key in tracker_keys if meta.get(key) is not None]

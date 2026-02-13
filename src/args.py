@@ -135,11 +135,16 @@ class Args:
         parser.add_argument('-hdb', '--hdb', nargs=1, required=False, help="HDB torrent id/link", type=str)
         parser.add_argument('-btn', '--btn', nargs=1, required=False, help="BTN torrent id/link", type=str)
         parser.add_argument('-bhd', '--bhd', nargs=1, required=False, help="BHD torrent_id/link", type=str)
+        parser.add_argument('-mteam', '--mteam', nargs=1, required=False, help="MTEAM torrent ID (e.g., 1133442)", type=str)
         parser.add_argument('-huno', '--huno', nargs=1, required=False, help="HUNO torrent id/link", type=str)
         parser.add_argument('-ulcx', '--ulcx', nargs=1, required=False, help="ULCX torrent id/link", type=str)
         parser.add_argument('-chd', '--chd', nargs=1, required=False, help="CHD torrent ID or URL (e.g., 8292 or https://ptchdbits.co/details.php?id=12345)", type=str)
         parser.add_argument('-u2', '--u2', nargs=1, required=False, help="U2 torrent ID or URL (e.g., 12345 or https://u2.dmhy.org/details.php?id=12345)", type=str)
         parser.add_argument('-pter', '--pter', nargs=1, required=False, help="PTER torrent ID or URL (e.g., 12345 or https://pterclub.com/details.php?id=12345)", type=str)
+        parser.add_argument('-audiences', '--audiences', nargs=1, required=False, help="AUDIENCES torrent ID or URL (e.g., 12345 or https://audiences.me/details.php?id=12345)", type=str)
+        parser.add_argument('-hhan', '--hhan', nargs=1, required=False, help="HHAN torrent ID or URL (e.g., 12345 or https://hhanclub.net/details.php?id=12345)", type=str)
+        parser.add_argument('-hdsky', '--hdsky', nargs=1, required=False, help="HDSKY torrent ID or URL (e.g., 12345 or https://hdsky.me/details.php?id=12345)", type=str)
+        parser.add_argument('-tjupt', '--tjupt', nargs=1, required=False, help="TJUPT torrent ID or URL (e.g., 12345 or https://www.tjupt.org/details.php?id=12345)", type=str)
         parser.add_argument('-req', '--search_requests', action='store_true', required=False, help="Search for matching requests on supported trackers", default=None)
         parser.add_argument('-sat', '--skip_auto_torrent', action='store_true', required=False, help="Skip automated qbittorrent client torrent searching", default=None)
         parser.add_argument('-onlyID', '--onlyID', action='store_true', required=False, help="Only grab meta ids (tmdb/imdb/etc) from tracker, not description/image links.", default=None)
@@ -387,6 +392,21 @@ class Args:
                                 console.print('[red]Continuing without --bhd')
                         else:
                             meta['bhd'] = value2
+                    elif key == 'mteam':
+                        # MTEAM accepts numeric ID directly
+                        if value2.startswith('http'):
+                            parsed = urllib.parse.urlparse(value2)
+                            try:
+                                # Try to extract ID from URL path (e.g., /details/1133442)
+                                mteampath = parsed.path
+                                if mteampath.endswith('/'):
+                                    mteampath = mteampath[:-1]
+                                meta['mteam'] = mteampath.split('/')[-1]
+                            except Exception:
+                                console.print('[red]Unable to parse id from url')
+                                console.print('[red]Continuing without --mteam')
+                        else:
+                            meta['mteam'] = value2
 
                     elif key == 'huno':
                         if value2.startswith('http'):
@@ -458,6 +478,82 @@ class Args:
                                 console.print('[red]Continuing without --pter')
                         else:
                             meta['pter'] = value2
+                    elif key == 'audiences':
+                        if value2.startswith('http'):
+                            parsed = urllib.parse.urlparse(value2)
+                            try:
+                                # AUDIENCES: try query parameter id first (e.g., ?id=123)
+                                query_params = urllib.parse.parse_qs(parsed.query)
+                                if 'id' in query_params and query_params['id']:
+                                    meta['audiences'] = query_params['id'][0]
+                                else:
+                                    # Fallback to path segment (e.g., /torrents/123)
+                                    audiencespath = parsed.path
+                                    if audiencespath.endswith('/'):
+                                        audiencespath = audiencespath[:-1]
+                                    meta['audiences'] = audiencespath.split('/')[-1]
+                            except Exception:
+                                console.print('[red]Unable to parse id from url')
+                                console.print('[red]Continuing without --audiences')
+                        else:
+                            meta['audiences'] = value2
+                    elif key == 'hhan':
+                        if value2.startswith('http'):
+                            parsed = urllib.parse.urlparse(value2)
+                            try:
+                                # HHAN: try query parameter id first (e.g., ?id=123)
+                                query_params = urllib.parse.parse_qs(parsed.query)
+                                if 'id' in query_params and query_params['id']:
+                                    meta['hhan'] = query_params['id'][0]
+                                else:
+                                    # Fallback to path segment (e.g., /torrents/123)
+                                    hhanpath = parsed.path
+                                    if hhanpath.endswith('/'):
+                                        hhanpath = hhanpath[:-1]
+                                    meta['hhan'] = hhanpath.split('/')[-1]
+                            except Exception:
+                                console.print('[red]Unable to parse id from url')
+                                console.print('[red]Continuing without --hhan')
+                        else:
+                            meta['hhan'] = value2
+                    elif key == 'hdsky':
+                        if value2.startswith('http'):
+                            parsed = urllib.parse.urlparse(value2)
+                            try:
+                                # HDSKY: try query parameter id first (e.g., ?id=123)
+                                query_params = urllib.parse.parse_qs(parsed.query)
+                                if 'id' in query_params and query_params['id']:
+                                    meta['hdsky'] = query_params['id'][0]
+                                else:
+                                    # Fallback to path segment (e.g., /torrents/123)
+                                    hdskypath = parsed.path
+                                    if hdskypath.endswith('/'):
+                                        hdskypath = hdskypath[:-1]
+                                    meta['hdsky'] = hdskypath.split('/')[-1]
+                            except Exception:
+                                console.print('[red]Unable to parse id from url')
+                                console.print('[red]Continuing without --hdsky')
+                        else:
+                            meta['hdsky'] = value2
+                    elif key == 'tjupt':
+                        if value2.startswith('http'):
+                            parsed = urllib.parse.urlparse(value2)
+                            try:
+                                # TJUPT: try query parameter id first (e.g., ?id=123)
+                                query_params = urllib.parse.parse_qs(parsed.query)
+                                if 'id' in query_params and query_params['id']:
+                                    meta['tjupt'] = query_params['id'][0]
+                                else:
+                                    # Fallback to path segment (e.g., /torrents/123)
+                                    tjuptpath = parsed.path
+                                    if tjuptpath.endswith('/'):
+                                        tjuptpath = tjuptpath[:-1]
+                                    meta['tjupt'] = tjuptpath.split('/')[-1]
+                            except Exception:
+                                console.print('[red]Unable to parse id from url')
+                                console.print('[red]Continuing without --tjupt')
+                        else:
+                            meta['tjupt'] = value2
 
                     else:
                         meta[key] = value2
