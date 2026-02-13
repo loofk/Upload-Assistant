@@ -147,7 +147,7 @@ class PTER:
                         if tmdb_match:
                             pter_tmdb = int(tmdb_match.group(2))
                     
-                    # Extract Douban ID - try multiple selectors
+                    # Extract Douban ID and URL - try multiple selectors
                     douban_link = soup.select_one('a[href*="movie.douban.com/subject/"]')
                     if not douban_link:
                         for link in soup.find_all('a', href=True):
@@ -157,18 +157,27 @@ class PTER:
                                 break
                     if douban_link:
                         douban_href = douban_link.get('href', '')
+                        # Normalize URL (handle relative URLs)
+                        if douban_href.startswith('/'):
+                            douban_href = f"https://movie.douban.com{douban_href}"
+                        elif not douban_href.startswith('http'):
+                            douban_href = f"https://movie.douban.com/subject/{douban_href}"
                         douban_match = re.search(r'/subject/(\d+)', douban_href)
                         if douban_match and meta:
                             douban_id = douban_match.group(1)
+                            douban_url = f"https://movie.douban.com/subject/{douban_id}/"
                             meta['douban_id'] = meta['douban'] = douban_id
-                            console.print(f"[green]PTER: Found Douban ID: {douban_id}[/green]")
+                            meta['douban_url'] = douban_url
+                            console.print(f"[green]PTER: Found Douban ID: {douban_id}, URL: {douban_url}[/green]")
                     # Also search in description text for douban URLs
                     if not douban_link and meta:
                         douban_url_match = re.search(r'https?://movie\.douban\.com/subject/(\d+)', response.text)
                         if douban_url_match:
                             douban_id = douban_url_match.group(1)
+                            douban_url = f"https://movie.douban.com/subject/{douban_id}/"
                             meta['douban_id'] = meta['douban'] = douban_id
-                            console.print(f"[green]PTER: Found Douban ID in page text: {douban_id}[/green]")
+                            meta['douban_url'] = douban_url
+                            console.print(f"[green]PTER: Found Douban ID in page text: {douban_id}, URL: {douban_url}[/green]")
                     
                     # Extract torrent name
                     name_elem = soup.select_one('h1, .torrentname, td.torrentname')
