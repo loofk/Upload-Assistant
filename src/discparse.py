@@ -35,7 +35,7 @@ class DiscParse:
         Weighted scoring system:
         - Largest file size: 40% (strongest indicator of main feature)
         - Total file size: 30% (overall content size)
-        - Duration: 20% (longer is typically main feature)
+        - Duration: 20% (longer is typically main feature, but penalize extremely long playlists)
         - File concentration: 10% (high ratio = fewer large files = likely main feature)
         """
         if not playlist.get('items'):
@@ -63,9 +63,26 @@ class DiscParse:
         max_total_size = 150.0 * 1024 * 1024 * 1024
         score += (total_size / max_total_size) * 30.0
 
-        # Normalize duration (assume max is 4 hours = 14400 seconds)
-        max_duration = 14400.0
-        score += (duration / max_duration) * 20.0
+        # Normalize duration with penalty for extremely long playlists
+        # Typical movie: 1.5-3 hours (5400-10800 seconds)
+        # Typical TV episode: 20-60 minutes (1200-3600 seconds)
+        # Penalize playlists longer than 4 hours (likely contain extras/all content)
+        ideal_duration = 7200.0  # 2 hours
+        max_reasonable_duration = 14400.0  # 4 hours
+        
+        if duration <= max_reasonable_duration:
+            # Normal duration: score based on how close to ideal (2 hours)
+            # Closer to ideal = higher score
+            duration_score = 1.0 - abs(duration - ideal_duration) / ideal_duration
+            duration_score = max(0.0, min(1.0, duration_score))  # Clamp to 0-1
+        else:
+            # Extremely long playlists (>4 hours): apply penalty
+            # Reduce score significantly for playlists longer than 4 hours
+            excess_duration = duration - max_reasonable_duration
+            penalty_factor = 1.0 / (1.0 + excess_duration / 3600.0)  # Exponential decay
+            duration_score = penalty_factor * 0.5  # Max 50% of duration score for long playlists
+        
+        score += duration_score * 20.0
 
         # File concentration (already 0-1 ratio)
         score += file_concentration * 10.0
