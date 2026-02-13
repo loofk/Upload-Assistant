@@ -312,14 +312,19 @@ class MTEAM:
                     if imdb_match:
                         mteam_imdb = int(imdb_match.group(1))
                 
-                # Extract Douban ID from douban link
+                # Extract Douban ID and URL from douban link
                 douban_link = data.get('douban', '')
                 if douban_link and isinstance(douban_link, str) and meta:
+                    # Normalize URL (ensure it's a complete URL)
+                    if not douban_link.startswith('http'):
+                        douban_link = f"https://movie.douban.com/subject/{douban_link}"
                     douban_match = re.search(r'/subject/(\d+)', douban_link)
                     if douban_match:
                         douban_id = douban_match.group(1)
+                        douban_url = f"https://movie.douban.com/subject/{douban_id}/"
                         meta['douban_id'] = meta['douban'] = douban_id
-                        console.print(f"[green]MTEAM: Found Douban ID: {douban_id}[/green]")
+                        meta['douban_url'] = douban_url
+                        console.print(f"[green]MTEAM: Found Douban ID: {douban_id}, URL: {douban_url}[/green]")
                 
                 # Extract TMDb ID (if available in API response)
                 tmdb_link = data.get('tmdb', '')
@@ -850,14 +855,26 @@ class MTEAM:
             data["imdb"] = f"https://www.imdb.com/title/tt{meta.get('imdb', '')}"  # No trailing slash
         
         # Add Douban URL if available
+        # Priority: meta['douban_url'] > meta['douban_id'] > ptgen['douban']
         douban_url = ""
-        if ptgen:
+        
+        # First, try to get from meta['douban_url']
+        if meta.get('douban_url'):
+            douban_url = meta.get('douban_url')
+        # Second, try to build from meta['douban_id'] or meta['douban']
+        elif meta.get('douban_id') or meta.get('douban'):
+            douban_id = meta.get('douban_id') or meta.get('douban')
+            if douban_id:
+                douban_url = f"https://movie.douban.com/subject/{douban_id}/"
+        # Finally, try to get from ptgen
+        elif ptgen:
             douban_value = ptgen.get("douban", "")
             if douban_value:
                 if isinstance(douban_value, str) and douban_value.startswith("http"):
                     douban_url = douban_value
                 elif isinstance(douban_value, str) and douban_value.isdigit():
                     douban_url = f"https://movie.douban.com/subject/{douban_value}/"
+        
         if douban_url:
             data["douban"] = douban_url
         
