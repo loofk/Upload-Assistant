@@ -1,11 +1,9 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import os
 import re
 from typing import Any, Optional, Union, cast
 
 import aiofiles
 import httpx
-from bs4 import BeautifulSoup
 from unidecode import unidecode
 
 from src.console import console
@@ -14,6 +12,61 @@ from src.trackers.COMMON import COMMON
 
 Meta = dict[str, Any]
 Config = dict[str, Any]
+
+# standardList.json: 1=1080p, 2=1080i, 3=720p, 5=SD, 6=4K, 7=8K（与 get_standard_id 一致）
+STANDARD_ID_TO_RES: dict[str, str] = {
+    "1": "1080p", "2": "1080i", "3": "720p", "5": "SD", "6": "2160p", "7": "8K",
+}
+# sourceList.json: 8=Web-DL, 1=Bluray, 4=Remux, 5=HDTV/TV, 3=DVD, 6=Other
+SOURCE_ID_TO_TYPE: dict[str, str] = {
+    "8": "WEBDL", "1": "BluRay", "4": "REMUX", "5": "HDTV", "3": "DVD", "6": "Other",
+}
+
+
+def _standard_id_to_res(standard_id: Any) -> str:
+    """API 返回的 standard ID -> 分辨率名称，供 search_existing 填 DupeEntry.res"""
+    return STANDARD_ID_TO_RES.get(str(standard_id).strip(), "")
+
+
+def _source_id_to_type(source_id: Any) -> str:
+    """API 返回的 source ID -> 类型名称，供 search_existing 填 DupeEntry.type"""
+    return SOURCE_ID_TO_TYPE.get(str(source_id).strip(), "")
+
+
+def _infer_type_from_name(name: str) -> str:
+    """从种子名称推断来源类型（API 无 source 时回退）"""
+    n = name.lower()
+    if "web-dl" in n or "webdl" in n or "web dl" in n or "amzn" in n or "nf " in n or "atvp" in n:
+        return "WEBDL"
+    if "blu-ray" in n or "bluray" in n or "uhd blu" in n or "bdrip" in n:
+        return "BluRay"
+    if "hdtv" in n or "pdtv" in n:
+        return "HDTV"
+    if "remux" in n:
+        return "REMUX"
+    return ""
+
+
+def _infer_res_from_name(name: str) -> str:
+    """从种子名称推断分辨率（API 无 standard 时回退）"""
+    n = name.lower()
+    if "2160p" in n or "4k" in n or "uhd" in n:
+        return "2160p"
+    if "1080p" in n or "1080i" in n:
+        return "1080p"
+    if "720p" in n or "720i" in n:
+        return "720p"
+    if "480p" in n or "576p" in n:
+        return "SD"
+    return ""
+
+
+class MTEAMRequestError(Exception):
+    """MTEAM 请求失败，由 _request 在失败时抛出。status 为 0 表示网络异常，否则为 HTTP 状态码。"""
+    def __init__(self, message: str, status: int = 0) -> None:
+        self.message = message
+        self.status = status
+        super().__init__(message)
 
 
 class MTEAM:
@@ -36,98 +89,149 @@ class MTEAM:
             'x-api-key': self.api_key,
         }, timeout=60.0)
 
+    @staticmethod
+    def _parse_api_response(response_json: dict) -> tuple[bool, Any, str]:
+        """解析 MTEAM 统一响应格式 {"code": 0 or "0", "message": "", "data": {}}。
+        返回 (success, data, message)。
+        """
+        code = response_json.get('code')
+        success = code == 0 or code == "0" or str(code) == "0"
+        data = response_json.get('data', {})
+        message = response_json.get('message', '')
+        return success, data, message
+
+    async def _request(
+        self,
+        url: str,
+        *,
+        data: Optional[dict] = None,
+        json: Optional[dict] = None,
+        files: Optional[dict] = None,
+    ) -> Any:
+        """通用请求：POST 到 url，内部处理 status 与 code。
+        data 为 form 表单，json 为 JSON 体，二者互斥。
+        成功返回 data；失败则打印错误并抛出 MTEAMRequestError(message, status)。
+        """
+        try:
+            if json is not None:
+                response = await self.session.post(url, json=json)
+            else:
+                response = await self.session.post(url, data=data, files=files)
+        except httpx.TimeoutException as e:
+            msg = f"Request timed out: {e}"
+            console.print(f"[red]{msg}[/red]")
+            raise MTEAMRequestError(msg, 0) from e
+        except httpx.RequestError as e:
+            msg = str(e)
+            console.print(f"[red]{msg}[/red]")
+            raise MTEAMRequestError(msg, 0) from e
+        status = response.status_code
+        if status != 200:
+            msg = response.text[:200] if response.text else f"HTTP {status}"
+            if response.headers.get('content-type', '').startswith('application/json'):
+                try:
+                    body = response.json()
+                    if isinstance(body, dict):
+                        msg = body.get('message') or body.get('error') or msg
+                except Exception:
+                    pass
+            if status == 403 or status == 401:
+                msg = "Authentication failed (403 Forbidden or 401 Unauthorized). Please check your API key." + (f" {msg}" if msg else "")
+            console.print(f"[red]{msg}[/red]")
+            raise MTEAMRequestError(msg, status)
+        try:
+            body = response.json()
+        except Exception:
+            msg = "Invalid JSON"
+            console.print(f"[red]{msg}[/red]")
+            raise MTEAMRequestError(msg, 200)
+        if not isinstance(body, dict):
+            msg = "Response is not dict"
+            console.print(f"[red]{msg}[/red]")
+            raise MTEAMRequestError(msg, 200)
+        success, data, message = self._parse_api_response(body)
+        if not success:
+            msg = message or "API returned error"
+            console.print(f"[red]{msg}[/red]")
+            raise MTEAMRequestError(msg, 200)
+        return data
+
     async def validate_credentials(self, meta: Meta) -> bool:
         """Validate API key by making a test request"""
         if not self.api_key:
             console.print('[red]Failed to validate API key. Please set api_key in config.')
             return False
         
+        url = "https://api.m-team.cc/api/member/profile"
         try:
-            # Test API key by making a request to user profile endpoint
-            # According to API docs: POST /api/member/profile with uid parameter
-            url = "https://api.m-team.cc/api/member/profile"
-            headers = {
-                'x-api-key': self.api_key,
-                'accept': 'application/json',
-                'Content-Type': 'application/x-www-form-urlencoded',
-            }
-            # uid is required, get from config
-            data = {'uid': self.uid}
-            response = await self.session.post(url, data=data, headers=headers)
-            if response.status_code == 200:
-                try:
-                    response_json = response.json()
-                    # API response format: {"code": 0 or "0", "message": "", "data": {}}
-                    # Handle both string and integer code values
-                    code = response_json.get('code')
-                    if code == 0 or code == "0" or str(code) == "0":
-                        return True
-                    else:
-                        console.print(f'[yellow]API validation returned code {response_json.get("code")}. Proceeding anyway.')
-                        return True
-                except Exception:
-                    return True
-            elif response.status_code == 401:
-                console.print('[red]Invalid API key. Please check your token.')
-                return False
-            else:
-                console.print(f'[yellow]API validation returned status {response.status_code}. Proceeding anyway.')
-                return True
-        except Exception as e:
-            console.print(f'[yellow]API validation error: {e}. Proceeding anyway.')
+            await self._request(url, data={'uid': self.uid})
             return True
+        except MTEAMRequestError as e:
+            return False
 
-    async def search_existing(self, meta: Meta, _disctype: str) -> Union[list[str], bool]:
-        """Search for existing torrents using API"""
-        dupes: list[str] = []
+    async def search_existing(self, meta: Meta, _disctype: str) -> Union[list[str], list[dict[str, Any]], bool]:
+        """Search for existing torrents using API.
+        返回 list[dict] 以兼容 dupe_checking：每条包含 name，以及 type/res/id/link/size 等（API 有则填，无则从 name 推断）。
+        这样 filter_dupes 的「source mismatch」等规则能正确排除 WEB-DL vs 蓝光 等，且 debug 时展示的重复项不会全是空字段。
+        """
+        dupes: list[dict[str, Any]] = []
         imdb_id = int(meta.get('imdb_id', 0) or 0)
         if imdb_id == 0:
             return dupes
         
         imdb = f"tt{meta.get('imdb', '')}"
-        # Try API search endpoint
-        search_url = f"https://api.m-team.cc/api/torrent/search"
-        
+        search_url = "https://api.m-team.cc/api/torrent/search"
+        payload = {
+            "mode": "normal",
+            "visible": 1,
+            "categories": [],
+            "pageNumber": 1,
+            "pageSize": 100,
+            "imdb": imdb,
+        }
         try:
-            data = {'imdb': imdb}
-            headers = {
-                'x-api-key': self.api_key,
-                'accept': 'application/json',
+            data = await self._request(search_url, json=payload)
+        except MTEAMRequestError:
+            return dupes
+        torrents = data if isinstance(data, list) else (data.get('data', []) or data.get('torrents', []) if isinstance(data, dict) else [])
+        if not isinstance(torrents, list):
+            torrents = []
+        console.print(f"[green]获取到 {len(torrents)} 个种子[/green]")
+        for torrent in torrents:
+            if not isinstance(torrent, dict):
+                continue
+            name = torrent.get('name') or torrent.get('title', '')
+            if not name:
+                continue
+            name = str(name)
+            # 实际 API 返回：id, name, smallDescr, standard, source, numfiles, size, status, ...
+            tid = torrent.get("id")
+            numfiles = torrent.get("numfiles")
+            file_count = int(numfiles) if numfiles is not None and str(numfiles).isdigit() else 0
+            standard_id = torrent.get("standard")
+            source_id = torrent.get("source")
+            # standardList: 1=1080p, 2=1080i, 3=720p, 5=SD, 6=4K, 7=8K
+            res = _standard_id_to_res(standard_id) if standard_id is not None else _infer_res_from_name(name)
+            # sourceList: 8=Web-DL, 1=Bluray, 4=Remux, 5=HDTV/TV, 3=DVD, 6=Other
+            type_str = _source_id_to_type(source_id) if source_id is not None else _infer_type_from_name(name)
+            link = f"https://kp.m-team.cc/details/{tid}" if tid else None
+            entry = {
+                "name": name,
+                "size": torrent.get("size"),
+                "files": [],
+                "file_count": file_count,
+                "trumpable": False,
+                "link": link,
+                "download": None,
+                "flags": list(torrent.get("labelsNew", [])) if isinstance(torrent.get("labelsNew"), list) else [],
+                "id": tid,
+                "type": type_str,
+                "res": res,
+                "internal": 0,
+                "bd_info": None,
+                "description": torrent.get("smallDescr"),
             }
-            response = await self.session.post(search_url, data=data, headers=headers)
-            
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    # Adjust based on actual API response structure
-                    if isinstance(data, dict):
-                        torrents = data.get('data', []) or data.get('torrents', [])
-                    elif isinstance(data, list):
-                        torrents = data
-                    else:
-                        torrents = []
-                    
-                    for torrent in torrents:
-                        if isinstance(torrent, dict):
-                            name = torrent.get('name') or torrent.get('title', '')
-                            if name:
-                                dupes.append(str(name))
-                except Exception:
-                    # Fallback to HTML parsing if API returns HTML
-                    soup = BeautifulSoup(response.text, 'lxml')
-                    rows = soup.select('a[href*="/torrents/"]')
-                    for row in rows:
-                        title = row.get_text(strip=True)
-                        if title:
-                            dupes.append(title)
-        except httpx.TimeoutException:
-            console.print("[bold red]Request timed out while searching for existing torrents.")
-        except httpx.RequestError as e:
-            console.print(f"[bold red]An error occurred while making the request: {e}")
-        except Exception as e:
-            console.print(f"[bold red]Unexpected error: {e}")
-            console.print_exception()
-
+            dupes.append(entry)
         return dupes
 
     async def get_category_id(self, meta: Meta) -> Optional[int]:
@@ -398,70 +502,77 @@ class MTEAM:
         return labels
 
     async def edit_desc(self, meta: Meta) -> None:
+        """生成 descr 参数内容，结构参考 docs/mteam/desc.txt：海报 → 自定义说明 → 影片信息+简介 → BDInfo/mediainfo → 截图。"""
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", encoding='utf-8') as base_file:
             base = await base_file.read()
 
         from src.bbcode import BBCODE
         common = COMMON(config=self.config)
-
-        parts: list[str] = []
-
-        if int(meta.get('imdb_id', 0) or 0) != 0:
-            ptgen = await common.ptgen(meta, self.ptgen_api, self.ptgen_retry)
-            if ptgen.strip() != '':
-                # Convert ptgen BBCode images to Markdown format for MTEAM
-                ptgen_markdown = ptgen
-                # Convert [img]...[/img] to ![](url)
-                ptgen_markdown = re.sub(r'\[img\]([^\[]+?)\[/img\]', r'![](\1)', ptgen_markdown, flags=re.IGNORECASE)
-                parts.append(ptgen_markdown)
-
         bbcode = BBCODE()
-        if meta.get('discs', []) != []:
-            discs = cast(list[dict[str, Any]], meta.get('discs', []))
-            for each in discs:
-                if each['type'] == "BDMV":
-                    parts.append(f"[hide=BDInfo]{each['summary']}[/hide]\n")
-                    parts.append("\n")
-                if each['type'] == "DVD":
-                    parts.append(f"{each['name']}:\n")
-                    parts.append(f"[hide=mediainfo][{each['vob_mi']}[/hide] [hide=mediainfo][{each['ifo_mi']}[/hide]\n")
-                    parts.append("\n")
-        else:
-            async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO_CLEANPATH.txt", encoding='utf-8') as mi_file:
-                mi = await mi_file.read()
-            parts.append(f"[hide=mediainfo]{mi}[/hide]")
-            parts.append("\n")
+
+        # 1) 自定义说明（转自/制作说明）：DESCRIPTION.txt，保留 [color=red]/[color=blue] 等
         desc = base
         desc = bbcode.convert_code_to_quote(desc)
         desc = bbcode.convert_spoiler_to_hide(desc)
         desc = bbcode.convert_comparison_to_centered(desc, 1000)
-        
-        # Convert BBCode to Markdown format for MTEAM
-        # Remove [center] and [/center] tags (Markdown doesn't need them)
         desc = desc.replace('[center]', '').replace('[/center]', '')
-        
-        # Convert BBCode images to Markdown format: [url=...][img]...[/img][/url] -> ![](url)
-        # Match: [url=https://imgbox.com/xxx][img]https://...[/img][/url]
         desc = re.sub(r'\[url=([^\]]+)\]\[img\]([^\[]*?)\[/img\]\[/url\]', r'![](\1)', desc, flags=re.IGNORECASE | re.DOTALL)
-        # Convert standalone [img]...[/img] -> ![](url)
         desc = re.sub(r'\[img\]([^\[]+?)\[/img\]', r'![](\1)', desc, flags=re.IGNORECASE)
-        # Convert [img=size]...[/img] -> ![](url) (if any)
         desc = re.sub(r'\[img=\d+\]([^\[]+?)\[/img\]', r'![](\1)', desc, flags=re.IGNORECASE)
-        
-        parts.append(desc)
 
+        parts: list[str] = []
+
+        # 2) 海报（ptgen 首图）
+        ptgen_body = ""
+        if int(meta.get('imdb_id', 0) or 0) != 0:
+            ptgen = await common.ptgen(meta, self.ptgen_api, self.ptgen_retry)
+            if ptgen.strip() != '':
+                ptgen_markdown = re.sub(r'\[img\]([^\[]+?)\[/img\]', r'![](\1)', ptgen, flags=re.IGNORECASE)
+                poster_match = re.match(r'^(\!\[\]\([^)]+\))\s*\n?(.*)', ptgen_markdown, re.DOTALL)
+                if poster_match:
+                    parts.append(poster_match.group(1).strip())
+                    ptgen_body = poster_match.group(2).strip()
+                else:
+                    parts.append(ptgen_markdown.strip())
+                parts.append("\n\n")
+
+        # 3) 自定义说明（转自/制作说明，与 desc.txt 一致）
+        if desc.strip():
+            parts.append(desc.strip())
+            parts.append("\n\n")
+
+        # 4) 影片信息+简介（ptgen 正文：◎ 译名/片名/简介等）
+        if ptgen_body:
+            parts.append(ptgen_body)
+            parts.append("\n\n")
+
+        # 5) BDInfo / mediainfo
+        if meta.get('discs', []) != []:
+            discs = cast(list[dict[str, Any]], meta.get('discs', []))
+            for each in discs:
+                if each['type'] == "BDMV":
+                    parts.append(f"[hide=BDInfo]{each['summary']}[/hide]\n\n")
+                if each['type'] == "DVD":
+                    parts.append(f"{each['name']}:\n")
+                    parts.append(f"[hide=mediainfo][{each['vob_mi']}[/hide] [hide=mediainfo][{each['ifo_mi']}[/hide]\n\n")
+        else:
+            try:
+                async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO_CLEANPATH.txt", encoding='utf-8') as mi_file:
+                    mi = await mi_file.read()
+                parts.append(f"[hide=mediainfo]{mi}[/hide]\n\n")
+            except Exception:
+                pass
+
+        # 6) 截图
         images = cast(list[dict[str, Any]], meta.get('image_list', []))
-        if len(images) > 0:
-            # MTEAM uses Markdown format for images: ![](url)
-            for each in range(len(images[:int(meta['screens'])])):
-                img_url = images[each]['img_url']
-                parts.append(f"![]({img_url})")
+        for each in range(len(images[:int(meta['screens'])])):
+            img_url = images[each]['img_url']
+            parts.append(f"![]({img_url})")
 
-        if self.signature is not None:
+        if self.signature:
             parts.append("\n\n")
             parts.append(self.signature)
 
-        # Convert line endings to \r\n for MTEAM (Windows-style)
         final_desc = "".join(parts).replace('\n', '\r\n')
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
             await descfile.write(final_desc)
@@ -483,22 +594,25 @@ class MTEAM:
 
     async def get_mediainfo_text(self, meta: Meta) -> str:
         """Get MediaInfo text for MTEAM form
-        For BDMV, use BD_FULL_00.txt (full BDInfo with all details)
-        For other types, use MEDIAINFO.txt
+        For BDMV, use BD_FULL_00.txt (full BDInfo).
+        For other types, use MI_FULL_00.txt (full MediaInfo) if present, else MEDIAINFO.txt.
         """
         if meta.get('bdinfo') is not None or meta.get('is_disc') == 'BDMV':
-            # Use fixed full BDInfo file: BD_FULL_00.txt
             full_bdinfo_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_FULL_00.txt"
-            
             if os.path.exists(full_bdinfo_path):
                 mi_path = full_bdinfo_path
                 console.print(f"[green]Using full BDInfo file: {os.path.basename(full_bdinfo_path)}[/green]")
             else:
-                # Fallback to BD_SUMMARY_00.txt if FULL file doesn't exist
                 mi_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt"
                 console.print(f"[yellow]BD_FULL_00.txt not found, falling back to BD_SUMMARY_00.txt[/yellow]")
         else:
-            mi_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt"
+            mi_full_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/MI_FULL_00.txt"
+            if os.path.exists(mi_full_path):
+                mi_path = mi_full_path
+                console.print(f"[green]Using full MediaInfo file: {os.path.basename(mi_full_path)}[/green]")
+            else:
+                mi_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt"
+                console.print(f"[yellow]MI_FULL_00.txt not found, using MEDIAINFO.txt[/yellow]")
         
         if os.path.exists(mi_path):
             async with aiofiles.open(mi_path, encoding='utf-8') as mi_file:
@@ -525,9 +639,7 @@ class MTEAM:
         if not meta.get('ptgen') and int(meta.get('imdb_id', 0) or 0) != 0:
             console.print("[yellow]PTGEN not found in meta, calling ptgen API...[/yellow]")
             common = COMMON(config=self.config)
-            ptgen_text = await common.ptgen(meta, self.ptgen_api, self.ptgen_retry)
-            console.print(f"[yellow]PTGEN API returned text length: {len(ptgen_text) if ptgen_text else 0}[/yellow]")
-            # ptgen() should have set meta['ptgen'], but let's verify
+            await common.ptgen(meta, self.ptgen_api, self.ptgen_retry)
             if not meta.get('ptgen'):
                 console.print("[red]Warning: ptgen() did not set meta['ptgen']![/red]")
                 console.print(f"[red]imdb_id: {meta.get('imdb_id')}, ptgen_api: {self.ptgen_api}[/red]")
@@ -536,13 +648,6 @@ class MTEAM:
 
         async with aiofiles.open(desc_file, encoding='utf-8') as desc_handle:
             mteam_desc = await desc_handle.read()
-            # Ensure description is in Markdown format (convert if still BBCode)
-            # Convert BBCode images to Markdown: [url=...][img]...[/img][/url] -> ![](url)
-            mteam_desc = re.sub(r'\[url=([^\]]+)\]\[img\]([^\[]*?)\[/img\]\[/url\]', r'![](\1)', mteam_desc, flags=re.IGNORECASE | re.DOTALL)
-            mteam_desc = re.sub(r'\[img\]([^\[]+?)\[/img\]', r'![](\1)', mteam_desc, flags=re.IGNORECASE)
-            mteam_desc = re.sub(r'\[img=\d+\]([^\[]+?)\[/img\]', r'![](\1)', mteam_desc, flags=re.IGNORECASE)
-            # Remove [center] tags
-            mteam_desc = mteam_desc.replace('[center]', '').replace('[/center]', '')
         
         mediainfo_text = await self.get_mediainfo_text(meta)
         
@@ -586,53 +691,15 @@ class MTEAM:
         genres = cast(list[str], ptgen.get("genre", [])) if ptgen else []
         console.print(f"  Extracted chinese_title: {chinese_title}")
         console.print(f"  Filtered genres: {genres}")
-        
-        # Try to extract subtitle info from description
-        subtitle_info = ""
-        desc_content = mteam_desc
-        # Look for subtitle patterns in description (e.g., "DiY官译简繁英+简英繁英双语字幕")
-        # Check in the original DESCRIPTION.txt file as well
-        try:
-            desc_file_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt"
-            if os.path.exists(desc_file_path):
-                async with aiofiles.open(desc_file_path, encoding='utf-8') as orig_desc_file:
-                    orig_desc = await orig_desc_file.read()
-                    desc_content = orig_desc + "\n" + desc_content
-        except Exception:
-            pass
-        
-        # Look for subtitle patterns - check for common subtitle descriptions
-        subtitle_patterns = [
-            r'DiY[^|\n]*字幕[^|\n]*',
-            r'官译[^|\n]*',
-            r'[^|\n]*字幕[^|\n]*',
-            r'双语字幕',
-        ]
-        for pattern in subtitle_patterns:
-            match = re.search(pattern, desc_content)
-            if match:
-                subtitle_info = match.group(0).strip()
-                # Clean up common prefixes/suffixes
-                subtitle_info = re.sub(r'^[^:]*[:：]\s*', '', subtitle_info)
-                break
-        
-        # Build smallDescr
+
+        # Build smallDescr：仅标题，可选类别（desc 中未必有字幕信息，不再从描述抽取拼接）
         if chinese_title:
-            # Use Chinese title from ptgen
             small_descr = chinese_title
-            # Add subtitle info if available
-            if subtitle_info:
-                small_descr += f" | {subtitle_info}"
-            else:
-                # Fallback to genre if no subtitle info
-                genre_value = genres[0] if genres and len(genres) > 0 and genres[0].strip() else ''
-                if genre_value:
-                    small_descr += f" | 类别:{genre_value}"
+            genre_value = genres[0] if genres and genres[0].strip() else ''
+            if genre_value:
+                small_descr += f" | 类别:{genre_value}"
         else:
-            # Fallback to English title if no Chinese title available
-            small_descr = str(meta.get('title', 'Monsters of Man'))
-            if subtitle_info:
-                small_descr += f" | {subtitle_info}"
+            small_descr = str(meta.get('title', ''))
         
         # Build form data according to MTEAM form structure
         data: dict[str, Any] = {
@@ -712,79 +779,16 @@ class MTEAM:
             console.print(data)
             meta['tracker_status'][self.tracker]['status_message'] = "Debug mode enabled, not uploading."
             return True  # Debug mode - simulated success
-        else:
-            if not self.api_key:
-                console.print("[bold red]Missing API key. Please set api_key in config.")
-                return False
-            
+        else:            
             try:
-                # Ensure x-api-key header is set for this request
-                headers = {
-                    'x-api-key': self.api_key,
-                    'accept': 'application/json',
-                }
-                
-                # Use multipart/form-data for file upload (formData)
-                # httpx automatically uses multipart/form-data when files parameter is provided
-                # The 'file' field contains the binary torrent file
-                up = await self.session.post(url=url, data=data, files=files, headers=headers)
-                    
-                # Check if upload was successful
-                if up.status_code == 200:
-                    # Parse JSON response according to API docs
-                    try:
-                        response_json = up.json()
-                        # API response format: {"code": 0 or "0", "message": "", "data": {}}
-                        # Handle both string and integer code values
-                        code = response_json.get('code')
-                        if code == 0 or code == "0" or str(code) == "0":
-                            console.print(f"[green]Uploaded to MTEAM successfully[/green]")
-                            meta['tracker_status'][self.tracker]['status_message'] = "Upload successful"
-                            
-                            # Try to extract torrent ID from response data
-                            data_obj = response_json.get('data', {})
-                            if isinstance(data_obj, dict):
-                                torrent_id = data_obj.get('id') or data_obj.get('torrentId')
-                                if torrent_id:
-                                    meta['tracker_status'][self.tracker]['torrent_id'] = str(torrent_id)
-                            
-                            return True
-                        else:
-                            error_msg = response_json.get('message', 'Unknown error')
-                            console.print(f"[red]Upload failed: {error_msg}[/red]")
-                            meta['tracker_status'][self.tracker]['status_message'] = f"Upload failed: {error_msg}"
-                            raise UploadException(f"Upload to MTEAM Failed: {error_msg}", 'red')  # noqa #F405
-                    except Exception as json_error:
-                        console.print(f"[yellow]Failed to parse response JSON: {json_error}[/yellow]")
-                        console.print(f"[yellow]Response text: {up.text[:500]}[/yellow]")
-                        raise UploadException(f"Upload to MTEAM Failed: Invalid response format", 'red')  # noqa #F405
-                
-                # If we get here, upload failed
-                console.print(data)
-                console.print("\n\n")
-                console.print(f"[yellow]Response URL: {up.url}[/yellow]")
-                console.print(f"[yellow]Response status: {up.status_code}[/yellow]")
-                
-                # Provide more detailed error information for 403 errors
-                if up.status_code == 403:
-                    error_msg = "Authentication failed (403 Forbidden). Please check your API key."
-                    if up.headers.get('content-type', '').startswith('application/json'):
-                        try:
-                            error_json = up.json()
-                            error_detail = error_json.get('error') or error_json.get('message') or str(error_json)
-                            error_msg += f" Server response: {error_detail}"
-                        except Exception:
-                            pass
-                    console.print(f"[red]{error_msg}[/red]")
-                    raise UploadException(f"Upload to MTEAM Failed: {error_msg}", 'red')  # noqa #F405
-                
-                if up.headers.get('content-type', '').startswith('application/json'):
-                    try:
-                        console.print(f"[yellow]Response JSON: {up.json()}[/yellow]")
-                    except Exception:
-                        pass
-                raise UploadException(f"Upload to MTEAM Failed: result URL {up.url} ({up.status_code}) was not expected", 'red')  # noqa #F405
-            except httpx.RequestError as e:
-                console.print(f"[red]Request error: {e}[/red]")
-                raise UploadException(f"Upload to MTEAM Failed: {e}", 'red')  # noqa #F405
-        return False
+                data_obj = await self._request(url, data=data, files=files)
+            except MTEAMRequestError as e:
+                console.print(f"[red]Upload to MTEAM Failed: {e.message}[/red]")
+                return False
+            console.print("[green]Uploaded to MTEAM successfully[/green]")
+            meta['tracker_status'][self.tracker]['status_message'] = "Upload successful"
+            if isinstance(data_obj, dict):
+                torrent_id = data_obj.get('id') or data_obj.get('torrentId')
+                if torrent_id:
+                    meta['tracker_status'][self.tracker]['torrent_id'] = str(torrent_id)
+            return True

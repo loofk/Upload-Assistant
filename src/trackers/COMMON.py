@@ -22,6 +22,28 @@ from src.console import console
 from src.exportmi import exportInfo
 from src.languages import languages_manager
 
+DOUBAN_URL_RE = re.compile(r'https?://movie\.douban\.com/subject/(\d+)')
+
+
+def _extract_douban_url_from_value(value: Any) -> Optional[str]:
+    """Extract first douban subject URL from a string, or recursively from dict/list."""
+    if isinstance(value, str):
+        m = DOUBAN_URL_RE.search(value)
+        return m.group(0) if m else None
+    if isinstance(value, dict):
+        for v in value.values():
+            u = _extract_douban_url_from_value(v)
+            if u:
+                return u
+        return None
+    if isinstance(value, list):
+        for item in value:
+            u = _extract_douban_url_from_value(item)
+            if u:
+                return u
+        return None
+    return None
+
 
 class COMMON:
     def __init__(self, config: dict[str, Any]) -> None:
@@ -674,15 +696,13 @@ class COMMON:
         
         # Extract API key from URL if present (e.g., https://example.com/api?key=xxx)
         api_key = None
-        from urllib.parse import urlparse, parse_qs, urlencode
+        from urllib.parse import urlparse, parse_qs
         parsed = urlparse(base_url)
         query_params = parse_qs(parsed.query)
         
         if 'key' in query_params:
             api_key = query_params['key'][0]
-            # Remove key from base_url to avoid duplication
             base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-            console.print(f"[yellow]Extracted API key from URL[/yellow]")
         
         # Determine API endpoint - if base_url doesn't end with /api, append it
         # For frontend+backend deployment, API is at /api
@@ -692,8 +712,6 @@ class COMMON:
             api_url = f"{base_url}api"
         else:
             api_url = base_url
-        
-        console.print(f"[yellow]PTGEN API URL: {api_url}, API Key present: {bool(api_key)}[/yellow]")
 
         async def fetch_ptgen(client: httpx.AsyncClient, request_url: str, request_params: dict[str, Any]) -> Optional[dict[str, Any]]:
             """Helper to fetch and parse ptgen response with error handling.
@@ -751,12 +769,40 @@ class COMMON:
                             if douban_match:
                                 douban_url = douban_match.group(0)
                                 console.print(f"[yellow]Extracted douban_url from format text: {douban_url}[/yellow]")
-                        
+                        # Top-level 'link' (some PTGen APIs return douban link here)
+                        if not douban_url:
+                            top_link = ptgen_json.get('link')
+                            if isinstance(top_link, str):
+                                m = DOUBAN_URL_RE.search(top_link)
+                                if m:
+                                    douban_url = m.group(0)
+                                    console.print(f"[yellow]Extracted douban_url from top-level link: {douban_url}[/yellow]")
+                        # Scan all string values in response for douban URL
+                        if not douban_url:
+                            douban_url = _extract_douban_url_from_value(ptgen_json)
+                            if douban_url:
+                                console.print(f"[yellow]Extracted douban_url from response body: {douban_url}[/yellow]")
+                        # If still no douban but IMDb response has usable content, use it directly
+                        if not douban_url and (format_text or ptgen_json.get('chinese_title') or ptgen_json.get('original_title')):
+                            console.print("[green]Using IMDb PTGen response directly (no douban link needed).[/green]")
+                            meta['ptgen'] = ptgen_json
+                            try:
+                                async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/meta.json", 'w', encoding='utf-8') as f:
+                                    await f.write(json.dumps(meta, indent=4))
+                            except Exception:
+                                pass
+                            ptgen_text = ptgen_json.get('format', '')
+                            if "[/img]" in ptgen_text:
+                                ptgen_text = ptgen_text.split("[/img]")[1]
+                            poster_url = ptgen_json.get('poster', '') or meta.get('imdb_info', {}).get('cover', meta.get('cover', ''))
+                            if poster_url:
+                                ptgen_text = f"[img]{poster_url}[/img]{ptgen_text}"
+                            return ptgen_text
                         if not douban_url:
                             console.print(f"[yellow]No douban URL found in IMDb response. Response keys: {list(ptgen_json.keys())}[/yellow]")
-                            # Print full response for debugging
-                            import json
-                            console.print(f"[yellow]Full IMDb response:\n{json.dumps(ptgen_json, indent=2, ensure_ascii=False)}[/yellow]")
+                            if meta.get('unattended') and not meta.get('unattended_confirm'):
+                                console.print("[yellow]Unattended: skipping douban link input, skipping ptgen.[/yellow]")
+                                return ""
                             # Ask user to manually enter douban URL
                             console.print("[yellow]Unable to extract douban link from IMDb response.[/yellow]")
                             douban_url = console.input("[yellow]Please enter [bold]Douban[/bold] link (e.g., https://movie.douban.com/subject/123456/): [/yellow]")
@@ -767,6 +813,9 @@ class COMMON:
                         console.print(f"[yellow]IMDb API call failed or returned error[/yellow]")
                         # If IMDb API failed but we have IMDb ID, still try to ask for douban URL
                         if int(meta.get('imdb_id', 0)) != 0:
+                            if meta.get('unattended') and not meta.get('unattended_confirm'):
+                                console.print("[yellow]Unattended: skipping douban link input, skipping ptgen.[/yellow]")
+                                return ""
                             console.print("[yellow]IMDb API failed, but IMDb ID exists. Please provide douban link manually.[/yellow]")
                             douban_url = console.input("[yellow]Please enter [bold]Douban[/bold] link (e.g., https://movie.douban.com/subject/123456/): [/yellow]")
                             if not douban_url.strip():
@@ -787,7 +836,10 @@ class COMMON:
                                 break
                 elif int(meta.get('imdb_id', 0)) == 0:
                     # No IMDb ID, ask for douban URL
-                    console.print("[red]No IMDb id was found.")
+                    console.print("[red]No IMDb id was found.[/red]")
+                    if meta.get('unattended') and not meta.get('unattended_confirm'):
+                        console.print("[yellow]Unattended: skipping douban link input, skipping ptgen.[/yellow]")
+                        return ""
                     douban_url = console.input("[yellow]Please enter [bold]Douban[/bold] link (e.g., https://movie.douban.com/subject/123456/): [/yellow]")
                     if not douban_url.strip():
                         console.print("[red]No douban URL provided, skipping ptgen[/red]")

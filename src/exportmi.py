@@ -448,6 +448,18 @@ async def exportInfo(
         await export.write(filtered_media_info.replace(video, os.path.basename(video)))
     async with aiofiles.open(f"{base_dir}/tmp/{folder_id}/MEDIAINFO_CLEANPATH.txt", "w", newline="", encoding="utf-8") as export_cleanpath:
         await export_cleanpath.write(filtered_media_info.replace(video, os.path.basename(video)))
+    # 与 BD 一致：额外生成完整 MediaInfo 到固定文件名 MI_FULL_00.txt（当前 MEDIAINFO.txt 为 full=False）
+    if not isdir:
+        try:
+            media_info_full = MediaInfo.parse(video, output="STRING", full=True)
+            filtered_full = "\n".join(line for line in media_info_full.splitlines() if not line.strip().startswith("ReportBy") and not line.strip().startswith("Report created by "))
+            async with aiofiles.open(f"{base_dir}/tmp/{folder_id}/MI_FULL_00.txt", "w", newline="", encoding="utf-8") as full_export:
+                await full_export.write(filtered_full.replace(video, os.path.basename(video)))
+            if debug:
+                console.print("[bold green]Full MediaInfo exported to MI_FULL_00.txt[/bold green]")
+        except Exception as e:
+            if debug:
+                console.print(f"[yellow]Could not export full MediaInfo: {e}[/yellow]")
     if debug:
         console.print("[bold green]MediaInfo Exported.")
 
