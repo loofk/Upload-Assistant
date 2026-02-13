@@ -783,6 +783,32 @@ config = {
             "ptgen_api": "",
             "anon": True,
         },
+        "CHD": {
+            # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
+            "link_dir_name": "",
+            # for CHD to work you need to export cookies from https://ptchdbits.co using https://addons.mozilla.org/en-US/firefox/addon/export-cookies-txt/.
+            # cookies need to be in netscape format and need to be in data/cookies/CHD.txt
+            "passkey": "",
+            "img_rehost": False,
+            "username": "",
+            "password": "",
+            "ptgen_api": "",
+            "announce_url": "",
+            "anon": False,
+        },
+        "U2": {
+            # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
+            "link_dir_name": "",
+            # for U2 to work you need to export cookies from https://u2.dmhy.org using https://addons.mozilla.org/en-US/firefox/addon/export-cookies-txt/.
+            # cookies need to be in netscape format and need to be in data/cookies/U2.txt
+            "passkey": "",
+            "img_rehost": False,
+            "username": "",
+            "password": "",
+            "ptgen_api": "",
+            "announce_url": "",
+            "anon": False,
+        },
         "PTP": {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",

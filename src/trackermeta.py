@@ -884,41 +884,6 @@ async def update_metadata_from_tracker(
             if meta['debug']:
                 console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
             found_match = False
-            imdb, tmdb, torrent_name, torrenthash, description = cast(
-                tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
-                nexus_info,
-            )
-            
-            if imdb or tmdb or description:
-                meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
-                if tmdb:
-                    meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
-                meta[f'{tracker_key}_name'] = torrent_name
-                if torrenthash:
-                    meta['ext_torrenthash'] = torrenthash
-                found_match = True
-                if description and not only_id:
-                    description_clean, image_list = await parse_nexusphp_description(description, meta)
-                    if description_clean and len(description_clean) > 0:
-                        console.print(f"Description content:\n{description_clean[:500]}...", markup=False)
-                        meta['description'] = description_clean
-                        meta['saved_description'] = True
-                    if image_list and meta.get('keep_images'):
-                        valid_images = await check_images_concurrently(image_list, meta)
-                        if valid_images:
-                            meta['image_list'] = valid_images
-                            await handle_image_list(meta, tracker_name, valid_images)
-                    else:
-                        meta['image_list'] = []
-                
-                console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TMDb ID: {tmdb}, Name: {torrent_name}[/green]")
-            else:
-                console.print(f"[yellow]{tracker_name} data not found for ID: {tracker_id}[/yellow]")
-                found_match = False
-        else:
-            if meta['debug']:
-                console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
-            found_match = False
 
     return meta, found_match
 

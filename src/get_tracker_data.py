@@ -167,22 +167,52 @@ class TrackerDataManager:
                         valid_trackers.append(tracker)
                         continue
                     tracker_config = self.get_tracker_config(tracker)
-                    api_key = tracker_config.get('api_key', '')
-                    announce_url = tracker_config.get('announce_url', '')
-
-                    if not tracker_config:
+                    
+                    # Check if tracker config exists (empty dict means not found)
+                    if not tracker_config or (isinstance(tracker_config, MappingProxyType) and len(tracker_config) == 0):
                         if meta.get('debug'):
                             console.print(f"[yellow]Tracker {tracker} not found in config, skipping[/yellow]")
                         continue
+                    
+                    api_key = tracker_config.get('api_key', '')
+                    announce_url = tracker_config.get('announce_url', '')
 
                     # Accept tracker if it has either a valid api_key or announce_url
                     has_api_key = api_key and api_key.strip() != ''
                     has_announce_url = announce_url and announce_url.strip() != ''
+                    
+                    # For HTTP/NexusPHP trackers (CHD, U2, PTER, etc.), check if cookie file exists
+                    # These trackers use cookies for authentication instead of API keys
+                    # api_key: Used for API-based trackers (Unit3D, etc.) to authenticate API requests
+                    # announce_url: Used when creating torrent files to set the tracker's announce URL
+                    # For metadata fetching, HTTP trackers only need cookie files, not api_key or announce_url
+                    is_http_tracker = tracker in ('CHD', 'U2', 'PTER', 'HDB', 'MTEAM', 'AUDIENCES', 'HDSKY', 'HHAN', 'TJUPT', 'TTG', 'PTS', 'ASC', 'AR', 'AZ', 'BJS', 'BT', 'CZ', 'FF', 'FL', 'HDS', 'HDT', 'IS', 'MTV', 'PHD')
+                    has_cookie_file = False
+                    if is_http_tracker:
+                        tracker_base_dir = meta.get('base_dir', '') or base_dir or ''
+                        if tracker_base_dir:
+                            cookie_file = f"{tracker_base_dir}/data/cookies/{tracker}.txt"
+                            has_cookie_file = os.path.exists(cookie_file)
+                            if meta.get('debug'):
+                                if has_cookie_file:
+                                    console.print(f"[green]Tracker {tracker} cookie file found at {cookie_file}[/green]")
+                                else:
+                                    console.print(f"[yellow]Tracker {tracker} is HTTP tracker but cookie file not found at {cookie_file}[/yellow]")
 
-                    if not has_api_key and not has_announce_url:
-                        if meta.get('debug'):
-                            console.print(f"[yellow]Tracker {tracker} has no api_key or announce_url set, skipping[/yellow]")
-                        continue
+                    # For metadata fetching: HTTP trackers only need cookie file, API trackers need api_key
+                    # announce_url is optional and only needed when creating torrent files
+                    if is_http_tracker:
+                        # HTTP trackers: only need cookie file for metadata fetching
+                        if not has_cookie_file:
+                            if meta.get('debug'):
+                                console.print(f"[yellow]Tracker {tracker} requires cookie file for metadata fetching, skipping[/yellow]")
+                            continue
+                    else:
+                        # API trackers: need api_key for metadata fetching
+                        if not has_api_key:
+                            if meta.get('debug'):
+                                console.print(f"[yellow]Tracker {tracker} requires api_key for metadata fetching, skipping[/yellow]")
+                            continue
 
                     valid_trackers.append(tracker)
 
