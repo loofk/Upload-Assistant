@@ -320,7 +320,7 @@ async def update_meta_with_unit3d_data(meta: Meta, tracker_data: Sequence[Any], 
             if (
                 meta.get('image_list')
                 and (
-                    not (meta.get('blu') or meta.get('aither') or meta.get('lst') or meta.get('oe') or meta.get('huno') or meta.get('ulcx'))
+                    not (meta.get('blu') or meta.get('aither') or meta.get('lst') or meta.get('oe') or meta.get('huno') or meta.get('ulcx') or meta.get('chd') or meta.get('u2') or meta.get('pter'))
                     or meta['unattended']
                 )
             ):

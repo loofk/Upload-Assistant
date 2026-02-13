@@ -88,6 +88,33 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
                 tracker_id = _last_path_id(path)
                 if tracker_id:
                     tracker_ids["huno"] = tracker_id
+            elif _is_host(host, "chdbits.org") or _is_host(host, "chdbits.co"):
+                # CHD: typically uses query parameter id or path segment
+                chd_id = _query_id(parsed.query, "id")
+                if chd_id:
+                    tracker_ids["chd"] = chd_id
+                else:
+                    tracker_id = _last_path_id(path)
+                    if tracker_id:
+                        tracker_ids["chd"] = tracker_id
+            elif _is_host(host, "u2.dmhy.org") or _is_host(host, "u2.dmhy.net"):
+                # U2: typically uses query parameter id
+                u2_id = _query_id(parsed.query, "id")
+                if u2_id:
+                    tracker_ids["u2"] = u2_id
+                else:
+                    tracker_id = _last_path_id(path)
+                    if tracker_id:
+                        tracker_ids["u2"] = tracker_id
+            elif _is_host(host, "pterclub.com") or _is_host(host, "pterclub.org"):
+                # PTER: typically uses query parameter id or path segment
+                pter_id = _query_id(parsed.query, "id")
+                if pter_id:
+                    tracker_ids["pter"] = pter_id
+                else:
+                    tracker_id = _last_path_id(path)
+                    if tracker_id:
+                        tracker_ids["pter"] = tracker_id
 
         return tracker_ids
 

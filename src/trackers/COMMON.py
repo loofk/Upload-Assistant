@@ -733,9 +733,20 @@ class COMMON:
 
         try:
             async with httpx.AsyncClient() as client:
-                # Try to get douban URL first using IMDb
+                # Check if douban ID/URL was manually provided via -douban parameter
                 douban_url = None
-                if int(meta.get('imdb_id', 0)) != 0:
+                douban_id = meta.get('douban_id') or meta.get('douban')
+                if douban_id:
+                    # User provided douban ID directly, use it
+                    if isinstance(douban_id, str) and douban_id.startswith('http'):
+                        douban_url = douban_id
+                    else:
+                        # Construct douban URL from ID
+                        douban_url = f"https://movie.douban.com/subject/{douban_id}/"
+                    console.print(f"[green]Using manually provided Douban ID: {douban_id}[/green]")
+                
+                # If no manual douban, try to get douban URL using IMDb
+                if not douban_url and int(meta.get('imdb_id', 0)) != 0:
                     # Use Params parameter format: /api?source=imdb&sid=tt123456
                     params = {
                         'source': 'imdb',

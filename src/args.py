@@ -98,6 +98,7 @@ class Args:
         parser.add_argument('-res', '--resolution', nargs=1, required=False, help="Resolution [2160p, 1080p, 1080i, 720p, 576p, 576i, 480p, 480i, 8640p, 4320p, OTHER]", choices=['2160p', '1080p', '1080i', '720p', '576p', '576i', '480p', '480i', '8640p', '4320p', 'other'])
         parser.add_argument('-tmdb', '--tmdb', nargs=1, required=False, help="TMDb ID (use movie/ or tv/ prefix)", type=str, dest='tmdb_manual')
         parser.add_argument('-imdb', '--imdb', nargs=1, required=False, help="IMDb ID", type=str, dest='imdb_manual')
+        parser.add_argument('-douban', '--douban', nargs=1, required=False, help="Douban ID or URL (e.g., 123456 or https://movie.douban.com/subject/123456/)", type=str, dest='douban_manual')
         parser.add_argument('-mal', '--mal', nargs=1, required=False, help="MAL ID", type=str, dest='mal_manual')
         parser.add_argument('-tvmaze', '--tvmaze', nargs=1, required=False, help="TVMAZE ID", type=str, dest='tvmaze_manual')
         parser.add_argument('-tvdb', '--tvdb', nargs=1, required=False, help="TVDB ID", type=str, dest='tvdb_manual')
@@ -136,6 +137,9 @@ class Args:
         parser.add_argument('-bhd', '--bhd', nargs=1, required=False, help="BHD torrent_id/link", type=str)
         parser.add_argument('-huno', '--huno', nargs=1, required=False, help="HUNO torrent id/link", type=str)
         parser.add_argument('-ulcx', '--ulcx', nargs=1, required=False, help="ULCX torrent id/link", type=str)
+        parser.add_argument('-chd', '--chd', nargs=1, required=False, help="CHD torrent id/link", type=str)
+        parser.add_argument('-u2', '--u2', nargs=1, required=False, help="U2 torrent id/link", type=str)
+        parser.add_argument('-pter', '--pter', nargs=1, required=False, help="PTER torrent id/link", type=str)
         parser.add_argument('-req', '--search_requests', action='store_true', required=False, help="Search for matching requests on supported trackers", default=None)
         parser.add_argument('-sat', '--skip_auto_torrent', action='store_true', required=False, help="Skip automated qbittorrent client torrent searching", default=None)
         parser.add_argument('-onlyID', '--onlyID', action='store_true', required=False, help="Only grab meta ids (tmdb/imdb/etc) from tracker, not description/image links.", default=None)
@@ -221,8 +225,8 @@ class Args:
                     else:
                         break
 
-        if meta.get('tmdb_manual') is not None or meta.get('imdb_manual') is not None:
-            meta['tmdb_manual'] = meta['tmdb_id'] = meta['tmdb'] = meta['imdb_id'] = meta['imdb'] = None
+        if meta.get('tmdb_manual') is not None or meta.get('imdb_manual') is not None or meta.get('douban_manual') is not None:
+            meta['tmdb_manual'] = meta['tmdb_id'] = meta['tmdb'] = meta['imdb_id'] = meta['imdb'] = meta['douban_id'] = meta['douban'] = None
         for key in parsed_args:
             value = parsed_args[key]
             if value not in (None, []):
@@ -245,6 +249,24 @@ class Args:
                         meta['manual_date'] = value2
                     elif key == 'tmdb_manual':
                         meta['category'], meta['tmdb_manual'] = self.parse_tmdb_id(value2, meta.get('category'))
+                    elif key == 'douban_manual':
+                        # Parse Douban ID from URL or use directly
+                        if value2.startswith('http'):
+                            parsed = urllib.parse.urlparse(value2)
+                            try:
+                                # Extract ID from URL like https://movie.douban.com/subject/123456/
+                                douban_match = re.search(r'/subject/(\d+)', parsed.path)
+                                if douban_match:
+                                    meta['douban_id'] = meta['douban'] = douban_match.group(1)
+                                else:
+                                    console.print('[yellow]Unable to parse Douban ID from URL, using as-is[/yellow]')
+                                    meta['douban_id'] = meta['douban'] = value2
+                            except Exception:
+                                console.print('[yellow]Unable to parse Douban ID from URL, using as-is[/yellow]')
+                                meta['douban_id'] = meta['douban'] = value2
+                        else:
+                            # Direct ID or numeric string
+                            meta['douban_id'] = meta['douban'] = value2
                     elif key == 'ptp':
                         if value2.startswith('http'):
                             parsed = urllib.parse.urlparse(value2)
@@ -379,6 +401,45 @@ class Args:
                                 console.print('[red]Continuing without --huno')
                         else:
                             meta['huno'] = value2
+                    elif key == 'chd':
+                        if value2.startswith('http'):
+                            parsed = urllib.parse.urlparse(value2)
+                            try:
+                                chdpath = parsed.path
+                                if chdpath.endswith('/'):
+                                    chdpath = chdpath[:-1]
+                                meta['chd'] = chdpath.split('/')[-1]
+                            except Exception:
+                                console.print('[red]Unable to parse id from url')
+                                console.print('[red]Continuing without --chd')
+                        else:
+                            meta['chd'] = value2
+                    elif key == 'u2':
+                        if value2.startswith('http'):
+                            parsed = urllib.parse.urlparse(value2)
+                            try:
+                                u2path = parsed.path
+                                if u2path.endswith('/'):
+                                    u2path = u2path[:-1]
+                                meta['u2'] = u2path.split('/')[-1]
+                            except Exception:
+                                console.print('[red]Unable to parse id from url')
+                                console.print('[red]Continuing without --u2')
+                        else:
+                            meta['u2'] = value2
+                    elif key == 'pter':
+                        if value2.startswith('http'):
+                            parsed = urllib.parse.urlparse(value2)
+                            try:
+                                pterpath = parsed.path
+                                if pterpath.endswith('/'):
+                                    pterpath = pterpath[:-1]
+                                meta['pter'] = pterpath.split('/')[-1]
+                            except Exception:
+                                console.print('[red]Unable to parse id from url')
+                                console.print('[red]Continuing without --pter')
+                        else:
+                            meta['pter'] = value2
 
                     else:
                         meta[key] = value2

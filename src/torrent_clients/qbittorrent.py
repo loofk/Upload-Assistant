@@ -159,7 +159,7 @@ class QbittorrentClientMixin:
                     meta.update(tracker_ids)
 
                     if tracker_ids:
-                        for tracker in ['ptp', 'bhd', 'btn', 'huno', 'blu', 'aither', 'ulcx', 'lst', 'oe', 'hdb']:
+                        for tracker in ['ptp', 'bhd', 'btn', 'huno', 'blu', 'aither', 'ulcx', 'lst', 'oe', 'hdb', 'chd', 'u2', 'pter']:
                             if meta.get(tracker):
                                 console.print(f"[bold cyan]meta updated with {tracker.upper()} ID: {meta[tracker]}")
 
