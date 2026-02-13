@@ -101,6 +101,177 @@ class TorrentCreator:
     # Limit concurrent torrent creation to avoid heavy parallel hashing
     _create_torrent_semaphore = asyncio.Semaphore(1)
     _create_torrent_inflight = 0
+
+    @classmethod
+    async def check_file_completeness(cls, meta: Meta, path: Union[str, os.PathLike[str]]) -> tuple[bool, Optional[str]]:
+        """
+        Check if the file/torrent is 100% complete in the download client.
+        Returns: (is_complete, error_message)
+        """
+        # Skip check if nohash is enabled or client is 'none'
+        if meta.get('nohash', False) or meta.get('client') == 'none':
+            return True, None
+        
+        # Skip check if unattended mode and skip_completeness_check is set
+        if meta.get('unattended', False) and meta.get('skip_completeness_check', False):
+            return True, None
+
+        try:
+            from src.clients import Clients
+            import qbittorrentapi
+            import aiohttp
+            
+            clients = Clients(meta.get('config', {}))
+            content_path = str(path)
+            
+            # Try to find torrents matching this path in qBittorrent
+            matching_torrents = await clients.find_qbit_torrents_by_path(content_path, meta)
+            
+            if not matching_torrents:
+                # No torrent found in client - assume file is complete (might be manually added or from another source)
+                if meta.get('debug', False):
+                    console.print("[yellow]No matching torrent found in download client, assuming file is complete[/yellow]")
+                return True, None
+            
+            # Get torrent client config to check completion status
+            config = meta.get('config', {})
+            torrent_clients = config.get('TORRENT_CLIENTS', {})
+            default_client_name = config.get('DEFAULT', {}).get('default_torrent_client', '')
+            
+            # Find qBittorrent client config
+            qbit_client_config = None
+            for client_name in [meta.get('client'), default_client_name]:
+                if client_name and client_name != 'none':
+                    client_config = torrent_clients.get(client_name)
+                    if client_config and client_config.get('torrent_client') == 'qbit':
+                        qbit_client_config = client_config
+                        break
+            
+            if not qbit_client_config:
+                if meta.get('debug', False):
+                    console.print("[yellow]No qBittorrent client config found, skipping completeness check[/yellow]")
+                return True, None
+            
+            # Check each matching torrent for completion status
+            for torrent_info in matching_torrents:
+                torrent_hash = torrent_info.get('hash', '')
+                torrent_name = torrent_info.get('name', 'Unknown')
+                
+                if not torrent_hash:
+                    continue
+                
+                # Get torrent state and progress from qBittorrent API
+                proxy_url = qbit_client_config.get('qui_proxy_url', '').strip()
+                qbt_client: Optional[qbittorrentapi.Client] = None
+                qbt_session: Optional[aiohttp.ClientSession] = None
+                
+                try:
+                    if proxy_url:
+                        qbt_proxy_url = proxy_url.rstrip('/')
+                        ssl_context = clients.create_ssl_context_for_client(qbit_client_config)
+                        qbt_session = aiohttp.ClientSession(
+                            timeout=aiohttp.ClientTimeout(total=10),
+                            connector=aiohttp.TCPConnector(ssl=ssl_context)
+                        )
+                        
+                        # Get torrent info via proxy
+                        async with qbt_session.get(
+                            f"{qbt_proxy_url}/api/v2/torrents/info",
+                            params={'hashes': torrent_hash}
+                        ) as response:
+                            if response.status == 200:
+                                torrents_data = await response.json()
+                                if torrents_data and len(torrents_data) > 0:
+                                    torrent_data = torrents_data[0]
+                                    torrent_state = torrent_data.get('state', 'unknown')
+                                    torrent_progress = torrent_data.get('progress', 0.0)
+                                else:
+                                    if meta.get('debug', False):
+                                        console.print(f"[yellow]Torrent {torrent_hash} not found in qBittorrent[/yellow]")
+                                    continue
+                            else:
+                                if meta.get('debug', False):
+                                    console.print(f"[yellow]Failed to get torrent info via proxy: {response.status}[/yellow]")
+                                continue
+                    else:
+                        # Direct qBittorrent API
+                        qbt_client = await clients.init_qbittorrent_client(qbit_client_config)
+                        if not qbt_client:
+                            continue
+                        
+                        torrents_info = await clients.retry_qbt_operation(
+                            lambda: asyncio.to_thread(qbt_client.torrents_info, torrent_hashes=torrent_hash),
+                            f"Get torrent info for {torrent_hash}",
+                            max_retries=2,
+                            initial_timeout=5.0
+                        )
+                        
+                        if not torrents_info or len(torrents_info) == 0:
+                            if meta.get('debug', False):
+                                console.print(f"[yellow]Torrent {torrent_hash} not found in qBittorrent[/yellow]")
+                            continue
+                        
+                        torrent_obj = torrents_info[0]
+                        torrent_state = getattr(torrent_obj, 'state', 'unknown')
+                        torrent_progress = getattr(torrent_obj, 'progress', 0.0)
+                    
+                    # Convert progress to percentage if it's a decimal (0.0-1.0)
+                    if isinstance(torrent_progress, float) and torrent_progress <= 1.0:
+                        progress_percent = torrent_progress * 100
+                    else:
+                        progress_percent = float(torrent_progress)
+                    
+                    # Check if torrent is completed
+                    completed_states = {'pausedUP', 'seeding', 'completed', 'stalledUP', 'uploading'}
+                    is_complete = torrent_state in completed_states or progress_percent >= 100.0
+                    
+                    if not is_complete:
+                        error_msg = (
+                            f"Torrent '{torrent_name}' is not complete!\n"
+                            f"  State: {torrent_state}\n"
+                            f"  Progress: {progress_percent:.2f}%\n"
+                            f"  Hash: {torrent_hash}\n"
+                            f"\n"
+                            f"Please wait for the download to complete before creating a torrent.\n"
+                            f"Creating a torrent from incomplete files will result in incorrect piece hashes."
+                        )
+                        if qbt_session:
+                            await qbt_session.close()
+                        return False, error_msg
+                    else:
+                        if meta.get('debug', False):
+                            console.print(f"[green]Torrent '{torrent_name}' is complete (state: {torrent_state}, progress: {progress_percent:.2f}%)[/green]")
+                    
+                finally:
+                    if qbt_session:
+                        await qbt_session.close()
+            
+            return True, None
+            
+        except ImportError:
+            # Clients module not available, skip check
+            if meta.get('debug', False):
+                console.print("[yellow]Clients module not available, skipping completeness check[/yellow]")
+            return True, None
+        except Exception as e:
+            # If check fails, warn but don't block (might be false positive)
+            console.print(f"[yellow]Warning: Could not verify file completeness: {e}[/yellow]")
+            if meta.get('debug', False):
+                import traceback
+                console.print(f"[dim]{traceback.format_exc()}[/dim]")
+            # Ask user if they want to continue
+            if not meta.get('unattended', False):
+                try:
+                    import cli_ui
+                    proceed = cli_ui.ask_yes_no(
+                        "Could not verify file completeness. Proceed with torrent creation anyway?",
+                        default=False
+                    )
+                    if not proceed:
+                        return False, "User cancelled torrent creation due to completeness check failure"
+                except Exception:
+                    pass
+            return True, None
     _torf_start_time = time.time()
 
     @staticmethod
@@ -211,6 +382,26 @@ class TorrentCreator:
                 console.print(f"[cyan]create_torrent start | in-flight={cls._create_torrent_inflight}{wait_msg}[/cyan]")
 
             try:
+                # Check file completeness before creating torrent
+                is_complete, error_msg = await cls.check_file_completeness(meta, path)
+                if not is_complete:
+                    console.print(f"[bold red]{error_msg}[/bold red]")
+                    if not meta.get('unattended', False):
+                        try:
+                            import cli_ui
+                            proceed = cli_ui.ask_yes_no(
+                                "File is not complete. Create torrent anyway? (NOT RECOMMENDED)",
+                                default=False
+                            )
+                            if not proceed:
+                                raise RuntimeError("Torrent creation cancelled: file is not complete")
+                        except ImportError:
+                            raise RuntimeError("Torrent creation cancelled: file is not complete")
+                    else:
+                        # In unattended mode, raise error unless explicitly allowed
+                        if not meta.get('skip_completeness_check', False):
+                            raise RuntimeError("Torrent creation cancelled: file is not complete (use --skip-completeness-check to override)")
+                
                 if not piece_size:
                     piece_size = meta.get('max_piece_size', 0)
                 tracker_url = tracker_url or None
