@@ -27,6 +27,7 @@ from src.trackers.BJS import BJS
 from src.trackers.BLU import BLU
 from src.trackers.BT import BT
 from src.trackers.CBR import CBR
+from src.trackers.CHD import CHD
 from src.trackers.COMMON import COMMON
 from src.trackers.CZ import CZ
 from src.trackers.DC import DC
@@ -83,6 +84,7 @@ from src.trackers.TOS import TOS
 from src.trackers.TTG import TTG
 from src.trackers.TTR import TTR
 from src.trackers.TVC import TVC
+from src.trackers.U2 import U2
 from src.trackers.ULCX import ULCX
 from src.trackers.UTP import UTP
 from src.trackers.YOINK import YOINK
@@ -1342,10 +1344,10 @@ class TRACKER_SETUP:
 
 tracker_class_map: dict[str, type[Any]] = {
     'A4K': A4K, 'ACM': ACM, 'AITHER': AITHER, 'ANT': ANT, 'AR': AR, 'ASC': ASC, 'AUDIENCES': AUDIENCES, 'AZ': AZ, 'BHD': BHD, 'BHDTV': BHDTV, 'BJS': BJS, 'BLU': BLU, 'BT': BT, 'CBR': CBR,
-    'CZ': CZ, 'DC': DC, 'DP': DP, 'EMUW': EMUW, 'FNP': FNP, 'FF': FF, 'FL': FL, 'FRIKI': FRIKI, 'GPW': GPW, 'HDB': HDB, 'HDS': HDS, 'HDSKY': HDSKY, 'HDT': HDT, 'HHAN': HHAN, 'HHD': HHD, 'HUNO': HUNO, 'ITT': ITT,
+    'CHD': CHD, 'CZ': CZ, 'DC': DC, 'DP': DP, 'EMUW': EMUW, 'FNP': FNP, 'FF': FF, 'FL': FL, 'FRIKI': FRIKI, 'GPW': GPW, 'HDB': HDB, 'HDS': HDS, 'HDSKY': HDSKY, 'HDT': HDT, 'HHAN': HHAN, 'HHD': HHD, 'HUNO': HUNO, 'ITT': ITT,
     'IHD': IHD, 'IS': IS, 'LCD': LCD, 'LDU': LDU, 'LST': LST, 'LT': LT, 'LUME': LUME, 'MTEAM': MTEAM, 'MTV': MTV, 'NBL': NBL, 'OE': OE, 'OTW': OTW, 'PHD': PHD, 'PT': PT, 'PTP': PTP, 'PTER': PTER, 'PTS': PTS, 'PTT': PTT,
     'R4E': R4E, 'RAS': RAS, 'RF': RF, 'RTF': RTF, 'SAM': SAM, 'SHRI': SHRI, 'SN': SN, 'SP': SP, 'SPD': SPD, 'STC': STC, 'THR': THR,
-    'TIK': TIK, 'TL': TL, 'TLZ': TLZ, 'TJUPT': TJUPT, 'TOS': TOS, 'TVC': TVC, 'TTG': TTG, 'TTR': TTR, 'ULCX': ULCX, 'UTP': UTP, 'YOINK': YOINK, 'YUS': YUS
+    'TIK': TIK, 'TL': TL, 'TLZ': TLZ, 'TJUPT': TJUPT, 'TOS': TOS, 'TVC': TVC, 'TTG': TTG, 'TTR': TTR, 'U2': U2, 'ULCX': ULCX, 'UTP': UTP, 'YOINK': YOINK, 'YUS': YUS
 }
 
 api_trackers = {
@@ -1358,5 +1360,5 @@ other_api_trackers = {
 }
 
 http_trackers = {
-    'AR', 'ASC', 'AUDIENCES', 'AZ', 'BJS', 'BT', 'CZ', 'FF', 'FL', 'HDB', 'HDS', 'HDSKY', 'HDT', 'HHAN', 'IS', 'MTEAM', 'MTV', 'PHD', 'PTER', 'PTS', 'TJUPT', 'TTG'
+    'AR', 'ASC', 'AUDIENCES', 'AZ', 'BJS', 'BT', 'CHD', 'CZ', 'FF', 'FL', 'HDB', 'HDS', 'HDSKY', 'HDT', 'HHAN', 'IS', 'MTEAM', 'MTV', 'PHD', 'PTER', 'PTS', 'TJUPT', 'TTG', 'U2'
 }

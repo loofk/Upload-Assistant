@@ -137,9 +137,9 @@ class Args:
         parser.add_argument('-bhd', '--bhd', nargs=1, required=False, help="BHD torrent_id/link", type=str)
         parser.add_argument('-huno', '--huno', nargs=1, required=False, help="HUNO torrent id/link", type=str)
         parser.add_argument('-ulcx', '--ulcx', nargs=1, required=False, help="ULCX torrent id/link", type=str)
-        parser.add_argument('-chd', '--chd', nargs=1, required=False, help="CHD torrent id/link", type=str)
-        parser.add_argument('-u2', '--u2', nargs=1, required=False, help="U2 torrent id/link", type=str)
-        parser.add_argument('-pter', '--pter', nargs=1, required=False, help="PTER torrent id/link", type=str)
+        parser.add_argument('-chd', '--chd', nargs=1, required=False, help="CHD torrent ID or URL (e.g., 8292 or https://ptchdbits.co/details.php?id=12345)", type=str)
+        parser.add_argument('-u2', '--u2', nargs=1, required=False, help="U2 torrent ID or URL (e.g., 12345 or https://u2.dmhy.org/details.php?id=12345)", type=str)
+        parser.add_argument('-pter', '--pter', nargs=1, required=False, help="PTER torrent ID or URL (e.g., 12345 or https://pterclub.com/details.php?id=12345)", type=str)
         parser.add_argument('-req', '--search_requests', action='store_true', required=False, help="Search for matching requests on supported trackers", default=None)
         parser.add_argument('-sat', '--skip_auto_torrent', action='store_true', required=False, help="Skip automated qbittorrent client torrent searching", default=None)
         parser.add_argument('-onlyID', '--onlyID', action='store_true', required=False, help="Only grab meta ids (tmdb/imdb/etc) from tracker, not description/image links.", default=None)
@@ -405,10 +405,16 @@ class Args:
                         if value2.startswith('http'):
                             parsed = urllib.parse.urlparse(value2)
                             try:
-                                chdpath = parsed.path
-                                if chdpath.endswith('/'):
-                                    chdpath = chdpath[:-1]
-                                meta['chd'] = chdpath.split('/')[-1]
+                                # CHD: try query parameter id first (e.g., ?id=8292)
+                                query_params = urllib.parse.parse_qs(parsed.query)
+                                if 'id' in query_params and query_params['id']:
+                                    meta['chd'] = query_params['id'][0]
+                                else:
+                                    # Fallback to path segment (e.g., /torrents/8292)
+                                    chdpath = parsed.path
+                                    if chdpath.endswith('/'):
+                                        chdpath = chdpath[:-1]
+                                    meta['chd'] = chdpath.split('/')[-1]
                             except Exception:
                                 console.print('[red]Unable to parse id from url')
                                 console.print('[red]Continuing without --chd')
@@ -418,10 +424,16 @@ class Args:
                         if value2.startswith('http'):
                             parsed = urllib.parse.urlparse(value2)
                             try:
-                                u2path = parsed.path
-                                if u2path.endswith('/'):
-                                    u2path = u2path[:-1]
-                                meta['u2'] = u2path.split('/')[-1]
+                                # U2: try query parameter id first (e.g., ?id=123)
+                                query_params = urllib.parse.parse_qs(parsed.query)
+                                if 'id' in query_params and query_params['id']:
+                                    meta['u2'] = query_params['id'][0]
+                                else:
+                                    # Fallback to path segment (e.g., /torrents/123)
+                                    u2path = parsed.path
+                                    if u2path.endswith('/'):
+                                        u2path = u2path[:-1]
+                                    meta['u2'] = u2path.split('/')[-1]
                             except Exception:
                                 console.print('[red]Unable to parse id from url')
                                 console.print('[red]Continuing without --u2')
@@ -431,10 +443,16 @@ class Args:
                         if value2.startswith('http'):
                             parsed = urllib.parse.urlparse(value2)
                             try:
-                                pterpath = parsed.path
-                                if pterpath.endswith('/'):
-                                    pterpath = pterpath[:-1]
-                                meta['pter'] = pterpath.split('/')[-1]
+                                # PTER: try query parameter id first (e.g., ?id=123)
+                                query_params = urllib.parse.parse_qs(parsed.query)
+                                if 'id' in query_params and query_params['id']:
+                                    meta['pter'] = query_params['id'][0]
+                                else:
+                                    # Fallback to path segment (e.g., /torrents/123)
+                                    pterpath = parsed.path
+                                    if pterpath.endswith('/'):
+                                        pterpath = pterpath[:-1]
+                                    meta['pter'] = pterpath.split('/')[-1]
                             except Exception:
                                 console.print('[red]Unable to parse id from url')
                                 console.print('[red]Continuing without --pter')

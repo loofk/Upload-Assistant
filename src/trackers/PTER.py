@@ -106,6 +106,78 @@ class PTER:
 
         return dupes
 
+    async def get_info_from_torrent_id(self, pter_id: Union[int, str], meta: Optional[Meta] = None) -> tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]]:
+        """
+        Fetch metadata from PTER torrent details page using torrent ID.
+        Returns: (imdb_id, tmdb_id, name, torrenthash, description)
+        """
+        pter_imdb = pter_tmdb = pter_name = pter_torrenthash = pter_description = None
+        common = COMMON(config=self.config)
+        # Get base_dir from meta if available
+        base_dir = meta.get('base_dir', '') if meta else ''
+        cookiefile = f"{base_dir}/data/cookies/PTER.txt"
+        
+        if not os.path.exists(cookiefile):
+            console.print("[bold red]Missing Cookie File. (data/cookies/PTER.txt)")
+            return pter_imdb, pter_tmdb, pter_name, pter_torrenthash, pter_description
+        
+        cookies = await common.parseCookieFile(cookiefile)
+        url = f"https://pterclub.com/details.php?id={pter_id}"
+        
+        try:
+            async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(url)
+                
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'lxml')
+                    
+                    # Extract IMDb ID
+                    imdb_link = soup.select_one('a[href*="imdb.com/title/tt"]')
+                    if imdb_link:
+                        imdb_href = imdb_link.get('href', '')
+                        imdb_match = re.search(r'tt(\d+)', imdb_href)
+                        if imdb_match:
+                            pter_imdb = int(imdb_match.group(1))
+                    
+                    # Extract TMDb ID
+                    tmdb_link = soup.select_one('a[href*="themoviedb.org"]')
+                    if tmdb_link:
+                        tmdb_href = tmdb_link.get('href', '')
+                        tmdb_match = re.search(r'/(movie|tv)/(\d+)', tmdb_href)
+                        if tmdb_match:
+                            pter_tmdb = int(tmdb_match.group(2))
+                    
+                    # Extract torrent name
+                    name_elem = soup.select_one('h1, .torrentname, td.torrentname')
+                    if name_elem:
+                        pter_name = name_elem.get_text(strip=True)
+                    
+                    # Extract description
+                    desc_elem = soup.select_one('#desctext, .desctext, td[colspan="2"]')
+                    if desc_elem:
+                        pter_description = str(desc_elem)
+                    
+                    # Extract torrent hash (if available in page)
+                    hash_elem = soup.select_one('input[name="hash"], code, .hash')
+                    if hash_elem:
+                        hash_text = hash_elem.get_text(strip=True)
+                        if len(hash_text) == 40:  # SHA1 hash length
+                            pter_torrenthash = hash_text
+                    
+                else:
+                    console.print(f"[yellow]Failed to fetch PTER details page. Status: {response.status_code}[/yellow]")
+                    
+        except httpx.RequestError as e:
+            console.print(f"[red]Request error fetching PTER details: {e}[/red]")
+        except Exception as e:
+            console.print(f"[red]Unexpected error fetching PTER details: {e}[/red]")
+            if meta and meta.get('debug', False):
+                console.print_exception()
+            elif self.config.get('DEFAULT', {}).get('debug', False):
+                console.print_exception()
+        
+        return pter_imdb, pter_tmdb, pter_name, pter_torrenthash, pter_description
+
     async def get_type_category_id(self, meta: Meta) -> str:
         cat_id = "0"  # Default to "(请选择)"
         category = str(meta.get('category', ''))

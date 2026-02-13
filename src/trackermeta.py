@@ -6,13 +6,19 @@ import sys
 from collections.abc import Mapping, MutableMapping, Sequence
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional, Union, cast
 
 import aiohttp
 import cli_ui
 import click
 from PIL import Image
 from typing_extensions import TypeAlias
+
+import html as html_module
+import re as re_module
+
+import httpx
+from bs4 import BeautifulSoup
 
 from src.bbcode import BBCODE
 from src.btnid import BtnIdManager
@@ -755,7 +761,299 @@ async def update_metadata_from_tracker(
                 meta[tracker_key] = None
                 found_match = False
 
+    elif tracker_name == "PTER":
+        bbcode = BBCODE()
+        if meta.get('pter') is not None:
+            meta[manual_key] = meta[tracker_key]
+            console.print(f"[cyan]{tracker_name} ID found in meta, reusing existing ID: {meta[tracker_key]}[/cyan]")
+            
+            pter_info = await tracker_instance.get_info_from_torrent_id(meta[tracker_key], meta)
+            imdb, tmdb, pter_name, meta['ext_torrenthash'], pter_description = cast(
+                tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
+                pter_info,
+            )
+            
+            if imdb or tmdb or pter_description:
+                meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
+                if tmdb:
+                    meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
+                meta['pter_name'] = pter_name
+                found_match = True
+                if pter_description and not only_id:
+                    # Parse description HTML and extract images
+                    description, image_list = await parse_nexusphp_description(pter_description, meta)
+                    if description and len(description) > 0:
+                        console.print(f"Description content:\n{description[:500]}...", markup=False)
+                        meta['description'] = description
+                        meta['saved_description'] = True
+                    if image_list and meta.get('keep_images'):
+                        valid_images = await check_images_concurrently(image_list, meta)
+                        if valid_images:
+                            meta['image_list'] = valid_images
+                            await handle_image_list(meta, tracker_name, valid_images)
+                    else:
+                        meta['image_list'] = []
+                
+                console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TMDb ID: {tmdb}, Name: {pter_name}[/green]")
+            else:
+                console.print(f"[yellow]{tracker_name} data not found for ID: {meta[tracker_key]}[/yellow]")
+                found_match = False
+        else:
+            if meta['debug']:
+                console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
+            found_match = False
+
+    elif tracker_name == "CHD":
+        bbcode = BBCODE()
+        if meta.get('chd') is not None:
+            meta[manual_key] = meta[tracker_key]
+            console.print(f"[cyan]{tracker_name} ID found in meta, reusing existing ID: {meta[tracker_key]}[/cyan]")
+            
+            chd_info = await tracker_instance.get_info_from_torrent_id(meta[tracker_key], meta)
+            imdb, tmdb, chd_name, meta['ext_torrenthash'], chd_description = cast(
+                tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
+                chd_info,
+            )
+            
+            if imdb or tmdb or chd_description:
+                meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
+                if tmdb:
+                    meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
+                meta['chd_name'] = chd_name
+                found_match = True
+                if chd_description and not only_id:
+                    description, image_list = await parse_nexusphp_description(chd_description, meta)
+                    if description and len(description) > 0:
+                        console.print(f"Description content:\n{description[:500]}...", markup=False)
+                        meta['description'] = description
+                        meta['saved_description'] = True
+                    if image_list and meta.get('keep_images'):
+                        valid_images = await check_images_concurrently(image_list, meta)
+                        if valid_images:
+                            meta['image_list'] = valid_images
+                            await handle_image_list(meta, tracker_name, valid_images)
+                    else:
+                        meta['image_list'] = []
+                
+                console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TMDb ID: {tmdb}, Name: {chd_name}[/green]")
+            else:
+                console.print(f"[yellow]{tracker_name} data not found for ID: {meta[tracker_key]}[/yellow]")
+                found_match = False
+        else:
+            if meta['debug']:
+                console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
+            found_match = False
+
+    elif tracker_name == "U2":
+        bbcode = BBCODE()
+        if meta.get('u2') is not None:
+            meta[manual_key] = meta[tracker_key]
+            console.print(f"[cyan]{tracker_name} ID found in meta, reusing existing ID: {meta[tracker_key]}[/cyan]")
+            
+            u2_info = await tracker_instance.get_info_from_torrent_id(meta[tracker_key], meta)
+            imdb, tmdb, u2_name, meta['ext_torrenthash'], u2_description = cast(
+                tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
+                u2_info,
+            )
+            
+            if imdb or tmdb or u2_description:
+                meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
+                if tmdb:
+                    meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
+                meta['u2_name'] = u2_name
+                found_match = True
+                if u2_description and not only_id:
+                    description, image_list = await parse_nexusphp_description(u2_description, meta)
+                    if description and len(description) > 0:
+                        console.print(f"Description content:\n{description[:500]}...", markup=False)
+                        meta['description'] = description
+                        meta['saved_description'] = True
+                    if image_list and meta.get('keep_images'):
+                        valid_images = await check_images_concurrently(image_list, meta)
+                        if valid_images:
+                            meta['image_list'] = valid_images
+                            await handle_image_list(meta, tracker_name, valid_images)
+                    else:
+                        meta['image_list'] = []
+                
+                console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TMDb ID: {tmdb}, Name: {u2_name}[/green]")
+            else:
+                console.print(f"[yellow]{tracker_name} data not found for ID: {meta[tracker_key]}[/yellow]")
+                found_match = False
+        else:
+            if meta['debug']:
+                console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
+            found_match = False
+            imdb, tmdb, torrent_name, torrenthash, description = cast(
+                tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
+                nexus_info,
+            )
+            
+            if imdb or tmdb or description:
+                meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
+                if tmdb:
+                    meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
+                meta[f'{tracker_key}_name'] = torrent_name
+                if torrenthash:
+                    meta['ext_torrenthash'] = torrenthash
+                found_match = True
+                if description and not only_id:
+                    description_clean, image_list = await parse_nexusphp_description(description, meta)
+                    if description_clean and len(description_clean) > 0:
+                        console.print(f"Description content:\n{description_clean[:500]}...", markup=False)
+                        meta['description'] = description_clean
+                        meta['saved_description'] = True
+                    if image_list and meta.get('keep_images'):
+                        valid_images = await check_images_concurrently(image_list, meta)
+                        if valid_images:
+                            meta['image_list'] = valid_images
+                            await handle_image_list(meta, tracker_name, valid_images)
+                    else:
+                        meta['image_list'] = []
+                
+                console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TMDb ID: {tmdb}, Name: {torrent_name}[/green]")
+            else:
+                console.print(f"[yellow]{tracker_name} data not found for ID: {tracker_id}[/yellow]")
+                found_match = False
+        else:
+            if meta['debug']:
+                console.print(f"[yellow]No ID found in meta for {tracker_name}[/yellow]")
+            found_match = False
+
     return meta, found_match
+
+
+async def parse_nexusphp_description(description_html: str, meta: Meta) -> tuple[str, list[ImageDict]]:
+    """
+    Parse NexusPHP description HTML to extract clean text and images.
+    Returns: (clean_description, image_list)
+    """
+    imagelist: list[ImageDict] = []
+    
+    if not description_html:
+        return "", imagelist
+    
+    soup = BeautifulSoup(description_html, 'lxml')
+    
+    # Extract images from [img] tags and loose URLs
+    img_tags = soup.find_all('img')
+    for img in img_tags:
+        img_url = img.get('src') or img.get('data-src')
+        if img_url and img_url.startswith('http'):
+            image_dict = {
+                'img_url': img_url,
+                'raw_url': img_url,
+                'web_url': img_url
+            }
+            imagelist.append(image_dict)
+    
+    # Also find loose image URLs in text
+    text_content = str(soup)
+    loose_images = re_module.findall(r'(https?://[^\s\[\]<>"]+\.(?:png|jpg|jpeg|gif|webp))', text_content, re_module.IGNORECASE)
+    for img_url in loose_images:
+        if not any(img['img_url'] == img_url for img in imagelist):
+            image_dict = {
+                'img_url': img_url,
+                'raw_url': img_url,
+                'web_url': img_url
+            }
+            imagelist.append(image_dict)
+    
+    # Remove image tags and get clean text
+    for img in soup.find_all('img'):
+        img.decompose()
+    
+    # Remove script and style tags
+    for script in soup.find_all(['script', 'style']):
+        script.decompose()
+    
+    clean_desc = soup.get_text(separator='\n', strip=True)
+    clean_desc = html_module.unescape(clean_desc)
+    clean_desc = re_module.sub(r'\n{3,}', '\n\n', clean_desc)  # Normalize multiple newlines
+    
+    return clean_desc, imagelist
+
+
+async def get_nexusphp_torrent_info(tracker_name: str, torrent_id: Union[int, str], meta: Meta, config: dict[str, Any]) -> tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]]:
+    """
+    Generic function to fetch metadata from NexusPHP tracker details page.
+    Returns: (imdb_id, tmdb_id, name, torrenthash, description)
+    """
+    imdb_id = tmdb_id = name = torrenthash = description = None
+    
+    # Map tracker names to their base URLs
+    tracker_urls = {
+        'CHD': 'https://ptchdbits.co',
+        'U2': 'https://u2.dmhy.org',
+    }
+    
+    base_url = tracker_urls.get(tracker_name)
+    if not base_url:
+        console.print(f"[red]Unknown NexusPHP tracker: {tracker_name}[/red]")
+        return imdb_id, tmdb_id, name, torrenthash, description
+    
+    common = COMMON(config=config)
+    base_dir = meta.get('base_dir', '') or ''
+    cookiefile = f"{base_dir}/data/cookies/{tracker_name}.txt"
+    
+    if not os.path.exists(cookiefile):
+        console.print(f"[yellow]Missing Cookie File for {tracker_name}. (data/cookies/{tracker_name}.txt)[/yellow]")
+        return imdb_id, tmdb_id, name, torrenthash, description
+    
+    cookies = await common.parseCookieFile(cookiefile)
+    url = f"{base_url}/details.php?id={torrent_id}"
+    
+    try:
+        async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url)
+            
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'lxml')
+                
+                # Extract IMDb ID
+                imdb_link = soup.select_one('a[href*="imdb.com/title/tt"]')
+                if imdb_link:
+                    imdb_href = imdb_link.get('href', '')
+                    imdb_match = re_module.search(r'tt(\d+)', imdb_href)
+                    if imdb_match:
+                        imdb_id = int(imdb_match.group(1))
+                
+                # Extract TMDb ID
+                tmdb_link = soup.select_one('a[href*="themoviedb.org"]')
+                if tmdb_link:
+                    tmdb_href = tmdb_link.get('href', '')
+                    tmdb_match = re_module.search(r'/(movie|tv)/(\d+)', tmdb_href)
+                    if tmdb_match:
+                        tmdb_id = int(tmdb_match.group(2))
+                
+                # Extract torrent name (common selectors for NexusPHP)
+                name_elem = soup.select_one('h1, .torrentname, td.torrentname, b.torrentname')
+                if name_elem:
+                    name = name_elem.get_text(strip=True)
+                
+                # Extract description
+                desc_elem = soup.select_one('#desctext, .desctext, td[colspan="2"], .nfo')
+                if desc_elem:
+                    description = str(desc_elem)
+                
+                # Extract torrent hash if available
+                hash_elem = soup.select_one('input[name="hash"], code, .hash, font[color="red"]')
+                if hash_elem:
+                    hash_text = hash_elem.get_text(strip=True)
+                    if len(hash_text) == 40:  # SHA1 hash length
+                        torrenthash = hash_text
+                
+            else:
+                console.print(f"[yellow]Failed to fetch {tracker_name} details page. Status: {response.status_code}[/yellow]")
+                
+    except httpx.RequestError as e:
+        console.print(f"[red]Request error fetching {tracker_name} details: {e}[/red]")
+    except Exception as e:
+        console.print(f"[red]Unexpected error fetching {tracker_name} details: {e}[/red]")
+        if config.get('DEFAULT', {}).get('debug', False):
+            console.print_exception()
+    
+    return imdb_id, tmdb_id, name, torrenthash, description
 
 
 async def handle_image_list(meta: Meta, tracker_name: str, valid_images: Optional[Sequence[ImageDict]] = None) -> None:

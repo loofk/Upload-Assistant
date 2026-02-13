@@ -128,6 +128,9 @@ class TrackerDataManager:
                     'yus': 'YUS',
                     'dp': 'DP',
                     'ptp': 'PTP',
+                    'pter': 'PTER',
+                    'chd': 'CHD',
+                    'u2': 'U2',
                 }
             else:
                 # Preference trackers with lesser overall torrents
@@ -149,6 +152,9 @@ class TrackerDataManager:
                     'aither': 'AITHER',
                     'btn': 'BTN',
                     'ptp': 'PTP',
+                    'pter': 'PTER',
+                    'chd': 'CHD',
+                    'u2': 'U2',
                 }
 
             specific_tracker: list[str] = [tracker_keys[key] for key in tracker_keys if meta.get(key) is not None]
