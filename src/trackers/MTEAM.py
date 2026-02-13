@@ -616,7 +616,8 @@ class MTEAM:
         return labels
 
     async def edit_desc(self, meta: Meta) -> None:
-        """生成 descr 参数内容，结构参考 docs/mteam/desc.txt：海报 → 自定义说明 → 影片信息+简介 → BDInfo/mediainfo → 截图。"""
+        """生成 descr 参数内容，结构参考 docs/mteam/desc.txt：海报 → 自定义说明 → 影片信息+简介 → 截图。
+        注意：BDInfo/mediainfo 已通过接口单独传递（mediainfo 参数），不再添加到 desc 中。"""
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", encoding='utf-8') as base_file:
             base = await base_file.read()
 
@@ -660,24 +661,8 @@ class MTEAM:
             parts.append(ptgen_body)
             parts.append("\n\n")
 
-        # 5) BDInfo / mediainfo
-        if meta.get('discs', []) != []:
-            discs = cast(list[dict[str, Any]], meta.get('discs', []))
-            for each in discs:
-                if each['type'] == "BDMV":
-                    parts.append(f"[hide=BDInfo]{each['summary']}[/hide]\n\n")
-                if each['type'] == "DVD":
-                    parts.append(f"{each['name']}:\n")
-                    parts.append(f"[hide=mediainfo][{each['vob_mi']}[/hide] [hide=mediainfo][{each['ifo_mi']}[/hide]\n\n")
-        else:
-            try:
-                async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO_CLEANPATH.txt", encoding='utf-8') as mi_file:
-                    mi = await mi_file.read()
-                parts.append(f"[hide=mediainfo]{mi}[/hide]\n\n")
-            except Exception:
-                pass
-
-        # 6) 截图
+        # 5) 截图
+        # Note: BDInfo/mediainfo 已通过接口单独传递，不再添加到 desc 中
         images = cast(list[dict[str, Any]], meta.get('image_list', []))
         for each in range(len(images[:int(meta['screens'])])):
             img_url = images[each]['img_url']
