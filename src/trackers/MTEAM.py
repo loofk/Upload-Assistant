@@ -234,6 +234,59 @@ class MTEAM:
             dupes.append(entry)
         return dupes
 
+    async def download_new_torrent(self, torrent_id: str, torrent_path: str) -> None:
+        """
+        Download the torrent file using the new credential mechanism.
+        Steps:
+        1. Call /api/torrent/genDlToken with formData parameter ID (torrent ID)
+        2. Get the data value from response (this is the actual torrent download URL)
+        3. Download the torrent file using GET request
+        """
+        if not self.api_key:
+            console.print("[red]MTEAM API key not configured, cannot download torrent[/red]")
+            return
+        
+        try:
+            # Step 1: Generate download token
+            # Call /api/torrent/genDlToken with formData parameter ID (torrent ID)
+            gen_token_url = "https://api.m-team.cc/api/torrent/genDlToken"
+            token_data = {"ID": torrent_id}
+            
+            # Use formData (application/x-www-form-urlencoded)
+            # _request returns the 'data' field from API response
+            # For genDlToken, the 'data' field contains the actual torrent download URL (string)
+            download_url = await self._request(gen_token_url, data=token_data)
+            
+            # Step 2: Validate download URL
+            if not download_url:
+                console.print("[red]No download URL found in genDlToken response[/red]")
+                return
+            
+            if not isinstance(download_url, str):
+                console.print(f"[red]Unexpected response format from genDlToken: expected string, got {type(download_url)}[/red]")
+                return
+            
+            # Step 3: Download the torrent file using GET request
+            console.print(f"[cyan]Downloading MTEAM torrent from: {download_url}[/cyan]")
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(download_url)
+                response.raise_for_status()
+                
+                # Save the torrent file
+                async with aiofiles.open(torrent_path, "wb") as torrent_file:
+                    await torrent_file.write(response.content)
+                
+                console.print(f"[green]Successfully downloaded MTEAM torrent to: {torrent_path}[/green]")
+                
+        except MTEAMRequestError as e:
+            console.print(f"[red]Failed to generate download token: {e.message}[/red]")
+        except httpx.RequestError as e:
+            console.print(f"[red]Failed to download torrent file: {e}[/red]")
+        except Exception as e:
+            console.print(f"[red]Unexpected error downloading MTEAM torrent: {e}[/red]")
+            if self.config.get('DEFAULT', {}).get('debug', False):
+                console.print_exception()
+
     async def get_info_from_torrent_id(self, mteam_id: Union[int, str], meta: Optional[Meta] = None) -> tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]]:
         """
         Fetch metadata from MTEAM torrent details using API.
@@ -851,5 +904,8 @@ class MTEAM:
             if isinstance(data_obj, dict):
                 torrent_id = data_obj.get('id') or data_obj.get('torrentId')
                 if torrent_id:
-                    meta['tracker_status'][self.tracker]['torrent_id'] = str(torrent_id)
+                    torrent_id_str = str(torrent_id)
+                    meta['tracker_status'][self.tracker]['torrent_id'] = torrent_id_str
+                    # Download the torrent file using the new credential mechanism
+                    await self.download_new_torrent(torrent_id_str, torrent_path)
             return True

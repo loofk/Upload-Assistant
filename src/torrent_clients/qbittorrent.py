@@ -792,12 +792,48 @@ class QbittorrentClientMixin:
                 if os.path.normpath(am_config_str).lower() in os.path.normpath(path).lower() and am_config_str.strip() != "":
                     auto_management = True
 
-        qbt_category = client['qbit_cross_cat'] if cross and client.get('qbit_cross_cat') else client.get("qbit_cat") if not meta.get("qbit_cat") else meta.get('qbit_cat')
+        # Category priority: meta > tracker config > cross > client default > "keep" (default)
+        qbt_category = None
+        if meta.get("qbit_cat"):
+            qbt_category = meta.get('qbit_cat')
+        elif tracker and self.config.get('TRACKERS') and tracker in self.config['TRACKERS']:
+            # Check for tracker-specific category in TRACKERS config
+            tracker_config = self.config['TRACKERS'][tracker]
+            if isinstance(tracker_config, dict) and tracker_config.get('qbit_cat'):
+                qbt_category = tracker_config.get('qbit_cat')
+        if not qbt_category:
+            qbt_category = client['qbit_cross_cat'] if cross and client.get('qbit_cross_cat') else client.get("qbit_cat")
+        # Default to "keep" if still no category
+        if not qbt_category:
+            qbt_category = "keep"
+        
+        # Speed limits: tracker config > client default
+        # Note: qBittorrent API uses KB/s (kilobytes per second) as unit
+        download_limit = None
+        upload_limit = None
+        if tracker and self.config.get('TRACKERS') and tracker in self.config['TRACKERS']:
+            tracker_config = self.config['TRACKERS'][tracker]
+            if isinstance(tracker_config, dict):
+                # Check for tracker-specific speed limits (in KB/s)
+                if tracker_config.get('qbit_download_limit'):
+                    download_limit = tracker_config.get('qbit_download_limit')
+                if tracker_config.get('qbit_upload_limit'):
+                    upload_limit = tracker_config.get('qbit_upload_limit')
+        # Fallback to client-wide limits if no tracker-specific limits
+        if download_limit is None and client.get('qbit_download_limit'):
+            download_limit = client.get('qbit_download_limit')
+        if upload_limit is None and client.get('qbit_upload_limit'):
+            upload_limit = client.get('qbit_upload_limit')
+        
         content_layout = client.get('content_layout', 'Original')
         if meta['debug']:
             console.print("qbt_category:", qbt_category)
             console.print(f"Content Layout: {content_layout}")
             console.print(f"[bold yellow]qBittorrent save path: {save_path}")
+            if download_limit is not None:
+                console.print(f"[cyan]Download limit: {download_limit} KB/s")
+            if upload_limit is not None:
+                console.print(f"[cyan]Upload limit: {upload_limit} KB/s")
 
         if cross:
             skip_checking = True
@@ -831,9 +867,18 @@ class QbittorrentClientMixin:
                     data.add_field('category', qbt_category)
                 if tag:
                     data.add_field('tags', tag)
+                if download_limit is not None:
+                    data.add_field('dlLimit', str(int(download_limit)))
+                if upload_limit is not None:
+                    data.add_field('upLimit', str(int(upload_limit)))
                 data.add_field('torrents', torrent.dump(), filename='torrent.torrent', content_type='application/x-bittorrent')
                 if meta['debug']:
-                    console.print(f"[cyan]POSTing to {Redaction.redact_private_info(qbt_proxy_url)}/api/v2/torrents/add with data: savepath={save_path}, autoTMM={auto_management}, skip_checking={skip_checking}, paused={paused_on_add}, contentLayout={content_layout}, category={qbt_category}, tags={tag}")
+                    debug_info = f"savepath={save_path}, autoTMM={auto_management}, skip_checking={skip_checking}, paused={paused_on_add}, contentLayout={content_layout}, category={qbt_category}, tags={tag}"
+                    if download_limit is not None:
+                        debug_info += f", dlLimit={download_limit}"
+                    if upload_limit is not None:
+                        debug_info += f", upLimit={upload_limit}"
+                    console.print(f"[cyan]POSTing to {Redaction.redact_private_info(qbt_proxy_url)}/api/v2/torrents/add with data: {debug_info}")
 
                 async with qbt_session.post(f"{qbt_proxy_url}/api/v2/torrents/add",
                                             data=data) as response:
@@ -844,16 +889,26 @@ class QbittorrentClientMixin:
             else:
                 if qbt_client is None:
                     raise RuntimeError("qbt_client cannot be None")
+                # Build kwargs for torrents_add
+                add_kwargs = {
+                    'torrent_files': torrent.dump(),
+                    'save_path': save_path,
+                    'use_auto_torrent_management': auto_management,
+                    'is_skip_checking': skip_checking,
+                    'paused': paused_on_add,
+                    'content_layout': content_layout,
+                }
+                if qbt_category:
+                    add_kwargs['category'] = qbt_category
+                if tag:
+                    add_kwargs['tags'] = tag
+                if download_limit is not None:
+                    add_kwargs['download_limit'] = int(download_limit)
+                if upload_limit is not None:
+                    add_kwargs['upload_limit'] = int(upload_limit)
+                
                 await self.retry_qbt_operation(
-                    lambda: asyncio.to_thread(qbt_client.torrents_add,
-                                              torrent_files=torrent.dump(),
-                                              save_path=save_path,
-                                              use_auto_torrent_management=auto_management,
-                                              is_skip_checking=skip_checking,
-                                              paused=paused_on_add,
-                                              content_layout=content_layout,
-                                              category=qbt_category,
-                                              tags=tag),
+                    lambda: asyncio.to_thread(qbt_client.torrents_add, **add_kwargs),
                     "Add torrent to qBittorrent",
                     initial_timeout=14.0
                 )

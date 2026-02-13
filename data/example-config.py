@@ -763,6 +763,13 @@ config = {
             "anon": True,
         },
         "MTEAM": {
+            # qBittorrent category for this tracker (default: "keep")
+            # Set to "keep" for vertex tool to avoid auto-deletion
+            "qbit_cat": "keep",
+            # Speed limits for this tracker (in KB/s, kilobytes per second)
+            # Example: 10240 = 10 MB/s, 5120 = 5 MB/s, 102400 = 100 MB/s
+            "qbit_download_limit": None,  # KB/s, e.g., 10240 for 10MB/s
+            "qbit_upload_limit": None,   # KB/s, e.g., 5120 for 5MB/s
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",
             # API key (Token) from 控制台 → 实验室 → 存取令牌
@@ -795,6 +802,11 @@ config = {
             "ptgen_api": "",
             "announce_url": "",
             "anon": False,
+            # qBittorrent category for this tracker (default: "keep")
+            "qbit_cat": "keep",
+            # Speed limits for this tracker (in KB/s, kilobytes per second)
+            "qbit_download_limit": None,
+            "qbit_upload_limit": None,
         },
         "U2": {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
@@ -808,6 +820,11 @@ config = {
             "ptgen_api": "",
             "announce_url": "",
             "anon": False,
+            # qBittorrent category for this tracker (default: "keep")
+            "qbit_cat": "keep",
+            # Speed limits for this tracker (in KB/s, kilobytes per second)
+            "qbit_download_limit": None,
+            "qbit_upload_limit": None,
         },
         "PTP": {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
@@ -1047,7 +1064,14 @@ config = {
             # Use the UA tracker acronym as a tag in qBitTorrent
             "use_tracker_as_tag": False,
             "qbit_tag": "",
-            "qbit_cat": "",
+            "qbit_cat": "",  # Default category (fallback if tracker doesn't specify, default is "keep")
+            # Note: Per-tracker category and speed limits are configured in TRACKERS section
+            # Each tracker can have "qbit_cat", "qbit_download_limit", "qbit_upload_limit"
+            # Default category is "keep" if not specified in tracker config
+            # Client-wide speed limits (fallback if no tracker-specific limit)
+            # Speed limits are in KB/s (kilobytes per second)
+            "qbit_download_limit": None,  # KB/s, e.g., 10240 for 10MB/s
+            "qbit_upload_limit": None,  # KB/s, e.g., 5120 for 5MB/s
             # If using cross seeding, add cross seed tag/category here
             "qbit_cross_tag": "",
             "qbit_cross_cat": "",
