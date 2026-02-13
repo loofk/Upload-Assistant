@@ -51,10 +51,11 @@ class DupeChecker:
         """
         if meta.get('debug'):
             console.log(f"[cyan]Pre-filtered dupes from {tracker_name}")
-            # Limit dupe output for readability
+            # Limit dupe output for readability; MTEAM: cap at 5 when many
             if dupes:
                 dupes_to_print: list[dict[str, Any]] = []
-                for dupe in dupes:
+                dupes_iter = dupes[:5] if tracker_name == "MTEAM" and len(dupes) > 5 else dupes
+                for dupe in dupes_iter:
                     if isinstance(dupe, dict) and 'files' in dupe and isinstance(dupe['files'], list):
                         # Limit files list to first 10 items
                         limited_dupe = Redaction.redact_private_info(dupe).copy()
@@ -66,6 +67,8 @@ class DupeChecker:
                     else:
                         dupes_to_print.append(Redaction.redact_private_info(dupe))
                 console.log(dupes_to_print)
+                if tracker_name == "MTEAM" and len(dupes) > 5:
+                    console.log(f"[dim]MTEAM: {len(dupes)} search results (showing first 5)[/dim]")
             else:
                 console.log(dupes)
 
@@ -330,6 +333,24 @@ class DupeChecker:
                         console.log(
                             f"[debug] Size comparison failed due to ValueError: entry_size={entry.get('size')}, source_size={meta.get('source_size')}"
                         )
+                elif tracker_name == "MTEAM":
+                    # MTEAM: treat as dupe when size matches within tolerance (e.g. per-episode TV)
+                    # Allow ±0.01GB difference to account for minor variations
+                    entry_size = coerce_int(entry.get('size'))
+                    source_size = coerce_int(meta.get('source_size'))
+                    if source_size is not None:
+                        if entry_size is None:
+                            await log_exclusion("size unknown (cannot confirm match)", each)
+                            return True
+                        # Tolerance: 0.01GB = 10737418 bytes
+                        size_tolerance = int(0.01 * 1024 * 1024 * 1024)
+                        size_diff = abs(entry_size - source_size)
+                        if size_diff > size_tolerance:
+                            await log_exclusion(f"size mismatch (entry {entry_size} vs source {source_size}, diff {size_diff} bytes)", each)
+                            return True
+                        meta['size_match'] = f"{entry.get('name')} = {entry.get('link', None)}"
+                        remember_match('size')
+                        return False
 
             else:
                 entry_size = coerce_int(entry.get('size'))
@@ -586,10 +607,11 @@ class DupeChecker:
         if new_dupes and not meta.get('unattended', False) and meta.get('debug'):
             if len(processed_dupes) > 1:
                 console.log(f"[yellow]Filtered dupes on {tracker_name}: ")
-            # Limit filtered dupe output for readability
+            # Limit filtered dupe output for readability; MTEAM: cap at 5 when many
             filtered_dupes_to_print: list[dict[str, Any]] = []
+            dupes_to_show = new_dupes[:5] if tracker_name == "MTEAM" and len(new_dupes) > 5 else new_dupes
 
-            for dupe in new_dupes:
+            for dupe in dupes_to_show:
                 limited_dupe = Redaction.redact_private_info(dupe).copy()
                 # Limit files list to first 10 items
                 limited_files = limited_dupe.get('files', [])
@@ -604,6 +626,8 @@ class DupeChecker:
 
             if len(processed_dupes) > 1:
                 console.log(filtered_dupes_to_print)
+            if tracker_name == "MTEAM" and len(new_dupes) > 5:
+                console.log(f"[dim]MTEAM: {len(new_dupes)} potential dupes (showing first 5)[/dim]")
 
         return new_dupes
 
