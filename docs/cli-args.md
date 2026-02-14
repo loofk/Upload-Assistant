@@ -169,6 +169,7 @@ Thise will use the specified hash to get tracker ids from qBitTorrent or rTorren
 - `-mps`, `--max-piece-size {1,2,4,8,16,32,64,128}`: Max piece size in MiB.
 - `-nh`, `--nohash`: Don’t hash `.torrent`.
 - `-rh`, `--rehash`: Rehash `.torrent` even if it was not needed.
+- `-ust`, `--use-source-torrent`: Use the source tracker's `.torrent` file (from `-u2` or `-chd` link) instead of creating one from local files. Allows uploading to the target tracker (e.g. MTEAM) before the download from U2/CHD has finished. Requires `-u2` or `-chd` and a configured passkey for that tracker.
 - `-mkbrr`, `--mkbrr`: Use mkbrr for torrent hashing.
 - `-entropy`, `--entropy N`: Use entropy in created torrents (32 or 64 bits).
 - `-rt`, `--randomized N`: Create N extra torrents with random infohash (default `0`).

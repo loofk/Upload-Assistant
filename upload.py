@@ -20,6 +20,7 @@ from typing import Any, Optional, cast
 import aiofiles
 import cli_ui
 import discord
+import httpx
 import requests
 from packaging import version
 from torf import Torrent
@@ -1046,6 +1047,35 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
         if meta.get('force_recheck', False):
             waiter = Wait(config)
             await waiter.select_and_recheck_best_torrent(meta, meta['path'], check_interval=5)
+        # When --use-source-torrent and -u2/-chd are set, download .torrent from source tracker instead of creating from local files
+        if meta.get('use_source_torrent') and not os.path.exists(torrent_path):
+            source_id = meta.get('u2') or meta.get('chd')
+            source_tracker = 'U2' if meta.get('u2') else 'CHD' if meta.get('chd') else None
+            if source_id and source_tracker:
+                tr_cfg = config.get('TRACKERS', {}).get(source_tracker, {})
+                passkey = str(tr_cfg.get('passkey', '')).strip()
+                if passkey:
+                    base_url = 'https://u2.dmhy.org' if source_tracker == 'U2' else 'https://ptchdbits.co'
+                    download_url = f"{base_url}/download.php?id={source_id}&passkey={passkey}"
+                    common = COMMON(config=config)
+                    cookiefile = f"{meta['base_dir']}/data/cookies/{source_tracker}.txt"
+                    try:
+                        cookies = await common.parseCookieFile(cookiefile) if os.path.exists(cookiefile) else {}
+                        async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
+                            r = await client.get(download_url)
+                        if r.status_code == 200 and len(r.content) > 0 and r.content[:1] == b'd':
+                            async with aiofiles.open(torrent_path, 'wb') as f:
+                                await f.write(r.content)
+                            meta['base_torrent_created'] = True
+                            console.print(f"[green]Using source .torrent from {source_tracker} (id={source_id})[/green]")
+                        else:
+                            if meta.get('debug'):
+                                console.print(f"[yellow]Source torrent download failed: status={r.status_code}, body starts with: {r.content[:50]!r}[/yellow]")
+                            console.print("[yellow]Could not download source .torrent; will create from local path.[/yellow]")
+                    except Exception as e:
+                        console.print(f"[yellow]Could not download source .torrent: {e}; will create from local path.[/yellow]")
+                else:
+                    console.print(f"[yellow]No passkey for {source_tracker}; will create .torrent from local path.[/yellow]")
         if not os.path.exists(torrent_path):
             reuse_torrent = None
             if meta.get('rehash', False) is False and not meta['base_torrent_created'] and not meta['we_checked_them_all']:

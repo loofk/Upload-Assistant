@@ -178,6 +178,7 @@ class Args:
         parser.add_argument('-uptimer', '--upload-timer', action='store_true', required=False, help="Prints the time it takes to upload to each individual site.", dest="upload_timer")
         parser.add_argument('-mps', '--max-piece-size', nargs=1, required=False, help="Set max piece size allowed in MiB for default torrent creation (default 128 MiB)", choices=['1', '2', '4', '8', '16', '32', '64', '128'])
         parser.add_argument('-nh', '--nohash', action='store_true', required=False, help="Don't hash .torrent")
+        parser.add_argument('-ust', '--use-source-torrent', dest='use_source_torrent', action='store_true', required=False, help="Use the source tracker's .torrent file (from -u2/-chd link) instead of creating one from local files; allows seeding before download completes")
         parser.add_argument('-rh', '--rehash', action='store_true', required=False, help="DO hash .torrent")
         parser.add_argument('-mkbrr', '--mkbrr', action='store_true', required=False, help="Use mkbrr for torrent hashing")
         parser.add_argument('-frc', '--force-recheck', action='store_true', required=False, help="(qBitTorrent only with auto torrent searching) Force recheck torrent in client before uploading", dest="force_recheck")
