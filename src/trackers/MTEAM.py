@@ -250,7 +250,7 @@ class MTEAM:
             # Step 1: Generate download token
             # Call /api/torrent/genDlToken with formData parameter ID (torrent ID)
             gen_token_url = "https://api.m-team.cc/api/torrent/genDlToken"
-            token_data = {"ID": torrent_id}
+            token_data = {"id": torrent_id}
             
             # Use formData (application/x-www-form-urlencoded)
             # _request returns the 'data' field from API response
