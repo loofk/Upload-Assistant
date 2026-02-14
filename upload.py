@@ -1061,8 +1061,8 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
                     cookiefile = f"{meta['base_dir']}/data/cookies/{source_tracker}.txt"
                     try:
                         cookies = await common.parseCookieFile(cookiefile) if os.path.exists(cookiefile) else {}
-                        async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
-                            r = await client.get(download_url)
+                        async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as http_client:
+                            r = await http_client.get(download_url)
                         if r.status_code == 200 and len(r.content) > 0 and r.content[:1] == b'd':
                             async with aiofiles.open(torrent_path, 'wb') as f:
                                 await f.write(r.content)
