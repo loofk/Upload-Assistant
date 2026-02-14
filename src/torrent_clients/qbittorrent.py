@@ -808,7 +808,7 @@ class QbittorrentClientMixin:
             qbt_category = "keep"
         
         # Speed limits: tracker config > client default
-        # Note: qBittorrent API uses KB/s (kilobytes per second) as unit
+        # Config values are in KB/s; qBittorrent API expects bytes/s, so we multiply by 1024 when sending
         download_limit = None
         upload_limit = None
         if tracker and self.config.get('TRACKERS') and tracker in self.config['TRACKERS']:
@@ -868,9 +868,9 @@ class QbittorrentClientMixin:
                 if tag:
                     data.add_field('tags', tag)
                 if download_limit is not None:
-                    data.add_field('dlLimit', str(int(download_limit)))
+                    data.add_field('dlLimit', str(int(download_limit) * 1024))
                 if upload_limit is not None:
-                    data.add_field('upLimit', str(int(upload_limit)))
+                    data.add_field('upLimit', str(int(upload_limit) * 1024))
                 data.add_field('torrents', torrent.dump(), filename='torrent.torrent', content_type='application/x-bittorrent')
                 if meta['debug']:
                     debug_info = f"savepath={save_path}, autoTMM={auto_management}, skip_checking={skip_checking}, paused={paused_on_add}, contentLayout={content_layout}, category={qbt_category}, tags={tag}"
@@ -903,9 +903,9 @@ class QbittorrentClientMixin:
                 if tag:
                     add_kwargs['tags'] = tag
                 if download_limit is not None:
-                    add_kwargs['download_limit'] = int(download_limit)
+                    add_kwargs['download_limit'] = int(download_limit) * 1024
                 if upload_limit is not None:
-                    add_kwargs['upload_limit'] = int(upload_limit)
+                    add_kwargs['upload_limit'] = int(upload_limit) * 1024
                 
                 await self.retry_qbt_operation(
                     lambda: asyncio.to_thread(qbt_client.torrents_add, **add_kwargs),
