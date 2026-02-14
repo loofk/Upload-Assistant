@@ -512,6 +512,7 @@ class TorrentCreator:
 
                         # Run mkbrr subprocess in thread to avoid blocking
                         def run_mkbrr() -> int:
+                            import cli_ui as _cli_ui  # avoid closure over outer 'cli_ui' which may be unbound
                             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
 
                             if process.stdout is None:
@@ -545,7 +546,7 @@ class TorrentCreator:
                                         else:
                                             eta = "--:--"  # Placeholder if we can't estimate yet
 
-                                    cli_ui.info_progress(f"mkbrr hashing... {speed} | ETA: {eta}", pieces_done, total_pieces)
+                                    _cli_ui.info_progress(f"mkbrr hashing... {speed} | ETA: {eta}", pieces_done, total_pieces)
 
                                 # Detect final output line
                                 if "Wrote" in line and ".torrent" in line and meta['debug']:
