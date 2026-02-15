@@ -861,6 +861,11 @@ async def update_metadata_from_tracker(
                 if tmdb:
                     meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
                 meta['u2_name'] = u2_name
+                # Hint animation when U2 description/name suggests anime (for correct MTEAM category 動畫)
+                desc_lower = (u2_description or '').lower()
+                name_str = (u2_name or '').lower()
+                if '动画' in (u2_description or '') or '动漫' in (u2_description or '') or 'anime' in desc_lower or 'myanimelist' in desc_lower or 'animation' in desc_lower or '动画' in name_str or '动漫' in name_str or 'anime' in name_str:
+                    meta['anime'] = True
                 found_match = True
                 if u2_description and not only_id:
                     description, image_list = await parse_nexusphp_description(u2_description, meta)

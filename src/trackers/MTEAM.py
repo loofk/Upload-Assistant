@@ -234,9 +234,10 @@ class MTEAM:
             dupes.append(entry)
         return dupes
 
-    async def download_new_torrent(self, torrent_id: str, torrent_path: str) -> None:
+    async def download_new_torrent(self, torrent_id: str, torrent_path: str) -> bool:
         """
-        Download the torrent file using the new credential mechanism.
+        Download the torrent file from MTEAM (site's .torrent) so client gets the same infohash as registered.
+        Returns True if download and save succeeded, False otherwise.
         Steps:
         1. Call /api/torrent/genDlToken with formData parameter ID (torrent ID)
         2. Get the data value from response (this is the actual torrent download URL)
@@ -244,48 +245,41 @@ class MTEAM:
         """
         if not self.api_key:
             console.print("[red]MTEAM API key not configured, cannot download torrent[/red]")
-            return
+            return False
         
         try:
-            # Step 1: Generate download token
-            # Call /api/torrent/genDlToken with formData parameter ID (torrent ID)
             gen_token_url = "https://api.m-team.cc/api/torrent/genDlToken"
             token_data = {"id": torrent_id}
-            
-            # Use formData (application/x-www-form-urlencoded)
-            # _request returns the 'data' field from API response
-            # For genDlToken, the 'data' field contains the actual torrent download URL (string)
             download_url = await self._request(gen_token_url, data=token_data)
             
-            # Step 2: Validate download URL
             if not download_url:
                 console.print("[red]No download URL found in genDlToken response[/red]")
-                return
+                return False
             
             if not isinstance(download_url, str):
                 console.print(f"[red]Unexpected response format from genDlToken: expected string, got {type(download_url)}[/red]")
-                return
+                return False
             
-            # Step 3: Download the torrent file using GET request
             console.print(f"[cyan]Downloading MTEAM torrent from: {download_url}[/cyan]")
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.get(download_url)
                 response.raise_for_status()
-                
-                # Save the torrent file
                 async with aiofiles.open(torrent_path, "wb") as torrent_file:
                     await torrent_file.write(response.content)
-                
-                console.print(f"[green]Successfully downloaded MTEAM torrent to: {torrent_path}[/green]")
+            console.print(f"[green]Successfully downloaded MTEAM torrent to: {torrent_path}[/green]")
+            return True
                 
         except MTEAMRequestError as e:
             console.print(f"[red]Failed to generate download token: {e.message}[/red]")
+            return False
         except httpx.RequestError as e:
             console.print(f"[red]Failed to download torrent file: {e}[/red]")
+            return False
         except Exception as e:
             console.print(f"[red]Unexpected error downloading MTEAM torrent: {e}[/red]")
             if self.config.get('DEFAULT', {}).get('debug', False):
                 console.print_exception()
+            return False
 
     async def get_info_from_torrent_id(self, mteam_id: Union[int, str], meta: Optional[Meta] = None) -> tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]]:
         """
@@ -381,14 +375,15 @@ class MTEAM:
         
         # 影劇/綜藝 (TV Series/Variety) categories
         elif category == 'TV':
-            # Check for variety shows
             genres_value = meta.get("genres", "")
             genres = ', '.join(cast(list[str], genres_value)) if isinstance(genres_value, list) else str(genres_value)
             keywords_value = meta.get("keywords", "")
             keywords = ', '.join(cast(list[str], keywords_value)) if isinstance(keywords_value, list) else str(keywords_value)
-            
+            # 動畫 (Animation) must be checked before 綜藝 so anime is not classified as variety
+            if 'animation' in genres.lower() or 'animation' in keywords.lower() or meta.get('anime', False) or meta.get('mal_id'):
+                return 405  # 動畫
+            # Check for variety shows (綜藝)
             is_variety = 'variety' in genres.lower() or 'reality' in genres.lower() or 'talk show' in genres.lower()
-            
             if is_variety:
                 # 影劇/綜藝/BD
                 if is_disc == 'BDMV':
@@ -455,16 +450,24 @@ class MTEAM:
         else:
             return None
 
+    @staticmethod
+    def _mediainfo_tracks_list(mi: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return mediainfo track list; normalize single dict to list (MediaInfo XML can emit one track as dict)."""
+        if not mi:
+            return []
+        media = cast(dict[str, Any], mi.get('media', {}))
+        raw = media.get('track', [])
+        if isinstance(raw, dict):
+            return [raw]
+        return cast(list[dict[str, Any]], raw) if isinstance(raw, list) else []
+
     async def get_video_codec_id(self, meta: Meta) -> Optional[int]:
         """Get video codec ID for MTEAM form (returns integer ID)
         Based on videoCodecList.json: 1=H.264, 16=H.265/HEVC, 2=VC-1, 4=MPEG-2, 3=Xvid, 19=AV1, 21=VP8/9, 22=AVS
         """
         mi = cast(dict[str, Any], meta.get('mediainfo', {}))
-        video_tracks = []
-        if mi:
-            media = cast(dict[str, Any], mi.get('media', {}))
-            tracks = cast(list[dict[str, Any]], media.get('track', []))
-            video_tracks = [t for t in tracks if t.get('@type') == 'Video']
+        tracks = self._mediainfo_tracks_list(mi)
+        video_tracks = [t for t in tracks if t.get('@type') == 'Video']
         
         if video_tracks:
             codec = str(video_tracks[0].get('Format', '')).upper()
@@ -494,11 +497,8 @@ class MTEAM:
         9=TrueHD, 10=TrueHD Atmos, 14=LPCM/PCM, 15=WAV, 1=FLAC, 2=APE, 4=MP2/3, 5=OGG, 7=Other
         """
         mi = cast(dict[str, Any], meta.get('mediainfo', {}))
-        audio_tracks = []
-        if mi:
-            media = cast(dict[str, Any], mi.get('media', {}))
-            tracks = cast(list[dict[str, Any]], media.get('track', []))
-            audio_tracks = [t for t in tracks if t.get('@type') == 'Audio']
+        tracks = self._mediainfo_tracks_list(mi)
+        audio_tracks = [t for t in tracks if t.get('@type') == 'Audio']
         
         if audio_tracks:
             codec = str(audio_tracks[0].get('Format', '')).upper()
@@ -583,15 +583,13 @@ class MTEAM:
         # Check for Chinese subtitles
         if meta.get('is_disc', '') != 'BDMV':
             mi = cast(dict[str, Any], meta.get('mediainfo', {}))
-            if mi:
-                media = cast(dict[str, Any], mi.get('media', {}))
-                tracks = cast(list[dict[str, Any]], media.get('track', []))
-                for track in tracks:
-                    if track['@type'] == "Text":
-                        language = track.get('Language')
-                        if language == "zh":
-                            labels.append('中字')
-                            break
+            tracks = self._mediainfo_tracks_list(mi)
+            for track in tracks:
+                if track.get('@type') == "Text":
+                    language = track.get('Language')
+                    if language == "zh":
+                        labels.append('中字')
+                        break
         else:
             bdinfo = cast(dict[str, Any], meta.get('bdinfo', {}))
             if bdinfo:
@@ -603,15 +601,13 @@ class MTEAM:
         
         # Check for Chinese audio
         mi = cast(dict[str, Any], meta.get('mediainfo', {}))
-        if mi:
-            media = cast(dict[str, Any], mi.get('media', {}))
-            tracks = cast(list[dict[str, Any]], media.get('track', []))
-            for track in tracks:
-                if track['@type'] == "Audio":
-                    language = track.get('Language')
-                    if language == "zh" or language == "chi":
-                        labels.append('中配')
-                        break
+        tracks = self._mediainfo_tracks_list(mi)
+        for track in tracks:
+            if track.get('@type') == "Audio":
+                language = track.get('Language')
+                if language == "zh" or language == "chi":
+                    labels.append('中配')
+                    break
         
         # Add 4k label for 2160p/UHD content
         resolution = str(meta.get('resolution', '')).lower()
@@ -908,6 +904,9 @@ class MTEAM:
                 if torrent_id:
                     torrent_id_str = str(torrent_id)
                     meta['tracker_status'][self.tracker]['torrent_id'] = torrent_id_str
-                    # Download the torrent file using the new credential mechanism
-                    await self.download_new_torrent(torrent_id_str, torrent_path)
+                    # Use site's .torrent so client gets same infohash (avoid "种子未注册" when cross-seeding)
+                    downloaded = await self.download_new_torrent(torrent_id_str, torrent_path)
+                    if not downloaded:
+                        meta['tracker_status'][self.tracker]['skip_add_to_client'] = True
+                        console.print("[yellow]Could not download site torrent; add to client skipped to avoid wrong infohash.[/yellow]")
             return True
