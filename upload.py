@@ -394,6 +394,7 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
         return
 
     meta['emby_debug'] = meta.get('emby_debug') if meta.get('emby_debug', False) else config['DEFAULT'].get('emby_debug', False)
+    meta.setdefault('verbose_client', bool(config.get('DEFAULT', {}).get('verbose_client', False)))
     if meta.get('emby_cat', None) == "movie" and meta.get('category', None) != "MOVIE":
         console.print(f"[red]Wrong category detected! Expected 'MOVIE', but found: {meta.get('category', None)}[/red]")
         meta['we_are_uploading'] = False

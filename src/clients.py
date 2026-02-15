@@ -119,9 +119,10 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
         return tracker_ids
 
     async def add_to_client(self, meta: dict[str, Any], tracker: str, cross: bool = False) -> None:
+        _client_debug = meta.get('debug') or meta.get('verbose_client')
         if cross:
             torrent_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}_cross].torrent"
-        elif meta['debug']:
+        elif meta.get('debug'):
             torrent_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}_DEBUG].torrent"
         else:
             torrent_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}].torrent"
@@ -132,17 +133,29 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
         if os.path.exists(torrent_path):
             torrent = Torrent.read(torrent_path)
         else:
-            console.print(f"[bold red]Torrent file {torrent_path} does not exist, cannot add to client")
-            return
+            # In --debug mode trackers often only create [Tracker].torrent, not [Tracker_DEBUG].torrent; fallback so add_to_client can still run
+            if meta.get('debug'):
+                fallback_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}].torrent"
+                if os.path.exists(fallback_path):
+                    torrent_path = fallback_path
+                    torrent = Torrent.read(torrent_path)
+                    if _client_debug:
+                        console.print(f"[cyan]DEBUG: Using fallback [tracker].torrent (no _DEBUG file): {torrent_path}[/cyan]")
+                else:
+                    console.print(f"[bold red]Torrent file {torrent_path} does not exist, cannot add to client[/bold red]")
+                    return
+            else:
+                console.print(f"[bold red]Torrent file {torrent_path} does not exist, cannot add to client[/bold red]")
+                return
 
         inject_clients: list[str] = []
         client_value = meta.get('client')
         if isinstance(client_value, str) and client_value != 'none':
             inject_clients = [client_value]
-            if meta['debug']:
+            if _client_debug:
                 console.print(f"[cyan]DEBUG: Using client from meta: {inject_clients}[/cyan]")
         elif client_value == 'none':
-            if meta['debug']:
+            if _client_debug:
                 console.print("[cyan]DEBUG: meta client is 'none', skipping adding to client[/cyan]")
             return
         else:
@@ -151,24 +164,24 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
                 inject_clients_config = default_section.get('injecting_client_list')
                 if isinstance(inject_clients_config, str) and inject_clients_config.strip():
                     inject_clients = [inject_clients_config]
-                    if meta['debug']:
+                    if _client_debug:
                         console.print(f"[cyan]DEBUG: Converted injecting_client_list string to list: {inject_clients}[/cyan]")
                 elif isinstance(inject_clients_config, list):
                     # Filter out empty strings and whitespace-only strings
                     inject_clients_list = cast(list[Any], inject_clients_config)
                     inject_clients = [str(c).strip() for c in inject_clients_list if str(c).strip()]
-                    if meta['debug']:
+                    if _client_debug:
                         console.print(f"[cyan]DEBUG: Using injecting_client_list from config: {inject_clients}[/cyan]")
                 else:
                     inject_clients = []
             except Exception as e:
-                if meta['debug']:
+                if _client_debug:
                     console.print(f"[cyan]DEBUG: Error reading injecting_client_list from config: {e}[/cyan]")
 
             if not inject_clients:
                 default_client = default_section.get('default_torrent_client')
                 if isinstance(default_client, str) and default_client != 'none':
-                    if meta['debug']:
+                    if _client_debug:
                         console.print(f"[cyan]DEBUG: Falling back to default_torrent_client: {default_client}[/cyan]")
                     inject_clients = [default_client]
 
@@ -176,7 +189,7 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
             console.print("[yellow]No torrent client configured for injecting (set default_torrent_client or injecting_client_list in config [DEFAULT]); skipping add to client.[/yellow]")
             return
 
-        if meta['debug']:
+        if _client_debug:
             console.print(f"[cyan]DEBUG: Clients to inject into: {inject_clients}[/cyan]")
 
         for client_name in inject_clients:
@@ -194,7 +207,7 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
             # Must pass client_name to remote_path_map
             local_path, remote_path = await self.remote_path_map(meta, client_name)
 
-            if meta['debug']:
+            if _client_debug:
                 console.print(f"[bold green]Adding to {client_name} ({torrent_client})")
 
             try:
