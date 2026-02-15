@@ -146,8 +146,9 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
                 console.print("[cyan]DEBUG: meta client is 'none', skipping adding to client[/cyan]")
             return
         else:
+            default_section = self.config.get('DEFAULT', {})
             try:
-                inject_clients_config = self.config['DEFAULT'].get('injecting_client_list')
+                inject_clients_config = default_section.get('injecting_client_list')
                 if isinstance(inject_clients_config, str) and inject_clients_config.strip():
                     inject_clients = [inject_clients_config]
                     if meta['debug']:
@@ -165,15 +166,14 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
                     console.print(f"[cyan]DEBUG: Error reading injecting_client_list from config: {e}[/cyan]")
 
             if not inject_clients:
-                default_client = self.config['DEFAULT'].get('default_torrent_client')
+                default_client = default_section.get('default_torrent_client')
                 if isinstance(default_client, str) and default_client != 'none':
                     if meta['debug']:
                         console.print(f"[cyan]DEBUG: Falling back to default_torrent_client: {default_client}[/cyan]")
                     inject_clients = [default_client]
 
         if not inject_clients:
-            if meta['debug']:
-                console.print("[cyan]DEBUG: No clients configured for injecting[/cyan]")
+            console.print("[yellow]No torrent client configured for injecting (set default_torrent_client or injecting_client_list in config [DEFAULT]); skipping add to client.[/yellow]")
             return
 
         if meta['debug']:
@@ -252,10 +252,14 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
                 await asyncio.sleep(inject_delay)
 
     async def find_existing_torrent(self, meta: dict[str, Any]) -> Optional[str]:
+        default_section = self.config.get('DEFAULT', {})
+        if not default_section:
+            console.print("[yellow]Config has no [DEFAULT] section; skipping torrent search.[/yellow]")
+            return None
         # Determine piece size preferences
         trackers_config = cast(dict[str, Any], self.config.get('TRACKERS', {}))
         mtv_config = trackers_config.get('MTV', {})
-        piece_limit = bool(self.config['DEFAULT'].get('prefer_max_16_torrent', False))
+        piece_limit = bool(default_section.get('prefer_max_16_torrent', False))
         mtv_torrent = False
         if isinstance(mtv_config, dict):
             mtv_config_dict = cast(dict[str, Any], mtv_config)
@@ -265,7 +269,7 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
             prefer_small_pieces = bool(piece_limit)
         best_match = None  # Track the best match for fallback if prefer_small_pieces is enabled
 
-        default_torrent_client = cast(str, self.config['DEFAULT']['default_torrent_client'])
+        default_torrent_client = str(default_section.get('default_torrent_client', '') or '')
 
         clients_to_search: list[str]
         meta_client = meta.get('client')
@@ -274,7 +278,7 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
             if meta['debug']:
                 console.print(f"[cyan]DEBUG: Using client from meta: {clients_to_search}[/cyan]")
         else:
-            searching_list = self.config['DEFAULT'].get('searching_client_list', [])
+            searching_list = default_section.get('searching_client_list', [])
             searching_list_values = cast(list[Any], searching_list) if isinstance(searching_list, list) else []
 
             if searching_list_values:
@@ -710,7 +714,9 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
         return local_path, remote_path
 
     async def get_ptp_from_hash(self, meta: dict[str, Any], pathed: bool = False) -> dict[str, Any]:
-        default_torrent_client = self.config['DEFAULT']['default_torrent_client']
+        default_torrent_client = self.config.get('DEFAULT', {}).get('default_torrent_client') or ''
+        if not default_torrent_client or default_torrent_client not in self.config.get('TORRENT_CLIENTS', {}):
+            return meta
         client = self.config['TORRENT_CLIENTS'][default_torrent_client]
         torrent_client = client['torrent_client']
         if torrent_client == 'rtorrent':
