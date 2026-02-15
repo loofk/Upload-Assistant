@@ -28,6 +28,60 @@ def _standard_id_to_res(standard_id: Any) -> str:
     return STANDARD_ID_TO_RES.get(str(standard_id).strip(), "")
 
 
+def _parse_codec_ids_from_mediainfo_text(text: str) -> tuple[Optional[int], Optional[int]]:
+    """Parse video/audio codec IDs from BDInfo or MediaInfo raw text when structured meta['mediainfo'] is missing (e.g. BDMV).
+    Returns (video_codec_id or None, audio_codec_id or None). MTEAM IDs: video 1=H.264, 16=H.265, 2=VC-1, 4=MPEG-2, 19=AV1, 21=VP8/9; audio 8=AC3, 3=DTS, 11=DTS-HD MA, 12=E-AC3, 9=TrueHD, 10=TrueHD Atmos, 6=AAC, 1=FLAC, 14=LPCM.
+    """
+    if not text or not isinstance(text, str):
+        return None, None
+    t = text.upper()
+    video_id: Optional[int] = None
+    audio_id: Optional[int] = None
+    # Video: order matters (more specific first)
+    if 'HEVC' in t or 'H.265' in t or 'X265' in t or 'H265' in t:
+        video_id = 16
+    elif 'AVC' in t or 'H.264' in t or 'X264' in t or 'H264' in t or 'MPEG-4 AVC' in t or 'MPEG4 AVC' in t:
+        video_id = 1
+    elif 'VC-1' in t or 'VC1' in t:
+        video_id = 2
+    elif 'MPEG-2' in t or 'MPEG2' in t:
+        video_id = 4
+    elif 'AV1' in t:
+        video_id = 19
+    elif 'VP9' in t or 'VP8' in t:
+        video_id = 21
+    elif 'XVID' in t:
+        video_id = 3
+    # Audio: order matters (more specific first)
+    if 'E-AC3' in t and ('ATMOS' in t or 'ATOMS' in t):
+        audio_id = 13
+    elif 'E-AC3' in t or 'DDP' in t or 'DOLBY DIGITAL PLUS' in t:
+        audio_id = 12
+    elif 'TRUEHD' in t and 'ATMOS' in t:
+        audio_id = 10
+    elif 'TRUEHD' in t or 'TRUE HD' in t:
+        audio_id = 9
+    elif 'DTS-HD' in t or 'DTSHD' in t or 'DTS-HD MA' in t:
+        audio_id = 11
+    elif 'DTS:X' in t or 'DTSX' in t:
+        audio_id = 3
+    elif 'DTS' in t:
+        audio_id = 3
+    elif 'LPCM' in t or 'PCM' in t:
+        audio_id = 14
+    elif 'FLAC' in t:
+        audio_id = 1
+    elif 'AC3' in t or 'DOLBY DIGITAL' in t or 'DD ' in t:
+        audio_id = 8
+    elif 'AAC' in t:
+        audio_id = 6
+    elif 'MP3' in t or 'MP2' in t:
+        audio_id = 4
+    elif 'OGG' in t or 'VORBIS' in t:
+        audio_id = 5
+    return video_id, audio_id
+
+
 def _source_id_to_type(source_id: Any) -> str:
     """API 返回的 source ID -> 类型名称，供 search_existing 填 DupeEntry.type"""
     return SOURCE_ID_TO_TYPE.get(str(source_id).strip(), "")
@@ -464,80 +518,82 @@ class MTEAM:
     async def get_video_codec_id(self, meta: Meta) -> Optional[int]:
         """Get video codec ID for MTEAM form (returns integer ID)
         Based on videoCodecList.json: 1=H.264, 16=H.265/HEVC, 2=VC-1, 4=MPEG-2, 3=Xvid, 19=AV1, 21=VP8/9, 22=AVS
+        Uses structured meta['mediainfo'] first; for BDMV (no mediainfo dict) falls back to parsing BDInfo/mediainfo text.
         """
         mi = cast(dict[str, Any], meta.get('mediainfo', {}))
         tracks = self._mediainfo_tracks_list(mi)
         video_tracks = [t for t in tracks if t.get('@type') == 'Video']
-        
         if video_tracks:
             codec = str(video_tracks[0].get('Format', '')).upper()
-            # Map codec strings to integer IDs based on videoCodecList.json
             if 'HEVC' in codec or 'H.265' in codec or 'X265' in codec:
-                return 16  # H.265(x265/HEVC)
+                return 16
             elif 'AVC' in codec or 'H.264' in codec or 'X264' in codec:
-                return 1  # H.264(x264/AVC)
+                return 1
             elif 'VC-1' in codec:
-                return 2  # VC-1
+                return 2
             elif 'MPEG-2' in codec or 'MPEG2' in codec:
-                return 4  # MPEG-2
-            elif 'XVID' in codec or 'XVID' in codec:
-                return 3  # Xvid
+                return 4
+            elif 'XVID' in codec:
+                return 3
             elif 'AV1' in codec:
-                return 19  # AV1
+                return 19
             elif 'VP8' in codec or 'VP9' in codec:
-                return 21  # VP8/9
+                return 21
             elif 'AVS' in codec:
-                return 22  # AVS
-        
-        return None
+                return 22
+            return None
+        # Fallback: BDMV and others may have no meta['mediainfo']; parse BDInfo/mediainfo text
+        mediainfo_text = await self.get_mediainfo_text(meta)
+        video_id, _ = _parse_codec_ids_from_mediainfo_text(mediainfo_text)
+        return video_id
 
     async def get_audio_codec_id(self, meta: Meta) -> Optional[int]:
         """Get audio codec ID for MTEAM form (returns integer ID)
         Based on audioCodecList.json: 6=AAC, 8=AC3, 3=DTS, 11=DTS-HD MA, 12=E-AC3, 13=E-AC3 Atoms,
         9=TrueHD, 10=TrueHD Atmos, 14=LPCM/PCM, 15=WAV, 1=FLAC, 2=APE, 4=MP2/3, 5=OGG, 7=Other
+        Uses structured meta['mediainfo'] first; for BDMV (no mediainfo dict) falls back to parsing BDInfo/mediainfo text.
         """
         mi = cast(dict[str, Any], meta.get('mediainfo', {}))
         tracks = self._mediainfo_tracks_list(mi)
         audio_tracks = [t for t in tracks if t.get('@type') == 'Audio']
-        
         if audio_tracks:
             codec = str(audio_tracks[0].get('Format', '')).upper()
             format_profile = str(audio_tracks[0].get('Format_Profile', '')).upper()
-            
-            # Map codec strings to integer IDs based on audioCodecList.json
-            # Check for more specific formats first
             if 'E-AC3' in codec and ('ATMOS' in format_profile or 'ATMOS' in codec):
-                return 13  # E-AC3 Atoms(DDP Atoms)
+                return 13
             elif 'E-AC3' in codec or 'DDP' in codec:
-                return 12  # E-AC3(DDP)
+                return 12
             elif 'ATMOS' in format_profile or 'TRUEHD ATMOS' in codec:
-                return 10  # TrueHD Atmos
+                return 10
             elif 'TRUEHD' in codec:
-                return 9  # TrueHD
+                return 9
             elif 'DTS-HD' in codec or 'DTSHD' in codec or 'DTS-HD MA' in codec:
-                return 11  # DTS-HD MA
+                return 11
             elif 'DTS:X' in format_profile or 'DTSX' in format_profile:
-                return 3  # DTS (DTS:X may map to DTS, need to verify)
+                return 3
             elif 'DTS' in codec:
-                return 3  # DTS
+                return 3
             elif 'LPCM' in codec or 'PCM' in codec:
-                return 14  # LPCM/PCM
+                return 14
             elif 'WAV' in codec:
-                return 15  # WAV
+                return 15
             elif 'FLAC' in codec:
-                return 1  # FLAC
+                return 1
             elif 'APE' in codec:
-                return 2  # APE
+                return 2
             elif 'MP2' in codec or 'MP3' in codec:
-                return 4  # MP2/3
+                return 4
             elif 'OGG' in codec or 'VORBIS' in codec:
-                return 5  # OGG
+                return 5
             elif 'AC3' in codec or 'DD' in codec or 'DOLBY DIGITAL' in codec:
-                return 8  # AC3(DD)
+                return 8
             elif 'AAC' in codec:
-                return 6  # AAC
-        
-        return None
+                return 6
+            return None
+        # Fallback: parse BDInfo/mediainfo text (e.g. BDMV has no meta['mediainfo'])
+        mediainfo_text = await self.get_mediainfo_text(meta)
+        _, audio_id = _parse_codec_ids_from_mediainfo_text(mediainfo_text)
+        return audio_id
 
     async def get_countries(self, meta: Meta) -> list[str]:
         """Get country/region IDs for MTEAM form (multi-select)
