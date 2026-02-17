@@ -915,6 +915,9 @@ async def imgbox_upload(
                             web_url = cast(Optional[str], submission_data.get('web_url'))
                             img_url = cast(Optional[str], submission_data.get('thumbnail_url'))
                             raw_url = cast(Optional[str], submission_data.get('image_url'))
+                            # Replace thumbs2.imgbox.com with thumbs.imgbox.com for China mainland access
+                            if img_url and "thumbs2.imgbox.com" in img_url:
+                                img_url = img_url.replace("thumbs2.imgbox.com", "thumbs.imgbox.com")
                             if web_url and img_url and raw_url:
                                 image_dict: dict[str, str] = {
                                     'web_url': web_url,

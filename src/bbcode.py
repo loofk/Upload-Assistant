@@ -117,8 +117,10 @@ class BBCODE:
                 continue
 
             raw_url = img_url
+            # Replace thumbs2.imgbox.com with thumbs.imgbox.com for China mainland access
             if "thumbs2.imgbox.com" in img_url:
-                raw_url = img_url.replace("thumbs2.imgbox.com", "images2.imgbox.com")
+                img_url = img_url.replace("thumbs2.imgbox.com", "thumbs.imgbox.com")
+                raw_url = img_url.replace("thumbs.imgbox.com", "images2.imgbox.com")
                 raw_url = raw_url.replace("_t.png", "_o.png")
 
             image_dict = {
