@@ -805,7 +805,8 @@ class COMMON:
                             ptgen_text = ptgen_json.get('format', '')
                             if "[/img]" in ptgen_text:
                                 ptgen_text = ptgen_text.split("[/img]")[1]
-                            poster_url = ptgen_json.get('poster', '') or meta.get('imdb_info', {}).get('cover', meta.get('cover', ''))
+                            # 统一使用 IMDb 海报，避免豆瓣等防盗链
+                            poster_url = meta.get('imdb_info', {}).get('cover', meta.get('cover', '')) or ptgen_json.get('poster', '')
                             if poster_url:
                                 ptgen_text = f"[img]{poster_url}[/img]{ptgen_text}"
                             return ptgen_text
@@ -878,8 +879,8 @@ class COMMON:
                 # Remove image tag if present (we'll add our own)
                 if "[/img]" in ptgen_text:
                     ptgen_text = ptgen_text.split("[/img]")[1]
-                # Use poster from ptgen_json if available, otherwise fallback to imdb_info cover
-                poster_url = ptgen_json.get('poster', '') or meta.get('imdb_info', {}).get('cover', meta.get('cover', ''))
+                # 统一使用 IMDb 海报，避免豆瓣等防盗链
+                poster_url = meta.get('imdb_info', {}).get('cover', meta.get('cover', '')) or ptgen_json.get('poster', '')
                 if poster_url:
                     ptgen_text = f"[img]{poster_url}[/img]{ptgen_text}"
 
