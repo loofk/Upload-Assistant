@@ -742,6 +742,43 @@ class MTEAM:
         if meta.get('type') == 'WEBDL' and meta.get('has_encode_settings', False) is True:
             mteam_name = mteam_name.replace('H.264', 'x264')
 
+        # 正确格式：电影 Title YYYY BluRay 1080p ...；剧集 Title YYYY S01E11-E12 1080p WEB-DL ...
+        # 用户明确不展示年份时不再追加
+        if meta.get('no_year'):
+            return mteam_name
+        # 年份取值：meta.year → search_year → imdb_info.year，提高命中率
+        year_val = (
+            meta.get('year')
+            or meta.get('search_year')
+            or (meta.get('imdb_info') or {}).get('year')
+        )
+        if not year_val:
+            return mteam_name
+        year_str = str(year_val).strip()
+        # 支持 TMDB 返回的 int（如 2024）或 2 位数年份（如 24 → 2024）
+        if len(year_str) == 2 and year_str.isdigit():
+            y = int(year_str)
+            year_str = f"20{y:02d}" if y < 50 else f"19{y:02d}"
+        if len(year_str) != 4 or not year_str.isdigit():
+            return mteam_name
+        year_int = int(year_str)
+        if year_int < 1900 or year_int > 2030:
+            return mteam_name
+        if re.search(r'\b(19|20)\d{2}\b', mteam_name):
+            return mteam_name
+        # 在首个“季集/类型/分辨率”前插入年份：剧集为 S01、S01E11、S01E11-E12；电影为 BluRay、WEB-DL、1080p 等
+        insert_before = re.compile(
+            r'\b(S\d+E?\d*(-E?\d+)?|BluRay|HDDVD|WEB-DL|WEBRip|REMUX|HDTV|DVDRip|'
+            r'2160p|1080p|1080i|720p|576p|480p|4K|8K|UHD)\b',
+            re.IGNORECASE
+        )
+        match = insert_before.search(mteam_name)
+        if match:
+            pos = match.start()
+            mteam_name = f"{mteam_name[:pos].rstrip()} {year_str} {mteam_name[pos:].lstrip()}"
+        else:
+            mteam_name = f"{mteam_name.strip()} {year_str}"
+
         return mteam_name
 
     async def get_mediainfo_text(self, meta: Meta) -> str:
