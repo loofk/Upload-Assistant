@@ -713,12 +713,13 @@ class MTEAM:
             parts.append(ptgen_body)
             parts.append("\n\n")
 
-        # 5) 截图
+        # 5) 截图（使用 raw_url 原图，避免缩略图 thumbs）
         # Note: BDInfo/mediainfo 已通过接口单独传递，不再添加到 desc 中
         images = cast(list[dict[str, Any]], meta.get('image_list', []))
         for each in range(len(images[:int(meta['screens'])])):
-            img_url = images[each]['img_url']
-            parts.append(f"![]({img_url})")
+            img_url = images[each].get('raw_url') or images[each].get('img_url', '')
+            if img_url:
+                parts.append(f"![]({img_url})")
 
         if self.signature:
             parts.append("\n\n")
