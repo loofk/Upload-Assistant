@@ -866,18 +866,40 @@ class MTEAM:
             console.print(f"  ptgen keys: {list(ptgen.keys())}")
             console.print(f"  chinese_title: {ptgen.get('chinese_title', 'NOT FOUND')}")
             console.print(f"  trans_title: {ptgen.get('trans_title', 'NOT FOUND')}")
-            console.print(f"  genre: {ptgen.get('genre', 'NOT FOUND')}")
+            console.print(f"  original_title: {ptgen.get('original_title', 'NOT FOUND')}")
+            console.print(f"  genre/genres: {ptgen.get('genre', 'NOT FOUND')} / {ptgen.get('genres', 'NOT FOUND')}")
         
-        # ptgen API returns 'chinese_title' (string) instead of 'trans_title' (list)
-        # Also check for 'trans_title' for backward compatibility
+        # ptgen 不同实现可能返回不同字段：chinese_title/trans_title（部分 API）或 original_title/aka（IMDb 直出）
         chinese_title = ""
         if ptgen:
-            chinese_title = ptgen.get('chinese_title', '') or ptgen.get('trans_title', '')
+            chinese_title = (
+                ptgen.get('chinese_title', '') or ptgen.get('trans_title', '') or ptgen.get('original_title', '')
+            )
             if isinstance(chinese_title, list) and len(chinese_title) > 0:
                 chinese_title = chinese_title[0]
+            if not chinese_title and ptgen.get('aka'):
+                aka = ptgen.get('aka')
+                chinese_title = aka[0] if isinstance(aka, list) and aka else (str(aka).strip() if aka else '')
             chinese_title = str(chinese_title).strip() if chinese_title else ""
         
-        genres = cast(list[str], ptgen.get("genre", [])) if ptgen else []
+        # 兼容 genre（单）与 genres（复）；genres 可能为 ['Animation', 'Comedy'] 或 [{'name': 'Animation'}, ...]
+        def _normalize_genres(val: Any) -> list[str]:
+            if val is None:
+                return []
+            if isinstance(val, list):
+                out: list[str] = []
+                for x in val:
+                    if isinstance(x, str) and x.strip():
+                        out.append(x.strip())
+                    elif isinstance(x, dict) and x.get('name'):
+                        out.append(str(x['name']).strip())
+                return out
+            if isinstance(val, str) and val.strip():
+                return [val.strip()]
+            return []
+        _genre = ptgen.get("genre") if ptgen else None
+        _genres = ptgen.get("genres") if ptgen else None
+        genres = _normalize_genres(_genres) if _genres else _normalize_genres(_genre)
         console.print(f"  Extracted chinese_title: {chinese_title}")
         console.print(f"  Filtered genres: {genres}")
 
