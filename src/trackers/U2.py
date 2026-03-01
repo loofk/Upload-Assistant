@@ -149,6 +149,17 @@ class U2:
                 response = await client.get(url)
                 
                 if response.status_code == 200:
+                    # Debug：将页面源码保存到 tmp 目录（与 DESCRIPTION.txt 等同级，不再加 uuid 子目录）
+                    if meta and meta.get('debug'):
+                        save_dir = f"{meta['base_dir']}/tmp"
+                        os.makedirs(save_dir, exist_ok=True)
+                        path = f"{save_dir}/u2_page_{u2_id}.html"
+                        try:
+                            with open(path, 'w', encoding='utf-8', errors='replace') as f:
+                                f.write(response.text)
+                            console.print(f"[dim]U2: 页面源码已保存到 {path}[/dim]")
+                        except OSError as e:
+                            console.print(f"[yellow]U2: 保存页面源码失败: {e}[/yellow]")
                     soup = BeautifulSoup(response.text, 'lxml')
                     
                     # Check if logged in - U2 may show login page if not authenticated
