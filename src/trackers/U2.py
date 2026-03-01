@@ -233,6 +233,10 @@ class U2:
                                 break
                     if name_elem:
                         u2_name = name_elem.get_text(strip=True)
+                    if not u2_name and soup.find('title'):
+                        title_text = soup.find('title').get_text(strip=True)
+                        if title_text:
+                            u2_name = re.sub(r'\s*[-|]\s*U2.*$', '', title_text, flags=re.IGNORECASE).strip() or title_text
                     
                     # Extract description - try multiple selectors
                     desc_elem = soup.select_one('#desctext, .desctext, td[colspan="2"], .nfo, table.torrentname + table td')
@@ -241,6 +245,11 @@ class U2:
                         for table in desc_tables:
                             if 'desctext' in str(table.get('id', '')) or 'desctext' in str(table.get('class', [])):
                                 desc_elem = table
+                                break
+                    if not desc_elem:
+                        for tag in soup.find_all(['td', 'div'], class_=re.compile(r'desc|nfo|content|detail', re.I)):
+                            if tag.get_text(strip=True) and len(tag.get_text(strip=True)) > 100:
+                                desc_elem = tag
                                 break
                     if desc_elem:
                         u2_description = str(desc_elem)
@@ -261,6 +270,8 @@ class U2:
                             break
                     if meta and anidb_aid is not None:
                         meta['anidb_aid'] = anidb_aid
+                    if anidb_aid is not None and not self.ids_moe_api_key:
+                        console.print("[yellow]U2: 页面含 AniDB 链接但未配置 ids_moe_api_key，无法解析 IMDb/TMDB。请在 TRACKERS.U2 中配置 ids_moe_api_key（https://ids.moe 申请）[/yellow]")
                     if (u2_imdb is None or u2_tmdb is None) and anidb_aid is not None and self.ids_moe_api_key:
                         ids_data = await self._resolve_anidb_via_ids_moe(anidb_aid)
                         if ids_data:

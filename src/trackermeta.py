@@ -855,8 +855,16 @@ async def update_metadata_from_tracker(
                 tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]],
                 u2_info,
             )
-            
-            if imdb or tmdb or u2_description:
+            # 调试：打印 U2 拉取结果
+            desc_len = len(u2_description) if u2_description else 0
+            console.print(
+                f"[dim]U2 info: imdb={imdb}, tmdb={tmdb}, name={u2_name!r}, hash={meta.get('ext_torrenthash')!r}, "
+                f"desc_len={desc_len}, douban_id={meta.get('douban_id')!r}, anidb_aid={meta.get('anidb_aid')!r}[/dim]",
+                markup=False,
+            )
+            # 有 IMDb/TMDb/描述/豆瓣/种子名 任一即视为找到（U2 页面可能只有豆瓣或仅 AniDB，get_info 内会写 meta['douban_id']）
+            has_any = bool(imdb or tmdb or u2_description or meta.get('douban_id') or u2_name)
+            if has_any:
                 meta['imdb_id'] = imdb if imdb else meta.get('imdb_id', 0)
                 if tmdb:
                     meta['category'], meta['tmdb_id'] = await BtnIdManager.parse_tmdb_id(str(tmdb), meta.get('category'))
