@@ -14,8 +14,14 @@ from src.trackers.COMMON import COMMON
 Meta = dict[str, Any]
 Config = dict[str, Any]
 
-# AniDB 链接正则：anidb.net/...aid=123 或 animedb.pl?show=anime&aid=123
+# AniDB 链接正则：支持 U2 常见格式
+# - anidb.net/a1726 或 https://anidb.net/a1726（路径形式，U2 页面主用）
+# - anidb.net/...?aid=123 或 &aid=123（查询参数）
+# - animedb.pl?show=anime&aid=123
+# 不匹配 anidb.net/episode/...（集数页）
 ANIDB_AID_RE = re.compile(
+    r'https?://(?:www\.)?anidb\.net/a(\d+)(?:[?/\s"\'<>]|$)|'  # anidb.net/a1726
+    r'anidb\.net/a(\d+)(?:[?/\s"\'<>]|$)|'
     r'anidb\.net[^"\']*[?&]aid=(\d+)|'
     r'animedb\.pl[^"\']*[?&]aid=(\d+)|'
     r'[/?&]aid=(\d+)',
@@ -279,8 +285,8 @@ class U2:
                     # U2 种子常仅含 AniDB：从页面/描述解析 AniDB aid，用 ids.moe 换 IMDb/TMDB（馒头与 ptgen 需要）
                     anidb_aid: Optional[int] = None
                     for m in ANIDB_AID_RE.finditer(response.text):
-                        g = m.group(1) or m.group(2) or m.group(3)
-                        if g and g.isdigit():
+                        g = m.group(1) or m.group(2) or m.group(3) or m.group(4) or m.group(5)
+                        if g and str(g).isdigit():
                             anidb_aid = int(g)
                             break
                     if meta and anidb_aid is not None:
