@@ -149,12 +149,14 @@ class U2:
                 response = await client.get(url)
                 
                 if response.status_code == 200:
-                    # 将页面源码保存到 base_dir/tmp（与 DESCRIPTION.txt 同级），便于排查 AniDB 等 DOM 结构；有 base_dir 即保存，不依赖 --debug
-                    save_dir = (meta.get('base_dir') or '').strip()
-                    if meta and save_dir:
-                        _path = f"{save_dir}/tmp/u2_page_{u2_id}.html"
-                        if meta.get('debug'):
-                            console.print(f"[dim]U2: debug={meta.get('debug')}, base_dir={save_dir!r}, path={_path}[/dim]")
+                    # 将页面源码保存到当次种子的工作目录（与 DESCRIPTION.txt 同级），便于排查 AniDB 等 DOM 结构
+                    base_dir = (meta.get('base_dir') or '').strip()
+                    uuid = (meta.get('uuid') or '').strip()
+                    if meta and base_dir:
+                        if uuid:
+                            _path = f"{base_dir}/tmp/{uuid}/u2_page_{u2_id}.html"
+                        else:
+                            _path = f"{base_dir}/tmp/u2_page_{u2_id}.html"
                         try:
                             os.makedirs(os.path.dirname(_path), exist_ok=True)
                             with open(_path, 'w', encoding='utf-8', errors='replace') as f:
