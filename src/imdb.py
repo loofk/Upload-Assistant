@@ -801,6 +801,12 @@ class ImdbManager:
                             return imdbID
 
                 if unattended:
+                    # 搜索词为空或无效时不要自动选第一条，避免误匹配（如 id.bdmv → Breaking Bad）
+                    search_term = (filename or "").strip()
+                    if len(search_term) < 3 or search_term.lower() in ("id", "bdmv", "video", "disk", "disc", "title"):
+                        if debug:
+                            console.print(f"[yellow]Unattended: search term {search_term!r} too short or generic, skipping auto-select[/yellow]")
+                        return 0
                     imdb_id = self.safe_get(sorted_results[0], ["node", "title", "id"], "")
                     if imdb_id:
                         imdbID = int(imdb_id.replace('tt', '').strip())

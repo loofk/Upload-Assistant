@@ -74,6 +74,26 @@ def _to_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _search_title_from_u2_name(u2_name: str) -> str:
+    """从 U2 种子名如 [亲爱一族][DearS][DearS(ディアーズ)][BDMV]... 提取用于 IMDb/TMDB 搜索的标题（优先英文）。"""
+    if not u2_name or not u2_name.strip():
+        return ""
+    # 取方括号内的片段，跳过纯标签（BDMV、1080p、USA 等）
+    tag_like = {"bdmv", "dvd", "dvdrip", "bluray", "web-dl", "1080p", "720p", "4k", "usa", "fin", "vol", "vol.", "tv", "bd", "rip"}
+    parts = re.findall(r"\[([^\]\[]+)\]", u2_name)
+    for p in parts:
+        p_clean = p.strip()
+        if not p_clean or len(p_clean) < 2:
+            continue
+        lower = p_clean.lower()
+        if lower in tag_like:
+            continue
+        # 优先含拉丁字母的片段（多为英文标题）
+        if any(c.isalpha() and ord(c) < 128 for c in p_clean):
+            return p_clean.split("(")[0].strip() or p_clean
+    return parts[0].strip() if parts else u2_name.strip()
+
+
 class Prep:
     """
     Prepare for upload:
@@ -697,6 +717,14 @@ class Prep:
                 else:
                     ids = None
 
+            # U2 仅有 AniDB 时无 imdb，用种子名提取标题供后续 TMDB/IMDb 搜索，避免 id.bdmv 等无效词
+            if meta.get('u2_name') and (not meta.get('imdb_id') or meta.get('imdb_id') == 0):
+                u2_title = _search_title_from_u2_name(meta['u2_name'])
+                if u2_title and len(u2_title.strip()) >= 2:
+                    filename = u2_title.strip()
+                    untouched_filename = meta['u2_name']
+                    meta['filename'] = filename
+
         # if there's no region/distributor info, lets ping some unit3d trackers and see if we get it
         ping_unit3d_config = self.config['DEFAULT'].get('ping_unit3d', False)
         if (not meta.get('region') or not meta.get('distributor')) and meta['is_disc'] == "BDMV" and ping_unit3d_config and not meta.get('edit', False) and not meta.get('emby', False) and not meta.get('site_check', False):
@@ -859,15 +887,23 @@ class Prep:
         # Get IMDb ID if not set
         if meta.get('imdb_id') == 0:
             try:
+                # U2 仅有 AniDB 时无 imdb，用种子名提取标题搜索，避免用 id.bdmv 等无效词
+                search_filename = filename
+                search_untouched = untouched_filename
+                if meta.get('u2_name'):
+                    u2_title = _search_title_from_u2_name(meta['u2_name'])
+                    if u2_title and len(u2_title.strip()) >= 2:
+                        search_filename = u2_title.strip()
+                        search_untouched = meta['u2_name']
                 search_year_value = _normalize_search_year(meta.get('search_year'))
                 meta['imdb_id'] = await imdb_manager.search_imdb(
-                    filename,
+                    search_filename,
                     search_year_value,
                     quickie=False,
                     category=meta.get('category', None),
                     debug=debug,
                     secondary_title=meta.get('secondary_title', None),
-                    untouched_filename=untouched_filename,
+                    untouched_filename=search_untouched,
                     attempted=0,
                     duration=duration,
                     unattended=unattended,
