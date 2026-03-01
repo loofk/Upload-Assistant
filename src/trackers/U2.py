@@ -14,6 +14,15 @@ from src.trackers.COMMON import COMMON
 Meta = dict[str, Any]
 Config = dict[str, Any]
 
+# AniDB 链接正则：anidb.net/...aid=123 或 animedb.pl?show=anime&aid=123
+ANIDB_AID_RE = re.compile(
+    r'anidb\.net[^"\']*[?&]aid=(\d+)|'
+    r'animedb\.pl[^"\']*[?&]aid=(\d+)|'
+    r'[/?&]aid=(\d+)',
+    re.IGNORECASE
+)
+IDS_MOE_BASE = "https://api.ids.moe"
+
 
 class U2:
 
@@ -26,6 +35,7 @@ class U2:
         self.password = str(config['TRACKERS']['U2'].get('password', '')).strip()
         self.rehost_images = bool(config['TRACKERS']['U2'].get('img_rehost', False))
         self.ptgen_api = str(config['TRACKERS']['U2'].get('ptgen_api', '')).strip()
+        self.ids_moe_api_key = str(config['TRACKERS']['U2'].get('ids_moe_api_key', '')).strip()
 
         self.ptgen_retry = 3
         self.signature: Optional[str] = None
@@ -93,6 +103,29 @@ class U2:
             console.print_exception()
 
         return dupes
+
+    async def _resolve_anidb_via_ids_moe(self, anidb_aid: int) -> dict[str, Any]:
+        """
+        通过 ids.moe 用 AniDB aid 解析 IMDb / TMDB / MAL 等。
+        需在 TRACKERS.U2 中配置 ids_moe_api_key（https://ids.moe 申请）。
+        返回含 imdb, themoviedb, myanimelist 等键的字典，无则缺省为 None。
+        """
+        if not self.ids_moe_api_key:
+            return {}
+        url = f"{IDS_MOE_BASE}/ids/{anidb_aid}"
+        params: dict[str, str] = {"p": "anidb"}
+        headers: dict[str, str] = {}
+        if self.ids_moe_api_key:
+            headers["Authorization"] = f"Bearer {self.ids_moe_api_key}"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(url, params=params, headers=headers or None)
+                r.raise_for_status()
+                data = r.json()
+        except Exception as e:
+            console.print(f"[yellow]ids.moe AniDB 解析失败 (aid={anidb_aid}): {e}[/yellow]")
+            return {}
+        return cast(dict[str, Any], data)
 
     async def get_info_from_torrent_id(self, u2_id: Union[int, str], meta: Optional[Meta] = None) -> tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]]:
         """
@@ -218,6 +251,35 @@ class U2:
                         hash_text = hash_elem.get_text(strip=True)
                         if len(hash_text) == 40:  # SHA1 hash length
                             u2_torrenthash = hash_text
+
+                    # U2 种子常仅含 AniDB：从页面/描述解析 AniDB aid，用 ids.moe 换 IMDb/TMDB（馒头与 ptgen 需要）
+                    anidb_aid: Optional[int] = None
+                    for m in ANIDB_AID_RE.finditer(response.text):
+                        g = m.group(1) or m.group(2) or m.group(3)
+                        if g and g.isdigit():
+                            anidb_aid = int(g)
+                            break
+                    if meta and anidb_aid is not None:
+                        meta['anidb_aid'] = anidb_aid
+                    if (u2_imdb is None or u2_tmdb is None) and anidb_aid is not None and self.ids_moe_api_key:
+                        ids_data = await self._resolve_anidb_via_ids_moe(anidb_aid)
+                        if ids_data:
+                            if u2_imdb is None and ids_data.get('imdb'):
+                                raw = str(ids_data['imdb']).strip().lstrip('t')
+                                if raw.isdigit():
+                                    u2_imdb = int(raw)
+                                    console.print(f"[green]U2: 从 AniDB aid={anidb_aid} 解析到 IMDb: tt{u2_imdb}[/green]")
+                            if u2_tmdb is None and ids_data.get('themoviedb'):
+                                try:
+                                    u2_tmdb = int(ids_data['themoviedb'])
+                                    console.print(f"[green]U2: 从 AniDB aid={anidb_aid} 解析到 TMDb: {u2_tmdb}[/green]")
+                                except (TypeError, ValueError):
+                                    pass
+                            if meta and ids_data.get('myanimelist') and not meta.get('mal_id'):
+                                try:
+                                    meta['mal_id'] = int(ids_data['myanimelist'])
+                                except (TypeError, ValueError):
+                                    pass
                     
                 else:
                     console.print(f"[yellow]Failed to fetch U2 details page. Status: {response.status_code}[/yellow]")

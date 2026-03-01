@@ -818,6 +818,8 @@ config = {
             "username": "",
             "password": "",
             "ptgen_api": "",
+            # Optional: ids.moe API key to resolve AniDB -> IMDb/TMDB when U2 seed only has AniDB (for cross-seed to MTEAM/ptgen)
+            "ids_moe_api_key": "",
             "announce_url": "",
             "anon": False,
             # qBittorrent category for this tracker (default: "keep")
