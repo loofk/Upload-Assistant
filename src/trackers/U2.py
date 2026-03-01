@@ -149,15 +149,17 @@ class U2:
                 response = await client.get(url)
                 
                 if response.status_code == 200:
-                    # Debug：将页面源码保存到 tmp 目录（与 DESCRIPTION.txt 等同级，不再加 uuid 子目录）
-                    if meta and meta.get('debug'):
-                        save_dir = f"{meta['base_dir']}/tmp"
-                        os.makedirs(save_dir, exist_ok=True)
-                        path = f"{save_dir}/u2_page_{u2_id}.html"
+                    # 将页面源码保存到 base_dir/tmp（与 DESCRIPTION.txt 同级），便于排查 AniDB 等 DOM 结构；有 base_dir 即保存，不依赖 --debug
+                    save_dir = (meta.get('base_dir') or '').strip()
+                    if meta and save_dir:
+                        _path = f"{save_dir}/tmp/u2_page_{u2_id}.html"
+                        if meta.get('debug'):
+                            console.print(f"[dim]U2: debug={meta.get('debug')}, base_dir={save_dir!r}, path={_path}[/dim]")
                         try:
-                            with open(path, 'w', encoding='utf-8', errors='replace') as f:
+                            os.makedirs(os.path.dirname(_path), exist_ok=True)
+                            with open(_path, 'w', encoding='utf-8', errors='replace') as f:
                                 f.write(response.text)
-                            console.print(f"[dim]U2: 页面源码已保存到 {path}[/dim]")
+                            console.print(f"[dim]U2: 页面源码已保存到 {_path}[/dim]")
                         except OSError as e:
                             console.print(f"[yellow]U2: 保存页面源码失败: {e}[/yellow]")
                     soup = BeautifulSoup(response.text, 'lxml')
