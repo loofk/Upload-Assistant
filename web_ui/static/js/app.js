@@ -48,182 +48,182 @@ const sanitizeHtml = window.sanitizeHtml;
 // Argument categories for the right sidebar (placeholders shown for info only)
 const argumentCategories = [
   {
-    title: "Modes / Workflows",
+    title: "模式 / 工作流",
     args: [
-      { label: "--queue", placeholder: "QUEUE_NAME", description: "Process a named queue from a folder path" },
-      { label: "--limit-queue", placeholder: "N", description: "Limit queue successful uploads" },
-      { label: "--site-check", description: "Site check (can it be uploaded)" },
-      { label: "--site-upload", placeholder: "TRACKER", description: "Site upload (process site check content)" },
-      { label: "--search_requests", description: "Search supported site for matching requests (config)" },
-      { label: "--unit3d", description: "Upload from UNIT3D-Upload-Checker results" }
+      { label: "--queue", placeholder: "QUEUE_NAME", description: "按队列名处理整个目录" },
+      { label: "--limit-queue", placeholder: "N", description: "限制队列成功上传数量" },
+      { label: "--site-check", description: "仅站点检查（能否上传，不发种）" },
+      { label: "--site-upload", placeholder: "TRACKER", description: "按单站点处理 site-check 结果并上传" },
+      { label: "--search_requests", description: "在支持的站点中搜索匹配求种（需配置）" },
+      { label: "--unit3d", description: "从 UNIT3D-Upload-Checker 结果上传" }
     ]
   },
   {
-    title: "Metadata / IDs",
-    subtitle: "Getting these correct is 90% of a successful upload!",
+    title: "元数据 / 各类 ID",
+    subtitle: "这些填对了，上传就成功了 90%！",
     args: [
-      { label: "--tmdb", placeholder: "movie/123", description: "TMDb id" },
-      { label: "--imdb", placeholder: "tt0111161", description: "IMDb id" },
-      { label: "--mal", placeholder: "ID", description: "MAL id" },
-      { label: "--tvmaze", placeholder: "ID", description: "TVMaze id" },
-      { label: "--tvdb", placeholder: "ID", description: "TVDB id" }
+      { label: "--tmdb", placeholder: "movie/123", description: "TMDb ID" },
+      { label: "--imdb", placeholder: "tt0111161", description: "IMDb ID" },
+      { label: "--mal", placeholder: "ID", description: "MAL ID（常用于番剧）" },
+      { label: "--tvmaze", placeholder: "ID", description: "TVMaze ID" },
+      { label: "--tvdb", placeholder: "ID", description: "TVDB ID" }
     ]
   },
   {
-    title: "Screenshots / Images",
+    title: "截图 / 图片",
     args: [
-      { label: "--screens", placeholder: "N", description: "Number of screenshots to use" },
-      { label: "--manual_frames", placeholder: '"1,250,500"', description: "Manual frame numbers for screenshots" },
-      { label: "--comparison", placeholder: "PATH", description: "Comparison images folder" },
-      { label: "--comparison_index", placeholder: "N", description: "Comparison main index" },
-      { label: "--disc-menus", placeholder: "PATH", description: "Folder containing disc menus screenshots" },
-      { label: "--imghost", placeholder: "HOST", description: "Specific image host to use" },
-      { label: "--skip-imagehost-upload", description: "Skip uploading screenshots" }
+      { label: "--screens", placeholder: "N", description: "生成的截图数量" },
+      { label: "--manual_frames", placeholder: '"1,250,500"', description: "手动指定截图帧号" },
+      { label: "--comparison", placeholder: "PATH", description: "对比图所在文件夹" },
+      { label: "--comparison_index", placeholder: "N", description: "主对比图下标" },
+      { label: "--disc-menus", placeholder: "PATH", description: "光盘菜单截图文件夹（BD/DVD）" },
+      { label: "--imghost", placeholder: "HOST", description: "选择使用的图床" },
+      { label: "--skip-imagehost-upload", description: "跳过上传截图到图床" }
     ]
   },
   {
-    title: "TV Fields",
+    title: "剧集相关参数",
     args: [
-      { label: "--season", placeholder: "S01", description: "Season number" },
-      { label: "--episode", placeholder: "E01", description: "Episode number" },
-      { label: "--manual-episode-title", placeholder: "TITLE", description: "Manual episode title" },
-      { label: "--daily", placeholder: "YYYY-MM-DD", description: "Air date for daily shows" }
+      { label: "--season", placeholder: "S01", description: "季号" },
+      { label: "--episode", placeholder: "E01", description: "集号" },
+      { label: "--manual-episode-title", placeholder: "TITLE", description: "手动指定单集标题" },
+      { label: "--daily", placeholder: "YYYY-MM-DD", description: "日播节目播出日期" }
     ]
   },
   {
-    title: "Title Shaping",
+    title: "标题格式调整",
     args: [
-      { label: "--year", placeholder: "YYYY", description: "Override year" },
-      { label: "--no-season", description: "Remove season" },
-      { label: "--no-year", description: "Remove year" },
-      { label: "--no-aka", description: "Remove AKA" },
-      { label: "--no-dub", description: "Remove Dubbed" },
-      { label: "--no-dual", description: "Remove Dual-Audio" },
-      { label: "--no-tag", description: "Remove group tag" },
-      { label: "--no-edition", description: "Remove edition" },
-      { label: "--dual-audio", description: "Add Dual-Audio" },
-      { label: "--tag", placeholder: "GROUP", description: "Group tag" },
-      { label: "--service", placeholder: "SERVICE", description: "Streaming service" },
-      { label: "--region", placeholder: "REGION", description: "Disc Region" },
-      { label: "--edition", placeholder: "TEXT", description: "Edition marker" },
-      { label: "--repack", placeholder: "TEXT", description: "Repack" }
+      { label: "--year", placeholder: "YYYY", description: "覆盖年份" },
+      { label: "--no-season", description: "标题中移除季信息" },
+      { label: "--no-year", description: "标题中移除年份" },
+      { label: "--no-aka", description: "移除 AKA 信息" },
+      { label: "--no-dub", description: "移除“DUBBED”标记" },
+      { label: "--no-dual", description: "移除“双语音轨”标记" },
+      { label: "--no-tag", description: "移除小组标签" },
+      { label: "--no-edition", description: "移除版本/加长版等标记" },
+      { label: "--dual-audio", description: "添加双语音轨标记" },
+      { label: "--tag", placeholder: "GROUP", description: "小组名标签" },
+      { label: "--service", placeholder: "SERVICE", description: "流媒体服务名" },
+      { label: "--region", placeholder: "REGION", description: "光盘地区码" },
+      { label: "--edition", placeholder: "TEXT", description: "版本标记" },
+      { label: "--repack", placeholder: "TEXT", description: "Repack 标记" }
     ]
   },
   {
-    title: "Description / NFO",
+    title: "简介 / NFO",
     args: [
-      { label: "--desclink", placeholder: "URL", description: "Link to pastebin/hastebin with description" },
-      { label: "--descfile", placeholder: "PATH", description: "Path to description file (.txt, .nfo, .md)" },
-      { label: "--nfo", description: "Use .nfo for description" }
+      { label: "--desclink", placeholder: "URL", description: "外部描述链接（Pastebin/Hastebin 等）" },
+      { label: "--descfile", placeholder: "PATH", description: "本地描述文件路径（.txt/.nfo/.md）" },
+      { label: "--nfo", description: "使用目录中的 .nfo 作为描述" }
     ]
   },
   {
-    title: "Language",
+    title: "语言设置",
     args: [
-      { label: "--original-language", placeholder: "en", description: "Original language of content" },
-      { label: "--only-if-languages", placeholder: "en,fr", description: "Only proceed with upload if the content has these languages" }
+      { label: "--original-language", placeholder: "en", description: "原始音轨语言" },
+      { label: "--only-if-languages", placeholder: "en,fr", description: "仅当文件包含这些语言时才继续上传" }
     ]
   },
   {
-    title: "Misc Metadata Flags",
+    title: "其他元数据开关",
     args: [
-      { label: "--commentary", description: "Commentary" },
-      { label: "--sfx-subtitles", description: "SFX subtitles" },
-      { label: "--extras", description: "Extras included" },
-      { label: "--distributor", placeholder: "NAME", description: "Disc distributor" },
-      { label: "--sorted-filelist", description: "Sorted filelist (handles typical anime nonsense)" },
-      { label: "--keep-folder", description: "Keep top folder with single file uploads" },
-      { label: "--keep-nfo", description: "Keep nfo (extremely site specific)" },
+      { label: "--commentary", description: "包含评论音轨" },
+      { label: "--sfx-subtitles", description: "包含 SFX 字幕" },
+      { label: "--extras", description: "包含额外花絮/特典" },
+      { label: "--distributor", placeholder: "NAME", description: "发行公司（Criterion、BFI 等）" },
+      { label: "--sorted-filelist", description: "按排序后的文件列表选主视频（常用于番剧目录）" },
+      { label: "--keep-folder", description: "单文件上传时保留上级目录" },
+      { label: "--keep-nfo", description: "保留 NFO 文件（极少数站点用）" },
     ]
   },
   {
-    title: "Tracker References",
-    subtitle: "Pull metadata ids, descriptions, and screenshots from these trackers",
+    title: "源站引用",
+    subtitle: "从这些站点拉取 ID / 描述 / 截图等信息",
     args: [
-      { label: "--onlyID", description: "Only grab meta ids, not descriptions" },
-      { label: "--ptp", placeholder: "ID_OR_URL", description: "PTP id/link" },
-      { label: "--blu", placeholder: "ID_OR_URL", description: "BLU id/link" },
-      { label: "--aither", placeholder: "ID_OR_URL", description: "Aither id/link" },
-      { label: "--lst", placeholder: "ID_OR_URL", description: "LST id/link" },
-      { label: "--oe", placeholder: "ID_OR_URL", description: "OE id/link" },
-      { label: "--hdb", placeholder: "ID_OR_URL", description: "HDB id/link" },
-      { label: "--btn", placeholder: "ID_OR_URL", description: "BTN id/link" },
-      { label: "--bhd", placeholder: "ID_OR_URL", description: "BHD id/link" },
-      { label: "--huno", placeholder: "ID_OR_URL", description: "HUNO id/link" },
-      { label: "--ulcx", placeholder: "ID_OR_URL", description: "ULCX id/link" },
-      { label: "--torrenthash", placeholder: "HASH", description: "(qBitTorrent only) Get site id from Torrent hash" }
+      { label: "--onlyID", description: "只抓取元数据 ID，不使用站点描述" },
+      { label: "--ptp", placeholder: "ID_OR_URL", description: "PTP ID/链接" },
+      { label: "--blu", placeholder: "ID_OR_URL", description: "BLU ID/链接" },
+      { label: "--aither", placeholder: "ID_OR_URL", description: "Aither ID/链接" },
+      { label: "--lst", placeholder: "ID_OR_URL", description: "LST ID/链接" },
+      { label: "--oe", placeholder: "ID_OR_URL", description: "OE ID/链接" },
+      { label: "--hdb", placeholder: "ID_OR_URL", description: "HDB ID/链接" },
+      { label: "--btn", placeholder: "ID_OR_URL", description: "BTN ID/链接" },
+      { label: "--bhd", placeholder: "ID_OR_URL", description: "BHD ID/链接" },
+      { label: "--huno", placeholder: "ID_OR_URL", description: "HUNO ID/链接" },
+      { label: "--ulcx", placeholder: "ID_OR_URL", description: "ULCX ID/链接" },
+      { label: "--torrenthash", placeholder: "HASH", description: "仅在 qBittorrent 中：从 torrent 注释里解析站点 ID" }
     ]
   },
   {
-    title: "Upload Selection / Dupe",
+    title: "上传选择 / 查重相关",
     args: [
-      { label: "--trackers", placeholder: "aither,lst,ptp,etc", description: "Specific Trackers list for uploading" },
-      { label: "--trackers-remove", placeholder: "blu,xyz,etc", description: "Remove these trackers from the default list for this upload" },
-      { label: "--trackers-pass", placeholder: "N", description: "How many trackers need to pass all checks for upload to proceed" },
-      { label: "--skip_auto_torrent", description: "Skip auto torrent searching" },
-      { label: "--skip-dupe-check", description: "Skip dupe check" },
-      { label: "--skip-dupe-asking", description: "Accept any reported dupes without prompting about it" },
-      { label: "--double-dupe-check", description: "Run another dupe check right before upload" },
-      { label: "--draft", description: "Send to Draft at supported sites (config)" },
-      { label: "--modq", description: "Send to modQ at supported sites (config)" },
-      { label: "--freeleech", placeholder: "25%", description: "Mark upload as Freeleech (percentage)" }
+      { label: "--trackers", placeholder: "aither,lst,ptp,etc", description: "覆盖默认 trackers，仅向这些站点上传" },
+      { label: "--trackers-remove", placeholder: "blu,xyz,etc", description: "从默认 trackers 中移除这些站点" },
+      { label: "--trackers-pass", placeholder: "N", description: "至少多少个站点检查通过才继续上传" },
+      { label: "--skip_auto_torrent", description: "跳过自动从客户端搜索种子" },
+      { label: "--skip-dupe-check", description: "跳过查重（需非常确定自己在做什么）" },
+      { label: "--skip-dupe-asking", description: "查到重复时不再询问，直接按重复处理" },
+      { label: "--double-dupe-check", description: "在上传前再跑一遍查重（适合抢首发）" },
+      { label: "--draft", description: "发送到草稿（支持的站点）" },
+      { label: "--modq", description: "发送到 modQ（支持的站点）" },
+      { label: "--freeleech", placeholder: "25%", description: "设为 Freeleech（百分比）" }
     ]
   },
   {
-    title: "Anonymity / Seeding / Streaming",
+    title: "匿名 / 做种 / 流媒体",
     args: [
-      { label: "--anon", description: "Anon upload at supported sites (config)" },
-      { label: "--no-seed", description: "Don't send torrents to client" },
-      { label: "--stream", description: "Stream" },
-      { label: "--webdv", description: "Dolby Vision hybrid" },
-      { label: "--hardcoded-subs", description: "Release contains hardcoded subs" },
-      { label: "--personalrelease", description: "Personal release" }
+      { label: "--anon", description: "匿名发布（支持的站点）" },
+      { label: "--no-seed", description: "不把种子添加到客户端做种" },
+      { label: "--stream", description: "流媒体优化" },
+      { label: "--webdv", description: "Dolby Vision 混合（HYBRID）" },
+      { label: "--hardcoded-subs", description: "包含硬字幕" },
+      { label: "--personalrelease", description: "个人发布" }
     ]
   },
   {
-    title: "Torrent Creation / Hashing",
+    title: "种子创建 / 哈希",
     args: [
-      { label: "--max-piece-size", placeholder: "N", description: "Max piece size (in MiB) of created torrent (1 <> 128)" },
-      { label: "--nohash", description: "Don't rehash torrent even if it was needed" },
-      { label: "--rehash", description: "Create a fresh torrent from the actual data, not an existing .torrent file" },
-      { label: "--mkbrr", description: "Use mkbrr for torrent creation (config)" },
-      { label: "--entropy", placeholder: "N", description: "Entropy" },
-      { label: "--randomized", placeholder: "N", description: "Randomized" },
-      { label: "--infohash", placeholder: "HASH", description: "Use this Infohash as the existing torrent from client" },
-      { label: "--force-recheck", description: "(qBitTorrent only) Force recheck the file in client before upload" }
+      { label: "--max-piece-size", placeholder: "N", description: "创建种子的最大分片大小（MiB，1–128）" },
+      { label: "--nohash", description: "即便需要也不重新计算种子哈希" },
+      { label: "--rehash", description: "从实际数据重新创建种子，而不是复用现有 .torrent" },
+      { label: "--mkbrr", description: "使用 mkbrr 创建种子（需配置）" },
+      { label: "--entropy", placeholder: "N", description: "熵（随机性）设置" },
+      { label: "--randomized", placeholder: "N", description: "额外生成 N 个随机 infohash 的种子" },
+      { label: "--infohash", placeholder: "HASH", description: "使用指定 infohash 作为已有种子的基准" },
+      { label: "--force-recheck", description: "仅 qBittorrent：上传前在客户端强制重新校验文件" }
     ]
   },
   {
-    title: "Torrent Client Integration",
+    title: "下载客户端集成",
     args: [
-      { label: "--client", placeholder: "NAME", description: "Client name (config)" },
-      { label: "--qbit-tag", placeholder: "TAG", description: "qBittorrent tag (config)" },
-      { label: "--qbit-cat", placeholder: "CATEGORY", description: "qBittorrent category (config)" },
-      { label: "--rtorrent-label", placeholder: "LABEL", description: "rTorrent label (config)" }
+      { label: "--client", placeholder: "NAME", description: "使用指定配置中的客户端名称" },
+      { label: "--qbit-tag", placeholder: "TAG", description: "添加到 qBittorrent 的标签" },
+      { label: "--qbit-cat", placeholder: "CATEGORY", description: "添加到 qBittorrent 的分类" },
+      { label: "--rtorrent-label", placeholder: "LABEL", description: "rTorrent 标签" }
     ]
   },
   {
-    title: "Cleanup / Temp",
+    title: "临时文件 / 清理",
     args: [
-      { label: "--delete-tmp", description: "Delete the tmp folder associated with this upload" },
-      { label: "--cleanup", description: "Cleanup the entire UA tmp folder" }
+      { label: "--delete-tmp", description: "删除本次上传对应的 tmp 目录" },
+      { label: "--cleanup", description: "清理整个 UA 的 tmp 目录" }
     ]
   },
   {
-    title: "Debug / Output",
+    title: "调试 / 输出",
     args: [
-      { label: "--debug", description: "Debug mode" },
-      { label: "--ffdebug", description: "FFmpeg debug" },
-      { label: "--upload-timer", description: "Upload timer (config)" }
+      { label: "--debug", description: "调试模式（不实际上传）" },
+      { label: "--ffdebug", description: "FFmpeg 调试输出" },
+      { label: "--upload-timer", description: "打印各站上传耗时（需配置）" }
     ]
   },
   {
-    title: "Misc Options",
+    title: "其他选项",
     args: [
-      { label: "--not-anime", description: "Can speed up tv data extraction when not anime content" },
-      { label: "--channel", placeholder: "ID_OR_TAG", description: "SPD channel" },
-      { label: "--unattended", description: "Unattended (no prompts (AT ALL))" },
-      { label: "--unattended_confirm", description: "Unattended confirm (use with --unattended, some prompting)" }
+      { label: "--not-anime", description: "标记为非动画，可加快某些 TV 数据抓取" },
+      { label: "--channel", placeholder: "ID_OR_TAG", description: "SPD 频道 ID 或标签" },
+      { label: "--unattended", description: "无人值守模式（完全无交互）" },
+      { label: "--unattended_confirm", description: "无人值守但保留少量关键确认（需配合 --unattended 使用）" }
     ]
   }
 ];
@@ -581,8 +581,8 @@ function AudionutsUAGUI() {
 
   // Initial welcome message in the rich output area
   useEffect(() => {
-    appendSystemMessage('Upload Assistant Interactive Output');
-    appendSystemMessage('\nQuick Start:\n  1. Select a file or folder from the left panel\n  2. Add Upload Assistant arguments (optional)\n  3. Click "Execute Upload" to start\n');
+    appendSystemMessage('发种助手 交互输出');
+    appendSystemMessage('\n快速开始：\n  1. 在左侧选择一个文件或文件夹\n  2. 在右侧（可选）添加命令行参数\n  3. 点击下方“开始上传”按钮\n');
   }, []);
 
   const loadBrowseRoots = async () => {
@@ -1169,8 +1169,8 @@ function AudionutsUAGUI() {
     const container = richOutputRef.current;
     if (container) {
       container.innerHTML = '';
-      appendSystemMessage('Upload Assistant Interactive Output');
-      appendSystemMessage('\nQuick Start:\n  1. Select a file or folder from the left panel\n  2. Add Upload Assistant arguments (optional)\n  3. Click "Execute Upload" to start\n');
+      appendSystemMessage('发种助手 交互输出');
+      appendSystemMessage('\n快速开始：\n  1. 在左侧选择一个文件或文件夹\n  2. 在右侧（可选）添加命令行参数\n  3. 点击下方“开始上传”按钮\n');
     }
   };
 
@@ -1310,7 +1310,7 @@ function AudionutsUAGUI() {
         <div className={`flex items-center justify-between px-4 py-3 border-b flex-shrink-0 ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
           <h1 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
             <UploadIcon />
-            Upload Assistant
+            发种助手
           </h1>
           <div className="flex items-center gap-2">
             <a
@@ -1342,14 +1342,14 @@ function AudionutsUAGUI() {
               <div className={`p-3 border-b flex-shrink-0 ${isDarkMode ? 'border-gray-700 bg-gray-900' : 'border-gray-200 bg-gradient-to-r from-purple-50 to-blue-50'}`}>
                 <h2 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
                   <FolderIcon />
-                  File Browser
+                  文件浏览器
                 </h2>
                 <div className="relative mt-2">
                   <input
                     type="text"
                     value={fileBrowserSearch}
                     onChange={(e) => handleFileBrowserSearch(e.target.value)}
-                    placeholder="Search files and folders..."
+                    placeholder="搜索文件和文件夹..."
                     className={`w-full pl-8 pr-8 py-1.5 text-sm rounded border ${
                       isDarkMode
                         ? 'bg-gray-800 border-gray-600 text-gray-200 placeholder-gray-500 focus:border-purple-500'
@@ -1543,7 +1543,7 @@ function AudionutsUAGUI() {
                     className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium"
                   >
                     <PlayIcon />
-                    {isExecuting ? 'Executing...' : 'Execute Upload'}
+                    {isExecuting ? '执行中...' : '开始上传'}
                   </button>
                   <button
                     onClick={clearTerminal}
@@ -1563,7 +1563,7 @@ function AudionutsUAGUI() {
               <div className={`flex-1 p-3 flex flex-col min-h-0 overflow-hidden ${isDarkMode ? 'bg-gray-900' : 'bg-gray-100'}`}>
                 <div className="flex items-center gap-2 mb-2 flex-shrink-0">
                   <span className={isDarkMode ? 'text-white' : 'text-gray-800'}><TerminalIcon /></span>
-                  <h3 className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>Output</h3>
+                  <h3 className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>输出</h3>
                   {isExecuting && (
                     <span className="ml-auto text-xs text-green-400 animate-pulse">● Running</span>
                   )}
@@ -1728,9 +1728,9 @@ function AudionutsUAGUI() {
 
         {/* Bottom Nav */}
         <div className={`flex border-t flex-shrink-0 ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-          {navButton('files', <FolderIcon />, 'Files')}
-          {navButton('main', <UploadIcon />, 'Upload')}
-          {navButton('args', <TerminalIcon />, 'Arguments')}
+          {navButton('files', <FolderIcon />, '文件')}
+          {navButton('main', <UploadIcon />, '上传')}
+          {navButton('args', <TerminalIcon />, '参数')}
         </div>
       </div>
     );
@@ -1747,14 +1747,14 @@ function AudionutsUAGUI() {
         <div className={`p-4 border-b ${isDarkMode ? 'border-gray-700 bg-gray-900' : 'border-gray-200 bg-gradient-to-r from-purple-50 to-blue-50'}`}>
           <h2 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
             <FolderIcon />
-            File Browser
+            文件浏览器
           </h2>
           <div className="relative mt-2">
             <input
               type="text"
               value={fileBrowserSearch}
               onChange={(e) => handleFileBrowserSearch(e.target.value)}
-              placeholder="Search files and folders..."
+              placeholder="搜索文件和文件夹..."
               className={`w-full pl-8 pr-8 py-1.5 text-sm rounded border ${
                 isDarkMode
                   ? 'bg-gray-800 border-gray-600 text-gray-200 placeholder-gray-500 focus:border-purple-500'
@@ -1904,13 +1904,13 @@ function AudionutsUAGUI() {
               <div className="flex items-center gap-3">
                 <h1 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
                   <UploadIcon />
-                  Upload Assistant Web UI
+                  发种助手 Web UI
                 </h1>
                 <a
                   href={`${APP_BASE}/logout`}
                   className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors bg-red-600 text-white hover:bg-red-700"
                 >
-                  Logout
+                  退出
                 </a>
               </div>
               
@@ -1920,7 +1920,7 @@ function AudionutsUAGUI() {
                   href={`${APP_BASE}/config`}
                   className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors bg-blue-600 text-white hover:bg-blue-700"
                 >
-                  View Config
+                  查看配置
                 </a>
                 <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
                   {isDarkMode ? '🌙 Dark' : '☀️ Light'}
@@ -1943,7 +1943,7 @@ function AudionutsUAGUI() {
             {/* Selected Path Display */}
             {selectedPath && (
               <div className={`p-3 ${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-blue-50 border-blue-200'} border rounded-lg`}>
-                <p className={`text-xs font-semibold ${isDarkMode ? 'text-gray-300' : 'text-gray-600'} mb-1`}>Selected Path:</p>
+                <p className={`text-xs font-semibold ${isDarkMode ? 'text-gray-300' : 'text-gray-600'} mb-1`}>已选择路径：</p>
                 <p className={`text-sm ${isDarkMode ? 'text-white' : 'text-gray-800'} break-all font-mono`}>{selectedPath}</p>
               </div>
             )}

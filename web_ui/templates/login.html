@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload Assistant Web UI - Login</title>
+    <title>Upload Assistant Web UI - 登录</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @keyframes shine {
@@ -27,39 +27,39 @@
                             <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
                         </svg>
                     </div>
-                    <div class="text-3xl font-bold pointer-events-none select-none text-white">Upload Assistant</div>
-                    <div class="text-muted-foreground text-sm pointer-events-none select-none text-gray-300">Web UI for Upload Assistant</div>
+                    <div class="text-3xl font-bold pointer-events-none select-none text-white">发种助手</div>
+                    <div class="text-muted-foreground text-sm pointer-events-none select-none text-gray-300">发种助手 图形管理界面</div>
                 </div>
                 <div class="px-6 pt-6">
                     <form method="post" class="space-y-4">
                         <div class="space-y-2">
-                            <label class="flex items-center gap-2 text-sm leading-none font-medium select-none text-white" for="username">Username</label>
-                            <input class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive text-white placeholder-gray-400 border-gray-600" id="username" name="username" placeholder="Enter your username" type="text" autocomplete="username" required>
+                            <label class="flex items-center gap-2 text-sm leading-none font-medium select-none text-white" for="username">用户名</label>
+                            <input class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive text-white placeholder-gray-400 border-gray-600" id="username" name="username" placeholder="请输入用户名（首次登录会创建账号）" type="text" autocomplete="username" required>
                         </div>
                         <div class="space-y-2">
-                            <label class="flex items-center gap-2 text-sm leading-none font-medium select-none text-white" for="password">Password</label>
-                            <input class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive text-white placeholder-gray-400 border-gray-600" id="password" name="password" placeholder="Enter your password" type="password" autocomplete="current-password" required>
+                            <label class="flex items-center gap-2 text-sm leading-none font-medium select-none text-white" for="password">密码</label>
+                            <input class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive text-white placeholder-gray-400 border-gray-600" id="password" name="password" placeholder="请输入密码" type="password" autocomplete="current-password" required>
                         </div>
                         {% if show_2fa %}
                         <div class="space-y-2">
-                            <label class="flex items-center gap-2 text-sm leading-none font-medium select-none text-white" for="totp_code">2FA Code</label>
-                            <input class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive text-white placeholder-gray-400 border-gray-600" id="totp_code" name="totp_code" placeholder="Enter 6-digit 2FA code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" pattern="\d{6}" required>
+                            <label class="flex items-center gap-2 text-sm leading-none font-medium select-none text-white" for="totp_code">二步验证码</label>
+                            <input class="file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive text-white placeholder-gray-400 border-gray-600" id="totp_code" name="totp_code" placeholder="请输入 6 位二步验证码" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" pattern="\d{6}" required>
                         </div>
                         {% endif %}
                         <div class="flex items-center space-x-2">
                             <input type="checkbox" id="remember" name="remember" value="1" class="border-input dark:bg-input/30 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:data-[state=checked]:bg-primary data-[state=checked]:border-primary data-[state=indeterminate]:bg-primary data-[state=indeterminate]:text-primary-foreground dark:data-[state=indeterminate]:bg-primary data-[state=indeterminate]:border-primary hover:border-muted-foreground/50 dark:hover:border-muted-foreground/50 focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive size-4 shrink-0 rounded-[4px] border shadow-xs transition-all outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-input border-gray-600">
-                            <label class="flex items-center gap-2 select-none text-sm font-normal leading-none text-white" for="remember">Remember me</label>
+                            <label class="flex items-center gap-2 select-none text-sm font-normal leading-none text-white" for="remember">记住登录状态</label>
                         </div>
                         {% if error %}
                         <div class="text-red-400 text-sm">{{ error }}</div>
                         {% endif %}
-                        <button class="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-all cursor-pointer disabled:cursor-not-allowed disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 h-10 rounded-md px-6 has-[&gt;svg]:px-4 w-full bg-blue-600 text-white hover:bg-blue-700" type="submit">Sign in</button>
+                        <button class="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-all cursor-pointer disabled:cursor-not-allowed disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 h-10 rounded-md px-6 has-[&gt;svg]:px-4 w-full bg-blue-600 text-white hover:bg-blue-700" type="submit">登录</button>
                     </form>
                     {% if show_2fa %}
                     <div class="mt-4 border-t pt-4">
                         <div class="flex items-center justify-between">
-                            <div class="text-sm text-gray-300">Have a recovery code instead?</div>
-                            <a href="/login/recovery" class="text-sm text-blue-400 hover:underline">Go to recovery page</a>
+                            <div class="text-sm text-gray-300">有恢复码？</div>
+                            <a href="/login/recovery" class="text-sm text-blue-400 hover:underline">前往恢复登录页面</a>
                         </div>
                     </div>
                     {% endif %}

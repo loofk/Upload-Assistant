@@ -1766,7 +1766,7 @@ function SecurityTab({ isDarkMode }) {
       if (data.success) {
         setSetupData(data);
         setRecoveryCodes(data.recovery_codes || null);
-        setMessage('Scan the QR code with your authenticator app, then enter the 6-digit code below.');
+        setMessage('请使用认证器 App 扫描二维码，然后在下方输入 6 位验证码。');
       } else {
         setMessage(data.error || 'Failed to setup 2FA');
       }
@@ -1778,7 +1778,7 @@ function SecurityTab({ isDarkMode }) {
 
   const handleVerifyAndEnable = async () => {
     if (!verificationCode || verificationCode.length !== 6) {
-      setMessage('Please enter a valid 6-digit code');
+      setMessage('请输入有效的 6 位验证码');
       return;
     }
 
@@ -2363,13 +2363,13 @@ function AccessLogTab({ isDarkMode }) {
 
       {/* Access Log Settings */}
 
-      <h2 className={`text-xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Access Log Settings</h2>
+      <h2 className={`text-xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>访问日志设置</h2>
       <p className={`text-sm mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-        Control what the Web UI logs. Default is <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>access_denied</code> (only failed API attempts). Choose <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>disabled</code> to turn off all logging.
+        控制 Web UI 记录哪些日志。默认值 <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>access_denied</code> 仅记录失败的 API 请求；选择 <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>disabled</code> 则完全关闭日志。
       </p>
 
       <div className="mb-4">
-        <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Level</label>
+        <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>级别</label>
         <select
           value={level}
           onChange={(e) => setLevel(e.target.value)}
@@ -2387,7 +2387,7 @@ function AccessLogTab({ isDarkMode }) {
           disabled={loading}
           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
         >
-          {loading ? 'Saving...' : 'Save'}
+          {loading ? '保存中...' : '保存'}
         </button>
       </div>
 
@@ -2400,20 +2400,20 @@ function AccessLogTab({ isDarkMode }) {
       {/* Access Log Display */}
       <div className="mt-6">
         <div className="flex justify-between items-center mb-3">
-          <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Recent Access Log</h3>
+          <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>最近访问日志</h3>
           <button
             onClick={loadLogEntries}
             disabled={logLoading}
             className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50 text-sm"
           >
-            {logLoading ? 'Loading...' : 'Refresh'}
+            {logLoading ? '加载中...' : '刷新'}
           </button>
         </div>
         <div className={`p-3 rounded border ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
           {logLoading ? (
-            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Loading log entries...</div>
+            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>正在加载日志...</div>
           ) : logEntries.length === 0 ? (
-            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>No log entries found.</div>
+            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>暂无日志记录。</div>
           ) : (
             <div className="space-y-2 max-h-96 overflow-y-auto">
               {logEntries.map((entry, index) => (
@@ -2827,8 +2827,8 @@ function ConfigApp() {
       <header className={headerClass}>
         <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center gap-3">
-            <h1 className={`${titleClass} text-lg md:text-2xl`}>Upload Assistant Config</h1>
-            <button type="button" onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700">Logout</button>
+            <h1 className={`${titleClass} text-lg md:text-2xl`}>发种助手 配置</h1>
+            <button type="button" onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700">退出</button>
           </div>
           <div className="flex items-center gap-2 md:gap-3 flex-wrap">
             <button
@@ -2837,9 +2837,9 @@ function ConfigApp() {
               onClick={saveAllChanges}
               disabled={saveDisabled}
             >
-              {isSaving ? 'Saving...' : 'Save Config'}
+              {isSaving ? '保存中...' : '保存配置'}
             </button>
-            <a href="/" className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-gray-700 text-white hover:bg-gray-600">Back to Upload</a>
+            <a href="/" className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-gray-700 text-white hover:bg-gray-600">返回发种页面</a>
             <span className="text-sm">{isDarkMode ? '🌙 Dark' : '☀️ Light'}</span>
             <button
               className={themeToggleClass}
@@ -2875,7 +2875,7 @@ function ConfigApp() {
                         : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
                   }`}
                 >
-                  Security
+                  安全设置
                 </button>
                 <button
                   onClick={() => setActiveTab('access-log')}
@@ -2889,7 +2889,7 @@ function ConfigApp() {
                         : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
                   }`}
                 >
-                  Access Log
+                  访问日志
                 </button>
                 {sections.map((section) => {
                   const sectionId = section.section.toLowerCase();
