@@ -1,5 +1,8 @@
 const { useEffect, useMemo, useRef, useState } = React;
 
+// Use shared i18n helper from shared_utils.js
+const cfgT = (typeof window !== 'undefined' && window.uaT) ? window.uaT : (s => s);
+
 // Helper to lazily load a QR code library (UMD build) and return the module
 function loadQRCodeLib() {
   return new Promise((resolve, reject) => {
@@ -2827,8 +2830,8 @@ function ConfigApp() {
       <header className={headerClass}>
         <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center gap-3">
-            <h1 className={`${titleClass} text-lg md:text-2xl`}>发种助手 配置</h1>
-            <button type="button" onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700">退出</button>
+            <h1 className={`${titleClass} text-lg md:text-2xl`}>{cfgT('Upload Assistant Config')}</h1>
+            <button type="button" onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700">{cfgT('Logout')}</button>
           </div>
           <div className="flex items-center gap-2 md:gap-3 flex-wrap">
             <button
@@ -2837,9 +2840,9 @@ function ConfigApp() {
               onClick={saveAllChanges}
               disabled={saveDisabled}
             >
-              {isSaving ? '保存中...' : '保存配置'}
+              {isSaving ? cfgT('Saving...') : cfgT('Save Config')}
             </button>
-            <a href="/" className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-gray-700 text-white hover:bg-gray-600">返回发种页面</a>
+            <a href="/" className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-gray-700 text-white hover:bg-gray-600">{cfgT('Back to Upload')}</a>
             <span className="text-sm">{isDarkMode ? '🌙 Dark' : '☀️ Light'}</span>
             <button
               className={themeToggleClass}
@@ -2875,7 +2878,7 @@ function ConfigApp() {
                         : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
                   }`}
                 >
-                  安全设置
+                  {cfgT('Security')}
                 </button>
                 <button
                   onClick={() => setActiveTab('access-log')}
@@ -2889,7 +2892,7 @@ function ConfigApp() {
                         : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
                   }`}
                 >
-                  访问日志
+                  {cfgT('Access Log')}
                 </button>
                 {sections.map((section) => {
                   const sectionId = section.section.toLowerCase();

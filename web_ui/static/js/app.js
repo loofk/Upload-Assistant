@@ -4,6 +4,9 @@ const THEME_KEY = 'ua_config_theme';
 const storage = window.UAStorage;
 const getStoredTheme = window.getUAStoredTheme;
 
+// Use shared i18n helper from shared_utils.js
+const t = (typeof window !== 'undefined' && window.uaT) ? window.uaT : (s => s);
+
 // Local CSRF cache used by fallback `apiFetch` when `uaApiFetch` isn't present.
 let localCsrf = null;
 const loadLocalCsrf = async (force = false) => {
@@ -581,8 +584,8 @@ function AudionutsUAGUI() {
 
   // Initial welcome message in the rich output area
   useEffect(() => {
-    appendSystemMessage('发种助手 交互输出');
-    appendSystemMessage('\n快速开始：\n  1. 在左侧选择一个文件或文件夹\n  2. 在右侧（可选）添加命令行参数\n  3. 点击下方“开始上传”按钮\n');
+    appendSystemMessage(t('Upload Assistant Interactive Output'));
+    appendSystemMessage(t('Quick Start Help'));
   }, []);
 
   const loadBrowseRoots = async () => {
@@ -1310,14 +1313,14 @@ function AudionutsUAGUI() {
         <div className={`flex items-center justify-between px-4 py-3 border-b flex-shrink-0 ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
           <h1 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
             <UploadIcon />
-            发种助手
+            {t('Upload Assistant')}
           </h1>
           <div className="flex items-center gap-2">
             <a
               href={`${APP_BASE}/config`}
               className="px-2 py-1 rounded text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700"
             >
-              Config
+              {t('Config')}
             </a>
             <button
               onClick={() => setIsDarkMode(!isDarkMode)}
@@ -1329,7 +1332,7 @@ function AudionutsUAGUI() {
               href={`${APP_BASE}/logout`}
               className="px-2 py-1 rounded text-xs font-semibold bg-red-600 text-white hover:bg-red-700"
             >
-              Logout
+              {t('Logout')}
             </a>
           </div>
         </div>
@@ -1342,14 +1345,14 @@ function AudionutsUAGUI() {
               <div className={`p-3 border-b flex-shrink-0 ${isDarkMode ? 'border-gray-700 bg-gray-900' : 'border-gray-200 bg-gradient-to-r from-purple-50 to-blue-50'}`}>
                 <h2 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
                   <FolderIcon />
-                  文件浏览器
+                  {t('File Browser')}
                 </h2>
                 <div className="relative mt-2">
                   <input
                     type="text"
                     value={fileBrowserSearch}
                     onChange={(e) => handleFileBrowserSearch(e.target.value)}
-                    placeholder="搜索文件和文件夹..."
+                    placeholder={t('Search files and folders...')}
                     className={`w-full pl-8 pr-8 py-1.5 text-sm rounded border ${
                       isDarkMode
                         ? 'bg-gray-800 border-gray-600 text-gray-200 placeholder-gray-500 focus:border-purple-500'
@@ -1543,7 +1546,7 @@ function AudionutsUAGUI() {
                     className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium"
                   >
                     <PlayIcon />
-                    {isExecuting ? '执行中...' : '开始上传'}
+                    {isExecuting ? t('Executing...') : t('Execute Upload')}
                   </button>
                   <button
                     onClick={clearTerminal}
@@ -1601,7 +1604,7 @@ function AudionutsUAGUI() {
               <div className={`p-3 border-b flex-shrink-0 ${isDarkMode ? 'border-gray-700 bg-gray-900' : 'border-gray-200 bg-gradient-to-l from-purple-50 to-blue-50'}`}>
                 <h2 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
                   <TerminalIcon />
-                  Arguments
+                  {t('Arguments')}
                 </h2>
               </div>
 
@@ -1728,9 +1731,9 @@ function AudionutsUAGUI() {
 
         {/* Bottom Nav */}
         <div className={`flex border-t flex-shrink-0 ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-          {navButton('files', <FolderIcon />, '文件')}
-          {navButton('main', <UploadIcon />, '上传')}
-          {navButton('args', <TerminalIcon />, '参数')}
+          {navButton('files', <FolderIcon />, t('Files'))}
+          {navButton('main', <UploadIcon />, t('Upload'))}
+          {navButton('args', <TerminalIcon />, t('Arguments'))}
         </div>
       </div>
     );
@@ -1904,13 +1907,13 @@ function AudionutsUAGUI() {
               <div className="flex items-center gap-3">
                 <h1 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
                   <UploadIcon />
-                  发种助手 Web UI
+                  {t('Upload Assistant Web UI')}
                 </h1>
                 <a
                   href={`${APP_BASE}/logout`}
                   className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors bg-red-600 text-white hover:bg-red-700"
                 >
-                  退出
+                  {t('Logout')}
                 </a>
               </div>
               
@@ -1920,7 +1923,7 @@ function AudionutsUAGUI() {
                   href={`${APP_BASE}/config`}
                   className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors bg-blue-600 text-white hover:bg-blue-700"
                 >
-                  查看配置
+                  {t('View Config')}
                 </a>
                 <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
                   {isDarkMode ? '🌙 Dark' : '☀️ Light'}
@@ -1943,14 +1946,14 @@ function AudionutsUAGUI() {
             {/* Selected Path Display */}
             {selectedPath && (
               <div className={`p-3 ${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-blue-50 border-blue-200'} border rounded-lg`}>
-                <p className={`text-xs font-semibold ${isDarkMode ? 'text-gray-300' : 'text-gray-600'} mb-1`}>已选择路径：</p>
+                <p className={`text-xs font-semibold ${isDarkMode ? 'text-gray-300' : 'text-gray-600'} mb-1`}>{t('Selected Path:')}</p>
                 <p className={`text-sm ${isDarkMode ? 'text-white' : 'text-gray-800'} break-all font-mono`}>{selectedPath}</p>
               </div>
             )}
 
             {/* Arguments */}
             <div className="space-y-2">
-              <label className={`text-sm font-semibold ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Additional Arguments:</label>
+              <label className={`text-sm font-semibold ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{t('Arguments')}</label>
               <input
                 type="text"
                 value={customArgs}
@@ -2120,7 +2123,7 @@ function AudionutsUAGUI() {
         <div className={`p-4 border-b ${isDarkMode ? 'border-gray-700 bg-gray-900' : 'border-gray-200 bg-gradient-to-l from-purple-50 to-blue-50'}`}>
           <h2 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
             <TerminalIcon />
-            Arguments
+            {t('Arguments')}
           </h2>
         </div>
         

@@ -1,6 +1,7 @@
 // Shared utility for storage and theme handling used by multiple UI scripts.
 (() => {
   const THEME_KEY = 'ua_config_theme';
+  const LOCALE_KEY = 'ua_locale';
 
   const uaStorage = {
     get(key) {
@@ -31,6 +32,36 @@
     if (stored === 'dark') return true;
     if (stored === 'light') return false;
     return typeof window !== 'undefined' && typeof window.UA_DEFAULT_THEME === 'boolean' ? window.UA_DEFAULT_THEME : true;
+  }
+
+  function getStoredLocale() {
+    const stored = uaStorage.get(LOCALE_KEY);
+    if (stored) return stored;
+    if (typeof window !== 'undefined' && typeof window.UA_DEFAULT_LOCALE === 'string') {
+      return window.UA_DEFAULT_LOCALE;
+    }
+    return 'zh';
+  }
+
+  function setStoredLocale(locale) {
+    if (!locale) return;
+    uaStorage.set(LOCALE_KEY, locale);
+  }
+
+  function uaTranslate(key) {
+    try {
+      const locales = (typeof window !== 'undefined' && window.UALocales) || {};
+      const current = String(getStoredLocale() || 'zh').toLowerCase();
+      const base = current.split('-')[0];
+      const dict =
+        locales[current] ||
+        locales[base] ||
+        locales.en ||
+        {};
+      return Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] : key;
+    } catch (_e) {
+      return key;
+    }
   }
 
   // CSRF + apiFetch helpers with automatic refresh on 401/403 responses.
@@ -109,6 +140,9 @@
   if (typeof window !== 'undefined') {
     window.UAStorage = window.UAStorage || uaStorage;
     window.getUAStoredTheme = window.getUAStoredTheme || getUAStoredTheme;
+    window.uaGetLocale = window.uaGetLocale || getStoredLocale;
+    window.uaSetLocale = window.uaSetLocale || setStoredLocale;
+    window.uaT = window.uaT || uaTranslate;
     window.loadCsrfToken = window.loadCsrfToken || loadCsrfToken;
     window.clearCsrfToken = window.clearCsrfToken || clearCsrfToken;
     window.uaApiFetch = window.uaApiFetch || uaApiFetch;
