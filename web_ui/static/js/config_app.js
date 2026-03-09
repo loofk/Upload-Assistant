@@ -572,7 +572,7 @@ function ConfigLeaf({
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start px-4 py-3">
         <div className={fullWidth ? 'col-span-1 md:col-span-12' : 'col-span-1 md:col-span-4'}>
           <div className="flex items-center gap-2">
-            <div className={labelClass}>{formatDisplayLabel(item.key)}</div>
+            <div className={labelClass}>{cfgT(formatDisplayLabel(item.key))}</div>
             {helpText && (
               <Tooltip content={helpText}>
                 <InfoIcon className={`w-4 h-4 ${isDarkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-600'}`} />
@@ -598,7 +598,9 @@ function ConfigLeaf({
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
-            <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>{checked ? 'True' : 'False'}</span>
+            <span className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>
+              {checked ? cfgT('True') : cfgT('False')}
+            </span>
           </div>
         </div>
         {!fullWidth && (
@@ -672,7 +674,7 @@ function ConfigLeaf({
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start px-4 py-3">
         <div className={fullWidth ? 'col-span-1 md:col-span-12' : 'col-span-1 md:col-span-4'}>
           <div className="flex items-center gap-2">
-            <div className={labelClass}>{formatDisplayLabel(item.key)}</div>
+            <div className={labelClass}>{cfgT(formatDisplayLabel(item.key))}</div>
             {helpText && (
               <Tooltip content={helpText}>
                 <InfoIcon className={`w-4 h-4 ${isDarkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-600'}`} />
@@ -708,9 +710,9 @@ function ConfigLeaf({
 
   if (isLinkingField(item.key, pathParts)) {
     const linkingOptions = [
-      { value: '', label: 'None (Original Path)' },
-      { value: 'symlink', label: 'Symbolic Link' },
-      { value: 'hardlink', label: 'Hard Link' }
+      { value: '', label: cfgT('None (Original Path)') },
+      { value: 'symlink', label: cfgT('Symbolic Link') },
+      { value: 'hardlink', label: cfgT('Hard Link') }
     ];
 
     const originalValue = String(item.value || '');
@@ -719,7 +721,7 @@ function ConfigLeaf({
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start px-4 py-3">
         <div className={fullWidth ? 'col-span-1 md:col-span-12' : 'col-span-1 md:col-span-4'}>
           <div className="flex items-center gap-2">
-            <div className={labelClass}>{formatDisplayLabel(item.key)}</div>
+            <div className={labelClass}>{cfgT(formatDisplayLabel(item.key))}</div>
             {helpText && (
               <Tooltip content={helpText}>
                 <InfoIcon className={`w-4 h-4 ${isDarkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-600'}`} />
@@ -757,7 +759,7 @@ function ConfigLeaf({
     return (
       <div className="col-span-full px-4 py-3">
         <div className="flex items-center gap-2 mb-2">
-          <div className={labelClass}>{formatDisplayLabel(item.key)}</div>
+          <div className={labelClass}>{cfgT(formatDisplayLabel(item.key))}</div>
           {helpText && (
             <Tooltip content={helpText}>
               <InfoIcon className={`w-4 h-4 ${isDarkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-600'}`} />
@@ -802,7 +804,7 @@ function ConfigLeaf({
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <label htmlFor={item.key} className={labelClass}>{formatDisplayLabel(item.key)}</label>
+          <label htmlFor={item.key} className={labelClass}>{cfgT(formatDisplayLabel(item.key))}</label>
           {helpText && (
             <Tooltip content={helpText}>
               <InfoIcon className={`w-4 h-4 ${isDarkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-600'}`} />
@@ -901,7 +903,7 @@ function ConfigLeaf({
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <label className={labelClass}>{formatDisplayLabel(item.key)}</label>
+          <label className={labelClass}>{cfgT(formatDisplayLabel(item.key))}</label>
           {helpText && (
             <Tooltip content={helpText}>
               <InfoIcon className={`w-4 h-4 ${isDarkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-600'}`} />
@@ -994,7 +996,7 @@ function ConfigLeaf({
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <label className={labelClass}>{formatDisplayLabel(item.key)}</label>
+        <label className={labelClass}>{cfgT(formatDisplayLabel(item.key))}</label>
           {helpText && (
             <Tooltip content={helpText}>
               <InfoIcon className={`w-4 h-4 ${isDarkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-600'}`} />
@@ -1049,7 +1051,7 @@ function ConfigLeaf({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <label htmlFor={item.key} className={labelClass}>{formatDisplayLabel(item.key)}</label>
+        <label htmlFor={item.key} className={labelClass}>{cfgT(formatDisplayLabel(item.key))}</label>
         {helpText && (
           <Tooltip content={helpText}>
             <InfoIcon className={`w-4 h-4 ${isDarkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-600'}`} />
@@ -1224,7 +1226,7 @@ function ItemList({
                 ? 'md:flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap bg-gray-600 text-white'
                 : 'md:flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap text-gray-400 hover:text-white hover:bg-gray-600'}
             >
-              Default trackers
+              {cfgT('Default trackers')}
             </button>
             <button
               type="button"
@@ -1233,7 +1235,7 @@ function ItemList({
                 ? 'md:flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap bg-gray-600 text-white'
                 : 'md:flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap text-gray-400 hover:text-white hover:bg-gray-600'}
             >
-              Configured trackers
+              {cfgT('Configured trackers')}
             </button>
             <button
               type="button"
@@ -1242,7 +1244,7 @@ function ItemList({
                 ? 'md:flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap bg-gray-600 text-white'
                 : 'md:flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap text-gray-400 hover:text-white hover:bg-gray-600'}
             >
-              Available trackers
+              {cfgT('Available trackers')}
             </button>
           </div>
 
@@ -1265,11 +1267,15 @@ function ItemList({
             <div className={trackerTab === 'configured' ? 'space-y-4' : 'hidden'}>
               {/* configured tab content */}
               <div className="space-y-4">
-                <div className={isDarkMode ? 'text-sm font-medium text-gray-200 mb-2' : 'text-sm font-medium text-gray-700 mb-2'}>Configured trackers</div>
+                <div className={isDarkMode ? 'text-sm font-medium text-gray-200 mb-2' : 'text-sm font-medium text-gray-700 mb-2'}>
+                  {cfgT('Configured trackers')}
+                </div>
                 <div className={`rounded-lg border p-3 ${isDarkMode ? 'border-gray-700 bg-gray-900/30' : 'border-gray-200 bg-gray-50'}`}>
                   <div className="space-y-2">
                     {configuredArray.length === 0 && (
-                      <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>No configured trackers</div>
+                      <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>
+                        {cfgT('No configured trackers')}
+                      </div>
                     )}
                     {configuredArray.map((tr) => {
                       const subsection = subsections.find(s => String(s.key).toUpperCase() === tr);
@@ -1545,7 +1551,7 @@ function ItemList({
             const headerClass = isDarkMode ? 'text-sm font-semibold text-gray-200 border-b pb-1 mb-3' : 'text-sm font-semibold text-gray-700 border-b pb-1 mb-3';
             return (
               <div key={gname}>
-                <div className={headerClass}>{gname}</div>
+                <div className={headerClass}>{cfgT(gname)}</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                   {itemsInGroup.map((item) => {
                     const leafPath = [...pathParts, item.key].join('/');
@@ -1811,9 +1817,9 @@ function SecurityTab({ isDarkMode }) {
 
   const handleDisable2FA = async () => {
     const confirmed = await showConfirmModal({
-      title: 'Disable Two-Factor Authentication',
-      message: 'Are you sure you want to disable 2FA? This will make your account less secure.',
-      confirmLabel: 'Disable'
+      title: cfgT('Disable Two-Factor Authentication'),
+      message: cfgT('Are you sure you want to disable 2FA? This will make your account less secure.'),
+      confirmLabel: cfgT('Disable')
     });
     if (!confirmed) return;
 
@@ -1959,17 +1965,19 @@ function SecurityTab({ isDarkMode }) {
 
   return (
     <div className={`rounded-lg border p-6 ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-      <h2 className={`text-xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Two-Factor Authentication (2FA)</h2>
+      <h2 className={`text-xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{cfgT('Two-Factor Authentication (2FA)')}</h2>
       
       <div className="space-y-4">
         <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h3 className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                2FA Status: {twofaStatus === null ? 'Loading...' : twofaStatus ? 'Enabled' : 'Disabled'}
+                {cfgT('2FA Status:')} {twofaStatus === null ? cfgT('Loading...') : twofaStatus ? cfgT('Enabled') : cfgT('Disabled')}
               </h3>
               <p className={`text-sm mt-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                {twofaStatus ? 'Your account is protected with time-based one-time passwords.' : 'Enable 2FA to add an extra layer of security to your account.'}
+                {twofaStatus
+                  ? cfgT('Your account is protected with time-based one-time passwords.')
+                  : cfgT('Enable 2FA to add an extra layer of security to your account.')}
               </p>
             </div>
             <div className="flex gap-2 flex-shrink-0">
@@ -1979,7 +1987,7 @@ function SecurityTab({ isDarkMode }) {
                   disabled={loading}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {loading ? 'Setting up...' : 'Enable 2FA'}
+                  {loading ? cfgT('Setting up...') : cfgT('Enable 2FA')}
                 </button>
               )}
               {twofaStatus && (
@@ -1988,7 +1996,7 @@ function SecurityTab({ isDarkMode }) {
                   disabled={loading}
                   className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
                 >
-                  {loading ? 'Disabling...' : 'Disable 2FA'}
+                  {loading ? cfgT('Disabling...') : cfgT('Disable 2FA')}
                 </button>
               )}
             </div>
@@ -1997,30 +2005,38 @@ function SecurityTab({ isDarkMode }) {
 
         {setupData && (
           <div className={`p-4 rounded-lg border ${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-yellow-50 border-yellow-200'}`}>
-            <h4 className={`font-medium mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Setup 2FA</h4>
+            <h4 className={`font-medium mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{cfgT('Setup 2FA')}</h4>
             <p className={`text-sm mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-              Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.):
+              {cfgT('Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.):')}
             </p>
             <div className="mb-4">
               {qrDataUrl ? (
-                React.createElement('img', { src: qrDataUrl, alt: '2FA QR Code', className: 'mx-auto border rounded' })
+                React.createElement('img', { src: qrDataUrl, alt: cfgT('2FA QR Code'), className: 'mx-auto border rounded' })
               ) : (
-                React.createElement('div', { className: 'mx-auto border rounded w-48 h-48 flex items-center justify-center text-sm text-gray-500', role: 'status' }, 'QR unavailable — please copy the secret manually')
+                React.createElement(
+                  'div',
+                  { className: 'mx-auto border rounded w-48 h-48 flex items-center justify-center text-sm text-gray-500', role: 'status' },
+                  cfgT('QR unavailable — please copy the secret manually')
+                )
               )}
             </div>
             <p className={`text-xs mb-4 text-center ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              Or manually enter: <code className={`px-2 py-1 rounded ${isDarkMode ? 'bg-gray-600' : 'bg-gray-200'}`}>{setupData.secret}</code>
+              {cfgT('Or manually enter:')}{' '}
+              <code className={`px-2 py-1 rounded ${isDarkMode ? 'bg-gray-600' : 'bg-gray-200'}`}>{setupData.secret}</code>
             </p>
             <p className={`text-xs mb-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              <strong>To store in environment variable:</strong> Set <code className={`px-1 py-0.5 rounded text-xs ${isDarkMode ? 'bg-gray-600' : 'bg-gray-200'}`}>UA_WEBUI_TOTP_SECRET={"{"}setupData.secret</code><br />
-              <strong>To copy to password manager:</strong> Save the secret {"{"}setupData.secret{"}"} in your password manager&#39;s TOTP field.
+              <strong>{cfgT('To store in environment variable:')}</strong>{' '}
+              {cfgT('Set')} <code className={`px-1 py-0.5 rounded text-xs ${isDarkMode ? 'bg-gray-600' : 'bg-gray-200'}`}>UA_WEBUI_TOTP_SECRET={"{"}setupData.secret</code>
+              <br />
+              <strong>{cfgT('To copy to password manager:')}</strong>{' '}
+              {cfgT('Save the secret in your password manager TOTP field.')}
             </p>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={verificationCode}
                 onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="000000"
+                placeholder={cfgT('000000')}
                 className={`flex-1 px-3 py-2 border rounded-lg ${isDarkMode ? 'bg-gray-600 border-gray-500 text-white' : 'bg-white border-gray-300'}`}
                 maxLength="6"
               />
@@ -2029,12 +2045,12 @@ function SecurityTab({ isDarkMode }) {
                 disabled={loading || verificationCode.length !== 6}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
               >
-                Verify & Enable
+                {cfgT('Verify & Enable')}
               </button>
             </div>
             {recoveryCodes && (
               <div className={`mt-4 p-3 rounded text-sm ${isDarkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
-                <div className="font-medium mb-2">One-time recovery codes (store these safely)</div>
+                <div className="font-medium mb-2">{cfgT('One-time recovery codes (store these safely)')}</div>
                 <div className="grid grid-cols-2 gap-2">
                   {recoveryCodes.map((c, idx) => (
                     React.createElement('div', { key: idx, className: `${isDarkMode ? 'px-2 py-1 bg-gray-700 text-white rounded text-xs' : 'px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs'}` }, c)
@@ -2091,8 +2107,24 @@ function SecurityTab({ isDarkMode }) {
             
 
             <div className="mt-3 flex gap-2">
-              <button onClick={handleCreateToken} className="px-3 py-1 bg-green-600 text-white rounded">Generate</button>
-              <button onClick={() => { if (createdTokenRaw) handleStoreToken(createdTokenRaw); else setTokenMessage('No token to store'); }} className="px-3 py-1 bg-blue-600 text-white rounded">Store</button>
+              <button
+                onClick={handleCreateToken}
+                className="px-3 py-1 bg-green-600 text-white rounded"
+              >
+                {cfgT('Generate')}
+              </button>
+              <button
+                onClick={() => {
+                  if (createdTokenRaw) {
+                    handleStoreToken(createdTokenRaw);
+                  } else {
+                    setTokenMessage(cfgT('No token to store'));
+                  }
+                }}
+                className="px-3 py-1 bg-blue-600 text-white rounded"
+              >
+                {cfgT('Store')}
+              </button>
             </div>
           </div>
 
@@ -2100,15 +2132,17 @@ function SecurityTab({ isDarkMode }) {
             {tokenMessage && <div className="text-sm text-red-600">{tokenMessage}</div>}
             <div className="mt-4">
               <div className="flex items-center justify-between">
-                <div className="text-sm font-medium mb-2">Existing tokens</div>
+                <div className="text-sm font-medium mb-2">{cfgT('Existing tokens')}</div>
                 {tokensReadOnly && (
-                  <div className="text-xs text-yellow-400">Read-only token store (env)</div>
+                  <div className="text-xs text-yellow-400">
+                    {cfgT('Read-only token store (env)')}
+                  </div>
                 )}
               </div>
               {tokensLoading ? (
-                <div className="text-sm">Loading...</div>
+                <div className="text-sm">{cfgT('Loading...')}</div>
               ) : tokens.length === 0 ? (
-                <div className="text-sm text-gray-500">No tokens</div>
+                <div className="text-sm text-gray-500">{cfgT('No tokens')}</div>
               ) : (
                 <div className="space-y-2">
                   {tokens.map((t) => (
@@ -2118,8 +2152,15 @@ function SecurityTab({ isDarkMode }) {
                         <div className="text-sm truncate">{t.label || '(no label)'} — {t.user}</div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <div className="text-sm text-gray-500">{t.expiry ? new Date(t.expiry * 1000).toLocaleString() : 'no expiry'}</div>
-                        <button onClick={() => handleRevokeToken(t.id)} className="px-2 py-1 bg-red-600 text-white rounded text-sm">Revoke</button>
+                        <div className="text-sm text-gray-500">
+                          {t.expiry ? new Date(t.expiry * 1000).toLocaleString() : cfgT('no expiry')}
+                        </div>
+                        <button
+                          onClick={() => handleRevokeToken(t.id)}
+                          className="px-2 py-1 bg-red-600 text-white rounded text-sm"
+                        >
+                          {cfgT('Revoke')}
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -2272,17 +2313,17 @@ function AccessLogTab({ isDarkMode }) {
     <div>
       {/* IP Control Panel */}
       <div className={`rounded-lg border p-6 mb-6 ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>IP Access Control</h2>
+        <h2 className={`text-xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{cfgT('IP Access Control')}</h2>
         <p className={`text-sm mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-          Control which IP addresses can access the Web UI. If whitelist is set, only listed IPs are allowed. Otherwise, listed IPs in blacklist are denied.
+          {cfgT('Control which IP addresses can access the Web UI. If whitelist is set, only listed IPs are allowed. Otherwise, listed IPs in blacklist are denied.')}
         </p>
 
         <div className="mb-4">
-          <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Whitelist (allowed IPs)</label>
+          <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>{cfgT('Whitelist (allowed IPs)')}</label>
           <div className="flex gap-2 mb-2">
             <input
               type="text"
-              placeholder="192.168.1.100"
+              placeholder={cfgT('Example IP address')}
               className={`flex-1 rounded-md border px-3 py-2 text-sm ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
               onKeyPress={(e) => {
                 if (e.key === 'Enter') {
@@ -2299,7 +2340,7 @@ function AccessLogTab({ isDarkMode }) {
               }}
               className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
             >
-              Add
+              {cfgT('Add')}
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -2313,11 +2354,11 @@ function AccessLogTab({ isDarkMode }) {
         </div>
 
         <div className="mb-4">
-          <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Blacklist (denied IPs)</label>
+          <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>{cfgT('Blacklist (denied IPs)')}</label>
           <div className="flex gap-2 mb-2">
             <input
               type="text"
-              placeholder="192.168.1.100"
+              placeholder={cfgT('Example IP address')}
               className={`flex-1 rounded-md border px-3 py-2 text-sm ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
               onKeyPress={(e) => {
                 if (e.key === 'Enter') {
@@ -2334,7 +2375,7 @@ function AccessLogTab({ isDarkMode }) {
               }}
               className="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
             >
-              Add
+              {cfgT('Add')}
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -2461,7 +2502,7 @@ function ConfigApp() {
   useEffect(() => {
     currentSectionsRef.current = sections;
   }, [sections]);
-  const [status, setStatus] = useState({ text: 'Loading config options...', type: 'info' });
+  const [status, setStatus] = useState({ text: cfgT('Loading config options...'), type: 'info' });
   const [isDarkMode, setIsDarkMode] = useState(getStoredTheme);
   const [expandedGroups, setExpandedGroups] = useState(new Set());
   const [pendingChanges, setPendingChanges] = useState(new Map());
@@ -2843,11 +2884,11 @@ function ConfigApp() {
               {isSaving ? cfgT('Saving...') : cfgT('Save Config')}
             </button>
             <a href="/" className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-gray-700 text-white hover:bg-gray-600">{cfgT('Back to Upload')}</a>
-            <span className="text-sm">{isDarkMode ? '🌙 Dark' : '☀️ Light'}</span>
+            <span className="text-sm">{isDarkMode ? cfgT('🌙 Dark') : cfgT('☀️ Light')}</span>
             <button
               className={themeToggleClass}
               type="button"
-              aria-label="Toggle theme"
+              aria-label={cfgT('Toggle theme')}
               onClick={() => setIsDarkMode((prev) => !prev)}
             >
               <span className={themeKnobClass}></span>
@@ -2917,7 +2958,7 @@ function ConfigApp() {
                             : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
                       }`}
                     >
-                      {section.section}
+                      {cfgT(section.section)}
                     </button>
                   );
                 })}
@@ -2955,7 +2996,7 @@ function ConfigApp() {
                                       : 'text-gray-600 hover:text-gray-900 hover:bg-gray-300'
                                 }`}
                               >
-                                {subTab.label}
+                                {cfgT(subTab.label)}
                               </button>
                             );
                           })}
