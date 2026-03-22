@@ -24,6 +24,62 @@ def guessit_fn(value: str, options: Optional[dict[str, Any]] = None) -> dict[str
     return cast(dict[str, Any], guessit_module.guessit(value, options))
 
 
+def _clean_search_term(raw_name: str) -> str:
+    """从种子名/tracker 标题中提取干净的搜索词，提升 IMDb 匹配率。
+
+    处理步骤:
+    1. 移除方括号标签 [VCB-Studio], [Ma10p_1080p] 等
+    2. 从 '/' 分隔的中英混合标题中提取英文部分
+    3. 移除技术参数 (分辨率、编码、容器格式等)
+    4. 清理多余空格和符号
+    """
+    import re as _re
+
+    if not raw_name or not raw_name.strip():
+        return ""
+
+    name = raw_name
+
+    # 1. 移除方括号标签: [VCB-Studio], [YYDM-11FANS], [Ma10p_1080p]
+    name = _re.sub(r'\[.*?\]', ' ', name)
+
+    # 2. 从 '/' 分隔的中英混合标题中提取英文部分
+    # 例: "葬送的芙莉莲/Frieren Beyond Journey's End" → "Frieren Beyond Journey's End"
+    if '/' in name:
+        parts = [p.strip() for p in name.split('/') if p.strip()]
+        for p in parts:
+            # 优先选择主要由 ASCII 字母组成的部分
+            ascii_ratio = sum(1 for c in p if c.isascii() and c.isalpha()) / max(len(p), 1)
+            if ascii_ratio > 0.5:
+                name = p
+                break
+
+    # 3. 移除技术参数
+    name = _re.sub(
+        r'\b(Ma\d+p|[0-9]{3,4}[pi]|FLAC|AAC|DTS(?:-HD)?(?:\s*MA)?|'
+        r'HEVC|x26[45]|AVC|H\.?26[45]|BDMV|REMUX|BluRay|Blu-ray|'
+        r'WEB-DL|WEBDL|WEBRip|HDTV|DVD(?:Rip)?|'
+        r'TrueHD|Atmos|E-AC-?3|AC3|DDP?\d*\.?\d*|'
+        r'10bit|8bit|HDR\d*\+?|DV|DoVi|'
+        r'AMZN|NF|DSNP|ATVP|HULU|BCORE|'
+        r'S\d{2}(?:E\d{2})?)\b',
+        '',
+        name,
+        flags=_re.IGNORECASE,
+    )
+
+    # 4. 替换常见分隔符为空格
+    name = _re.sub(r'[_.]', ' ', name)
+
+    # 5. 移除发布组标签 (通常在末尾 -GROUP)
+    name = _re.sub(r'\s*-\s*\w+$', '', name)
+
+    # 6. 清理多余空格
+    name = _re.sub(r'\s+', ' ', name).strip()
+
+    return name
+
+
 class ImdbManager:
     def safe_get(self, data: Any, path: list[str], default: Any = None) -> Any:
         for key in path:
@@ -746,6 +802,8 @@ class ImdbManager:
                 # Calculate similarity for all results
                 results_with_similarity: list[tuple[dict[str, Any], float]] = []
                 filename_norm = filename.lower().strip()
+                # Also try cleaned version for better matching on tracker names
+                filename_cleaned = _clean_search_term(filename).lower().strip()
                 search_year_int = int(search_year) if search_year else 0
 
                 for r in search_results:
@@ -754,14 +812,26 @@ class ImdbManager:
                     title_text = self.safe_get(title, ["titleText", "text"], "")
                     result_year = self.safe_get(title, ["releaseYear", "year"], 0)
 
-                    similarity = SequenceMatcher(None, filename_norm, title_text.lower().strip()).ratio()
+                    # Use the higher similarity between raw and cleaned filename
+                    sim_raw = SequenceMatcher(None, filename_norm, title_text.lower().strip()).ratio()
+                    sim_cleaned = SequenceMatcher(None, filename_cleaned, title_text.lower().strip()).ratio() if filename_cleaned != filename_norm else sim_raw
+                    similarity = max(sim_raw, sim_cleaned)
 
-                    # Only boost similarity if titles are very similar (>= 0.99) AND years match
-                    if similarity >= 0.99 and search_year_int > 0 and result_year > 0:
+                    # Boost similarity for year match (relaxed from >= 0.99 to >= 0.60)
+                    if similarity >= 0.60 and search_year_int > 0 and result_year > 0:
                         if result_year == search_year_int:
-                            similarity += 0.1  # Full boost for exact year match
+                            similarity += 0.10  # Full boost for exact year match
                         elif result_year == search_year_int - 1:
                             similarity += 0.05  # Half boost for -1 year
+
+                    # Boost for category match
+                    type_info = self.safe_get(title, ["titleType", "text"], "")
+                    if category and type_info:
+                        title_type_lower = str(type_info).lower()
+                        if category.lower() == "movie" and "tv series" not in title_type_lower:
+                            similarity += 0.05
+                        elif category.lower() == "tv" and "tv series" in title_type_lower:
+                            similarity += 0.05
 
                     results_with_similarity.append((r, similarity))
 
@@ -785,12 +855,12 @@ class ImdbManager:
 
                 # Check if the best match is significantly better than others
                 best_similarity = results_with_similarity[0][1]
-                similarity_threshold = 0.85
+                similarity_threshold = 0.75
 
                 if best_similarity >= similarity_threshold:
                     second_best = results_with_similarity[1][1] if len(results_with_similarity) > 1 else 0.0
 
-                    if best_similarity - second_best >= 0.10:
+                    if best_similarity - second_best >= 0.08:
                         if debug:
                             console.print(
                                 f"[green]Auto-selecting best match: {self.safe_get(sorted_results[0], ['node', 'title', 'titleText', 'text'], '')} (similarity: {best_similarity:.2f})[/green]"

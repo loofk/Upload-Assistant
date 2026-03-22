@@ -688,6 +688,54 @@ class COMMON:
                         cookies[lineFields[5]] = lineFields[6]
         return cookies
 
+    @staticmethod
+    def _build_ptgen_fallback(meta: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """当 PTGen API 无法获取豆瓣数据时，用 TMDb/IMDb 已有信息构造最小化的 ptgen 兼容数据。
+
+        确保 MTEAM/TJUPT 的 smallDescr (trans_title) 和 countries (region) 字段不为空。
+        """
+        title = meta.get('title', '')
+        if not title:
+            return None
+
+        # 尝试从 TMDb 获取中文翻译标题
+        imdb_info = meta.get('imdb_info', {}) or {}
+        tmdb_info = meta.get('tmdb_info', {}) or {}
+        genres = imdb_info.get('genres', '') or tmdb_info.get('genres', '')
+
+        # 构建地区信息
+        original_language = meta.get('original_language', '')
+        region_map: dict[str, list[str]] = {
+            'en': ['美国'], 'ja': ['日本'], 'ko': ['韩国'], 'zh': ['中国大陆'],
+            'fr': ['法国'], 'de': ['德国'], 'es': ['西班牙'], 'it': ['意大利'],
+            'pt': ['巴西'], 'ru': ['俄罗斯'], 'hi': ['印度'], 'th': ['泰国'],
+        }
+        region = region_map.get(original_language, [])
+
+        # 构建 trans_title: 优先使用 aka 或 title
+        aka = imdb_info.get('aka', '') or ''
+        trans_title = [aka] if aka else [title]
+
+        genre_list = [g.strip() for g in str(genres).split(',')] if genres else []
+
+        ptgen_data: dict[str, Any] = {
+            'success': True,
+            'data': {
+                'chinese_title': aka or title,
+                'trans_title': trans_title,
+                'original_title': title,
+                'genre': genre_list,
+                'region': region,
+                'year': meta.get('year', ''),
+            },
+            'format': f"◎片　　名 {title}\n◎年　　代 {meta.get('year', '')}\n",
+            # 标记这是 fallback 数据
+            '_fallback': True,
+        }
+
+        console.print(f"[yellow]PTGen fallback: using TMDb/IMDb data for {title}[/yellow]")
+        return ptgen_data
+
     async def ptgen(self, meta: dict[str, Any], ptgen_site: str = "", ptgen_retry: int = 3) -> str:
         ptgen_text = ""
         base_url = 'https://ptgen.zhenzhen.workers.dev'
@@ -813,7 +861,12 @@ class COMMON:
                         if not douban_url:
                             console.print(f"[yellow]No douban URL found in IMDb response. Response keys: {list(ptgen_json.keys())}[/yellow]")
                             if meta.get('unattended') and not meta.get('unattended_confirm'):
-                                console.print("[yellow]Unattended: skipping douban link input, skipping ptgen.[/yellow]")
+                                console.print("[yellow]Unattended: skipping douban link input, attempting TMDb fallback for ptgen data.[/yellow]")
+                                # Fallback: construct minimal ptgen data from TMDb/IMDb info
+                                ptgen_fallback = self._build_ptgen_fallback(meta)
+                                if ptgen_fallback:
+                                    meta['ptgen'] = ptgen_fallback
+                                    return ptgen_fallback.get('format', '')
                                 return ""
                             # Ask user to manually enter douban URL
                             console.print("[yellow]Unable to extract douban link from IMDb response.[/yellow]")
@@ -826,7 +879,11 @@ class COMMON:
                         # If IMDb API failed but we have IMDb ID, still try to ask for douban URL
                         if int(meta.get('imdb_id', 0)) != 0:
                             if meta.get('unattended') and not meta.get('unattended_confirm'):
-                                console.print("[yellow]Unattended: skipping douban link input, skipping ptgen.[/yellow]")
+                                console.print("[yellow]Unattended: IMDb API failed, attempting TMDb fallback for ptgen data.[/yellow]")
+                                ptgen_fallback = self._build_ptgen_fallback(meta)
+                                if ptgen_fallback:
+                                    meta['ptgen'] = ptgen_fallback
+                                    return ptgen_fallback.get('format', '')
                                 return ""
                             console.print("[yellow]IMDb API failed, but IMDb ID exists. Please provide douban link manually.[/yellow]")
                             douban_url = console.input("[yellow]Please enter [bold]Douban[/bold] link (e.g., https://movie.douban.com/subject/123456/): [/yellow]")
@@ -850,7 +907,11 @@ class COMMON:
                     # No IMDb ID, ask for douban URL
                     console.print("[red]No IMDb id was found.[/red]")
                     if meta.get('unattended') and not meta.get('unattended_confirm'):
-                        console.print("[yellow]Unattended: skipping douban link input, skipping ptgen.[/yellow]")
+                        console.print("[yellow]Unattended: no IMDb ID, attempting TMDb fallback for ptgen data.[/yellow]")
+                        ptgen_fallback = self._build_ptgen_fallback(meta)
+                        if ptgen_fallback:
+                            meta['ptgen'] = ptgen_fallback
+                            return ptgen_fallback.get('format', '')
                         return ""
                     douban_url = console.input("[yellow]Please enter [bold]Douban[/bold] link (e.g., https://movie.douban.com/subject/123456/): [/yellow]")
                     if not douban_url.strip():

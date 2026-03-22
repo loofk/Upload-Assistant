@@ -88,7 +88,11 @@ class TrackerMetaManager:
         await handle_image_list(meta, tracker_name, valid_images)
 
 
-async def prompt_user_for_confirmation(message: str) -> bool:
+async def prompt_user_for_confirmation(message: str, meta: Optional[Meta] = None) -> bool:
+    # unattended 模式下自动确认（默认 Yes）
+    if meta and meta.get('unattended') and not meta.get('unattended_confirm'):
+        console.print(f"[yellow]Unattended: auto-confirming '{message}'[/yellow]")
+        return True
     try:
         response_raw = cli_ui.ask_string(f"{message} (Y/n): ")
         response = (response_raw or "").strip().lower()
@@ -483,8 +487,13 @@ async def update_metadata_from_tracker(
                         console.print(f"Description after cleaning:\n{description[:1000]}...", markup=False)
 
                         if not meta.get('skipit'):
-                            console.print("[cyan]Do you want to edit, discard or keep the description?[/cyan]")
-                            edit_choice = cli_ui.ask_string("Enter 'e' to edit, 'd' to discard, or press Enter to keep it as is: ")
+                            if meta.get('unattended') and not meta.get('unattended_confirm'):
+                                console.print("[yellow]Unattended: keeping description as is.[/yellow]")
+                                meta['description'] = description
+                                meta['saved_description'] = True
+                            else:
+                                console.print("[cyan]Do you want to edit, discard or keep the description?[/cyan]")
+                                edit_choice = cli_ui.ask_string("Enter 'e' to edit, 'd' to discard, or press Enter to keep it as is: ")
 
                             if (edit_choice or "").lower() == 'e':
                                 edited_description = click.edit(description)
@@ -511,8 +520,12 @@ async def update_metadata_from_tracker(
                                 nfo_content = await asyncio.to_thread(Path(nfo_file_path).read_text, encoding="utf-8")
                                 console.print("[bold green]Successfully grabbed FraMeSToR description")
                                 console.print(f"Description content:\n{nfo_content[:1000]}...", markup=False)
-                                console.print("[cyan]Do you want to discard or keep the description?[/cyan]")
-                                edit_choice = cli_ui.ask_string("Enter 'd' to discard, or press Enter to keep it as is: ")
+                                if meta.get('unattended') and not meta.get('unattended_confirm'):
+                                    console.print("[yellow]Unattended: keeping description as is.[/yellow]")
+                                    edit_choice = ""
+                                else:
+                                    console.print("[cyan]Do you want to discard or keep the description?[/cyan]")
+                                    edit_choice = cli_ui.ask_string("Enter 'd' to discard, or press Enter to keep it as is: ")
 
                                 if (edit_choice or "").lower() == 'd':
                                     meta['description'] = ""
@@ -690,7 +703,7 @@ async def update_metadata_from_tracker(
             if imdb or tvdb_id or meta['hdb_description']:
                 if not meta['unattended']:
                     console.print(f"[green]{tracker_name} data found: IMDb ID: {imdb}, TVDb ID: {meta['tvdb_id']}, HDB Name: {meta['hdb_name']}[/green]")
-                    if await prompt_user_for_confirmation(f"Do you want to use the ID's found on {tracker_name}?"):
+                    if await prompt_user_for_confirmation(f"Do you want to use the ID's found on {tracker_name}?", meta=meta):
                         console.print(f"[green]{tracker_name} data retained.[/green]")
                         meta['imdb_id'] = imdb if imdb else meta.get('imdb_id')
                         meta['tvdb_id'] = tvdb_id if tvdb_id else meta.get('tvdb_id')
@@ -703,8 +716,12 @@ async def update_metadata_from_tracker(
                         if description and len(description) > 0 and not only_id:
                             console.print("[bold green]Successfully grabbed description from HDB")
                             console.print(f"HDB Description content:\n{description[:1000]}.....", markup=False)
-                            console.print("[cyan]Do you want to edit, discard or keep the description?[/cyan]")
-                            edit_choice_raw = cli_ui.ask_string("Enter 'e' to edit, 'd' to discard, or press Enter to keep it as is: ")
+                            if meta.get('unattended') and not meta.get('unattended_confirm'):
+                                console.print("[yellow]Unattended: keeping HDB description as is.[/yellow]")
+                                edit_choice_raw = ""
+                            else:
+                                console.print("[cyan]Do you want to edit, discard or keep the description?[/cyan]")
+                                edit_choice_raw = cli_ui.ask_string("Enter 'e' to edit, 'd' to discard, or press Enter to keep it as is: ")
                             edit_choice = (edit_choice_raw or "").strip().lower()
 
                             if edit_choice.lower() == 'e':

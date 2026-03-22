@@ -1,0 +1,18 @@
+{
+    "success": true,
+    "data": {
+        "chinese_title": "测试电影",
+        "trans_title": ["测试电影"],
+        "original_title": "Test Movie",
+        "aka": ["测试电影 Test Movie"],
+        "genre": ["动作", "冒险"],
+        "region": ["美国", "中国大陆"],
+        "douban": "https://movie.douban.com/subject/1291546/",
+        "year": "2024",
+        "director": ["导演A"],
+        "cast": ["演员A", "演员B"],
+        "poster": "https://img.example.com/poster.jpg",
+        "rating": "8.5"
+    },
+    "format": "[img]https://img.example.com/poster.jpg[/img]\n\n◎译　　名 测试电影\n◎片　　名 Test Movie\n◎年　　代 2024\n◎产　　地 美国/中国大陆\n◎类　　别 动作/冒险"
+}

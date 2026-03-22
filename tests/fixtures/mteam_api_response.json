@@ -1,0 +1,43 @@
+{
+    "code": "SUCCESS",
+    "message": "SUCCESS",
+    "data": {
+        "id": "1133442",
+        "createdDate": "2024-01-15T10:30:00.000+00:00",
+        "lastModifiedDate": "2024-01-15T10:30:00.000+00:00",
+        "name": "Test.Movie.2024.1080p.WEB-DL.DDP5.1.H.265-GROUP",
+        "smallDescr": "测试电影 | 动作",
+        "imdb": "https://www.imdb.com/title/tt1234567/",
+        "douban": "https://movie.douban.com/subject/1291546/",
+        "descr": "## 影片信息\n\n海报和描述内容",
+        "category": {
+            "id": "419",
+            "name": "Movie(电影)/HD"
+        },
+        "source": {
+            "id": "8",
+            "name": "WEB-DL"
+        },
+        "medium": null,
+        "standard": {
+            "id": "1",
+            "name": "1080p"
+        },
+        "videoCodec": {
+            "id": "16",
+            "name": "H.265"
+        },
+        "audioCodec": {
+            "id": "12",
+            "name": "E-AC-3"
+        },
+        "status": {
+            "id": "1",
+            "name": "Normal"
+        },
+        "size": "4294967296",
+        "leechers": "2",
+        "seeders": "50",
+        "hash": "abc123def456"
+    }
+}
