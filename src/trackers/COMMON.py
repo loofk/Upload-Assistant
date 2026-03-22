@@ -736,6 +736,40 @@ class COMMON:
         console.print(f"[yellow]PTGen fallback: using TMDb/IMDb data for {title}[/yellow]")
         return ptgen_data
 
+    @staticmethod
+    async def _search_douban_by_title(
+        titles: list[str],
+        year: str,
+    ) -> Optional[str]:
+        """Use Douban suggest API to search by title, return matching Douban subject ID.
+
+        Tries each title in the list sequentially; returns the first result
+        where year and type (movie/tv) match.
+        """
+        for title in titles:
+            if not title or not title.strip():
+                continue
+            url = "https://movie.douban.com/j/subject_suggest"
+            params = {"q": title.strip()}
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            }
+            try:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                    resp = await client.get(url, params=params, headers=headers)
+                    if resp.status_code != 200:
+                        continue
+                    results = resp.json()
+                    for r in results:
+                        if r.get("year") == str(year) and r.get("type") in ("movie", "tv"):
+                            douban_id = r.get("id")
+                            console.print(f"[green]Douban suggest: '{title}' → {douban_id} ({r.get('title')})[/green]")
+                            return str(douban_id)
+            except Exception as e:
+                console.print(f"[yellow]Douban suggest API error for '{title}': {e}[/yellow]")
+                continue
+        return None
+
     async def ptgen(self, meta: dict[str, Any], ptgen_site: str = "", ptgen_retry: int = 3) -> str:
         ptgen_text = ""
         base_url = 'https://ptgen.zhenzhen.workers.dev'
@@ -859,6 +893,24 @@ class COMMON:
                                 ptgen_text = f"[img]{poster_url}[/img]{ptgen_text}"
                             return ptgen_text
                         if not douban_url:
+                            # Fallback: search Douban suggest API by title
+                            search_titles = [t for t in [
+                                meta.get('title', ''),
+                                meta.get('original_title', ''),
+                            ] if t]
+                            aka = meta.get('aka', [])
+                            if isinstance(aka, list):
+                                search_titles.extend([str(a) for a in aka if a])
+                            year = meta.get('year', '')
+                            if search_titles and year:
+                                found_douban = await self._search_douban_by_title(search_titles, year)
+                                if found_douban:
+                                    douban_url = f"https://movie.douban.com/subject/{found_douban}/"
+                                    meta['douban_id'] = meta['douban'] = found_douban
+                                    meta['douban_url'] = douban_url
+                                    console.print(f"[green]Auto-resolved Douban ID via title search: {found_douban}[/green]")
+
+                        if not douban_url:
                             console.print(f"[yellow]No douban URL found in IMDb response. Response keys: {list(ptgen_json.keys())}[/yellow]")
                             if meta.get('unattended') and not meta.get('unattended_confirm'):
                                 console.print("[yellow]Unattended: skipping douban link input, attempting TMDb fallback for ptgen data.[/yellow]")
@@ -904,28 +956,46 @@ class COMMON:
                             if ptgen_json is not None and ptgen_json.get("error") is None and ptgen_json.get("success", False):
                                 break
                 elif int(meta.get('imdb_id', 0)) == 0:
-                    # No IMDb ID, ask for douban URL
+                    # No IMDb ID, try Douban suggest API first
                     console.print("[red]No IMDb id was found.[/red]")
-                    if meta.get('unattended') and not meta.get('unattended_confirm'):
-                        console.print("[yellow]Unattended: no IMDb ID, attempting TMDb fallback for ptgen data.[/yellow]")
-                        ptgen_fallback = self._build_ptgen_fallback(meta)
-                        if ptgen_fallback:
-                            meta['ptgen'] = ptgen_fallback
-                            return ptgen_fallback.get('format', '')
-                        return ""
-                    douban_url = console.input("[yellow]Please enter [bold]Douban[/bold] link (e.g., https://movie.douban.com/subject/123456/): [/yellow]")
-                    if not douban_url.strip():
-                        console.print("[red]No douban URL provided, skipping ptgen[/red]")
-                        return ""
-                    
-                    params = {'url': douban_url}
-                    ptgen_json = await fetch_ptgen(client, api_url, params)
-                    
-                    if ptgen_json is None or ptgen_json.get("error") is not None or not ptgen_json.get("success", False):
-                        for _retry in range(ptgen_retry):
-                            ptgen_json = await fetch_ptgen(client, api_url, params)
-                            if ptgen_json is not None and ptgen_json.get("error") is None and ptgen_json.get("success", False):
-                                break
+                    search_titles = [t for t in [
+                        meta.get('title', ''),
+                        meta.get('original_title', ''),
+                    ] if t]
+                    aka = meta.get('aka', [])
+                    if isinstance(aka, list):
+                        search_titles.extend([str(a) for a in aka if a])
+                    year = meta.get('year', '')
+                    if search_titles and year:
+                        found_douban = await self._search_douban_by_title(search_titles, year)
+                        if found_douban:
+                            douban_url = f"https://movie.douban.com/subject/{found_douban}/"
+                            meta['douban_id'] = meta['douban'] = found_douban
+                            meta['douban_url'] = douban_url
+                            console.print(f"[green]Auto-resolved Douban ID via title search: {found_douban}[/green]")
+
+                    if not douban_url:
+                        if meta.get('unattended') and not meta.get('unattended_confirm'):
+                            console.print("[yellow]Unattended: no IMDb ID, attempting TMDb fallback for ptgen data.[/yellow]")
+                            ptgen_fallback = self._build_ptgen_fallback(meta)
+                            if ptgen_fallback:
+                                meta['ptgen'] = ptgen_fallback
+                                return ptgen_fallback.get('format', '')
+                            return ""
+                        douban_url = console.input("[yellow]Please enter [bold]Douban[/bold] link (e.g., https://movie.douban.com/subject/123456/): [/yellow]")
+                        if not douban_url.strip():
+                            console.print("[red]No douban URL provided, skipping ptgen[/red]")
+                            return ""
+
+                    if douban_url:
+                        params = {'url': douban_url}
+                        ptgen_json = await fetch_ptgen(client, api_url, params)
+
+                        if ptgen_json is None or ptgen_json.get("error") is not None or not ptgen_json.get("success", False):
+                            for _retry in range(ptgen_retry):
+                                ptgen_json = await fetch_ptgen(client, api_url, params)
+                                if ptgen_json is not None and ptgen_json.get("error") is None and ptgen_json.get("success", False):
+                                    break
 
                 if ptgen_json is None or not ptgen_json.get("success", False):
                     error_msg = ptgen_json.get("error", "Unknown error") if ptgen_json else "No response"
