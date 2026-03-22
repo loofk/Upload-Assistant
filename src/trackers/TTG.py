@@ -22,6 +22,11 @@ Config = dict[str, Any]
 
 class TTG:
 
+    # Language grouping constants for type ID classification
+    LANG_ZH: frozenset[str] = frozenset({'ZH', 'CN', 'CMN', 'ZH-CN', 'ZH-TW', 'ZH-HK'})
+    LANG_KR: frozenset[str] = frozenset({'KR', 'KO'})
+    LANG_JP: frozenset[str] = frozenset({'JA', 'JP'})
+
     def __init__(self, config: Config) -> None:
         self.config: Config = config
         self.tracker = 'TTG'
@@ -34,6 +39,8 @@ class TTG:
         self.passkey = str(config['TRACKERS']['TTG'].get('announce_url', '')).strip().split('/')[-1]
         self.signature = None
         self.banned_groups = [""]
+        self.timeout_search = int(config['TRACKERS']['TTG'].get('timeout_search', 15))
+        self.timeout_upload = int(config['TRACKERS']['TTG'].get('timeout_upload', 60))
 
         self.cookie_validator = CookieValidator(config)
 
@@ -52,65 +59,63 @@ class TTG:
         lang = str(meta.get('original_language', 'UNKNOWN')).upper()
         category = str(meta.get('category', ''))
         resolution = str(meta.get('resolution', ''))
-        if meta['category'] == "MOVIE":
-            # 51 = DVDRip
-            if resolution.startswith("720"):
-                type_id = 52  # 720p
-            if resolution.startswith("1080"):
-                type_id = 53  # 1080p/i
-            if meta.get('is_disc') == "BDMV":
-                type_id = 54  # Blu-ray disc
-
-        elif category == "TV":
-            if meta.get('tv_pack', 0) != 1:
-                # TV Singles
-                if resolution.startswith("720"):
-                    type_id = 69  # 720p TV EU/US
-                    if lang in ('ZH', 'CN', 'CMN'):
-                        type_id = 76  # Chinese
-                if resolution.startswith("1080"):
-                    type_id = 70  # 1080 TV EU/US
-                    if lang in ('ZH', 'CN', 'CMN'):
-                        type_id = 75  # Chinese
-                if lang in ('KR', 'KO'):
-                    type_id = 75  # Korean
-                if lang in ('JA', 'JP'):
-                    type_id = 73  # Japanese
-            else:
-                # TV Packs
-                type_id = 87  # EN/US
-                if lang in ('KR', 'KO'):
-                    type_id = 99  # Korean
-                if lang in ('JA', 'JP'):
-                    type_id = 88  # Japanese
-                if lang in ('ZH', 'CN', 'CMN'):
-                    type_id = 90  # Chinese
 
         genres_value = str(meta.get("genres", "")).lower().replace(' ', '').replace('-', '')
         keywords_value = str(meta.get("keywords", "")).lower().replace(' ', '').replace('-', '')
-        if "documentary" in genres_value or 'documentary' in keywords_value:
-            if resolution.startswith("720"):
-                type_id = 62  # 720p
-            if resolution.startswith("1080"):
-                type_id = 63  # 1080
-            if meta.get('is_disc', '') == 'BDMV':
-                type_id = 64  # BDMV
+        is_documentary = "documentary" in genres_value or 'documentary' in keywords_value
+        is_animation = "animation" in genres_value or 'animation' in keywords_value
 
-        if (
-            "animation" in genres_value
-            or 'animation' in keywords_value
-        ) and meta.get('sd', 1) == 0:
-            type_id = 58
-
-        if resolution in ("2160p"):
-            type_id = 108
+        # 2160p takes highest priority regardless of category
+        if resolution == "2160p":
             if meta.get('is_disc', '') == 'BDMV':
                 type_id = 109
+            else:
+                type_id = 108
+        elif is_documentary:
+            if meta.get('is_disc', '') == 'BDMV':
+                type_id = 64  # Documentary BDMV
+            elif resolution.startswith("1080"):
+                type_id = 63  # Documentary 1080
+            elif resolution.startswith("720"):
+                type_id = 62  # Documentary 720p
+        elif is_animation and meta.get('sd', 1) == 0:
+            type_id = 58  # HD Animation
+        elif category == "MOVIE":
+            if meta.get('is_disc') == "BDMV":
+                type_id = 54  # Blu-ray disc
+            elif resolution.startswith("1080"):
+                type_id = 53  # 1080p/i
+            elif resolution.startswith("720"):
+                type_id = 52  # 720p
+            # 51 = DVDRip
+        elif category == "TV":
+            if meta.get('tv_pack', 0) != 1:
+                # TV Singles
+                if lang in self.LANG_JP:
+                    type_id = 73  # Japanese
+                elif lang in self.LANG_KR:
+                    type_id = 75  # Korean
+                elif resolution.startswith("1080"):
+                    if lang in self.LANG_ZH:
+                        type_id = 75  # Chinese 1080
+                    else:
+                        type_id = 70  # 1080 TV EU/US
+                elif resolution.startswith("720"):
+                    if lang in self.LANG_ZH:
+                        type_id = 76  # Chinese 720
+                    else:
+                        type_id = 69  # 720p TV EU/US
+            else:
+                # TV Packs
+                if lang in self.LANG_JP:
+                    type_id = 88  # Japanese
+                elif lang in self.LANG_KR:
+                    type_id = 99  # Korean
+                elif lang in self.LANG_ZH:
+                    type_id = 90  # Chinese
+                else:
+                    type_id = 87  # EN/US
 
-        # I guess complete packs?:
-            # 103 = TV Shows KR
-            # 101 = TV Shows JP
-            # 60 = TV Shows
         return type_id
 
     async def upload(self, meta: Meta, _disctype: str) -> Optional[bool]:
@@ -189,7 +194,7 @@ class TTG:
             cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/TTG.json")
             raw_cookies = self.cookie_validator._load_cookies_dict_secure(cookiefile)  # type: ignore[reportPrivateUsage]
             cookies = {name: str(data.get('value', '')) for name, data in raw_cookies.items()}
-            async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=60.0) as client:
+            async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=float(self.timeout_upload)) as client:
                 up = await client.post(url=url, data=data, files=files)
 
             if str(up.url).startswith("https://totheglory.im/details.php?id="):
@@ -229,7 +234,7 @@ class TTG:
         search_url = f"https://totheglory.im/browse.php?search_field= {imdb} {res_type}"
 
         try:
-            async with httpx.AsyncClient(cookies=cookies, timeout=10.0) as client:
+            async with httpx.AsyncClient(cookies=cookies, timeout=float(self.timeout_search)) as client:
                 response = await client.get(search_url)
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
@@ -256,17 +261,32 @@ class TTG:
         return dupes
 
     async def validate_credentials(self, meta: Meta) -> bool:
-        cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/TTG.pkl")
+        cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/TTG.json")
+        # Migrate legacy .pkl cookie file to .json if needed
+        legacy_pkl = os.path.abspath(f"{meta['base_dir']}/data/cookies/TTG.pkl")
+        if not os.path.exists(cookiefile) and os.path.exists(legacy_pkl):
+            try:
+                # Use cookie_auth's secure loader which handles pickle→json conversion
+                self.cookie_validator._load_cookies_dict_secure(legacy_pkl)  # type: ignore[reportPrivateUsage]
+                console.print("[yellow]TTG: Migrated legacy TTG.pkl to TTG.json[/yellow]")
+            except Exception as e:
+                console.print(f"[red]TTG: Failed to migrate cookie file: {e}[/red]")
         if not os.path.exists(cookiefile):
-            await self.login(cookiefile)
+            if meta.get('unattended'):
+                console.print('[red]TTG: No cookie file found and running in unattended mode. Skipping TTG.')
+                return False
+            await self.login(cookiefile, meta=meta)
         vcookie = await self.validate_cookies(meta, cookiefile)
         if vcookie is not True:
             console.print('[red]Failed to validate cookies. Please confirm that the site is up and your passkey is valid.')
+            if meta.get('unattended'):
+                console.print('[red]TTG: Cookie invalid in unattended mode. Skipping TTG.')
+                return False
             recreate = cli_ui.ask_yes_no("Log in again and create new session?")
             if recreate is True:
                 if os.path.exists(cookiefile):
                     os.remove(cookiefile)
-                await self.login(cookiefile)
+                await self.login(cookiefile, meta=meta)
                 vcookie = await self.validate_cookies(meta, cookiefile)
                 return vcookie
             else:
@@ -287,7 +307,7 @@ class TTG:
         else:
             return False
 
-    async def login(self, cookiefile: str) -> None:
+    async def login(self, cookiefile: str, meta: Optional[Meta] = None) -> None:
         url = "https://totheglory.im/takelogin.php"
         data: dict[str, Any] = {
             'username': self.username,
@@ -299,6 +319,8 @@ class TTG:
             response = await client.post(url, data=data)
             await asyncio.sleep(0.5)
             if str(response.url).endswith('2fa.php'):
+                if meta and meta.get('unattended'):
+                    raise UploadException('TTG requires 2FA but running in unattended mode. Please log in manually first.', 'red')  # noqa #F405
                 soup = BeautifulSoup(response.text, 'html.parser')
                 token_input = soup.find('input', {'name': 'authenticity_token'})
                 auth_token = token_input.get('value') if token_input else None

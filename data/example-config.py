@@ -752,6 +752,17 @@ config = {
             "ptgen_api": "",
             "anon": True,
         },
+        "OB": {
+            # OurBits (ourbits.club) — NexusPHP based
+            # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
+            "link_dir_name": "",
+            "passkey": 'passkey',
+            "img_rehost": False,
+            "username": "",
+            "password": "",
+            "ptgen_api": "",
+            "anon": True,
+        },
         "AUDIENCES": {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name
             "link_dir_name": "",

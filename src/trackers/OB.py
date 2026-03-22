@@ -1,5 +1,4 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
-import asyncio
 import os
 import re
 from typing import Any, Optional, Union, cast
@@ -15,107 +14,35 @@ from src.cookie_auth import CookieValidator
 from src.exceptions import *  # noqa E403
 from src.trackers.COMMON import COMMON
 
+from src.trackers.TJUPT import TJUPT
+
 Meta = dict[str, Any]
 Config = dict[str, Any]
 
 
-class TJUPT:
+class OB:
+    """OurBits (ourbits.club) tracker — NexusPHP based."""
 
-    # Area IDs: 1=大陆, 2=港, 3=台, 4=欧美, 5=韩, 6=日, 7=印度, 8=其他
-    AREA_MAP: dict[str, int] = {
-        "中国大陆": 1, "中国香港": 2, "中国台湾": 3,
-        "美国": 4, "英国": 4, "法国": 4, "德国": 4, "意大利": 4, "西班牙": 4,
-        "葡萄牙": 4, "澳大利亚": 4, "加拿大": 4, "比利时": 4, "瑞士": 4,
-        "俄罗斯": 4, "荷兰": 4, "瑞典": 4, "丹麦": 4, "挪威": 4, "芬兰": 4,
-        "波兰": 4, "爱尔兰": 4, "土耳其": 4,
-        "日本": 6,
-        "韩国": 5,
-        "印度": 7,
-        "泰国": 8, "墨西哥": 8, "阿根廷": 8, "巴西": 8, "智利": 8,
-        "马来西亚": 8, "新加坡": 8, "菲律宾": 8, "越南": 8,
-        "伊朗": 8, "以色列": 8, "南非": 8,
-    }
+    # Reuse TJUPT's area mapping (same NexusPHP region IDs)
+    AREA_MAP = TJUPT.AREA_MAP
 
     def __init__(self, config: Config) -> None:
         self.config: Config = config
-        self.tracker = 'TJUPT'
-        self.source_flag = 'TJUPT'
-        self.passkey = str(config['TRACKERS']['TJUPT'].get('passkey', '')).strip()
-        self.username = str(config['TRACKERS']['TJUPT'].get('username', '')).strip()
-        self.password = str(config['TRACKERS']['TJUPT'].get('password', '')).strip()
-        self.rehost_images = bool(config['TRACKERS']['TJUPT'].get('img_rehost', False))
-        self.ptgen_api = str(config['TRACKERS']['TJUPT'].get('ptgen_api', '')).strip()
+        self.tracker = 'OB'
+        self.source_flag = 'OB'
+        self.passkey = str(config['TRACKERS']['OB'].get('passkey', '')).strip()
+        self.username = str(config['TRACKERS']['OB'].get('username', '')).strip()
+        self.password = str(config['TRACKERS']['OB'].get('password', '')).strip()
+        self.rehost_images = bool(config['TRACKERS']['OB'].get('img_rehost', False))
+        self.ptgen_api = str(config['TRACKERS']['OB'].get('ptgen_api', '')).strip()
 
         self.ptgen_retry = 3
         self.signature: Optional[str] = None
         self.banned_groups: list[str] = [""]
-        self.timeout_search = int(config['TRACKERS']['TJUPT'].get('timeout_search', 15))
-        self.timeout_upload = int(config['TRACKERS']['TJUPT'].get('timeout_upload', 60))
+        self.timeout_search = int(config['TRACKERS']['OB'].get('timeout_search', 15))
+        self.timeout_upload = int(config['TRACKERS']['OB'].get('timeout_upload', 60))
 
         self.cookie_validator = CookieValidator(config)
-
-    async def _request_with_retry(
-        self,
-        client: httpx.AsyncClient,
-        method: str,
-        url: str,
-        max_retries: int = 2,
-        **kwargs: Any,
-    ) -> httpx.Response:
-        """Send an HTTP request with retry on timeout or 5xx errors (exponential backoff)."""
-        last_exc: Optional[Exception] = None
-        for attempt in range(max_retries + 1):
-            try:
-                response = await client.request(method, url, **kwargs)
-                if response.status_code >= 500 and attempt < max_retries:
-                    wait = 2 ** attempt
-                    console.print(f"[yellow]TJUPT: Server error {response.status_code}, retrying in {wait}s (attempt {attempt + 1}/{max_retries})[/yellow]")
-                    await asyncio.sleep(wait)
-                    continue
-                return response
-            except httpx.TimeoutException as e:
-                last_exc = e
-                if attempt < max_retries:
-                    wait = 2 ** attempt
-                    console.print(f"[yellow]TJUPT: Timeout, retrying in {wait}s (attempt {attempt + 1}/{max_retries})[/yellow]")
-                    await asyncio.sleep(wait)
-                    continue
-                raise
-        raise last_exc  # type: ignore[misc]
-
-    @staticmethod
-    def _extract_douban_id(soup: BeautifulSoup, response_text: str) -> Optional[str]:
-        """Extract Douban ID from a parsed page.
-
-        Searches for ``movie.douban.com/subject/<id>`` links first, then falls
-        back to a regex scan of the raw *response_text*.
-
-        Returns the Douban ID string or ``None``.
-        """
-        douban_link = soup.select_one('a[href*="movie.douban.com/subject/"]')
-        if not douban_link:
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
-                if 'movie.douban.com/subject/' in href or 'douban.com/subject/' in href:
-                    douban_link = link
-                    break
-
-        if douban_link:
-            douban_href = str(douban_link.get('href', ''))
-            parsed = urlparse(douban_href)
-            # Handle relative URLs
-            if not parsed.scheme:
-                douban_href = f"https://movie.douban.com{douban_href}" if douban_href.startswith('/') else f"https://movie.douban.com/subject/{douban_href}"
-            match = re.search(r'/subject/(\d+)', douban_href)
-            if match:
-                return match.group(1)
-
-        # Fallback: regex scan of raw page text
-        url_match = re.search(r'https?://movie\.douban\.com/subject/(\d+)', response_text)
-        if url_match:
-            return url_match.group(1)
-
-        return None
 
     async def validate_credentials(self, meta: Meta) -> bool:
         vcookie = await self.validate_cookies(meta)
@@ -126,34 +53,32 @@ class TJUPT:
 
     async def validate_cookies(self, meta: Meta) -> bool:
         common = COMMON(config=self.config)
-        url = "https://www.tjupt.org"
-        cookiefile = f"{meta['base_dir']}/data/cookies/TJUPT.txt"
+        url = "https://ourbits.club"
+        cookiefile = f"{meta['base_dir']}/data/cookies/OB.txt"
         if os.path.exists(cookiefile):
             cookies = await common.parseCookieFile(cookiefile)
             async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
                 resp = await client.get(url=url)
-
-                return resp.text.find('''<a href="#" data-url="logout.php" id="logout-confirm">''') != -1
+                return 'logout.php' in resp.text
         else:
-            console.print("[bold red]Missing Cookie File. (data/cookies/TJUPT.txt)")
+            console.print("[bold red]Missing Cookie File. (data/cookies/OB.txt)")
             return False
 
     async def search_existing(self, meta: Meta, _disctype: str) -> Union[list[str], bool]:
         dupes: list[str] = []
         common = COMMON(config=self.config)
-        cookiefile = f"{meta['base_dir']}/data/cookies/TJUPT.txt"
+        cookiefile = f"{meta['base_dir']}/data/cookies/OB.txt"
         if not os.path.exists(cookiefile):
-            console.print("[bold red]Missing Cookie File. (data/cookies/TJUPT.txt)")
+            console.print("[bold red]Missing Cookie File. (data/cookies/OB.txt)")
             return False
         cookies = await common.parseCookieFile(cookiefile)
         imdb_id = int(meta.get('imdb_id', 0) or 0)
         imdb = f"tt{meta.get('imdb', '')}" if imdb_id != 0 else ""
-        source = await self.get_type_medium_id(meta)
-        search_url = f"https://www.tjupt.org/torrents.php?search={imdb}&incldead=0&search_mode=0&source{source}=1"
+        search_url = f"https://ourbits.club/torrents.php?search={imdb}&incldead=0&search_mode=0"
 
         try:
             async with httpx.AsyncClient(cookies=cookies, timeout=float(self.timeout_search), follow_redirects=True) as client:
-                response = await self._request_with_retry(client, 'GET', search_url)
+                response = await client.get(search_url)
 
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'lxml')
@@ -178,97 +103,6 @@ class TJUPT:
 
         return dupes
 
-    async def get_info_from_torrent_id(self, tjupt_id: Union[int, str], meta: Optional[Meta] = None) -> tuple[Optional[int], Optional[int], Optional[str], Optional[str], Optional[str]]:
-        """
-        Fetch metadata from TJUPT torrent details page using torrent ID.
-        Returns: (imdb_id, tmdb_id, name, torrenthash, description)
-        """
-        tjupt_imdb = tjupt_tmdb = tjupt_name = tjupt_torrenthash = tjupt_description = None
-        common = COMMON(config=self.config)
-        base_dir = meta.get('base_dir', '') if meta else ''
-        cookiefile = f"{base_dir}/data/cookies/TJUPT.txt"
-        
-        if not os.path.exists(cookiefile):
-            console.print("[bold red]Missing Cookie File. (data/cookies/TJUPT.txt)[/bold red]")
-            return tjupt_imdb, tjupt_tmdb, tjupt_name, tjupt_torrenthash, tjupt_description
-        
-        cookies = await common.parseCookieFile(cookiefile)
-        url = f"https://www.tjupt.org/details.php?id={tjupt_id}"
-        
-        try:
-            async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
-                response = await client.get(url)
-                
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.text, 'lxml')
-                    
-                    # Extract IMDb ID
-                    imdb_link = soup.select_one('a[href*="imdb.com/title/tt"]')
-                    if not imdb_link:
-                        for link in soup.find_all('a', href=True):
-                            href = link.get('href', '')
-                            if 'imdb.com/title/tt' in href:
-                                imdb_link = link
-                                break
-                    if imdb_link:
-                        imdb_href = imdb_link.get('href', '')
-                        imdb_match = re.search(r'tt(\d+)', imdb_href)
-                        if imdb_match:
-                            tjupt_imdb = int(imdb_match.group(1))
-                    
-                    # Extract TMDb ID
-                    tmdb_link = soup.select_one('a[href*="themoviedb.org"]')
-                    if not tmdb_link:
-                        for link in soup.find_all('a', href=True):
-                            href = link.get('href', '')
-                            if 'themoviedb.org' in href:
-                                tmdb_link = link
-                                break
-                    if tmdb_link:
-                        tmdb_href = tmdb_link.get('href', '')
-                        tmdb_match = re.search(r'/(movie|tv)/(\d+)', tmdb_href)
-                        if tmdb_match:
-                            tjupt_tmdb = int(tmdb_match.group(2))
-                    
-                    # Extract Douban ID and URL
-                    douban_id = self._extract_douban_id(soup, response.text)
-                    if douban_id and meta:
-                        douban_url = f"https://movie.douban.com/subject/{douban_id}/"
-                        meta['douban_id'] = meta['douban'] = douban_id
-                        meta['douban_url'] = douban_url
-                        console.print(f"[green]TJUPT: Found Douban ID: {douban_id}, URL: {douban_url}[/green]")
-                    
-                    # Extract torrent name
-                    name_elem = soup.select_one('h1, .torrentname, td.torrentname, b.torrentname, table.torrentname')
-                    if name_elem:
-                        tjupt_name = name_elem.get_text(strip=True)
-                    
-                    # Extract description
-                    desc_elem = soup.select_one('#desctext, .desctext, td[colspan="2"], .nfo')
-                    if desc_elem:
-                        tjupt_description = str(desc_elem)
-                    
-                    # Extract torrent hash
-                    hash_elem = soup.select_one('input[name="hash"], code, .hash')
-                    if hash_elem:
-                        hash_text = hash_elem.get_text(strip=True)
-                        if len(hash_text) == 40:
-                            tjupt_torrenthash = hash_text
-                    
-                else:
-                    console.print(f"[yellow]Failed to fetch TJUPT details page. Status: {response.status_code}[/yellow]")
-                    
-        except httpx.RequestError as e:
-            console.print(f"[red]Request error fetching TJUPT details: {e}[/red]")
-        except Exception as e:
-            console.print(f"[red]Unexpected error fetching TJUPT details: {e}[/red]")
-            if meta and meta.get('debug', False):
-                console.print_exception()
-            elif self.config.get('DEFAULT', {}).get('debug', False):
-                console.print_exception()
-        
-        return tjupt_imdb, tjupt_tmdb, tjupt_name, tjupt_torrenthash, tjupt_description
-
     async def get_type_category_id(self, meta: Meta) -> str:
         cat_id = "0"  # Default to "请选择"
         category = str(meta.get('category', ''))
@@ -281,27 +115,18 @@ class TJUPT:
         keywords_lower = keywords.lower()
 
         # Genre-based categories take priority over basic MOVIE/TV
-        if 'animation' in genres_lower or 'animation' in keywords_lower:
+        if 'animation' in genres_lower or 'animation' in keywords_lower or 'anime' in genres_lower:
             cat_id = '405'  # 动漫
         elif 'documentary' in genres_lower or 'documentary' in keywords_lower:
-            cat_id = '411'  # 纪录片
+            cat_id = '402'  # 纪录片
         elif 'variety' in genres_lower or 'reality' in genres_lower or 'talk show' in genres_lower:
             cat_id = '403'  # 综艺
         elif category == 'MOVIE':
             cat_id = '401'  # 电影
         elif category == 'TV':
-            cat_id = '402'  # 剧集
+            cat_id = '404'  # 剧集/TV Series
 
         return cat_id
-
-    async def get_area_id(self, meta: Meta) -> int:
-        ptgen = cast(dict[str, Any], meta.get('ptgen', {}))
-        regions_value = ptgen.get("region", [])
-        regions = cast(list[str], regions_value) if isinstance(regions_value, list) else []
-        for area, area_id in self.AREA_MAP.items():
-            if area in regions:
-                return area_id
-        return 8
 
     async def get_type_medium_id(self, meta: Meta) -> str:
         medium_id = "0"
@@ -320,9 +145,32 @@ class TJUPT:
             medium_id = '5'
 
         if medium_id == "0":
-            console.print("[yellow]TJUPT: Could not determine medium type, defaulting to 0[/yellow]")
+            console.print("[yellow]OB: Could not determine medium type, defaulting to 0[/yellow]")
 
         return medium_id
+
+    async def get_area_id(self, meta: Meta) -> int:
+        ptgen = cast(dict[str, Any], meta.get('ptgen', {}))
+        regions_value = ptgen.get("region", [])
+        regions = cast(list[str], regions_value) if isinstance(regions_value, list) else []
+        for area, area_id in self.AREA_MAP.items():
+            if area in regions:
+                return area_id
+        return 8
+
+    async def edit_name(self, meta: Meta) -> str:
+        ob_name = str(meta.get('name', ''))
+
+        remove_list = ['Dubbed', 'Dual-Audio']
+        for each in remove_list:
+            ob_name = ob_name.replace(each, '')
+
+        ob_name = ob_name.replace('PQ10', 'HDR')
+
+        if meta.get('type') == 'WEBDL' and meta.get('has_encode_settings', False) is True:
+            ob_name = ob_name.replace('H.264', 'x264')
+
+        return ob_name
 
     async def edit_desc(self, meta: Meta) -> None:
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", encoding='utf-8') as base_file:
@@ -379,21 +227,6 @@ class TJUPT:
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
             await descfile.write("".join(parts))
 
-    async def edit_name(self, meta: Meta) -> str:
-        tjupt_name = str(meta.get('name', ''))
-
-        remove_list = ['Dubbed', 'Dual-Audio']
-        for each in remove_list:
-            tjupt_name = tjupt_name.replace(each, '')
-
-        tjupt_name = tjupt_name.replace(str(meta.get("aka", '')), '')
-        tjupt_name = tjupt_name.replace('PQ10', 'HDR')
-
-        if meta.get('type') == 'WEBDL' and meta.get('has_encode_settings', False) is True:
-            tjupt_name = tjupt_name.replace('H.264', 'x264')
-
-        return tjupt_name
-
     async def is_zhongzi(self, meta: Meta) -> Optional[str]:
         if meta.get('is_disc', '') != 'BDMV':
             mi = cast(dict[str, Any], meta.get('mediainfo', {}))
@@ -421,15 +254,15 @@ class TJUPT:
         if not os.path.exists(desc_file):
             await self.edit_desc(meta)
 
-        # Check anonymous upload (checkbox format: "yes" if checked, omitted if not)
+        # Check anonymous upload
         anon = None
         if meta.get('anon') == 1 or self.config['TRACKERS'][self.tracker].get('anon', False):
             anon = 'yes'
 
-        tjupt_name = await self.edit_name(meta)
+        ob_name = await self.edit_name(meta)
 
         async with aiofiles.open(desc_file, encoding='utf-8') as desc_handle:
-            tjupt_desc = await desc_handle.read()
+            ob_desc = await desc_handle.read()
         torrent_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}].torrent"
 
         async with aiofiles.open(torrent_path, 'rb') as torrentFile:
@@ -456,30 +289,30 @@ class TJUPT:
             small_descr = small_descr.replace('/ |', '|')
         else:
             small_descr = str(meta.get('title', ''))
-        
-        # Build form data according to TJUPT form structure
+
+        # Build form data
         data: dict[str, Any] = {
-            "name": tjupt_name,
+            "name": ob_name,
             "small_descr": small_descr,
-            "descr": tjupt_desc,
+            "descr": ob_desc,
             "type": await self.get_type_category_id(meta),
         }
-        
+
         # Add IMDb URL if available
         imdb_id = int(meta.get('imdb_id', 0) or 0)
         if imdb_id != 0:
             data["url"] = f"https://www.imdb.com/title/tt{meta.get('imdb', '')}/"
-        
+
         # Add anonymous upload checkbox if needed
         if anon:
             data["uplver"] = anon
-        
+
         # Add Chinese subtitle checkbox if detected
         chinese_sub = await self.is_zhongzi(meta)
         if chinese_sub == 'yes':
             data["chinese"] = "yes"
 
-        url = "https://www.tjupt.org/takeupload.php"
+        url = "https://ourbits.club/takeupload.php"
 
         # Submit
         if meta.get('debug'):
@@ -489,13 +322,13 @@ class TJUPT:
             await common.create_torrent_for_upload(meta, f"{self.tracker}" + "_DEBUG", f"{self.tracker}" + "_DEBUG", announce_url="https://fake.tracker")
             return True  # Debug mode - simulated success
         else:
-            cookiefile = f"{meta['base_dir']}/data/cookies/TJUPT.txt"
+            cookiefile = f"{meta['base_dir']}/data/cookies/OB.txt"
             if os.path.exists(cookiefile):
                 cookies = await common.parseCookieFile(cookiefile)
                 async with httpx.AsyncClient(cookies=cookies, timeout=float(self.timeout_upload), follow_redirects=True) as client:
-                    up = await self._request_with_retry(client, 'POST', url, data=data, files=files)
+                    up = await client.post(url=url, data=data, files=files)
 
-                    if str(up.url).startswith("https://www.tjupt.org/details.php?id="):
+                    if str(up.url).startswith("https://ourbits.club/details.php?id="):
                         console.print(f"[green]Uploaded to: [yellow]{str(up.url).replace('&uploaded=1', '')}[/yellow][/green]")
                         id_match = re.search(r"(id=)(\d+)", urlparse(str(up.url)).query)
                         if id_match is None:
@@ -508,16 +341,16 @@ class TJUPT:
                     else:
                         console.print(data)
                         console.print("\n\n")
-                        raise UploadException(f"Upload to TJUPT Failed: result URL {up.url} ({up.status_code}) was not expected", 'red')  # noqa #F405
+                        raise UploadException(f"Upload to OB Failed: result URL {up.url} ({up.status_code}) was not expected", 'red')  # noqa #F405
         return False
 
     async def download_new_torrent(self, id: str, torrent_path: str) -> None:
-        download_url = f"https://www.tjupt.org/download.php?id={id}&passkey={self.passkey}"
+        download_url = f"https://ourbits.club/download.php?id={id}&passkey={self.passkey}"
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             r = await client.get(url=download_url)
         if r.status_code == 200:
             async with aiofiles.open(torrent_path, "wb") as tor:
                 await tor.write(r.content)
         else:
-            console.print("[red]There was an issue downloading the new .torrent from tjupt")
+            console.print("[red]There was an issue downloading the new .torrent from OurBits")
             console.print(r.text)

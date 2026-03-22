@@ -54,6 +54,7 @@ from src.trackers.LUME import LUME
 from src.trackers.MTEAM import MTEAM
 from src.trackers.MTV import MTV
 from src.trackers.NBL import NBL
+from src.trackers.OB import OB
 from src.trackers.OE import OE
 from src.trackers.OTW import OTW
 from src.trackers.PHD import PHD
@@ -1345,7 +1346,7 @@ class TRACKER_SETUP:
 tracker_class_map: dict[str, type[Any]] = {
     'A4K': A4K, 'ACM': ACM, 'AITHER': AITHER, 'ANT': ANT, 'AR': AR, 'ASC': ASC, 'AUDIENCES': AUDIENCES, 'AZ': AZ, 'BHD': BHD, 'BHDTV': BHDTV, 'BJS': BJS, 'BLU': BLU, 'BT': BT, 'CBR': CBR,
     'CHD': CHD, 'CZ': CZ, 'DC': DC, 'DP': DP, 'EMUW': EMUW, 'FNP': FNP, 'FF': FF, 'FL': FL, 'FRIKI': FRIKI, 'GPW': GPW, 'HDB': HDB, 'HDS': HDS, 'HDSKY': HDSKY, 'HDT': HDT, 'HHAN': HHAN, 'HHD': HHD, 'HUNO': HUNO, 'ITT': ITT,
-    'IHD': IHD, 'IS': IS, 'LCD': LCD, 'LDU': LDU, 'LST': LST, 'LT': LT, 'LUME': LUME, 'MTEAM': MTEAM, 'MTV': MTV, 'NBL': NBL, 'OE': OE, 'OTW': OTW, 'PHD': PHD, 'PT': PT, 'PTP': PTP, 'PTER': PTER, 'PTS': PTS, 'PTT': PTT,
+    'IHD': IHD, 'IS': IS, 'LCD': LCD, 'LDU': LDU, 'LST': LST, 'LT': LT, 'LUME': LUME, 'MTEAM': MTEAM, 'MTV': MTV, 'NBL': NBL, 'OB': OB, 'OE': OE, 'OTW': OTW, 'PHD': PHD, 'PT': PT, 'PTP': PTP, 'PTER': PTER, 'PTS': PTS, 'PTT': PTT,
     'R4E': R4E, 'RAS': RAS, 'RF': RF, 'RTF': RTF, 'SAM': SAM, 'SHRI': SHRI, 'SN': SN, 'SP': SP, 'SPD': SPD, 'STC': STC, 'THR': THR,
     'TIK': TIK, 'TL': TL, 'TLZ': TLZ, 'TJUPT': TJUPT, 'TOS': TOS, 'TVC': TVC, 'TTG': TTG, 'TTR': TTR, 'U2': U2, 'ULCX': ULCX, 'UTP': UTP, 'YOINK': YOINK, 'YUS': YUS
 }
@@ -1360,5 +1361,5 @@ other_api_trackers = {
 }
 
 http_trackers = {
-    'AR', 'ASC', 'AUDIENCES', 'AZ', 'BJS', 'BT', 'CHD', 'CZ', 'FF', 'FL', 'HDB', 'HDS', 'HDSKY', 'HDT', 'HHAN', 'IS', 'MTEAM', 'MTV', 'PHD', 'PTER', 'PTS', 'TJUPT', 'TTG', 'U2'
+    'AR', 'ASC', 'AUDIENCES', 'AZ', 'BJS', 'BT', 'CHD', 'CZ', 'FF', 'FL', 'HDB', 'HDS', 'HDSKY', 'HDT', 'HHAN', 'IS', 'MTEAM', 'MTV', 'OB', 'PHD', 'PTER', 'PTS', 'TJUPT', 'TTG', 'U2'
 }
