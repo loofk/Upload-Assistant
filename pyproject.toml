@@ -45,7 +45,9 @@ exclude = ["data", "tests"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not live'"
 markers = [
     "unit: pure logic unit tests",
     "integration: tests with mocked HTTP",
+    "live: tests requiring real cookies and network access",
 ]

@@ -1,4 +1,5 @@
 """公共 fixture，供所有测试使用。"""
+import importlib.util
 import os
 import sys
 from typing import Any
@@ -7,7 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 # 确保项目根目录在 sys.path 中
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 
 @pytest.fixture
@@ -139,3 +141,55 @@ def mock_meta(tmp_path: Any) -> dict[str, Any]:
 def mock_console():
     """Mock Rich console 以避免终端输出干扰测试。"""
     return MagicMock()
+
+
+# ── Live test fixtures (需要真实 data/config.py 和 cookies) ──
+
+
+@pytest.fixture
+def real_config() -> dict[str, Any]:
+    """加载真实 data/config.py 配置。
+
+    如果文件不存在则自动 skip，仅用于 live 测试。
+    """
+    config_path = os.path.join(PROJECT_ROOT, "data", "config.py")
+    if not os.path.exists(config_path):
+        pytest.skip("data/config.py not found — skip live test")
+
+    spec = importlib.util.spec_from_file_location("config", config_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    config: dict[str, Any] = mod.config  # type: ignore[attr-defined]
+    return config
+
+
+@pytest.fixture
+def real_meta(tmp_path: Any) -> dict[str, Any]:
+    """为 live 测试提供 meta 字典，base_dir 指向项目根目录。
+
+    这样 cookie 路径 (base_dir/data/cookies/XXX.txt) 能正确解析。
+    """
+    uuid = "live-test"
+    os.makedirs(os.path.join(str(tmp_path), "tmp", uuid), exist_ok=True)
+
+    return {
+        "base_dir": PROJECT_ROOT,
+        "uuid": uuid,
+        "path": "",
+        "imdb_id": 0,
+        "imdb": "0",
+        "tmdb_id": 0,
+        "tvdb_id": 0,
+        "tvmaze_id": 0,
+        "mal_id": 0,
+        "douban_id": None,
+        "douban_url": None,
+        "category": "MOVIE",
+        "type": "DISC",
+        "debug": False,
+        "unattended": False,
+        "anime": False,
+        "ptgen": {},
+        "tracker_status": {},
+    }
