@@ -1416,6 +1416,12 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
     assert upload_stage["result"]["downloaded_torrent"]["hash"] == uploaded_hash
     assert upload_stage["result"]["injected_torrent"]["save_path"] == "/downloads/Name"
     assert upload_stage["result"]["injected_torrent"]["category"] == "MTEAM"
+    assert payload["closure"]["source"]["content_path"] == "/downloads/Name"
+    assert payload["closure"]["target"]["prepared"] is True
+    assert payload["closure"]["target"]["uploaded"] is True
+    assert payload["closure"]["target"]["downloaded"] is True
+    assert payload["closure"]["target"]["injected"] is True
+    assert payload["closure"]["target"]["uploaded_torrent_hash"] == uploaded_hash
 
 
 @pytest.mark.asyncio

@@ -697,6 +697,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "requested_path": args.content_path,
         "target_torrent_file": effective_target_torrent_file,
         "ready": all(stage.get("ok", False) for stage in stages),
+        "closure": _pipeline_closure(stages, effective_content_path, effective_source_torrent_hash, effective_target_torrent_file),
         "stages": stages,
     }
 
@@ -721,6 +722,39 @@ def _find_stage(stages: list[dict[str, Any]], stage_name: str) -> dict[str, Any]
         if stage.get("stage") == stage_name:
             return stage
     return None
+
+
+def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, source_torrent_hash: str | None, target_torrent_file: str | None) -> dict[str, Any]:
+    source_download = _find_stage(stages, "source-download")
+    inject_source = _find_stage(stages, "inject-source")
+    wait_complete = _find_stage(stages, "wait-complete")
+    target_prepare = _find_stage(stages, "target-prepare")
+    target_upload = _find_stage(stages, "target-upload")
+    target_upload_result = target_upload.get("result") if target_upload and isinstance(target_upload.get("result"), dict) else {}
+    downloaded_torrent = target_upload_result.get("downloaded_torrent") if isinstance(target_upload_result, dict) else None
+    injected_torrent = target_upload_result.get("injected_torrent") if isinstance(target_upload_result, dict) else None
+    return {
+        "source": {
+            "downloaded": _stage_completed(source_download),
+            "injected": _stage_completed(inject_source),
+            "complete": _stage_completed(wait_complete),
+            "torrent_hash": source_torrent_hash,
+            "content_path": content_path,
+        },
+        "target": {
+            "prepared": _stage_completed(target_prepare),
+            "uploaded": isinstance(target_upload_result, dict) and target_upload_result.get("status") == "uploaded",
+            "downloaded": isinstance(downloaded_torrent, dict),
+            "injected": isinstance(injected_torrent, dict) and not injected_torrent.get("blockers"),
+            "torrent_file": target_torrent_file,
+            "uploaded_torrent_hash": target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None,
+            "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
+        },
+    }
+
+
+def _stage_completed(stage: dict[str, Any] | None) -> bool:
+    return bool(stage and stage.get("ok") and not stage.get("skipped"))
 
 
 def _content_path_from_stage(stage: dict[str, Any]) -> str | None:
