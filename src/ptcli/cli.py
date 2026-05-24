@@ -708,6 +708,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 lambda payload: payload,
             )
             stages.append(source_download_result)
+            effective_source_torrent_hash = _torrent_hash_from_stage(source_download_result) or effective_source_torrent_hash
         else:
             stages.append(
                 {
@@ -725,6 +726,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 lambda path: _torrent_file_evidence(path),
             )
             stages.append(source_download_result)
+            effective_source_torrent_hash = _torrent_hash_from_stage(source_download_result) or effective_source_torrent_hash
         else:
             stages.append(
                 {
