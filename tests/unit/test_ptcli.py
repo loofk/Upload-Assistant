@@ -4322,6 +4322,10 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["summary"]["uploaded_torrent_hash"] == uploaded_hash
     assert summary_payload["summary"]["injected_torrent_hash"] == uploaded_hash
     assert summary_payload["summary"]["uploaded_torrent_path"] == str(tmp_path / "MTEAM-999.torrent")
+    assert summary_payload["summary"]["uploaded_torrent"]["path"] == str(tmp_path / "MTEAM-999.torrent")
+    assert summary_payload["summary"]["uploaded_torrent"]["exists"] is True
+    assert summary_payload["summary"]["uploaded_torrent"]["size_bytes"] == len(b"d4:infod")
+    assert len(summary_payload["summary"]["uploaded_torrent"]["sha1"]) == 40
     assert summary_payload["summary"]["uploaded_wait"]["complete"] is True
     assert summary_payload["summary"]["rule_obligations"]["ready"] is True
 
@@ -4396,6 +4400,10 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
     assert result["uploaded_torrent_hash"] == uploaded_hash
     assert result["injected_torrent"]["save_path"] == "/downloads/Example"
     assert result["summary"]["downloaded"] is True
+    assert result["summary"]["uploaded_torrent"]["path"] == str(uploaded_torrent)
+    assert result["summary"]["uploaded_torrent"]["exists"] is True
+    assert result["summary"]["uploaded_torrent"]["size_bytes"] > 0
+    assert len(result["summary"]["uploaded_torrent"]["sha1"]) == 40
     assert result["summary"]["injected"] is True
     assert result["summary"]["injection_verified"] is True
     assert result["summary"]["uploaded_torrent_path"] == str(uploaded_torrent)

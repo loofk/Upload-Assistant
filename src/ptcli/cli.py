@@ -658,6 +658,7 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "ready": result.get("status") in {"ready", "uploaded"} and not blockers,
         "uploaded": result.get("status") == "uploaded",
         "downloaded": isinstance(downloaded_torrent, dict),
+        "uploaded_torrent": downloaded_torrent if isinstance(downloaded_torrent, dict) else None,
         "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
         "injected": _injected_torrent_verified(injected_torrent),
         "injection_verified": _injected_torrent_verified(injected_torrent),
