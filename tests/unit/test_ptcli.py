@@ -185,6 +185,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                 "source": {"mode": "downloaded", "torrent_hash": "a" * 40, "content_path": "/downloads/Name"},
                 "target": {"ready": True, "uploaded_torrent_hash": "b" * 40},
             },
+            "summary": {"ready": True, "complete": True, "status": "complete"},
             "next_actions": ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."],
             "stages": [{"stage": "target-upload", "ok": True}],
         }
@@ -232,6 +233,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["closure"]["target"]["injected"] is True
     assert payload["evidence"]["source"]["mode"] == "downloaded"
     assert payload["evidence"]["target"]["uploaded_torrent_hash"] == "b" * 40
+    assert payload["summary"]["status"] == "complete"
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True
@@ -713,6 +715,32 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
     assert evidence["target"]["uploaded_torrent_hash"] == "b" * 40
     assert evidence["target"]["injection_verified"] is True
     assert evidence["target"]["injected_torrent_hash"] == "b" * 40
+
+
+def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
+    stages = [
+        {"stage": "flow-check", "ok": True, "result": {}},
+        {"stage": "source-download", "ok": True, "skipped": True, "message": "--download-source not provided; source download skipped."},
+        {"stage": "target-upload", "ok": False, "error": "Target upload stage did not complete every requested upload follow-up."},
+    ]
+    closure = {
+        "complete": False,
+        "blockers": ["target.injected"],
+        "source": {"ready": True, "matched": True, "content_path": "/downloads/Name"},
+        "target": {"prepared": True, "uploaded": True, "downloaded": True, "injected": False},
+    }
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    summary = ptcli_cli._pipeline_run_summary(stages, False, ["target-upload: failed"], closure, evidence)
+
+    assert summary["status"] == "blocked"
+    assert summary["complete"] is False
+    assert summary["blockers"] == ["target-upload: failed"]
+    assert summary["failed_stages"] == ["target-upload"]
+    assert summary["completed_stages"] == ["flow-check"]
+    assert summary["skipped_stages"] == ["source-download"]
+    assert summary["stage_statuses"][2]["message"] == "Target upload stage did not complete every requested upload follow-up."
+    assert summary["source"]["mode"] == "matched"
 
 
 def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:

@@ -387,6 +387,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     pipeline_result = await pipeline_payload(pipeline_args)
     closure = pipeline_result.get("closure") if isinstance(pipeline_result.get("closure"), dict) else None
     evidence = pipeline_result.get("evidence") if isinstance(pipeline_result.get("evidence"), dict) else None
+    summary = pipeline_result.get("summary") if isinstance(pipeline_result.get("summary"), dict) else None
     ready = bool(pipeline_result.get("ready"))
     blockers = _retorrent_execute_blockers(pipeline_result, closure, ready)
     next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
@@ -396,6 +397,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "pipeline": pipeline_result,
         "closure": closure,
         "evidence": evidence,
+        "summary": summary,
         "ready": ready,
         "complete": not blockers,
         "blockers": blockers,
@@ -780,6 +782,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     ready = all(stage.get("ok", False) for stage in stages)
     blockers = _pipeline_stage_blockers(stages) if _pipeline_has_action(args) and not ready else []
     closure = _pipeline_closure(stages, effective_content_path, effective_source_torrent_hash, effective_target_torrent_file)
+    evidence = _pipeline_evidence(closure)
     return {
         "status": "blocked" if blockers else "ok",
         "source_tracker": source_tracker,
@@ -792,7 +795,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "ready": ready,
         "blockers": blockers,
         "closure": closure,
-        "evidence": _pipeline_evidence(closure),
+        "evidence": evidence,
+        "summary": _pipeline_run_summary(stages, ready, blockers, closure, evidence),
         "next_actions": _pipeline_next_actions(args, blockers, closure),
         "stages": stages,
     }
@@ -830,6 +834,31 @@ def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:
         reason = stage.get("error") or stage.get("message") or "stage did not complete."
         blockers.append(f"{stage_name}: {reason}")
     return blockers
+
+
+def _pipeline_run_summary(stages: list[dict[str, Any]], ready: bool, blockers: list[str], closure: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    stage_statuses = [_pipeline_stage_status(stage) for stage in stages]
+    return {
+        "ready": ready,
+        "complete": bool(closure.get("complete")),
+        "status": "complete" if ready and closure.get("complete") else "blocked" if blockers or closure.get("blockers") else "incomplete",
+        "blockers": blockers or (closure.get("blockers") if isinstance(closure.get("blockers"), list) else []),
+        "stage_statuses": stage_statuses,
+        "failed_stages": [stage["stage"] for stage in stage_statuses if not stage["ok"]],
+        "completed_stages": [stage["stage"] for stage in stage_statuses if stage["ok"] and not stage["skipped"]],
+        "skipped_stages": [stage["stage"] for stage in stage_statuses if stage["skipped"]],
+        "source": evidence.get("source", {}),
+        "target": evidence.get("target", {}),
+    }
+
+
+def _pipeline_stage_status(stage: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "stage": str(stage.get("stage") or "unknown"),
+        "ok": bool(stage.get("ok")),
+        "skipped": bool(stage.get("skipped")),
+        "message": stage.get("error") or stage.get("message"),
+    }
 
 
 def _pipeline_next_actions(args: argparse.Namespace, blockers: list[str], closure: dict[str, Any]) -> list[str]:
