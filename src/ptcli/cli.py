@@ -1154,6 +1154,8 @@ async def _target_connection_check(config: dict[str, Any], target_trackers_raw: 
 
 
 def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trackers: list[str], content_path: str | None) -> list[dict[str, str]]:
+    target_trackers_arg = ",".join(target_trackers)
+    retorrent_path_arg = f"--path {json.dumps(content_path, ensure_ascii=False)}" if content_path else '--save-path "/downloads"'
     commands = [
         {
             "stage": "source-info",
@@ -1161,11 +1163,15 @@ def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trac
         },
         {
             "stage": "source-download",
-            "command": f"python3 ptcli.py source-download --tracker {source_tracker} --source-id {source_torrent_id} --to {','.join(target_trackers)} --output-dir ./tmp/source --accept-rules --json",
+            "command": f"python3 ptcli.py source-download --tracker {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} --output-dir ./tmp/source --accept-rules --json",
         },
         {
             "stage": "rules",
-            "command": f"python3 ptcli.py rules --trackers {source_tracker},{','.join(target_trackers)} --json",
+            "command": f"python3 ptcli.py rules --trackers {source_tracker},{target_trackers_arg} --json",
+        },
+        {
+            "stage": "retorrent-execute",
+            "command": f"python3 ptcli.py retorrent --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} --execute --accept-rules --confirm-upload {retorrent_path_arg} --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json",
         },
     ]
     if content_path:
