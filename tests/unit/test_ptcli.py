@@ -2881,6 +2881,8 @@ async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None
 
     assert result["save_path"] == "/downloads"
     assert result["hash"] == torrent.infohash
+    assert result["verified_in_client"] is True
+    assert result["client_matches"][0]["hash"] == torrent.infohash
     assert result["category"] == "pt"
     assert result["tags"] == "U2"
     assert fake_client.added_kwargs["save_path"] == "/downloads"

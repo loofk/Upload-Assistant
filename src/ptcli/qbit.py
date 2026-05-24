@@ -154,6 +154,7 @@ class QbitReadOnlyService:
             add_kwargs["tags"] = tags
 
         await asyncio.to_thread(client.torrents_add, **add_kwargs)
+        client_matches = await self.list_torrents(torrent_hash=torrent_hash)
         return {
             "torrent_path": str(resolved_torrent_path),
             "hash": torrent_hash,
@@ -162,6 +163,8 @@ class QbitReadOnlyService:
             "tags": tags,
             "paused": paused,
             "skip_checking": skip_checking,
+            "verified_in_client": bool(client_matches),
+            "client_matches": summaries_to_dicts(client_matches),
         }
 
     async def wait_for_completion(
