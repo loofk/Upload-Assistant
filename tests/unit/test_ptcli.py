@@ -616,7 +616,25 @@ def test_pipeline_next_actions_reports_stage_blockers() -> None:
     args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--inject-source", "--json"])
     actions = ptcli_cli._pipeline_next_actions(args, ["inject-source: --save-path is required when --inject-source is used."], {"complete": False})
 
-    assert actions == ["Fix inject-source: --save-path is required when --inject-source is used."]
+    assert actions == ["Provide a qBittorrent save path with --save-path when using --inject-source."]
+
+
+def test_pipeline_next_actions_explain_source_stage_blockers() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--download-source", "--json"])
+    actions = ptcli_cli._pipeline_next_actions(
+        args,
+        [
+            "source-download: Skipped because flow-check, source-info, or executable rule-check did not pass.",
+            "inject-source: qBittorrent source torrent injection was not verified.",
+            "wait-complete: qBittorrent task did not complete before timeout.",
+        ],
+        {"complete": False},
+    )
+
+    assert any("--download-source" in action and "rule-check" in action for action in actions)
+    assert any("--inject-source --save-path" in action for action in actions)
+    assert any("--wait-complete" in action and "--path" in action for action in actions)
 
 
 def test_pipeline_next_actions_explain_target_upload_followup_blockers() -> None:
@@ -777,6 +795,30 @@ def test_pipeline_stage_blockers_include_target_upload_followup_details() -> Non
 
     assert "target-upload: Target upload stage did not complete every requested upload follow-up." in blockers
     assert "target-upload: injected_torrent: qBittorrent refused torrent" in blockers
+
+
+def test_pipeline_stage_blockers_include_source_followup_details() -> None:
+    stages = [
+        {
+            "stage": "inject-source",
+            "ok": False,
+            "error": "qBittorrent source torrent injection was not verified.",
+            "result": {"hash": "a" * 40, "verified_in_client": False},
+        },
+        {
+            "stage": "wait-complete",
+            "ok": False,
+            "error": "qBittorrent task did not complete before timeout.",
+            "result": {"complete": False, "blockers": ["no matching torrent"]},
+        },
+    ]
+
+    blockers = ptcli_cli._pipeline_stage_blockers(stages)
+
+    assert "inject-source: qBittorrent source torrent injection was not verified." in blockers
+    assert "inject-source: qBittorrent did not verify the injected source torrent in the client list." in blockers
+    assert "wait-complete: no matching torrent" in blockers
+    assert "wait-complete: qBittorrent did not report the source torrent as complete." in blockers
 
 
 def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
@@ -1741,6 +1783,66 @@ async def test_pipeline_inject_source_runs_after_download(monkeypatch, tmp_path)
     assert inject_stage["result"]["category"] == "pt"
     assert inject_stage["result"]["tags"] == "U2"
     assert inject_stage["result"]["paused"] is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_inject_source_requires_client_verification(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (tracker, source_id, base_dir)
+        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path.parent.mkdir(parents=True, exist_ok=True)
+        torrent_path.write_bytes(b"d4:infod")
+        return torrent_path
+
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+        _ = (config, client_name, torrent_path, save_path, category, tags, paused)
+        return {"client": "qbittorrent", "hash": "a" * 40, "verified_in_client": False}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--download-source",
+            "--inject-source",
+            "--save-path",
+            "/downloads",
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    inject_stage = next(stage for stage in payload["stages"] if stage["stage"] == "inject-source")
+    assert inject_stage["ok"] is False
+    assert "not verified" in inject_stage["error"]
+    assert any("injected source torrent" in blocker for blocker in payload["blockers"])
+    assert any("--inject-source --save-path" in action for action in payload["next_actions"])
 
 
 @pytest.mark.asyncio

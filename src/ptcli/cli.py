@@ -683,6 +683,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 "inject-source",
                 lambda: _inject_source_with_config(config, args.client, torrent_path, args.save_path, args.qbit_category, args.qbit_tags, args.paused),
                 lambda payload: payload,
+                validate=_injected_torrent_verified,
+                invalid_message="qBittorrent source torrent injection was not verified.",
             )
             stages.append(inject_result)
             effective_source_torrent_hash = _torrent_hash_from_result(inject_result.get("result")) or effective_source_torrent_hash
@@ -901,7 +903,25 @@ def _stage_result_blockers(stage_name: str, result: Any) -> list[str]:
         return []
     if stage_name == "target-upload":
         return _target_upload_result_blockers(result)
+    if stage_name == "inject-source":
+        return _source_inject_result_blockers(result)
+    if stage_name == "wait-complete":
+        return _wait_complete_result_blockers(result)
     return _string_list(result.get("blockers"))
+
+
+def _source_inject_result_blockers(result: dict[str, Any]) -> list[str]:
+    blockers = _string_list(result.get("blockers"))
+    if result.get("verified_in_client") is False:
+        _append_unique_string(blockers, "qBittorrent did not verify the injected source torrent in the client list.")
+    return blockers
+
+
+def _wait_complete_result_blockers(result: dict[str, Any]) -> list[str]:
+    blockers = _string_list(result.get("blockers"))
+    if result.get("complete") is False:
+        _append_unique_string(blockers, "qBittorrent did not report the source torrent as complete.")
+    return blockers
 
 
 def _target_upload_result_blockers(result: dict[str, Any]) -> list[str]:
@@ -1073,6 +1093,14 @@ def _pipeline_next_actions(args: argparse.Namespace, blockers: list[str], closur
 
 
 def _pipeline_stage_blocker_next_action(blocker: str) -> str:
+    if blocker.startswith("source-download:"):
+        return "Fix source torrent download prerequisites, then re-run with --download-source after flow-check, source-info, and rule-check pass."
+    if blocker.startswith("inject-source: --save-path"):
+        return "Provide a qBittorrent save path with --save-path when using --inject-source."
+    if blocker.startswith("inject-source:"):
+        return "Fix qBittorrent source torrent injection, then re-run with --download-source --inject-source --save-path."
+    if blocker.startswith("wait-complete:"):
+        return "Wait for the source torrent to finish in qBittorrent, then re-run with --wait-complete or provide --path for already completed content."
     if blocker.startswith("target-upload: downloaded_torrent:"):
         return "Fix target torrent download from MTEAM, then re-run target upload follow-up with --download-uploaded-torrent and --inject-uploaded-torrent."
     if blocker.startswith("target-upload: injected_torrent:"):
