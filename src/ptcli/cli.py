@@ -2329,6 +2329,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     inject_source = _find_stage(stages, "inject-source")
     wait_complete = _find_stage(stages, "wait-complete")
     match = _find_stage(stages, "match")
+    source_content_verify = _find_stage(stages, "source-content-verify")
     target_prepare = _find_stage(stages, "target-prepare")
     target_upload = _find_stage(stages, "target-upload")
     target_upload_result = target_upload.get("result") if target_upload and isinstance(target_upload.get("result"), dict) else {}
@@ -2342,18 +2343,21 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_injected = _source_injection_verified(inject_source)
     source_complete = _stage_completed(wait_complete)
     source_matched = _match_stage_has_match(match)
+    source_content_verified = _source_content_verified(source_content_verify)
     target_injected = _injected_torrent_verified(injected_torrent)
     target_seeding = target_injected and (not isinstance(uploaded_wait, dict) or bool(uploaded_wait.get("complete")))
     injected_target_hash = _torrent_hash_from_result(injected_torrent)
     uploaded_target_hash = target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None
     source = {
-        "ready": (source_downloaded and source_injected and source_complete) or source_matched,
+        "ready": (source_downloaded and source_injected and source_complete) or (source_matched and source_content_verified),
         "downloaded": source_downloaded,
         "injected": source_injected,
         "injection_verified": source_injected,
         "injected_torrent_hash": _torrent_hash_from_stage(inject_source),
         "complete": source_complete,
         "matched": source_matched,
+        "content_verified": source_content_verified,
+        "content_verification": source_content_verify.get("result") if source_content_verify and isinstance(source_content_verify.get("result"), dict) else None,
         "torrent_hash": source_torrent_hash,
         "content_path": content_path,
         "source_torrent": source_download_result if isinstance(source_download_result, dict) else None,
@@ -2418,6 +2422,8 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "torrent_hash": source.get("torrent_hash"),
             "injected_torrent_hash": source.get("injected_torrent_hash"),
             "injection_verified": bool(source.get("injection_verified")),
+            "content_verified": bool(source.get("content_verified")),
+            "content_verification": source.get("content_verification"),
             "content_path": source.get("content_path"),
             "source_torrent": source.get("source_torrent"),
             "source_torrent_path": source.get("source_torrent_path"),
@@ -2454,6 +2460,10 @@ def _source_injection_verified(stage: dict[str, Any] | None) -> bool:
     if not _stage_completed(stage):
         return False
     return _injected_torrent_verified(stage.get("result"))
+
+
+def _source_content_verified(stage: dict[str, Any] | None) -> bool:
+    return True if stage is None else _stage_completed(stage)
 
 
 def _stage_completed(stage: dict[str, Any] | None) -> bool:

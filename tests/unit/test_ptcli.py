@@ -1471,6 +1471,43 @@ def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
     assert closure["source"]["matched"] is True
 
 
+def test_pipeline_closure_rejects_unverified_existing_qbit_match() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "b" * 40}]}},
+        {
+            "stage": "source-content-verify",
+            "ok": False,
+            "message": "Matched qBittorrent content does not include the source tracker torrent hash.",
+            "result": {"verified": False, "expected_hash": "a" * 40, "matched_hashes": ["b" * 40]},
+        },
+        {"stage": "target-prepare", "ok": True, "result": {}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "uploaded_torrent_hash": "c" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "c" * 40, "verified_in_client": True},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    assert closure["complete"] is False
+    assert closure["blockers"] == ["source.ready"]
+    assert closure["source"]["ready"] is False
+    assert closure["source"]["matched"] is True
+    assert closure["source"]["content_verified"] is False
+    assert evidence["source"]["content_verified"] is False
+    assert evidence["source"]["content_verification"]["matched_hashes"] == ["b" * 40]
+
+
 def test_pipeline_closure_preserves_torrent_file_evidence() -> None:
     source_torrent = {"path": "/tmp/U2-60635.torrent", "exists": True, "size_bytes": 8, "sha1": "c" * 40}
     uploaded_torrent = {"path": "/tmp/MTEAM-999.torrent", "exists": True, "size_bytes": 9, "sha1": "d" * 40}
