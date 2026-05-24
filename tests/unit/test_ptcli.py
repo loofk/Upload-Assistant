@@ -631,8 +631,10 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
             "uploaded": True,
             "downloaded": True,
             "injected": True,
+            "injection_verified": True,
             "torrent_file": "/tmp/mteam.torrent",
             "uploaded_torrent_hash": "b" * 40,
+            "injected_torrent_hash": "b" * 40,
             "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
         },
     }
@@ -644,6 +646,8 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
     assert evidence["source"]["torrent_hash"] == "a" * 40
     assert evidence["target"]["ready"] is True
     assert evidence["target"]["uploaded_torrent_hash"] == "b" * 40
+    assert evidence["target"]["injection_verified"] is True
+    assert evidence["target"]["injected_torrent_hash"] == "b" * 40
 
 
 def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
@@ -696,6 +700,9 @@ def test_pipeline_closure_requires_target_injection_client_verification() -> Non
     assert closure["complete"] is False
     assert closure["blockers"] == ["target.injected"]
     assert closure["target"]["injected"] is False
+    assert closure["target"]["injection_verified"] is False
+    assert closure["target"]["injected_torrent_hash"] == "b" * 40
+    assert closure["target"]["uploaded_torrent_hash"] == "b" * 40
 
 
 def test_pipeline_closure_requires_source_injection_client_verification() -> None:
@@ -746,8 +753,10 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
             "uploaded": True,
             "downloaded": True,
             "injected": True,
+            "injection_verified": True,
             "torrent_file": "/tmp/mteam.torrent",
             "uploaded_torrent_hash": "b" * 40,
+            "injected_torrent_hash": "b" * 40,
             "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
         },
     }
@@ -756,6 +765,8 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
 
     assert evidence["source"]["injection_verified"] is True
     assert evidence["source"]["injected_torrent_hash"] == "a" * 40
+    assert evidence["target"]["injection_verified"] is True
+    assert evidence["target"]["injected_torrent_hash"] == "b" * 40
 
 
 def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:

@@ -811,6 +811,9 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_injected = _source_injection_verified(inject_source)
     source_complete = _stage_completed(wait_complete)
     source_matched = _match_stage_has_match(match)
+    target_injected = _injected_torrent_verified(injected_torrent)
+    injected_target_hash = _torrent_hash_from_result(injected_torrent)
+    uploaded_target_hash = target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None
     source = {
         "ready": (source_downloaded and source_injected and source_complete) or source_matched,
         "downloaded": source_downloaded,
@@ -826,9 +829,11 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "prepared": _stage_completed(target_prepare),
         "uploaded": isinstance(target_upload_result, dict) and target_upload_result.get("status") == "uploaded",
         "downloaded": isinstance(downloaded_torrent, dict),
-        "injected": _injected_torrent_verified(injected_torrent),
+        "injected": target_injected,
+        "injection_verified": target_injected,
         "torrent_file": target_torrent_file,
-        "uploaded_torrent_hash": target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None,
+        "uploaded_torrent_hash": uploaded_target_hash or injected_target_hash,
+        "injected_torrent_hash": injected_target_hash,
         "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
     }
     blockers = _closure_blockers(source, target)
@@ -869,6 +874,8 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "ready": bool(target.get("prepared") and target.get("uploaded") and target.get("downloaded") and target.get("injected")),
             "torrent_file": target.get("torrent_file"),
             "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
+            "injected_torrent_hash": target.get("injected_torrent_hash"),
+            "injection_verified": bool(target.get("injection_verified")),
             "uploaded_torrent_path": target.get("uploaded_torrent_path"),
         },
     }
