@@ -144,9 +144,13 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--target-execute", action="store_true", help="Check readiness for a live target upload.")
     doctor.add_argument("--confirm-upload", action="store_true", help="Confirm manual rule review and live upload intent.")
     doctor.add_argument("--download-uploaded-torrent", action="store_true", help="Check follow-up download of the generated MTEAM torrent file.")
+    doctor.add_argument("--uploaded-torrent-id", help="Existing MTEAM torrent id to download and inject without re-submitting the upload.")
     doctor.add_argument("--uploaded-torrent-file", help="Existing uploaded MTEAM .torrent file intended for qBittorrent injection.")
     doctor.add_argument("--inject-uploaded-torrent", action="store_true", help="Check follow-up qBittorrent injection after target upload.")
     doctor.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
+    doctor.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for uploaded target torrent injection.")
+    doctor.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for uploaded target torrent injection.")
+    doctor.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent to qBittorrent paused.")
     doctor.add_argument("--wait-uploaded-complete", action="store_true", help="Check qBittorrent completion wait after uploaded target torrent injection.")
     doctor.add_argument("--connect-qbit", action="store_true", help="Probe qBittorrent connectivity by listing one torrent.")
     doctor.add_argument("--probe-source", action="store_true", help="Probe source tracker metadata lookup with the configured credentials/cookies.")
@@ -602,6 +606,7 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
         target_execute=args.target_execute,
         confirm_upload=args.confirm_upload,
         download_uploaded_torrent=args.download_uploaded_torrent,
+        uploaded_torrent_id=args.uploaded_torrent_id,
         uploaded_torrent_file=args.uploaded_torrent_file,
         inject_uploaded_torrent=args.inject_uploaded_torrent,
         uploaded_save_path=args.uploaded_save_path,
@@ -944,6 +949,7 @@ def _doctor_summary_inputs(args: argparse.Namespace) -> dict[str, Any]:
         "source_torrent_file": args.source_torrent_file,
         "package_dir": args.package_dir,
         "target_torrent_file": args.target_torrent_file,
+        "uploaded_torrent_id": args.uploaded_torrent_id,
         "uploaded_torrent_file": args.uploaded_torrent_file,
         "accept_rules": bool(args.accept_rules),
         "target_execute": bool(args.target_execute),
@@ -951,6 +957,9 @@ def _doctor_summary_inputs(args: argparse.Namespace) -> dict[str, Any]:
         "download_uploaded_torrent": bool(args.download_uploaded_torrent),
         "inject_uploaded_torrent": bool(args.inject_uploaded_torrent),
         "uploaded_save_path": args.uploaded_save_path,
+        "uploaded_qbit_category": args.uploaded_qbit_category,
+        "uploaded_qbit_tags": args.uploaded_qbit_tags,
+        "uploaded_paused": bool(args.uploaded_paused),
         "wait_uploaded_complete": bool(args.wait_uploaded_complete),
         "connect_qbit": bool(args.connect_qbit),
         "probe_source": bool(args.probe_source),
@@ -964,6 +973,7 @@ def _doctor_summary_artifacts(args: argparse.Namespace) -> dict[str, Any]:
         "source_torrent_file": _path_artifact(args.source_torrent_file),
         "package_dir": _path_artifact(args.package_dir),
         "target_torrent_file": _path_artifact(args.target_torrent_file),
+        "uploaded_torrent_id": args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(args.uploaded_torrent_file),
     }
 
@@ -988,6 +998,32 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
         }
     ]
     if not payload.get("live_safe_to_attempt"):
+        return commands
+
+    if args.uploaded_torrent_id and args.package_dir:
+        uploaded_resume_args = [
+            "target-upload",
+            "--package-dir",
+            args.package_dir,
+            "--client",
+            args.client,
+            "--uploaded-torrent-id",
+            args.uploaded_torrent_id,
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+        if args.uploaded_save_path:
+            uploaded_resume_args.extend(["--uploaded-save-path", args.uploaded_save_path])
+        if args.uploaded_qbit_category:
+            uploaded_resume_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
+        if args.uploaded_qbit_tags:
+            uploaded_resume_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
+        if args.uploaded_paused:
+            uploaded_resume_args.append("--uploaded-paused")
+        commands.append({"stage": "resume-uploaded-torrent-download", "command": _ptcli_command(uploaded_resume_args)})
         return commands
 
     source_tracker = normalize_tracker(args.source_tracker)
@@ -1042,8 +1078,11 @@ def _doctor_retry_command(args: argparse.Namespace) -> str:
         ("--source-torrent-file", args.source_torrent_file),
         ("--package-dir", args.package_dir),
         ("--target-torrent-file", args.target_torrent_file),
+        ("--uploaded-torrent-id", args.uploaded_torrent_id),
         ("--uploaded-torrent-file", args.uploaded_torrent_file),
         ("--uploaded-save-path", args.uploaded_save_path),
+        ("--uploaded-qbit-category", args.uploaded_qbit_category),
+        ("--uploaded-qbit-tags", args.uploaded_qbit_tags),
     ):
         if value:
             retry_args.extend([option, value])
@@ -1054,6 +1093,7 @@ def _doctor_retry_command(args: argparse.Namespace) -> str:
         ("--download-uploaded-torrent", args.download_uploaded_torrent),
         ("--inject-uploaded-torrent", args.inject_uploaded_torrent),
         ("--wait-uploaded-complete", args.wait_uploaded_complete),
+        ("--uploaded-paused", args.uploaded_paused),
         ("--connect-qbit", args.connect_qbit),
         ("--probe-source", args.probe_source),
         ("--probe-target", args.probe_target),
