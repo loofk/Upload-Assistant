@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Final
 
-from src.ptcli.flows import get_flow_profiles
+from src.ptcli.flows import NEXUSPHP_MTEAM_SOURCE_TRACKERS, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS
 
 
@@ -48,7 +48,7 @@ _DEFAULT_NOTES: Final[tuple[str, ...]] = (
     "Let the tracker adapter perform concrete field/category/description validation before upload.",
 )
 
-_ENABLED_AUTOMATION_TRACKERS: Final[set[str]] = {"CHD", "MTEAM", "U2"}
+_ENABLED_AUTOMATION_TRACKERS: Final[set[str]] = {*NEXUSPHP_MTEAM_SOURCE_TRACKERS, "MTEAM"}
 
 
 def get_rule_profile(tracker: str) -> RuleProfile:

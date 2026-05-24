@@ -13,9 +13,14 @@ import aiofiles
 import httpx
 
 from src.ptcli.mainland import normalize_tracker
+from src.trackers.AUDIENCES import AUDIENCES
 from src.trackers.CHD import CHD
 from src.trackers.COMMON import COMMON
+from src.trackers.HDSKY import HDSKY
+from src.trackers.HHAN import HHAN
 from src.trackers.MTEAM import MTEAM
+from src.trackers.PTER import PTER
+from src.trackers.TJUPT import TJUPT
 from src.trackers.U2 import U2
 
 
@@ -27,13 +32,23 @@ class SourceTrackerProtocol(Protocol):
 
 
 SOURCE_TRACKER_CLASSES: dict[str, type[Any]] = {
+    "AUDIENCES": AUDIENCES,
     "CHD": CHD,
+    "HDSKY": HDSKY,
+    "HHAN": HHAN,
     "MTEAM": MTEAM,
+    "PTER": PTER,
+    "TJUPT": TJUPT,
     "U2": U2,
 }
 
 NEXUS_DOWNLOAD_BASE_URLS: dict[str, str] = {
+    "AUDIENCES": "https://audiences.me",
     "CHD": "https://ptchdbits.co",
+    "HDSKY": "https://hdsky.me",
+    "HHAN": "https://hhanclub.net",
+    "PTER": "https://pterclub.com",
+    "TJUPT": "https://www.tjupt.org",
     "U2": "https://u2.dmhy.org",
 }
 

@@ -875,6 +875,19 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
     }
 
 
+def test_rule_check_accepts_enabled_chinese_nexus_source_with_ack(capsys) -> None:
+    code = main(["rule-check", "--from", "PTER", "--to", "MTEAM", "--accept-rules", "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ready"] is True
+    assert payload["source_tracker"] == "PTER"
+    assert payload["automation_scope"]["reference_flow_enabled"] is True
+    assert payload["automation_scope"]["source_adapter_enabled"] is True
+    assert payload["automation_scope"]["target_adapter_enabled"] is True
+    assert payload["manual_review"]["site_specific_rules_encoded"] is False
+
+
 def test_source_download_requires_target_rule_context(monkeypatch, capsys) -> None:
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
 
@@ -910,6 +923,29 @@ def test_source_info_exposes_normalized_source_id(monkeypatch, capsys) -> None:
     assert payload["input_source_id"] == source_url
     assert payload["source_torrent_id"] == "60635"
     assert payload["source"]["torrent_id"] == "60635"
+
+
+def test_source_info_uses_enabled_chinese_source_adapter(monkeypatch, capsys) -> None:
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (_config, base_dir)
+        return source_info_from_tuple(tracker, extract_torrent_id(source_id), (7, 8, "PTER.Name.2024", "b" * 40, "desc"), {})
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+
+    code = main(["source-info", "--tracker", "PTER", "--source-id", "123", "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tracker"] == "PTER"
+    assert payload["source_torrent_id"] == "123"
+    assert payload["source"]["name"] == "PTER.Name.2024"
+
+
+def test_source_module_registers_enabled_chinese_source_adapters() -> None:
+    for tracker in ["AUDIENCES", "CHD", "HDSKY", "HHAN", "PTER", "TJUPT", "U2"]:
+        assert tracker in ptcli_source.SOURCE_TRACKER_CLASSES
+        assert tracker in ptcli_source.NEXUS_DOWNLOAD_BASE_URLS
 
 
 def test_source_info_blocks_unsupported_tracker_before_fetch(monkeypatch, capsys) -> None:
@@ -1989,6 +2025,28 @@ def test_flow_check_ready_for_u2_to_mteam(tmp_path) -> None:
     assert payload["requested_source_id"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["input_source_id"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["source_torrent_id"] == "60635"
+
+
+def test_flow_check_ready_for_enabled_chinese_nexus_source(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "PTER.txt").write_text("uid=1;", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {
+            "PTER": {"passkey": "pter-passkey"},
+            "MTEAM": {"api_key": "mteam-api"},
+        },
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+
+    payload = build_flow_check(config, "PTER", "123", "MTEAM", "default", base_dir=str(tmp_path))
+
+    assert payload["ready"] is True
+    assert payload["source_tracker"] == "PTER"
+    assert any(check["name"] == "PTER.passkey" and check["ok"] is True for check in payload["checks"])
+    assert any(check["name"] == "PTER.cookie" and check["ok"] is True for check in payload["checks"])
+    assert any(check["name"] == "reference_flow" and check["ok"] is True for check in payload["checks"])
 
 
 def test_flow_check_reports_missing_cookie(tmp_path) -> None:
