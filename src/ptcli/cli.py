@@ -489,7 +489,7 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
             args.uploaded_qbit_tags,
             args.uploaded_paused,
         )
-        return {**result, "injected_torrent": inject_result}
+        return _with_uploaded_injection(result, inject_result)
     return result
 
 
@@ -871,7 +871,7 @@ async def _target_upload_with_config(
             args.uploaded_qbit_tags,
             args.uploaded_paused,
         )
-        return {**result, "injected_torrent": inject_result}
+        return _with_uploaded_injection(result, inject_result)
     return result
 
 
@@ -890,6 +890,17 @@ async def _wait_complete_with_config(
         "client": resolved_client_name,
         **result,
     }
+
+
+def _with_uploaded_injection(result: dict[str, Any], inject_result: dict[str, Any]) -> dict[str, Any]:
+    uploaded_torrent_hash = _torrent_hash_from_result(inject_result)
+    payload = {**result, "injected_torrent": inject_result}
+    if uploaded_torrent_hash:
+        payload["uploaded_torrent_hash"] = uploaded_torrent_hash
+        downloaded_torrent = payload.get("downloaded_torrent")
+        if isinstance(downloaded_torrent, dict):
+            payload["downloaded_torrent"] = {**downloaded_torrent, "hash": uploaded_torrent_hash}
+    return payload
 
 
 async def _qbit_connection_check(config: dict[str, Any], client_name: str) -> dict[str, Any]:

@@ -1338,6 +1338,7 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    uploaded_hash = "d" * 40
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
@@ -1357,6 +1358,7 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         return {
+            "hash": uploaded_hash,
             "torrent_path": torrent_path,
             "save_path": save_path,
             "category": category,
@@ -1410,6 +1412,8 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
     upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
     assert upload_stage["ok"] is True
     assert upload_stage["result"]["status"] == "uploaded"
+    assert upload_stage["result"]["uploaded_torrent_hash"] == uploaded_hash
+    assert upload_stage["result"]["downloaded_torrent"]["hash"] == uploaded_hash
     assert upload_stage["result"]["injected_torrent"]["save_path"] == "/downloads/Name"
     assert upload_stage["result"]["injected_torrent"]["category"] == "MTEAM"
 
@@ -1427,6 +1431,7 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    uploaded_hash = "e" * 40
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
@@ -1441,6 +1446,7 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         return {
+            "hash": uploaded_hash,
             "torrent_path": torrent_path,
             "save_path": save_path,
             "category": category,
@@ -1512,6 +1518,7 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
 
     upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
     assert upload_stage["ok"] is True
+    assert upload_stage["result"]["uploaded_torrent_hash"] == uploaded_hash
     assert upload_stage["result"]["injected_torrent"]["save_path"] == "/downloads/Name"
     assert upload_stage["result"]["injected_torrent"]["category"] == "MTEAM"
 
@@ -2221,6 +2228,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
+    uploaded_hash = "f" * 40
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
         return {
@@ -2231,6 +2239,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
         return {
             "client": client_name,
+            "hash": uploaded_hash,
             "torrent_path": torrent_path,
             "save_path": save_path,
             "category": category,
@@ -2269,6 +2278,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     result = await ptcli_cli.target_upload_payload(args)
 
     assert result["status"] == "uploaded"
+    assert result["uploaded_torrent_hash"] == uploaded_hash
+    assert result["downloaded_torrent"]["hash"] == uploaded_hash
     assert result["injected_torrent"]["save_path"] == "/downloads/Example"
     assert result["injected_torrent"]["category"] == "MTEAM"
     assert result["injected_torrent"]["tags"] == "retorrent"
