@@ -28,6 +28,7 @@ def build_doctor_check(
     download_uploaded_torrent: bool = False,
     inject_uploaded_torrent: bool = False,
     uploaded_save_path: str | None = None,
+    wait_uploaded_complete: bool = False,
 ) -> dict[str, Any]:
     flow_check = build_flow_check(config, source_tracker, source_id, target_trackers, client, base_dir=base_dir)
     checks: list[dict[str, Any]] = []
@@ -45,7 +46,7 @@ def build_doctor_check(
         checks.append(package_preflight["check"])
     else:
         checks.append(_check("target_package", False, "Target package directory was not provided."))
-    checks.extend(_upload_followup_checks(download_uploaded_torrent, inject_uploaded_torrent, uploaded_save_path, content_path, target_execute))
+    checks.extend(_upload_followup_checks(download_uploaded_torrent, inject_uploaded_torrent, uploaded_save_path, content_path, target_execute, wait_uploaded_complete))
 
     return {
         "status": "ok",
@@ -143,6 +144,7 @@ def _upload_followup_checks(
     uploaded_save_path: str | None,
     content_path: str | None,
     target_execute: bool,
+    wait_uploaded_complete: bool,
 ) -> list[dict[str, Any]]:
     checks = [
         _check(
@@ -167,6 +169,14 @@ def _upload_followup_checks(
         checks.append(_path_check("uploaded_save_path", save_path, required=True))
     else:
         checks.append(_check("inject_uploaded_torrent", True, "Uploaded target torrent injection is not requested."))
+    if wait_uploaded_complete and not inject_uploaded_torrent:
+        checks.append(_check("wait_uploaded_complete", False, "--wait-uploaded-complete requires --inject-uploaded-torrent."))
+    elif target_execute and not wait_uploaded_complete:
+        checks.append(_check("wait_uploaded_complete", False, "Uploaded target torrent completion wait is required for full live retorrent closure."))
+    elif wait_uploaded_complete:
+        checks.append(_check("wait_uploaded_complete", True, "Uploaded target torrent will be waited until complete in qBittorrent."))
+    else:
+        checks.append(_check("wait_uploaded_complete", True, "Uploaded target torrent completion wait is not requested."))
     return checks
 
 
@@ -182,6 +192,7 @@ def _live_safe_to_attempt(checks: list[dict[str, Any]], target_execute: bool) ->
         "target_package",
         "download_uploaded_torrent",
         "inject_uploaded_torrent",
+        "wait_uploaded_complete",
     }
     checks_by_name = {str(check["name"]): bool(check["ok"]) for check in checks}
     return all(checks_by_name.get(name, False) for name in required_names)

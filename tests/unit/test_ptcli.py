@@ -134,6 +134,7 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert '"stage": "doctor-live"' in out
     assert "--target-execute --confirm-upload" in out
     assert "--download-uploaded-torrent --inject-uploaded-torrent" in out
+    assert "--wait-uploaded-complete" in out
     assert '"stage": "retorrent-execute"' in out
     assert "--execute --accept-rules --confirm-upload" in out
     assert "--uploaded-qbit-category MTEAM" in out
@@ -1077,11 +1078,13 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
         download_uploaded_torrent=True,
         inject_uploaded_torrent=True,
         uploaded_save_path=str(content_path),
+        wait_uploaded_complete=True,
     )
 
     assert payload["ready"] is True
     assert payload["live_safe_to_attempt"] is True
     assert payload["package_preflight"]["status"] == "ready"
+    assert any(check["name"] == "wait_uploaded_complete" and check["ok"] is True for check in payload["checks"])
 
 
 def test_doctor_requires_uploaded_torrent_injection_for_live_closure(tmp_path) -> None:
@@ -1128,6 +1131,7 @@ def test_doctor_requires_uploaded_torrent_injection_for_live_closure(tmp_path) -
     assert payload["live_safe_to_attempt"] is False
     assert any(check["name"] == "download_uploaded_torrent" and check["ok"] is False for check in payload["checks"])
     assert any(check["name"] == "inject_uploaded_torrent" and check["ok"] is False for check in payload["checks"])
+    assert any(check["name"] == "wait_uploaded_complete" and check["ok"] is False for check in payload["checks"])
 
 
 def test_doctor_reports_blockers_for_missing_package(tmp_path) -> None:

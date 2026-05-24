@@ -129,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--download-uploaded-torrent", action="store_true", help="Check follow-up download of the generated MTEAM torrent file.")
     doctor.add_argument("--inject-uploaded-torrent", action="store_true", help="Check follow-up qBittorrent injection after target upload.")
     doctor.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
+    doctor.add_argument("--wait-uploaded-complete", action="store_true", help="Check qBittorrent completion wait after uploaded target torrent injection.")
     doctor.add_argument("--connect-qbit", action="store_true", help="Probe qBittorrent connectivity by listing one torrent.")
     doctor.add_argument("--probe-source", action="store_true", help="Probe source tracker metadata lookup with the configured credentials/cookies.")
     doctor.add_argument("--probe-target", action="store_true", help="Probe MTEAM target duplicate-search API with the source metadata signal.")
@@ -498,6 +499,7 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
         download_uploaded_torrent=args.download_uploaded_torrent,
         inject_uploaded_torrent=args.inject_uploaded_torrent,
         uploaded_save_path=args.uploaded_save_path,
+        wait_uploaded_complete=args.wait_uploaded_complete,
     )
     live_checks = []
     if args.connect_qbit:
@@ -1254,7 +1256,7 @@ def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trac
         },
         {
             "stage": "doctor-live",
-            "command": f"python3 ptcli.py doctor --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} {doctor_path_arg} --accept-rules --target-execute --confirm-upload --download-uploaded-torrent --inject-uploaded-torrent --json",
+            "command": f"python3 ptcli.py doctor --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} {doctor_path_arg} --accept-rules --target-execute --confirm-upload --download-uploaded-torrent --inject-uploaded-torrent --wait-uploaded-complete --json",
         },
         {
             "stage": "retorrent-execute",
