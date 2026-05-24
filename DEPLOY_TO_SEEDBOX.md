@@ -107,13 +107,13 @@ scp data/config.py user@your-seedbox-ip:/path/to/config.py
 
 ```bash
 # 拉取最新镜像
-docker pull ghcr.io/audionut/upload-assistant:latest
+docker pull ghcr.io/loofk/upload-assistant:latest
 
 # 运行测试（Debug 模式）
 docker run --rm -it --network=host \
   -v /path/to/config.py:/Upload-Assistant/data/config.py \
   -v /path/to/downloads:/downloads \
-  ghcr.io/audionut/upload-assistant:latest \
+  ghcr.io/loofk/upload-assistant:latest \
   /downloads/path/to/video.mkv \
   --trackers MTEAM \
   --debug \

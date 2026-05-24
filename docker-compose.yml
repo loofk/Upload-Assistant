@@ -1,6 +1,6 @@
 services:
   upload-assistant-cli:
-    image: ghcr.io/audionut/upload-assistant:latest
+    image: ghcr.io/loofk/upload-assistant:latest
     container_name: UA
     restart: unless-stopped
     networks:

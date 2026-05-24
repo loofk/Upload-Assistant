@@ -1,0 +1,7 @@
+-r requirements.txt
+
+bandit
+pyright
+pytest
+pytest-asyncio
+ruff==0.14.13
