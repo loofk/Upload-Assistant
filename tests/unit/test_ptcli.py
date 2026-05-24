@@ -64,6 +64,19 @@ class EmptyQbitClient(FakeQbitClient):
         return []
 
 
+class DelayedQbitClient(FakeQbitClient):
+    def __init__(self, visible_after: int = 2) -> None:
+        super().__init__()
+        self.visible_after = visible_after
+        self.info_calls = 0
+
+    def torrents_info(self, **kwargs):
+        self.info_calls += 1
+        if kwargs.get("torrent_hashes") and self.info_calls >= self.visible_after:
+            return [{"name": "One", "hash": kwargs["torrent_hashes"], "content_path": "/downloads/One", "progress": 1.0}]
+        return []
+
+
 def make_mteam_safe_torrent(tmp_path, name: str = "upload") -> str:
     content = tmp_path / f"{name}.mkv"
     content.write_bytes(b"content")
@@ -5100,6 +5113,7 @@ async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None
     assert result["save_path"] == "/downloads"
     assert result["hash"] == torrent.infohash
     assert result["verified_in_client"] is True
+    assert result["verification_attempts"] == 1
     assert result["client_matches"][0]["hash"] == torrent.infohash
     assert result["category"] == "pt"
     assert result["tags"] == "U2"
@@ -5107,6 +5121,29 @@ async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None
     assert fake_client.added_kwargs["category"] == "pt"
     assert fake_client.added_kwargs["tags"] == "U2"
     assert fake_client.added_kwargs["paused"] is True
+
+
+@pytest.mark.asyncio
+async def test_qbit_service_waits_for_added_torrent_visibility(tmp_path) -> None:
+    fake_client = DelayedQbitClient(visible_after=3)
+    content = tmp_path / "source.mkv"
+    content.write_bytes(b"content")
+    torrent_path = tmp_path / "source.torrent"
+    torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+    torrent.generate()
+    torrent.write(str(torrent_path), overwrite=True)
+    service = QbitReadOnlyService({}, qbit_client=fake_client)
+
+    result = await service.add_torrent_file(
+        torrent_path=str(torrent_path),
+        save_path="/downloads",
+        verify_timeout=1.0,
+        verify_interval=0.001,
+    )
+
+    assert result["verified_in_client"] is True
+    assert result["verification_attempts"] == 3
+    assert result["client_matches"][0]["hash"] == torrent.infohash
 
 
 @pytest.mark.asyncio

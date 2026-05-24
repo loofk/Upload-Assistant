@@ -1,4 +1,4 @@
-"""Read-only qBittorrent helpers for ptcli."""
+"""qBittorrent helpers for ptcli."""
 
 from __future__ import annotations
 
@@ -146,7 +146,14 @@ class QbitReadOnlyService:
         tags: str | None = None,
         paused: bool = False,
         skip_checking: bool = False,
+        verify_timeout: float = 5.0,
+        verify_interval: float = 0.5,
     ) -> dict[str, Any]:
+        if verify_timeout < 0:
+            raise ValueError("verify_timeout must be >= 0.")
+        if verify_interval <= 0:
+            raise ValueError("verify_interval must be > 0.")
+
         client = await self.connect()
         resolved_torrent_path, torrent_bytes, torrent_hash = await asyncio.to_thread(_read_torrent_payload, torrent_path)
         if not torrent_bytes.startswith(b"d"):
@@ -164,7 +171,7 @@ class QbitReadOnlyService:
             add_kwargs["tags"] = tags
 
         await asyncio.to_thread(client.torrents_add, **add_kwargs)
-        client_matches = await self.list_torrents(torrent_hash=torrent_hash)
+        client_matches, verification_attempts = await self._wait_for_added_torrent(torrent_hash, verify_timeout, verify_interval)
         return {
             "torrent_path": str(resolved_torrent_path),
             "hash": torrent_hash,
@@ -173,9 +180,20 @@ class QbitReadOnlyService:
             "tags": tags,
             "paused": paused,
             "skip_checking": skip_checking,
+            "verification_attempts": verification_attempts,
             "verified_in_client": bool(client_matches),
             "client_matches": summaries_to_dicts(client_matches),
         }
+
+    async def _wait_for_added_torrent(self, torrent_hash: str, timeout: float, interval: float) -> tuple[list[QbitTorrentSummary], int]:
+        deadline = asyncio.get_running_loop().time() + timeout
+        attempts = 0
+        while True:
+            attempts += 1
+            matches = await self.list_torrents(torrent_hash=torrent_hash)
+            if matches or asyncio.get_running_loop().time() >= deadline:
+                return matches, attempts
+            await asyncio.sleep(interval)
 
     async def wait_for_completion(
         self,
