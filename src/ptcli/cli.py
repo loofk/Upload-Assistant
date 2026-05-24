@@ -1517,6 +1517,7 @@ def _source_inject_result_blockers(result: dict[str, Any]) -> list[str]:
     blockers = _string_list(result.get("blockers"))
     if result.get("verified_in_client") is False:
         _append_unique_string(blockers, "qBittorrent did not verify the injected source torrent in the client list.")
+    _extend_unique_string(blockers, _client_verification_blockers(result.get("client_verification")))
     return blockers
 
 
@@ -1531,6 +1532,9 @@ def _target_upload_result_blockers(result: dict[str, Any]) -> list[str]:
     blockers = _string_list(result.get("blockers"))
     _extend_unique_string(blockers, _nested_blockers(result.get("downloaded_torrent"), "downloaded_torrent"))
     _extend_unique_string(blockers, _nested_blockers(result.get("injected_torrent"), "injected_torrent"))
+    injected_torrent = result.get("injected_torrent")
+    if isinstance(injected_torrent, dict):
+        _extend_unique_string(blockers, [f"injected_torrent: {blocker}" for blocker in _client_verification_blockers(injected_torrent.get("client_verification"))])
     _extend_unique_string(blockers, _nested_blockers(result.get("uploaded_wait"), "uploaded_wait"))
     uploaded_wait = result.get("uploaded_wait")
     if isinstance(uploaded_wait, dict) and uploaded_wait.get("complete") is False:
@@ -1542,6 +1546,18 @@ def _nested_blockers(payload: Any, label: str) -> list[str]:
     if not isinstance(payload, dict):
         return []
     return [f"{label}: {blocker}" for blocker in _string_list(payload.get("blockers"))]
+
+
+def _client_verification_blockers(client_verification: Any) -> list[str]:
+    if not isinstance(client_verification, dict):
+        return []
+    checks = {
+        "visible": "qBittorrent did not list the injected torrent after add.",
+        "save_path_matched": "qBittorrent did not report the requested save path for the injected torrent.",
+        "category_matched": "qBittorrent did not report the requested category for the injected torrent.",
+        "tags_matched": "qBittorrent did not report the requested tags for the injected torrent.",
+    }
+    return [message for key, message in checks.items() if client_verification.get(key) is False]
 
 
 def _string_list(value: Any) -> list[str]:
@@ -2081,6 +2097,8 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
 
 def _injected_torrent_verified(injected_torrent: Any) -> bool:
     if not isinstance(injected_torrent, dict) or injected_torrent.get("blockers"):
+        return False
+    if _client_verification_blockers(injected_torrent.get("client_verification")):
         return False
     if "verified_in_client" in injected_torrent:
         return bool(injected_torrent.get("verified_in_client"))

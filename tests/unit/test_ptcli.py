@@ -1023,6 +1023,25 @@ def test_target_upload_result_requires_uploaded_torrent_client_verification() ->
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
 
 
+def test_target_upload_result_requires_uploaded_torrent_client_metadata_match() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {
+            "hash": "a" * 40,
+            "verified_in_client": True,
+            "client_verification": {
+                "visible": True,
+                "save_path_matched": True,
+                "category_matched": False,
+                "tags_matched": True,
+            },
+        },
+    }
+
+    assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
+
+
 def test_target_upload_result_accepts_completed_uploaded_torrent_injection() -> None:
     payload = {
         "status": "uploaded",
@@ -1059,6 +1078,29 @@ def test_target_upload_summary_surfaces_followup_blockers() -> None:
     assert "injected_torrent: qBittorrent refused torrent" in summary["blockers"]
     assert "uploaded_wait: torrent hash missing" in summary["blockers"]
     assert "uploaded_wait: qBittorrent did not report the uploaded target torrent as complete." in summary["blockers"]
+
+
+def test_target_upload_summary_surfaces_client_metadata_mismatch() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {
+            "hash": "a" * 40,
+            "verified_in_client": True,
+            "client_verification": {
+                "visible": True,
+                "save_path_matched": False,
+                "category_matched": True,
+                "tags_matched": False,
+            },
+        },
+    }
+
+    summary = ptcli_cli._target_upload_summary(payload, {"status": "ready", "blockers": [], "rule_obligation_review": {"ready": True, "blockers": []}})
+
+    assert summary["ready"] is False
+    assert "injected_torrent: qBittorrent did not report the requested save path for the injected torrent." in summary["blockers"]
+    assert "injected_torrent: qBittorrent did not report the requested tags for the injected torrent." in summary["blockers"]
 
 
 def test_target_upload_result_accepts_completed_uploaded_torrent_wait() -> None:
