@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import json
 from pathlib import Path
@@ -88,6 +89,25 @@ def test_normalize_tracker_aliases() -> None:
 
 def test_parse_tracker_list_deduplicates() -> None:
     assert parse_tracker_list("mteam, M-TEAM, tjupt") == ["MTEAM", "TJUPT"]
+
+
+def test_help_surfaces_short_live_closure_commands() -> None:
+    help_text = build_parser().format_help()
+
+    assert "Common live closure commands:" in help_text
+    assert "ptcli retorrent --from U2 --source-id 60635 --to MTEAM --execute" in help_text
+    assert "ptcli pipeline --from U2 --source-id 60635 --to MTEAM --save-path /downloads" in help_text
+    assert "ptcli doctor --from U2 --source-id 60635 --to MTEAM" in help_text
+
+
+def test_pipeline_help_describes_live_closure_defaults() -> None:
+    parser = build_parser()
+    pipeline_parser = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction)).choices["pipeline"]
+    help_text = pipeline_parser.format_help()
+
+    assert "automatically fills in the live closure defaults" in help_text
+    assert "download/inject/wait" in help_text
+    assert "uploaded MTEAM torrent download/inject/wait" in help_text
 
 
 def test_retorrent_plan_requires_supported_trackers() -> None:

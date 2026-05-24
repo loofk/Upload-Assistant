@@ -55,6 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ptcli",
         description="Focused CLI for compliant mainland/CN PT retorrent workflows.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Common live closure commands:\n"
+            "  ptcli retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --json\n"
+            "  ptcli pipeline --from U2 --source-id 60635 --to MTEAM --save-path /downloads --check-dupes --prepare-target --accept-rules --upload-target --target-execute --confirm-upload --json\n"
+            "  ptcli doctor --from U2 --source-id 60635 --to MTEAM --path /downloads/movie --package-dir ./tmp/target/U2-60635-to-MTEAM --target-execute --confirm-upload --accept-rules --json"
+        ),
     )
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
@@ -145,7 +152,15 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --package-dir or ./tmp/retorrent-runs.")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
-    pipeline = subparsers.add_parser("pipeline", help="Run a read-only dry-run pipeline: flow-check, source-info, and optional qBittorrent match.")
+    pipeline = subparsers.add_parser(
+        "pipeline",
+        help="Run staged retorrent checks; with --target-execute it auto-runs the live closure follow-ups.",
+        description=(
+            "Run the staged PT retorrent pipeline. Plain runs are dry/read-only unless action flags are supplied. "
+            "When --upload-target --target-execute is used, the pipeline automatically fills in the live closure defaults: "
+            "source download/inject/wait when needed, target torrent export/sanitize when needed, and uploaded MTEAM torrent download/inject/wait."
+        ),
+    )
     pipeline.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
     pipeline.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code.")
     pipeline.add_argument("--source-id", required=True, help="Source tracker torrent id or details URL.")
