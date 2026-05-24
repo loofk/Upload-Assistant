@@ -1304,6 +1304,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "source_torrent_id": source_torrent_id,
         "source_torrent_hash": effective_source_torrent_hash,
         "target_trackers": target_trackers,
+        "client": args.client,
+        "qbit_options": _pipeline_qbit_options(args),
         "path": effective_content_path,
         "requested_path": args.content_path,
         "target_torrent_file": effective_target_torrent_file,
@@ -1719,6 +1721,21 @@ def _pipeline_effective_actions(
     }
 
 
+def _pipeline_qbit_options(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "source": {
+            "category": args.qbit_category,
+            "tags": args.qbit_tags,
+            "paused": bool(args.paused),
+        },
+        "uploaded": {
+            "category": args.uploaded_qbit_category,
+            "tags": args.uploaded_qbit_tags,
+            "paused": bool(args.uploaded_paused),
+        },
+    }
+
+
 def _pipeline_stage_status(stage: dict[str, Any]) -> dict[str, Any]:
     return {
         "stage": str(stage.get("stage") or "unknown"),
@@ -1886,6 +1903,8 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "input_source_id": payload.get("input_source_id"),
         "source_torrent_id": payload.get("source_torrent_id"),
         "target_trackers": payload.get("target_trackers"),
+        "client": payload.get("client"),
+        "qbit_options": payload.get("qbit_options"),
         "path": payload.get("path"),
         "target_torrent_file": payload.get("target_torrent_file"),
         "ready": payload.get("ready"),
@@ -1937,6 +1956,10 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     source_torrent_id = str(payload.get("source_torrent_id") or "")
     target_trackers = payload.get("target_trackers")
     target_trackers_arg = ",".join(str(tracker) for tracker in target_trackers) if isinstance(target_trackers, list) else str(target_trackers or "")
+    client = str(payload.get("client") or "default")
+    qbit_options = payload.get("qbit_options") if isinstance(payload.get("qbit_options"), dict) else {}
+    source_qbit_options = qbit_options.get("source") if isinstance(qbit_options.get("source"), dict) else {}
+    uploaded_qbit_options = qbit_options.get("uploaded") if isinstance(qbit_options.get("uploaded"), dict) else {}
     content_path = payload.get("path")
     path_args = ["--path", str(content_path)] if content_path else []
     uploaded_save_path_args = ["--uploaded-save-path", str(content_path)] if content_path else []
@@ -1956,11 +1979,14 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         source_torrent_id,
                         "--to",
                         target_trackers_arg,
+                        "--client",
+                        client,
                         "--source-torrent-file",
                         str(source_torrent_file),
                         "--inject-source",
                         "--save-path",
                         str(content_path or "/downloads"),
+                        *_qbit_resume_args(source_qbit_options, prefix=""),
                         "--wait-complete",
                         "--accept-rules",
                         "--write-summary",
@@ -1985,6 +2011,8 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         source_torrent_id,
                         "--to",
                         target_trackers_arg,
+                        "--client",
+                        client,
                         *path_args,
                         "--package-dir",
                         str(target_package_dir),
@@ -1997,6 +2025,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         "--download-uploaded-torrent",
                         "--inject-uploaded-torrent",
                         *uploaded_save_path_args,
+                        *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
                         "--wait-uploaded-complete",
                         "--write-summary",
                         "--json",
@@ -2015,10 +2044,13 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         "target-upload",
                         "--package-dir",
                         str(target_package_dir),
+                        "--client",
+                        client,
                         "--uploaded-torrent-file",
                         str(uploaded_torrent_file),
                         "--inject-uploaded-torrent",
                         *uploaded_save_path_args,
+                        *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
                         "--wait-uploaded-complete",
                         "--write-summary",
                         "--json",
@@ -2027,6 +2059,19 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
             }
         )
     return commands
+
+
+def _qbit_resume_args(options: dict[str, Any], *, prefix: str) -> list[str]:
+    args: list[str] = []
+    category = options.get("category")
+    tags = options.get("tags")
+    if category:
+        args.extend([f"--{prefix}qbit-category", str(category)])
+    if tags:
+        args.extend([f"--{prefix}qbit-tags", str(tags)])
+    if options.get("paused"):
+        args.append(f"--{prefix}paused")
+    return args
 
 
 def _ptcli_command(args: list[str]) -> str:
