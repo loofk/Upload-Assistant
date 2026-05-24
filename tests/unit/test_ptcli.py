@@ -434,6 +434,59 @@ def test_json_capture_moves_stdout_to_logs() -> None:
     assert payload == {"status": "ok", "logs": ["noisy tracker log"]}
 
 
+def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {"stage": "target-prepare", "ok": True, "result": {}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "uploaded_torrent_hash": "b" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+
+    assert closure["complete"] is True
+    assert closure["blockers"] == []
+    assert closure["source"]["ready"] is True
+    assert closure["source"]["matched"] is True
+
+
+def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": []}},
+        {"stage": "target-prepare", "ok": True, "result": {}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", None, "/tmp/target.torrent")
+
+    assert closure["complete"] is False
+    assert closure["blockers"] == ["source.ready"]
+    assert closure["source"]["ready"] is False
+    assert closure["source"]["matched"] is False
+
+
 def test_resolve_default_qbit_client() -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -1559,8 +1612,10 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
     assert upload_stage["result"]["downloaded_torrent"]["hash"] == uploaded_hash
     assert upload_stage["result"]["injected_torrent"]["save_path"] == "/downloads/Name"
     assert upload_stage["result"]["injected_torrent"]["category"] == "MTEAM"
-    assert payload["closure"]["complete"] is False
-    assert payload["closure"]["blockers"] == ["source.downloaded", "source.injected", "source.complete"]
+    assert payload["closure"]["complete"] is True
+    assert payload["closure"]["blockers"] == []
+    assert payload["closure"]["source"]["ready"] is True
+    assert payload["closure"]["source"]["matched"] is True
     assert payload["closure"]["source"]["content_path"] == "/downloads/Name"
     assert payload["closure"]["target"]["prepared"] is True
     assert payload["closure"]["target"]["uploaded"] is True

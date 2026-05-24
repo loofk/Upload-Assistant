@@ -751,15 +751,22 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_download = _find_stage(stages, "source-download")
     inject_source = _find_stage(stages, "inject-source")
     wait_complete = _find_stage(stages, "wait-complete")
+    match = _find_stage(stages, "match")
     target_prepare = _find_stage(stages, "target-prepare")
     target_upload = _find_stage(stages, "target-upload")
     target_upload_result = target_upload.get("result") if target_upload and isinstance(target_upload.get("result"), dict) else {}
     downloaded_torrent = target_upload_result.get("downloaded_torrent") if isinstance(target_upload_result, dict) else None
     injected_torrent = target_upload_result.get("injected_torrent") if isinstance(target_upload_result, dict) else None
+    source_downloaded = _stage_completed(source_download)
+    source_injected = _stage_completed(inject_source)
+    source_complete = _stage_completed(wait_complete)
+    source_matched = _match_stage_has_match(match)
     source = {
-        "downloaded": _stage_completed(source_download),
-        "injected": _stage_completed(inject_source),
-        "complete": _stage_completed(wait_complete),
+        "ready": (source_downloaded and source_injected and source_complete) or source_matched,
+        "downloaded": source_downloaded,
+        "injected": source_injected,
+        "complete": source_complete,
+        "matched": source_matched,
         "torrent_hash": source_torrent_hash,
         "content_path": content_path,
     }
@@ -783,9 +790,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
 
 def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[str]:
     checks = [
-        ("source.downloaded", source.get("downloaded")),
-        ("source.injected", source.get("injected")),
-        ("source.complete", source.get("complete")),
+        ("source.ready", source.get("ready")),
         ("target.prepared", target.get("prepared")),
         ("target.uploaded", target.get("uploaded")),
         ("target.downloaded", target.get("downloaded")),
@@ -796,6 +801,16 @@ def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[st
 
 def _stage_completed(stage: dict[str, Any] | None) -> bool:
     return bool(stage and stage.get("ok") and not stage.get("skipped"))
+
+
+def _match_stage_has_match(stage: dict[str, Any] | None) -> bool:
+    if not _stage_completed(stage):
+        return False
+    result = stage.get("result")
+    if not isinstance(result, dict):
+        return False
+    matches = result.get("matches")
+    return isinstance(matches, list) and any(isinstance(match, dict) for match in matches)
 
 
 def _content_path_from_stage(stage: dict[str, Any]) -> str | None:
