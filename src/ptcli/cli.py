@@ -124,6 +124,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     target_upload = subparsers.add_parser("target-upload", help="Preflight a prepared target package before live upload.")
     target_upload.add_argument("--package-dir", required=True, help="Directory created by pipeline --prepare-target.")
+    target_upload.add_argument("--torrent-file", help="MTEAM .torrent file to include in the upload payload summary.")
+    target_upload.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json into the package directory.")
     target_upload.add_argument("--execute", action="store_true", help="Request live upload. Currently blocked until upload support is enabled.")
     target_upload.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
@@ -260,7 +262,7 @@ def flow_check_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
-    return build_mteam_upload_preflight(args.package_dir, execute=args.execute)
+    return build_mteam_upload_preflight(args.package_dir, execute=args.execute, torrent_file=args.torrent_file, write_payload=args.write_payload)
 
 
 async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:

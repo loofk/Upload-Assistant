@@ -851,12 +851,16 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
         {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
     ]
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
 
-    preflight = build_mteam_upload_preflight(package["package_dir"])
+    preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
 
     assert preflight["status"] == "ready"
     assert preflight["dry_run"] is True
     assert preflight["upload_gate"]["ready"] is True
+    assert preflight["upload_payload"]["form_fields"]["name"] == source_info["name"]
+    assert preflight["upload_payload"]["torrent_file"]["sha1"]
 
 
 def test_mteam_upload_preflight_blocks_execute_until_live_upload_exists(tmp_path) -> None:
@@ -876,11 +880,59 @@ def test_mteam_upload_preflight_blocks_execute_until_live_upload_exists(tmp_path
         {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
     ]
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
 
-    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True)
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
 
     assert preflight["status"] == "blocked"
     assert "live upload is not enabled" in preflight["blockers"][0]
+
+
+def test_mteam_upload_payload_summary_blocks_missing_torrent(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], [{"stage": "match", "ok": True, "result": {"count": 1}}], "/downloads/Example", str(tmp_path))
+    from_disk = build_mteam_upload_preflight(package["package_dir"])
+
+    assert from_disk["status"] == "blocked"
+    assert "torrent file is required" in from_disk["upload_payload"]["blockers"][0]
+
+
+def test_mteam_upload_payload_summary_writes_payload_file(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file), write_payload=True)
+
+    assert preflight["status"] == "ready"
+    assert preflight["files"]["upload_payload"].endswith("mteam-upload-payload.json")
+    assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-upload-payload.json").exists()
 
 
 def test_target_upload_command_outputs_preflight_json(tmp_path, capsys) -> None:
@@ -896,13 +948,16 @@ def test_target_upload_command_outputs_preflight_json(tmp_path, capsys) -> None:
         "description_length": 100,
     }
     package = write_mteam_prepare_package(source_info, ["MTEAM"], [{"stage": "match", "ok": True, "result": {"count": 1}}], "/downloads/Example", str(tmp_path))
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
 
-    code = main(["target-upload", "--package-dir", package["package_dir"], "--json"])
+    code = main(["target-upload", "--package-dir", package["package_dir"], "--torrent-file", str(torrent_file), "--write-payload", "--json"])
 
     assert code == 0
     out = capsys.readouterr().out
     assert '"target_tracker": "MTEAM"' in out
     assert '"upload_gate"' in out
+    assert '"upload_payload"' in out
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -55,16 +56,23 @@ def write_mteam_prepare_package(
     }
 
 
-def build_mteam_upload_preflight(package_dir: str, execute: bool = False) -> dict[str, Any]:
+def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torrent_file: str | None = None, write_payload: bool = False) -> dict[str, Any]:
     package = load_mteam_prepare_package(package_dir)
     gate = package.get("upload_gate", {})
     files = package.get("files", {})
     blockers = list(package.get("blockers", []))
+    payload_summary = build_mteam_upload_payload_summary(package, torrent_file=torrent_file)
+    blockers.extend(payload_summary["blockers"])
 
     if not isinstance(gate, dict) or not gate.get("ready"):
         blockers.append("MTEAM upload gate is not ready.")
     if execute:
         blockers.append("MTEAM live upload is not enabled in ptcli yet.")
+
+    if write_payload:
+        payload_path = Path(package_dir).expanduser() / "mteam-upload-payload.json"
+        _write_json(payload_path, payload_summary)
+        files = {**files, "upload_payload": str(payload_path)}
 
     return {
         "status": "blocked" if blockers else "ready",
@@ -73,8 +81,29 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False) -> dic
         "package_dir": str(Path(package_dir).expanduser()),
         "files": files,
         "upload_gate": gate,
+        "upload_payload": payload_summary,
         "blockers": blockers,
         "next_actions": _upload_preflight_next_actions(blockers, execute),
+    }
+
+
+def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: str | None = None) -> dict[str, Any]:
+    field_mapping = package.get("field_mapping", {})
+    description_length = int(package.get("description_length", 0) or 0)
+    form_fields = _mteam_upload_form_fields(field_mapping, description_length)
+    torrent_summary, torrent_blockers = _torrent_file_summary(torrent_file)
+    missing_fields = [field for field in ("name", "smallDescr", "descr", "category") if not form_fields.get(field)]
+    blockers = [f"MTEAM upload payload is missing required field(s): {', '.join(missing_fields)}."] if missing_fields else []
+    blockers.extend(torrent_blockers)
+
+    return {
+        "endpoint": "https://api.m-team.cc/api/torrent/createOredit",
+        "method": "POST",
+        "multipart": True,
+        "form_fields": form_fields,
+        "file_field": "file",
+        "torrent_file": torrent_summary,
+        "blockers": blockers,
     }
 
 
@@ -408,6 +437,45 @@ def _prepare_package_dir(output_dir: str, source_info: dict[str, Any] | None) ->
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _mteam_upload_form_fields(field_mapping: dict[str, Any], description_length: int) -> dict[str, Any]:
+    form_fields: dict[str, Any] = {
+        "name": field_mapping.get("name"),
+        "smallDescr": field_mapping.get("smallDescr"),
+        "descr": {"source": "mteam-description-draft.txt", "length": description_length} if description_length > 0 else None,
+        "category": field_mapping.get("category"),
+        "standard": field_mapping.get("standard"),
+        "anonymous": field_mapping.get("anonymous", True),
+        "dmmCode": "",
+        "tags": "",
+        "aids": "",
+        "mediainfoAnalysisResult": None,
+    }
+    for optional_field in ("imdb", "douban"):
+        if field_mapping.get(optional_field):
+            form_fields[optional_field] = field_mapping[optional_field]
+    return form_fields
+
+
+def _torrent_file_summary(torrent_file: str | None) -> tuple[dict[str, Any] | None, list[str]]:
+    if not torrent_file:
+        return None, ["MTEAM upload torrent file is required."]
+
+    path = Path(torrent_file).expanduser()
+    if not path.exists() or not path.is_file():
+        return {"path": str(path)}, [f"MTEAM upload torrent file does not exist: {path}"]
+
+    data = path.read_bytes()
+    blockers: list[str] = []
+    if not data.startswith(b"d"):
+        blockers.append("MTEAM upload torrent file does not look like a .torrent file.")
+    return {
+        "path": str(path),
+        "filename": path.name,
+        "size": len(data),
+        "sha1": hashlib.sha1(data).hexdigest(),
+    }, blockers
 
 
 def _read_json(path: Path) -> Any:
