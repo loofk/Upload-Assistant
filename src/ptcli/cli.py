@@ -380,6 +380,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     evidence = pipeline_result.get("evidence") if isinstance(pipeline_result.get("evidence"), dict) else None
     ready = bool(pipeline_result.get("ready"))
     blockers = _retorrent_execute_blockers(pipeline_result, closure, ready)
+    next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
     return {
         "status": "complete" if not blockers else "blocked",
         "plan": plan_payload,
@@ -389,6 +390,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "ready": ready,
         "complete": not blockers,
         "blockers": blockers,
+        "next_actions": next_actions,
     }
 
 
@@ -407,6 +409,15 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
     if pipeline_result.get("status") not in {None, "ok", "complete"}:
         blockers.append(f"pipeline status is {pipeline_result.get('status')}.")
     return blockers
+
+
+def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: list[str]) -> list[str]:
+    if not blockers:
+        return ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
+    pipeline_actions = pipeline_result.get("next_actions")
+    if isinstance(pipeline_actions, list) and pipeline_actions:
+        return [str(action) for action in pipeline_actions]
+    return [f"Fix {blocker}" for blocker in blockers]
 
 
 def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespace:

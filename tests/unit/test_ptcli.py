@@ -180,6 +180,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                 "source": {"mode": "downloaded", "torrent_hash": "a" * 40, "content_path": "/downloads/Name"},
                 "target": {"ready": True, "uploaded_torrent_hash": "b" * 40},
             },
+            "next_actions": ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."],
             "stages": [{"stage": "target-upload", "ok": True}],
         }
 
@@ -220,6 +221,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["status"] == "complete"
     assert payload["complete"] is True
     assert payload["blockers"] == []
+    assert payload["next_actions"] == ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
     assert payload["ready"] is True
     assert payload["closure"]["source"]["complete"] is True
     assert payload["closure"]["target"]["injected"] is True
@@ -368,6 +370,7 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
         return {
             "ready": False,
             "closure": {"complete": False, "blockers": ["target.injected"]},
+            "next_actions": ["Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path."],
             "stages": [{"stage": "target-upload", "ok": False}],
         }
 
@@ -399,6 +402,7 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
     assert payload["complete"] is False
     assert payload["ready"] is False
     assert payload["blockers"] == ["target.injected", "pipeline did not report ready."]
+    assert payload["next_actions"] == ["Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path."]
 
 
 @pytest.mark.asyncio
