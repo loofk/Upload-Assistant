@@ -115,14 +115,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     source_info = subparsers.add_parser("source-info", help="Fetch source tracker metadata by torrent id/details URL.")
     source_info.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
-    source_info.add_argument("--tracker", required=True, help="Source tracker code, initially U2, CHD, or MTEAM.")
+    source_info.add_argument("--tracker", required=True, help="Supported source tracker code; inspect ptcli sites --json for current capabilities.")
     source_info.add_argument("--source-id", required=True, help="Source tracker torrent id or details URL.")
     source_info.add_argument("--base-dir", help="Project/base directory used for cookies, defaults to current directory.")
     source_info.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     source_download = subparsers.add_parser("source-download", help="Download a source .torrent to an output directory.")
     source_download.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
-    source_download.add_argument("--tracker", required=True, help="Source tracker code, initially U2, CHD, or MTEAM.")
+    source_download.add_argument("--tracker", required=True, help="Source tracker code with source_download capability; inspect ptcli sites --json.")
     source_download.add_argument("--source-id", required=True, help="Source tracker torrent id or details URL.")
     source_download.add_argument("--to", dest="target_trackers", help="Target tracker codes for executable source-download rule gates.")
     source_download.add_argument("--output-dir", required=True, help="Directory where the source .torrent file will be written.")
@@ -130,7 +130,11 @@ def build_parser() -> argparse.ArgumentParser:
     source_download.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
     source_download.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
-    flow_check = subparsers.add_parser("flow-check", help="Check local config readiness for a reference retorrent flow.")
+    flow_check = subparsers.add_parser(
+        "flow-check",
+        help="Check local config readiness for an enabled ptcli retorrent flow.",
+        description="Check local config readiness for an enabled ptcli retorrent flow.",
+    )
     flow_check.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
     flow_check.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code.")
     flow_check.add_argument("--source-id", required=True, help="Source tracker torrent id or details URL.")
@@ -251,13 +255,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     retorrent = subparsers.add_parser("retorrent", help="Plan or execute a retorrent workflow between supported trackers.")
     retorrent.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
-    retorrent.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code, for example MTEAM.")
+    retorrent.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code; inspect ptcli sites --json for full live closure sources.")
     retorrent.add_argument("--source-id", required=True, help="Source tracker torrent id or details URL.")
     retorrent.add_argument("--to", dest="target_trackers", required=True, help="Target tracker codes, comma-separated.")
     retorrent.add_argument("--path", dest="content_path", help="Existing local content path on the seedbox.")
     retorrent.add_argument("--client", default="default", help="Configured torrent client name, defaults to config default.")
     retorrent.add_argument("--base-dir", help="Project/base directory used for cookies, defaults to current directory.")
-    retorrent.add_argument("--execute", action="store_true", help="Run the full reference pipeline after every gate passes.")
+    retorrent.add_argument("--execute", action="store_true", help="Run the full live closure pipeline after every gate passes.")
     retorrent.add_argument("--dry-run", action="store_true", help="Plan only; do not download, upload, or inject torrents.")
     retorrent.add_argument("--output-dir", default="./tmp/source", help="Directory for downloaded source .torrent files.")
     retorrent.add_argument("--source-torrent-file", help="Reuse an existing source .torrent file during --execute instead of downloading it again.")

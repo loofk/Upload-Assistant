@@ -181,6 +181,19 @@ def test_help_surfaces_short_live_closure_commands() -> None:
     assert "--target-torrent-file ./tmp/exported/mteam.torrent" in help_text
 
 
+def test_help_points_to_capability_matrix() -> None:
+    parser = build_parser()
+    subparsers = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction)).choices
+
+    source_info_help = subparsers["source-info"].format_help()
+    assert "ptcli sites" in source_info_help
+    assert "--json" in source_info_help
+    assert "source_download capability" in subparsers["source-download"].format_help()
+    assert "enabled ptcli retorrent flow" in subparsers["flow-check"].format_help()
+    assert "full live closure sources" in subparsers["retorrent"].format_help()
+    assert "full live closure pipeline" in subparsers["retorrent"].format_help()
+
+
 def test_pipeline_help_describes_live_closure_defaults() -> None:
     parser = build_parser()
     pipeline_parser = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction)).choices["pipeline"]
