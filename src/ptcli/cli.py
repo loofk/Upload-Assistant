@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import hashlib
 import io
 import json
 import sys
@@ -703,7 +704,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             source_download_result = await _pipeline_stage(
                 "source-download",
                 lambda: download_source_torrent(config, source_tracker, source_torrent_id, args.output_dir, base_dir=args.base_dir),
-                lambda path: {"path": str(path)},
+                lambda path: _torrent_file_evidence(path),
             )
             stages.append(source_download_result)
         else:
@@ -989,9 +990,26 @@ def _validate_existing_torrent_file(torrent_file: str, label: str) -> dict[str, 
         if torrent_file.read(1) != b"d":
             raise ValueError(f"{label} torrent file does not look like a .torrent file.")
     return {
-        "path": str(path),
+        **_torrent_file_evidence(path),
         "reused": True,
     }
+
+
+def _torrent_file_evidence(torrent_file: str | Path) -> dict[str, Any]:
+    path = Path(torrent_file).expanduser()
+    payload: dict[str, Any] = {
+        "path": str(path),
+        "exists": path.is_file(),
+    }
+    if path.is_file():
+        data = path.read_bytes()
+        payload.update(
+            {
+                "size_bytes": len(data),
+                "sha1": hashlib.sha1(data).hexdigest(),
+            }
+        )
+    return payload
 
 
 def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:

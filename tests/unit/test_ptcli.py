@@ -653,7 +653,10 @@ def test_source_download_requires_rule_ack(monkeypatch, capsys) -> None:
 def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> None:
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
         _ = (tracker, source_id, base_dir)
-        return tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path.parent.mkdir(parents=True, exist_ok=True)
+        torrent_path.write_bytes(b"d4:infod")
+        return torrent_path
 
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
@@ -1923,7 +1926,10 @@ async def test_pipeline_download_source_runs_after_prereqs(monkeypatch, tmp_path
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
         _ = (tracker, source_id, base_dir)
-        return tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path.parent.mkdir(parents=True, exist_ok=True)
+        torrent_path.write_bytes(b"d4:infod")
+        return torrent_path
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
@@ -1952,6 +1958,9 @@ async def test_pipeline_download_source_runs_after_prereqs(monkeypatch, tmp_path
     download_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-download")
     assert download_stage["ok"] is True
     assert download_stage["result"]["path"].endswith("source-out/U2-60635.torrent")
+    assert download_stage["result"]["exists"] is True
+    assert download_stage["result"]["size_bytes"] == len(b"d4:infod")
+    assert len(download_stage["result"]["sha1"]) == 40
 
 
 @pytest.mark.asyncio
@@ -2121,6 +2130,9 @@ async def test_pipeline_inject_source_reuses_existing_source_torrent(monkeypatch
     assert download_stage["ok"] is True
     assert download_stage["result"]["reused"] is True
     assert download_stage["result"]["path"] == str(source_torrent)
+    assert download_stage["result"]["exists"] is True
+    assert download_stage["result"]["size_bytes"] == len(b"d4:infod")
+    assert len(download_stage["result"]["sha1"]) == 40
     assert inject_stage["ok"] is True
     assert inject_stage["result"]["torrent_path"] == str(source_torrent)
 
@@ -2257,6 +2269,8 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
     assert wait_stage["result"]["matches"][0]["content_path"] == "/downloads"
     assert payload["source_torrent_hash"] == source_hash
     assert payload["evidence"]["source"]["source_torrent_path"] == source_download_stage["result"]["path"]
+    assert source_download_stage["result"]["exists"] is True
+    assert len(source_download_stage["result"]["sha1"]) == 40
     assert payload["evidence"]["source"]["source_wait"]["complete"] is True
     assert payload["summary"]["source"]["source_wait"]["matches"][0]["hash"] == source_hash
 
