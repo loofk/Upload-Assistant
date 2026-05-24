@@ -1132,6 +1132,8 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
 
     assert evidence["source"]["injection_verified"] is True
     assert evidence["source"]["injected_torrent_hash"] == "a" * 40
+    assert "source_torrent_path" in evidence["source"]
+    assert "source_wait" in evidence["source"]
     assert evidence["target"]["injection_verified"] is True
     assert evidence["target"]["injected_torrent_hash"] == "b" * 40
 
@@ -2249,10 +2251,14 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
     payload = await ptcli_cli.pipeline_payload(args)
 
     wait_stage = next(stage for stage in payload["stages"] if stage["stage"] == "wait-complete")
+    source_download_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-download")
     assert wait_stage["ok"] is True
     assert wait_stage["result"]["complete"] is True
     assert wait_stage["result"]["matches"][0]["content_path"] == "/downloads"
     assert payload["source_torrent_hash"] == source_hash
+    assert payload["evidence"]["source"]["source_torrent_path"] == source_download_stage["result"]["path"]
+    assert payload["evidence"]["source"]["source_wait"]["complete"] is True
+    assert payload["summary"]["source"]["source_wait"]["matches"][0]["hash"] == source_hash
 
 
 @pytest.mark.asyncio
