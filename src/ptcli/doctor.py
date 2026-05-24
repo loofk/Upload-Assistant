@@ -69,6 +69,7 @@ def build_doctor_check(
         "flow_check": flow_check,
         "rule_check": rule_check,
         "package_preflight": package_preflight.get("preflight") if package_preflight else None,
+        "compliance": _doctor_compliance_summary(rule_check, package_preflight.get("preflight") if package_preflight else None),
         "checks": checks,
         "next_actions": _next_actions(checks, target_execute),
     }
@@ -193,6 +194,53 @@ def _rule_obligations_check(preflight: dict[str, Any] | None, target_execute: bo
     if isinstance(blockers, list) and blockers:
         return _check("rule_obligations", False, f"MTEAM live upload rule obligations have blockers: {'; '.join(str(blocker) for blocker in blockers)}")
     return _check("rule_obligations", False, "MTEAM live upload rule obligations have blockers.")
+
+
+def _doctor_compliance_summary(rule_check: dict[str, Any], preflight: dict[str, Any] | None) -> dict[str, Any]:
+    automation_scope = rule_check.get("automation_scope") if isinstance(rule_check.get("automation_scope"), dict) else {}
+    obligation_review = preflight.get("rule_obligation_review") if isinstance(preflight, dict) else None
+    obligations = rule_check.get("rule_obligations")
+    if not isinstance(obligations, list):
+        obligations = []
+    acknowledged = [obligation for obligation in obligations if isinstance(obligation, dict) and obligation.get("acknowledged") is True]
+    blockers = _failed_check_messages(rule_check.get("checks"))
+    if isinstance(obligation_review, dict):
+        review_blockers = obligation_review.get("blockers")
+        if isinstance(review_blockers, list):
+            blockers.extend(str(blocker) for blocker in review_blockers if isinstance(blocker, str))
+    return {
+        "ready": bool(rule_check.get("ready")) and not blockers and (not isinstance(obligation_review, dict) or bool(obligation_review.get("ready"))),
+        "rules_acknowledged": _check_ok(rule_check.get("checks"), "rules_acknowledged"),
+        "site_specific_rules_encoded": bool(automation_scope.get("site_specific_rules_encoded")),
+        "policy_checks": automation_scope.get("concrete_policy_checks") or "unknown",
+        "manual_review": rule_check.get("manual_review") if isinstance(rule_check.get("manual_review"), dict) else {"required": True, "acknowledged": False},
+        "automation_scope": automation_scope,
+        "rule_obligations": {
+            "ready": bool(obligations) and len(acknowledged) == len([obligation for obligation in obligations if isinstance(obligation, dict)]),
+            "count": len([obligation for obligation in obligations if isinstance(obligation, dict)]),
+            "acknowledged_count": len(acknowledged),
+            "items": obligations,
+        },
+        "target_rule_obligation_review": obligation_review if isinstance(obligation_review, dict) else None,
+        "blockers": blockers,
+        "disclaimer": "Site-specific tracker rules are not fully encoded; doctor verifies acknowledgements and adapter gates, but live runs still require manual source/target rule review.",
+    }
+
+
+def _failed_check_messages(checks: Any) -> list[str]:
+    if not isinstance(checks, list):
+        return []
+    return [
+        f"{check.get('name', 'check')}: {check.get('message', 'check failed')}"
+        for check in checks
+        if isinstance(check, dict) and not check.get("ok")
+    ]
+
+
+def _check_ok(checks: Any, name: str) -> bool:
+    if not isinstance(checks, list):
+        return False
+    return any(isinstance(check, dict) and check.get("name") == name and bool(check.get("ok")) for check in checks)
 
 
 def _upload_followup_checks(

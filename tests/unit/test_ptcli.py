@@ -1811,6 +1811,11 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
     assert payload["ready"] is True
     assert payload["live_safe_to_attempt"] is True
     assert payload["package_preflight"]["status"] == "ready"
+    assert payload["compliance"]["ready"] is True
+    assert payload["compliance"]["rules_acknowledged"] is True
+    assert payload["compliance"]["site_specific_rules_encoded"] is False
+    assert payload["compliance"]["rule_obligations"]["acknowledged_count"] == 2
+    assert payload["compliance"]["target_rule_obligation_review"]["ready"] is True
     assert any(check["name"] == "wait_uploaded_complete" and check["ok"] is True for check in payload["checks"])
     assert any(check["name"] == "rule_obligations" and check["ok"] is True for check in payload["checks"])
 
@@ -2207,6 +2212,8 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert summary_payload["artifacts"]["content_path"]["exists"] is True
     assert summary_payload["artifacts"]["package_dir"]["is_dir"] is True
     assert summary_payload["artifacts"]["target_torrent_file"]["is_file"] is True
+    assert summary_payload["compliance"]["ready"] is True
+    assert summary_payload["compliance"]["site_specific_rules_encoded"] is False
     assert summary_payload["failed_check_names"] == []
     assert "--target-execute --confirm-upload" in commands["pipeline-live"]
     assert str(content_path) in commands["pipeline-live"]

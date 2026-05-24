@@ -825,6 +825,7 @@ def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, s
         "checks": checks,
         "flow_check": payload.get("flow_check"),
         "rule_check": payload.get("rule_check"),
+        "compliance": payload.get("compliance"),
         "package_preflight": payload.get("package_preflight"),
     }
 
