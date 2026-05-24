@@ -103,6 +103,7 @@ MTeamDownloadCallable = Callable[[dict[str, Any], str, str], Awaitable[str]]
 def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torrent_file: str | None = None, write_payload: bool = False) -> dict[str, Any]:
     package = load_mteam_prepare_package(package_dir)
     gate = package.get("upload_gate", {})
+    rule_review = package.get("rule_review", {})
     files = package.get("files", {})
     blockers = list(package.get("blockers", []))
     payload_summary = build_mteam_upload_payload_summary(package, torrent_file=torrent_file)
@@ -110,6 +111,8 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
 
     if not isinstance(gate, dict) or not gate.get("ready"):
         blockers.append("MTEAM upload gate is not ready.")
+    if not isinstance(rule_review, dict) or rule_review.get("blockers"):
+        blockers.append("MTEAM rule review has blockers.")
     if write_payload:
         payload_path = Path(package_dir).expanduser() / "mteam-upload-payload.json"
         _write_json(payload_path, payload_summary)
@@ -122,7 +125,7 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
         "package_dir": str(Path(package_dir).expanduser()),
         "files": files,
         "upload_gate": gate,
-        "rule_review": package.get("rule_review", {}),
+        "rule_review": rule_review if isinstance(rule_review, dict) else {},
         "upload_payload": payload_summary,
         "blockers": blockers,
         "next_actions": _upload_preflight_next_actions(blockers, execute),

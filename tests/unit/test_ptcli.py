@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 from torf import Torrent
 
@@ -2735,6 +2738,32 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     assert preflight["rule_review"]["rule_check_ready"] is True
     assert preflight["upload_payload"]["form_fields"]["name"] == source_info["name"]
     assert preflight["upload_payload"]["torrent_file"]["sha1"]
+
+
+def test_mteam_upload_preflight_blocks_rule_review_blockers(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    rule_review_path = Path(package["files"]["rule_review"])
+    rule_review = json.loads(rule_review_path.read_text(encoding="utf-8"))
+    rule_review["blockers"] = ["Injected rule blocker for preflight coverage."]
+    rule_review_path.write_text(json.dumps(rule_review), encoding="utf-8")
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    assert preflight["rule_review"]["blockers"]
+    assert "MTEAM rule review has blockers." in preflight["blockers"]
 
 
 def test_mteam_upload_preflight_reports_torrent_safety_metadata(tmp_path) -> None:
