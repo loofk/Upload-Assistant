@@ -1003,6 +1003,13 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
     if not payload.get("live_safe_to_attempt"):
         return commands
 
+    commands.append(
+        {
+            "stage": "doctor-live-probes",
+            "command": _doctor_retry_command(args, force_probes=True),
+        }
+    )
+
     if args.uploaded_torrent_id and args.package_dir:
         uploaded_resume_args = [
             "target-upload",
@@ -1060,7 +1067,7 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
     return commands
 
 
-def _doctor_retry_command(args: argparse.Namespace) -> str:
+def _doctor_retry_command(args: argparse.Namespace, *, force_probes: bool = False) -> str:
     retry_args = [
         "doctor",
         "--from",
@@ -1097,9 +1104,9 @@ def _doctor_retry_command(args: argparse.Namespace) -> str:
         ("--inject-uploaded-torrent", args.inject_uploaded_torrent),
         ("--wait-uploaded-complete", args.wait_uploaded_complete),
         ("--uploaded-paused", args.uploaded_paused),
-        ("--connect-qbit", args.connect_qbit),
-        ("--probe-source", args.probe_source),
-        ("--probe-target", args.probe_target),
+        ("--connect-qbit", force_probes or args.connect_qbit),
+        ("--probe-source", force_probes or args.probe_source),
+        ("--probe-target", force_probes or args.probe_target),
     ):
         if enabled:
             retry_args.append(option)

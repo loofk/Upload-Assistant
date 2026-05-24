@@ -2402,6 +2402,9 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert summary_payload["compliance"]["ready"] is True
     assert summary_payload["compliance"]["site_specific_rules_encoded"] is False
     assert summary_payload["failed_check_names"] == []
+    assert "--connect-qbit" in commands["doctor-live-probes"]
+    assert "--probe-source" in commands["doctor-live-probes"]
+    assert "--probe-target" in commands["doctor-live-probes"]
     assert "--target-execute --confirm-upload" in commands["pipeline-live"]
     assert str(content_path) in commands["pipeline-live"]
     assert str(target_torrent) in commands["pipeline-live"]
@@ -2476,6 +2479,9 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["inputs"]["uploaded_torrent_id"] == "999"
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
+    assert "--connect-qbit" in commands["doctor-live-probes"]
+    assert "--probe-source" in commands["doctor-live-probes"]
+    assert "--probe-target" in commands["doctor-live-probes"]
     assert "pipeline-live" not in commands
     assert "--uploaded-torrent-id 999" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-save-path" in commands["resume-uploaded-torrent-download"]
