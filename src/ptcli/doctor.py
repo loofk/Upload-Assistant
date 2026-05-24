@@ -48,8 +48,10 @@ def build_doctor_check(
     package_preflight = _package_preflight(package_dir, target_execute, target_torrent_file or uploaded_torrent_file)
     if package_preflight:
         checks.append(package_preflight["check"])
+        checks.append(_rule_obligations_check(package_preflight.get("preflight"), target_execute))
     else:
         checks.append(_check("target_package", False, "Target package directory was not provided."))
+        checks.append(_rule_obligations_check(None, target_execute))
     checks.extend(_upload_followup_checks(download_uploaded_torrent, uploaded_torrent_file, inject_uploaded_torrent, uploaded_save_path, content_path, target_execute, wait_uploaded_complete))
 
     return {
@@ -159,6 +161,22 @@ def _package_preflight_message(preflight: dict[str, Any]) -> str:
     return "Target package upload preflight has blockers."
 
 
+def _rule_obligations_check(preflight: dict[str, Any] | None, target_execute: bool) -> dict[str, Any]:
+    if not target_execute:
+        return _check("rule_obligations", True, "Live upload is not requested.")
+    if not isinstance(preflight, dict):
+        return _check("rule_obligations", False, "MTEAM rule obligations cannot be checked without a target package preflight.")
+    review = preflight.get("rule_obligation_review")
+    if not isinstance(review, dict):
+        return _check("rule_obligations", False, "MTEAM rule obligation review is missing from target package preflight.")
+    blockers = review.get("blockers")
+    if review.get("ready"):
+        return _check("rule_obligations", True, "MTEAM live upload rule obligations are complete and acknowledged.")
+    if isinstance(blockers, list) and blockers:
+        return _check("rule_obligations", False, f"MTEAM live upload rule obligations have blockers: {'; '.join(str(blocker) for blocker in blockers)}")
+    return _check("rule_obligations", False, "MTEAM live upload rule obligations have blockers.")
+
+
 def _upload_followup_checks(
     download_uploaded_torrent: bool,
     uploaded_torrent_file: str | None,
@@ -211,6 +229,7 @@ def _live_safe_to_attempt(checks: list[dict[str, Any]], target_execute: bool) ->
         "flow_check",
         "rule_check",
         "rules_acknowledged",
+        "rule_obligations",
         "live_upload_confirmation",
         "target_torrent_file",
         "target_package",
