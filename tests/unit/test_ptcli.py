@@ -495,6 +495,63 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
     assert '"target_trackers": [' in out
 
 
+def test_source_download_requires_target_rule_context(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+
+    code = main(["source-download", "--tracker", "U2", "--source-id", "60635", "--output-dir", "./tmp/source", "--accept-rules", "--json"])
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert '"status": "blocked"' in out
+    assert "--to is required" in out
+
+
+def test_source_download_requires_rule_ack(monkeypatch, capsys) -> None:
+    async def fake_download_source_torrent(*_args, **_kwargs):
+        raise AssertionError("download must not run without rule acknowledgement")
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+
+    code = main(["source-download", "--tracker", "U2", "--source-id", "60635", "--to", "MTEAM", "--output-dir", "./tmp/source", "--json"])
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert '"status": "blocked"' in out
+    assert "rules_acknowledged" in out
+
+
+def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> None:
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (tracker, source_id, base_dir)
+        return tmp_path / output_dir / "U2-60635.torrent"
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+
+    code = main(
+        [
+            "source-download",
+            "--tracker",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--output-dir",
+            "source-out",
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"status": "ok"' in out
+    assert '"rule_check"' in out
+    assert "source-out/U2-60635.torrent" in out
+
+
 def test_json_capture_moves_stdout_to_logs() -> None:
     def noisy_payload():
         print("noisy tracker log")

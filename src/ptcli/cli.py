@@ -98,8 +98,10 @@ def build_parser() -> argparse.ArgumentParser:
     source_download.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
     source_download.add_argument("--tracker", required=True, help="Source tracker code, initially U2, CHD, or MTEAM.")
     source_download.add_argument("--source-id", required=True, help="Source tracker torrent id or details URL.")
+    source_download.add_argument("--to", dest="target_trackers", help="Target tracker codes for executable source-download rule gates.")
     source_download.add_argument("--output-dir", required=True, help="Directory where the source .torrent file will be written.")
     source_download.add_argument("--base-dir", help="Project/base directory used for cookies, defaults to current directory.")
+    source_download.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
     source_download.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     flow_check = subparsers.add_parser("flow-check", help="Check local config readiness for a reference retorrent flow.")
@@ -281,10 +283,29 @@ async def source_info(args: argparse.Namespace) -> dict[str, Any]:
 
 async def source_download(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config(args.config)
-    output_path = await download_source_torrent(config, args.tracker, args.source_id, args.output_dir, base_dir=args.base_dir)
+    source_tracker = normalize_tracker(args.tracker)
+    if not args.target_trackers:
+        return {
+            "status": "blocked",
+            "tracker": source_tracker,
+            "blockers": ["--to is required so source-download can run source/target rule gates before downloading."],
+        }
+    target_trackers = parse_tracker_list(args.target_trackers)
+    rule_check = build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
+    if not rule_check.get("ready"):
+        return {
+            "status": "blocked",
+            "tracker": source_tracker,
+            "target_trackers": target_trackers,
+            "rule_check": rule_check,
+            "blockers": _rule_check_blockers(rule_check),
+        }
+    output_path = await download_source_torrent(config, source_tracker, args.source_id, args.output_dir, base_dir=args.base_dir)
     return {
         "status": "ok",
-        "tracker": normalize_tracker(args.tracker),
+        "tracker": source_tracker,
+        "target_trackers": target_trackers,
+        "rule_check": rule_check,
         "path": str(output_path),
     }
 
@@ -1124,7 +1145,7 @@ def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trac
         },
         {
             "stage": "source-download",
-            "command": f"python3 ptcli.py source-download --tracker {source_tracker} --source-id {source_torrent_id} --output-dir ./tmp/source --json",
+            "command": f"python3 ptcli.py source-download --tracker {source_tracker} --source-id {source_torrent_id} --to {','.join(target_trackers)} --output-dir ./tmp/source --accept-rules --json",
         },
         {
             "stage": "rules",
@@ -1337,7 +1358,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "source-download":
             payload = _with_captured_stdout(lambda: asyncio.run(source_download(args)), json_output)
             _print_payload(payload, json_output)
-            return 0
+            return _source_download_exit_code(payload)
 
         if args.command == "flow-check":
             _print_payload(_with_captured_stdout(lambda: flow_check_payload(args), json_output), json_output)
@@ -1371,6 +1392,20 @@ def _retorrent_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> i
     if payload.get("status") in {"complete", "ok"}:
         return 0
     return 1
+
+
+def _source_download_exit_code(payload: dict[str, Any]) -> int:
+    if payload.get("status") == "ok" and not payload.get("blockers"):
+        return 0
+    return 1
+
+
+def _rule_check_blockers(rule_check: dict[str, Any]) -> list[str]:
+    checks = rule_check.get("checks")
+    if not isinstance(checks, list):
+        return ["Executable rule check did not pass."]
+    blockers = [f"{check.get('name', 'rule_check')}: {check.get('message', 'Executable rule check did not pass.')}" for check in checks if isinstance(check, dict) and not check.get("ok")]
+    return blockers or ["Executable rule check did not pass."]
 
 
 def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, download_uploaded: bool, inject_uploaded: bool) -> bool:
