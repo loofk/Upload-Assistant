@@ -1,4 +1,5 @@
 import pytest
+from torf import Torrent
 
 import src.ptcli.cli as ptcli_cli
 from src.ptcli.cli import _with_captured_stdout, build_parser, build_plan, main
@@ -15,6 +16,7 @@ from src.ptcli.target import (
     build_mteam_prepare_preview,
     build_mteam_upload_gate,
     build_mteam_upload_preflight,
+    create_mteam_upload_torrent_candidate,
     extract_mteam_uploaded_torrent_id,
     search_mteam_duplicates,
     upload_mteam_from_package,
@@ -1512,6 +1514,25 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-prepare-preview.json").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-description-draft.txt").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-field-mapping.json").read_text(encoding="utf-8").strip().startswith("{")
+
+
+def test_create_mteam_upload_torrent_candidate_sanitizes_export(tmp_path) -> None:
+    content = tmp_path / "Example.mkv"
+    content.write_bytes(b"content")
+    source_torrent = tmp_path / "source.torrent"
+    torrent = Torrent(path=str(content), trackers=["https://source.example/passkey/announce"], comment="private comment")
+    torrent.generate()
+    torrent.metainfo["url-list"] = ["https://source.example/file"]
+    torrent.write(str(source_torrent), overwrite=True)
+
+    result = create_mteam_upload_torrent_candidate(str(source_torrent), str(tmp_path / "exported"))
+
+    sanitized = Torrent.read(result["path"], validate=False)
+    assert result["path"].endswith(".mteam-upload.torrent")
+    assert sanitized.metainfo["announce"] == "https://fake.tracker"
+    assert sanitized.metainfo["comment"] == ""
+    assert sanitized.metainfo["info"]["source"] == "MTEAM"
+    assert "url-list" not in sanitized.metainfo
 
 
 def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:

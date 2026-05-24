@@ -10,6 +10,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from torf import Torrent
+
 from src.trackers.MTEAM import MTEAM
 
 REQUIRED_MTEAM_PACKAGE_FILES = {
@@ -19,6 +21,36 @@ REQUIRED_MTEAM_PACKAGE_FILES = {
     "description_draft": "mteam-description-draft.txt",
     "upload_gate": "mteam-upload-gate.json",
 }
+
+MTEAM_UPLOAD_ANNOUNCE = "https://fake.tracker"
+MTEAM_SOURCE_FLAG = "MTEAM"
+
+
+def create_mteam_upload_torrent_candidate(torrent_file: str, output_dir: str | None = None) -> dict[str, Any]:
+    source_path = Path(torrent_file).expanduser()
+    if not source_path.exists():
+        raise ValueError(f"Torrent file not found: {source_path}")
+    target_dir = Path(output_dir).expanduser() if output_dir else source_path.parent
+    target_dir.mkdir(parents=True, exist_ok=True)
+    output_path = target_dir / f"{source_path.stem}.mteam-upload.torrent"
+
+    torrent = Torrent.read(str(source_path), validate=False)
+    removed_fields = []
+    for key in list(torrent.metainfo):
+        if key not in {"announce", "comment", "creation date", "created by", "encoding", "info"}:
+            removed_fields.append(key)
+            torrent.metainfo.pop(key, None)
+    torrent.metainfo["announce"] = MTEAM_UPLOAD_ANNOUNCE
+    torrent.metainfo["comment"] = ""
+    torrent.metainfo["info"]["source"] = MTEAM_SOURCE_FLAG
+    Torrent.copy(torrent).write(str(output_path), overwrite=True)
+    return {
+        "source_path": str(source_path),
+        "path": str(output_path),
+        "announce": MTEAM_UPLOAD_ANNOUNCE,
+        "source_flag": MTEAM_SOURCE_FLAG,
+        "removed_fields": removed_fields,
+    }
 
 
 def write_mteam_prepare_package(

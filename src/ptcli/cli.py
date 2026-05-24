@@ -20,7 +20,13 @@ from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tra
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import get_rule_profiles, rule_profiles_to_dicts
 from src.ptcli.source import download_source_torrent, extract_torrent_id, fetch_source_info, source_info_has_signal
-from src.ptcli.target import build_mteam_upload_preflight, search_mteam_duplicates, upload_mteam_from_package, write_mteam_prepare_package
+from src.ptcli.target import (
+    build_mteam_upload_preflight,
+    create_mteam_upload_torrent_candidate,
+    search_mteam_duplicates,
+    upload_mteam_from_package,
+    write_mteam_prepare_package,
+)
 
 
 @dataclass(frozen=True)
@@ -730,10 +736,13 @@ async def _export_hash_with_config(config: dict[str, Any], client_name: str, tor
     resolved_client_name, client_config = resolve_client_config(config, client_name)
     service = QbitReadOnlyService(client_config)
     output_path = await service.export_torrent(torrent_hash, output_dir)
+    candidate = await asyncio.to_thread(create_mteam_upload_torrent_candidate, str(output_path), output_dir)
     return {
         "client": resolved_client_name,
         "hash": torrent_hash.strip().lower(),
-        "path": str(output_path),
+        "exported_path": str(output_path),
+        "path": candidate["path"],
+        "candidate": candidate,
     }
 
 
