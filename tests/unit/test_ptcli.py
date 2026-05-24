@@ -279,12 +279,21 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
 
     resume_target = commands["resume-target-package"]
     assert "--target-execute --confirm-upload" in resume_target
-    assert "--uploaded-save-path" not in resume_target
-    assert "--download-uploaded-torrent" not in resume_target
-    assert "--inject-uploaded-torrent" not in resume_target
-    assert "--wait-uploaded-complete" not in resume_target
+    assert "--download-uploaded-torrent" in resume_target
+    assert "--inject-uploaded-torrent" in resume_target
+    assert '--uploaded-save-path "/downloads/Example"' in resume_target
+    assert "--wait-uploaded-complete" in resume_target
+    assert "--write-summary" in resume_target
     assert "--uploaded-qbit-category MTEAM" in resume_target
     assert "--uploaded-qbit-tags retorrent" in resume_target
+
+    doctor_live = commands["doctor-live"]
+    assert "--download-uploaded-torrent" in doctor_live
+    assert "--inject-uploaded-torrent" in doctor_live
+    assert "--wait-uploaded-complete" in doctor_live
+    assert "--connect-qbit" in doctor_live
+    assert "--probe-source" in doctor_live
+    assert "--probe-target" in doctor_live
 
     resume_uploaded = commands["resume-uploaded-torrent"]
     assert "--uploaded-torrent-file ./tmp/uploaded/MTEAM-<id>.torrent" in resume_uploaded
