@@ -1279,7 +1279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "pipeline":
             payload = _with_captured_stdout(lambda: asyncio.run(pipeline_payload(args)), json_output)
             _print_payload(payload, json_output)
-            return 0
+            return _pipeline_exit_code(args, payload)
 
         if args.command == "target-upload":
             payload = _with_captured_stdout(lambda: asyncio.run(target_upload_payload(args)), json_output)
@@ -1299,6 +1299,32 @@ def _retorrent_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> i
     if payload.get("status") in {"complete", "ok"}:
         return 0
     return 1
+
+
+def _pipeline_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:
+    if not _pipeline_has_action(args):
+        return 0
+    if payload.get("status") == "ok" and payload.get("ready") is True:
+        return 0
+    return 1
+
+
+def _pipeline_has_action(args: argparse.Namespace) -> bool:
+    action_names = (
+        "download_source",
+        "inject_source",
+        "wait_complete",
+        "check_dupes",
+        "prepare_target",
+        "export_target_torrent",
+        "sanitize_target_torrent",
+        "upload_target",
+        "target_execute",
+        "write_payload",
+        "download_uploaded_torrent",
+        "inject_uploaded_torrent",
+    )
+    return any(bool(getattr(args, name, False)) for name in action_names)
 
 
 def _target_upload_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:

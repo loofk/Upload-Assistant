@@ -463,6 +463,27 @@ def test_json_capture_moves_stdout_to_logs() -> None:
     assert payload == {"status": "ok", "logs": ["noisy tracker log"]}
 
 
+def test_pipeline_exit_code_keeps_preview_zero_when_not_ready() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--json"])
+
+    assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": False}) == 0
+
+
+def test_pipeline_exit_code_returns_nonzero_for_failed_action() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--upload-target", "--json"])
+
+    assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": False}) == 1
+
+
+def test_pipeline_exit_code_returns_zero_for_ready_action() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--download-source", "--json"])
+
+    assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": True}) == 0
+
+
 def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "skipped": True},
