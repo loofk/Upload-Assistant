@@ -1441,6 +1441,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--uploaded-save-path or an inferred completed content path is required with --inject-uploaded-torrent."})
         elif args.wait_uploaded_complete and not args.inject_uploaded_torrent:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--wait-uploaded-complete requires --inject-uploaded-torrent."})
+        elif args.target_execute and not _source_ready_for_live_target_upload(stages):
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because current pipeline run did not verify complete source qBittorrent content before live target upload."})
         else:
             package_dir = str(target_prepare_stage.get("result", {}).get("package_dir", ""))
             upload_stage = await _pipeline_stage(
@@ -1525,6 +1527,17 @@ def _rule_check_ready(stages: list[dict[str, Any]]) -> bool:
         return False
     result = stage.get("result")
     return isinstance(result, dict) and bool(result.get("ready"))
+
+
+def _source_ready_for_live_target_upload(stages: list[dict[str, Any]]) -> bool:
+    source_download = _find_stage(stages, "source-download")
+    inject_source = _find_stage(stages, "inject-source")
+    wait_complete = _find_stage(stages, "wait-complete")
+    match = _find_stage(stages, "match")
+    source_content_verify = _find_stage(stages, "source-content-verify")
+    source_downloaded_flow_ready = _stage_completed(source_download) and _source_injection_verified(inject_source) and _stage_completed(wait_complete)
+    existing_content_ready = _match_stage_has_match(match) and _source_content_verified(source_content_verify)
+    return source_downloaded_flow_ready or existing_content_ready
 
 
 def _load_existing_target_prepare_package(package_dir: str) -> dict[str, Any]:
