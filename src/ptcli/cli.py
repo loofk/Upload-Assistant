@@ -350,8 +350,6 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         return {"status": "blocked", "plan": plan_payload, "blockers": plan.blockers}
     if not args.confirm_upload:
         return {"status": "blocked", "plan": plan_payload, "blockers": ["--confirm-upload is required with retorrent --execute."]}
-    if not args.target_torrent_file and not args.export_target_torrent:
-        return {"status": "blocked", "plan": plan_payload, "blockers": ["--target-torrent-file or --export-target-torrent is required with retorrent --execute."]}
     if not args.content_path and not args.save_path:
         return {"status": "blocked", "plan": plan_payload, "blockers": ["--path or --save-path is required with retorrent --execute."]}
 
@@ -417,7 +415,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         accept_rules=args.accept_rules,
         upload_target=True,
         target_torrent_file=args.target_torrent_file,
-        export_target_torrent=args.export_target_torrent,
+        export_target_torrent=args.export_target_torrent or not bool(args.target_torrent_file),
         target_torrent_output_dir=args.target_torrent_output_dir,
         sanitize_target_torrent=args.sanitize_target_torrent,
         target_execute=True,

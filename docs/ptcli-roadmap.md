@@ -35,10 +35,10 @@ python3 ptcli.py match --path /downloads/movie --json
 python3 ptcli.py export --hash "<infohash>" --output-dir ./tmp/exported --json
 python3 ptcli.py retorrent --from MTEAM --source-id 12345 --to TJUPT,CHD --path /downloads/movie --dry-run --json
 python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --target-torrent-file ./tmp/exported/mteam.torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
-python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --export-target-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
+python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
 ```
 
-`retorrent --execute` 是高层闭环命令，会默认执行上传后目标站种子下载和 qBittorrent 注入。顶层 JSON 只有在 `closure.complete=true` 且 pipeline ready 时才返回 `status: complete`；否则返回 `status: blocked` 和 blockers，并以非 0 退出码结束。source 侧闭环可由“源种下载 + QB 注入 + 等待完成”证明，也可由“已有 `--path` 能匹配 QB 任务”证明。`pipeline` / `target-upload` 保留显式参数，便于拆分排障和人工复核；带执行动作的 `pipeline` 未 ready 时返回 `status: blocked`、顶层 blockers 和非 0 退出码，并在 `evidence` 汇总 source/target 的 hash、路径和闭环模式；`retorrent --execute` 也会把该 evidence 提升到顶层，`target-upload --execute` 只有实际 `status: uploaded` 时返回 0。
+`retorrent --execute` 是高层闭环命令，会默认执行上传后目标站种子下载和 qBittorrent 注入；未提供 `--target-torrent-file` 时，会默认从匹配到的 qBittorrent 任务导出目标候选种子。顶层 JSON 只有在 `closure.complete=true` 且 pipeline ready 时才返回 `status: complete`；否则返回 `status: blocked` 和 blockers，并以非 0 退出码结束。source 侧闭环可由“源种下载 + QB 注入 + 等待完成”证明，也可由“已有 `--path` 能匹配 QB 任务”证明。`pipeline` / `target-upload` 保留显式参数，便于拆分排障和人工复核；带执行动作的 `pipeline` 未 ready 时返回 `status: blocked`、顶层 blockers 和非 0 退出码，并在 `evidence` 汇总 source/target 的 hash、路径和闭环模式；`retorrent --execute` 也会把该 evidence 提升到顶层，`target-upload --execute` 只有实际 `status: uploaded` 时返回 0。
 
 后续子命令建议：
 

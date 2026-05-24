@@ -280,6 +280,41 @@ async def test_retorrent_execute_enables_uploaded_torrent_followup_by_default(mo
 
 
 @pytest.mark.asyncio
+async def test_retorrent_execute_defaults_to_export_target_torrent(monkeypatch) -> None:
+    captured_args = {}
+
+    async def fake_pipeline_payload(args):
+        captured_args["args"] = args
+        return {"ready": True, "closure": {"complete": True, "blockers": []}, "evidence": {"complete": True}, "stages": []}
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--path",
+            "/downloads/Name",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    assert payload["ready"] is True
+    assert captured_args["args"].export_target_torrent is True
+    assert captured_args["args"].target_torrent_file is None
+
+
+@pytest.mark.asyncio
 async def test_retorrent_execute_can_disable_target_torrent_sanitizing(monkeypatch, tmp_path) -> None:
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
