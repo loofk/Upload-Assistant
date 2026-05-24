@@ -1547,6 +1547,51 @@ def test_doctor_auto_enables_uploaded_torrent_followup_for_live_closure(tmp_path
     assert any(check["name"] == "wait_uploaded_complete" and check["ok"] is True for check in payload["checks"])
 
 
+def test_doctor_infers_uploaded_save_path_from_package_content(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    content_path = tmp_path / "downloads" / "Name"
+    content_path.mkdir(parents=True)
+    target_torrent = make_mteam_safe_torrent(tmp_path, "target")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        package_dir=package["package_dir"],
+        target_torrent_file=target_torrent,
+        accept_rules=True,
+        target_execute=True,
+        confirm_upload=True,
+    )
+
+    assert payload["ready"] is True
+    assert payload["live_safe_to_attempt"] is True
+    assert payload["effective_uploaded_save_path"] == str(content_path)
+    assert any(check["name"] == "uploaded_save_path" and check["ok"] is True and str(content_path) in check["message"] for check in payload["checks"])
+
+
 def test_doctor_blocks_live_upload_without_rule_obligations(tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)

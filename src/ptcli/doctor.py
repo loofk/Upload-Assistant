@@ -51,18 +51,21 @@ def build_doctor_check(
     checks.append(_target_torrent_check(target_torrent_file, required=bool((package_dir or target_execute) and not uploaded_torrent_file)))
     checks.append(_torrent_file_check("uploaded_torrent_file", uploaded_torrent_file, required=False))
     package_preflight = _package_preflight(package_dir, target_execute, target_torrent_file or uploaded_torrent_file)
+    package_content_path = _package_content_path(package_preflight)
+    effective_uploaded_save_path = uploaded_save_path or content_path or package_content_path
     if package_preflight:
         checks.append(package_preflight["check"])
         checks.append(_rule_obligations_check(package_preflight.get("preflight"), target_execute))
     else:
         checks.append(_check("target_package", False, "Target package directory was not provided."))
         checks.append(_rule_obligations_check(None, target_execute))
-    checks.extend(_upload_followup_checks(download_uploaded_torrent, uploaded_torrent_file, inject_uploaded_torrent, uploaded_save_path, content_path, target_execute, wait_uploaded_complete))
+    checks.extend(_upload_followup_checks(download_uploaded_torrent, uploaded_torrent_file, inject_uploaded_torrent, effective_uploaded_save_path, target_execute, wait_uploaded_complete))
 
     return {
         "status": "ok",
         "ready": all(check["ok"] for check in checks),
         "live_safe_to_attempt": _live_safe_to_attempt(checks, target_execute),
+        "effective_uploaded_save_path": effective_uploaded_save_path,
         "flow_check": flow_check,
         "rule_check": rule_check,
         "package_preflight": package_preflight.get("preflight") if package_preflight else None,
@@ -157,6 +160,16 @@ def _package_preflight(package_dir: str | None, target_execute: bool, target_tor
     }
 
 
+def _package_content_path(package_preflight: dict[str, Any] | None) -> str | None:
+    if not package_preflight:
+        return None
+    preflight = package_preflight.get("preflight")
+    if not isinstance(preflight, dict):
+        return None
+    content_path = preflight.get("content_path")
+    return str(content_path) if content_path else None
+
+
 def _package_preflight_message(preflight: dict[str, Any]) -> str:
     if preflight.get("status") == "ready":
         return "Target package upload preflight is ready."
@@ -186,8 +199,7 @@ def _upload_followup_checks(
     download_uploaded_torrent: bool,
     uploaded_torrent_file: str | None,
     inject_uploaded_torrent: bool,
-    uploaded_save_path: str | None,
-    content_path: str | None,
+    effective_uploaded_save_path: str | None,
     target_execute: bool,
     wait_uploaded_complete: bool,
 ) -> list[dict[str, Any]]:
@@ -208,12 +220,11 @@ def _upload_followup_checks(
         checks.append(_check("inject_uploaded_torrent", False, "--inject-uploaded-torrent requires --download-uploaded-torrent or --uploaded-torrent-file."))
     elif target_execute and not inject_uploaded_torrent:
         checks.append(_check("inject_uploaded_torrent", False, "Uploaded target torrent injection is required for full live retorrent closure."))
-    elif inject_uploaded_torrent and not (uploaded_save_path or content_path):
-        checks.append(_check("inject_uploaded_torrent", False, "--uploaded-save-path or --path is required with --inject-uploaded-torrent."))
+    elif inject_uploaded_torrent and not effective_uploaded_save_path:
+        checks.append(_check("inject_uploaded_torrent", False, "--uploaded-save-path, --path, or a target package content path is required with --inject-uploaded-torrent."))
     elif inject_uploaded_torrent:
-        save_path = uploaded_save_path or content_path
         checks.append(_check("inject_uploaded_torrent", True, "Uploaded target torrent will be injected into qBittorrent."))
-        checks.append(_path_check("uploaded_save_path", save_path, required=True))
+        checks.append(_path_check("uploaded_save_path", effective_uploaded_save_path, required=True))
     else:
         checks.append(_check("inject_uploaded_torrent", True, "Uploaded target torrent injection is not requested."))
     if wait_uploaded_complete and not inject_uploaded_torrent:
