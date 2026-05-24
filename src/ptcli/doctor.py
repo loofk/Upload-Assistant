@@ -45,7 +45,7 @@ def build_doctor_check(
         checks.append(package_preflight["check"])
     else:
         checks.append(_check("target_package", False, "Target package directory was not provided."))
-    checks.extend(_upload_followup_checks(download_uploaded_torrent, inject_uploaded_torrent, uploaded_save_path, content_path))
+    checks.extend(_upload_followup_checks(download_uploaded_torrent, inject_uploaded_torrent, uploaded_save_path, content_path, target_execute))
 
     return {
         "status": "ok",
@@ -137,16 +137,28 @@ def _package_preflight(package_dir: str | None, target_execute: bool, target_tor
     }
 
 
-def _upload_followup_checks(download_uploaded_torrent: bool, inject_uploaded_torrent: bool, uploaded_save_path: str | None, content_path: str | None) -> list[dict[str, Any]]:
+def _upload_followup_checks(
+    download_uploaded_torrent: bool,
+    inject_uploaded_torrent: bool,
+    uploaded_save_path: str | None,
+    content_path: str | None,
+    target_execute: bool,
+) -> list[dict[str, Any]]:
     checks = [
         _check(
             "download_uploaded_torrent",
-            True,
-            "Uploaded target torrent will be downloaded." if download_uploaded_torrent else "Uploaded target torrent download is not requested.",
+            download_uploaded_torrent or not target_execute,
+            "Uploaded target torrent will be downloaded."
+            if download_uploaded_torrent
+            else "Uploaded target torrent download is required for full live retorrent closure."
+            if target_execute
+            else "Uploaded target torrent download is not requested.",
         )
     ]
     if inject_uploaded_torrent and not download_uploaded_torrent:
         checks.append(_check("inject_uploaded_torrent", False, "--inject-uploaded-torrent requires --download-uploaded-torrent."))
+    elif target_execute and not inject_uploaded_torrent:
+        checks.append(_check("inject_uploaded_torrent", False, "Uploaded target torrent injection is required for full live retorrent closure."))
     elif inject_uploaded_torrent and not (uploaded_save_path or content_path):
         checks.append(_check("inject_uploaded_torrent", False, "--uploaded-save-path or --path is required with --inject-uploaded-torrent."))
     elif inject_uploaded_torrent:
@@ -168,6 +180,8 @@ def _live_safe_to_attempt(checks: list[dict[str, Any]], target_execute: bool) ->
         "live_upload_confirmation",
         "target_torrent_file",
         "target_package",
+        "download_uploaded_torrent",
+        "inject_uploaded_torrent",
     }
     checks_by_name = {str(check["name"]): bool(check["ok"]) for check in checks}
     return all(checks_by_name.get(name, False) for name in required_names)
