@@ -20,12 +20,14 @@ def build_doctor_check(
     client: str,
     base_dir: str | None = None,
     content_path: str | None = None,
+    source_torrent_file: str | None = None,
     package_dir: str | None = None,
     target_torrent_file: str | None = None,
     accept_rules: bool = False,
     target_execute: bool = False,
     confirm_upload: bool = False,
     download_uploaded_torrent: bool = False,
+    uploaded_torrent_file: str | None = None,
     inject_uploaded_torrent: bool = False,
     uploaded_save_path: str | None = None,
     wait_uploaded_complete: bool = False,
@@ -35,18 +37,20 @@ def build_doctor_check(
     checks.append(_check("flow_check", bool(flow_check.get("ready")), "Reference flow config is ready." if flow_check.get("ready") else "Reference flow config has blockers."))
     checks.extend(_prefix_checks("flow.", flow_check.get("checks", [])))
     checks.append(_path_check("content_path", content_path, required=False))
+    checks.append(_torrent_file_check("source_torrent_file", source_torrent_file, required=False))
     rule_check = build_rule_check(normalize_tracker(source_tracker), parse_tracker_list(target_trackers), accept_rules=accept_rules)
     checks.append(_rules_check(accept_rules))
     checks.append(_check("rule_check", bool(rule_check.get("ready")), "Executable rule check passed." if rule_check.get("ready") else "Executable rule check has blockers."))
     checks.extend(_prefix_checks("rule.", rule_check.get("checks", [])))
     checks.append(_confirmation_check(target_execute, confirm_upload))
-    checks.append(_target_torrent_check(target_torrent_file, required=bool(package_dir or target_execute)))
-    package_preflight = _package_preflight(package_dir, target_execute, target_torrent_file)
+    checks.append(_target_torrent_check(target_torrent_file, required=bool((package_dir or target_execute) and not uploaded_torrent_file)))
+    checks.append(_torrent_file_check("uploaded_torrent_file", uploaded_torrent_file, required=False))
+    package_preflight = _package_preflight(package_dir, target_execute, target_torrent_file or uploaded_torrent_file)
     if package_preflight:
         checks.append(package_preflight["check"])
     else:
         checks.append(_check("target_package", False, "Target package directory was not provided."))
-    checks.extend(_upload_followup_checks(download_uploaded_torrent, inject_uploaded_torrent, uploaded_save_path, content_path, target_execute, wait_uploaded_complete))
+    checks.extend(_upload_followup_checks(download_uploaded_torrent, uploaded_torrent_file, inject_uploaded_torrent, uploaded_save_path, content_path, target_execute, wait_uploaded_complete))
 
     return {
         "status": "ok",
@@ -114,11 +118,19 @@ def _confirmation_check(target_execute: bool, confirm_upload: bool) -> dict[str,
 def _target_torrent_check(target_torrent_file: str | None, required: bool) -> dict[str, Any]:
     if not target_torrent_file:
         return _check("target_torrent_file", not required, "Target torrent file not provided." if not required else "Target torrent file is required.")
-    path = Path(target_torrent_file).expanduser()
+    return _torrent_file_check("target_torrent_file", target_torrent_file, required=True)
+
+
+def _torrent_file_check(name: str, torrent_file: str | None, required: bool) -> dict[str, Any]:
+    if not torrent_file:
+        return _check(name, not required, "Torrent file not provided." if not required else "Torrent file is required.")
+    path = Path(torrent_file).expanduser()
     if not path.exists():
-        return _check("target_torrent_file", False, f"Target torrent file not found: {path}")
+        return _check(name, False, f"Torrent file not found: {path}")
+    if not path.is_file():
+        return _check(name, False, f"Torrent path is not a file: {path}")
     data = path.read_bytes()
-    return _check("target_torrent_file", data.startswith(b"d"), f"Target torrent file: {path}")
+    return _check(name, data.startswith(b"d"), f"Torrent file: {path}" if data.startswith(b"d") else f"Torrent file does not look like a .torrent file: {path}")
 
 
 def _package_preflight(package_dir: str | None, target_execute: bool, target_torrent_file: str | None) -> dict[str, Any] | None:
@@ -149,6 +161,7 @@ def _package_preflight_message(preflight: dict[str, Any]) -> str:
 
 def _upload_followup_checks(
     download_uploaded_torrent: bool,
+    uploaded_torrent_file: str | None,
     inject_uploaded_torrent: bool,
     uploaded_save_path: str | None,
     content_path: str | None,
@@ -158,16 +171,18 @@ def _upload_followup_checks(
     checks = [
         _check(
             "download_uploaded_torrent",
-            download_uploaded_torrent or not target_execute,
+            download_uploaded_torrent or bool(uploaded_torrent_file) or not target_execute,
             "Uploaded target torrent will be downloaded."
             if download_uploaded_torrent
+            else "Uploaded target torrent file is already available."
+            if uploaded_torrent_file
             else "Uploaded target torrent download is required for full live retorrent closure."
             if target_execute
             else "Uploaded target torrent download is not requested.",
         )
     ]
-    if inject_uploaded_torrent and not download_uploaded_torrent:
-        checks.append(_check("inject_uploaded_torrent", False, "--inject-uploaded-torrent requires --download-uploaded-torrent."))
+    if inject_uploaded_torrent and not (download_uploaded_torrent or uploaded_torrent_file):
+        checks.append(_check("inject_uploaded_torrent", False, "--inject-uploaded-torrent requires --download-uploaded-torrent or --uploaded-torrent-file."))
     elif target_execute and not inject_uploaded_torrent:
         checks.append(_check("inject_uploaded_torrent", False, "Uploaded target torrent injection is required for full live retorrent closure."))
     elif inject_uploaded_torrent and not (uploaded_save_path or content_path):

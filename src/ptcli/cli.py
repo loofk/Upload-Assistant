@@ -123,12 +123,14 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--client", default="default", help="Configured qBittorrent client name, defaults to config default.")
     doctor.add_argument("--base-dir", help="Project/base directory used for cookies, defaults to current directory.")
     doctor.add_argument("--path", dest="content_path", help="Existing local content path on the seedbox.")
+    doctor.add_argument("--source-torrent-file", help="Existing source .torrent file intended for qBittorrent injection.")
     doctor.add_argument("--package-dir", help="Directory created by pipeline --prepare-target.")
     doctor.add_argument("--target-torrent-file", help="MTEAM .torrent file intended for target upload.")
     doctor.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
     doctor.add_argument("--target-execute", action="store_true", help="Check readiness for a live target upload.")
     doctor.add_argument("--confirm-upload", action="store_true", help="Confirm manual rule review and live upload intent.")
     doctor.add_argument("--download-uploaded-torrent", action="store_true", help="Check follow-up download of the generated MTEAM torrent file.")
+    doctor.add_argument("--uploaded-torrent-file", help="Existing uploaded MTEAM .torrent file intended for qBittorrent injection.")
     doctor.add_argument("--inject-uploaded-torrent", action="store_true", help="Check follow-up qBittorrent injection after target upload.")
     doctor.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
     doctor.add_argument("--wait-uploaded-complete", action="store_true", help="Check qBittorrent completion wait after uploaded target torrent injection.")
@@ -514,12 +516,14 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
         client=args.client,
         base_dir=args.base_dir,
         content_path=args.content_path,
+        source_torrent_file=args.source_torrent_file,
         package_dir=args.package_dir,
         target_torrent_file=args.target_torrent_file,
         accept_rules=args.accept_rules,
         target_execute=args.target_execute,
         confirm_upload=args.confirm_upload,
         download_uploaded_torrent=args.download_uploaded_torrent,
+        uploaded_torrent_file=args.uploaded_torrent_file,
         inject_uploaded_torrent=args.inject_uploaded_torrent,
         uploaded_save_path=args.uploaded_save_path,
         wait_uploaded_complete=args.wait_uploaded_complete,
