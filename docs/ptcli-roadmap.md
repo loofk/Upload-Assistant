@@ -38,7 +38,7 @@ python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --ac
 python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --export-target-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
 ```
 
-`retorrent --execute` 是高层闭环命令，会默认执行上传后目标站种子下载和 qBittorrent 注入；`pipeline` / `target-upload` 保留显式参数，便于拆分排障和人工复核。
+`retorrent --execute` 是高层闭环命令，会默认执行上传后目标站种子下载和 qBittorrent 注入。顶层 JSON 只有在 `closure.complete=true` 且 pipeline ready 时才返回 `status: complete`；否则返回 `status: blocked` 和 blockers。`pipeline` / `target-upload` 保留显式参数，便于拆分排障和人工复核。
 
 后续子命令建议：
 

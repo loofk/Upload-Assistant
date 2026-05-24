@@ -357,13 +357,35 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
 
     pipeline_args = _pipeline_args_from_retorrent(args)
     pipeline_result = await pipeline_payload(pipeline_args)
+    closure = pipeline_result.get("closure") if isinstance(pipeline_result.get("closure"), dict) else None
+    ready = bool(pipeline_result.get("ready"))
+    blockers = _retorrent_execute_blockers(pipeline_result, closure, ready)
     return {
-        "status": "ok",
+        "status": "complete" if not blockers else "blocked",
         "plan": plan_payload,
         "pipeline": pipeline_result,
-        "closure": pipeline_result.get("closure") if isinstance(pipeline_result.get("closure"), dict) else None,
-        "ready": bool(pipeline_result.get("ready")),
+        "closure": closure,
+        "ready": ready,
+        "complete": not blockers,
+        "blockers": blockers,
     }
+
+
+def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[str, Any] | None, ready: bool) -> list[str]:
+    blockers: list[str] = []
+    if closure is None:
+        blockers.append("pipeline did not return a closure summary.")
+    else:
+        closure_blockers = closure.get("blockers")
+        if isinstance(closure_blockers, list):
+            blockers.extend(str(blocker) for blocker in closure_blockers)
+        if closure.get("complete") is not True and not blockers:
+            blockers.append("retorrent closure did not complete.")
+    if not ready:
+        blockers.append("pipeline did not report ready.")
+    if pipeline_result.get("status") not in {None, "ok", "complete"}:
+        blockers.append(f"pipeline status is {pipeline_result.get('status')}.")
+    return blockers
 
 
 def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespace:
@@ -1067,6 +1089,18 @@ def _print_payload(payload: dict[str, Any], json_output: bool) -> None:
         print("Rule profiles:")
         for profile in payload["rules"]:
             print(f"  {profile['tracker']}: {profile['automation_status']} ({profile['rules_url']})")
+        return
+
+    if payload["status"] in {"ok", "complete", "blocked"} and "plan" in payload and "pipeline" in payload:
+        print(f"Status: {payload['status']}")
+        print(f"Ready: {payload.get('ready')}")
+        if payload.get("blockers"):
+            print("Blockers:")
+            for blocker in payload["blockers"]:
+                print(f"  - {blocker}")
+        closure = payload.get("closure")
+        if isinstance(closure, dict):
+            print(f"Closure complete: {closure.get('complete')}")
         return
 
     if payload["status"] == "ok" and "plan" in payload:

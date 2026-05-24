@@ -139,7 +139,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         captured_args["args"] = args
         return {
             "ready": True,
-            "closure": {"source": {"complete": True}, "target": {"uploaded": True, "injected": True}},
+            "closure": {"complete": True, "blockers": [], "source": {"complete": True}, "target": {"uploaded": True, "injected": True}},
             "stages": [{"stage": "target-upload", "ok": True}],
         }
 
@@ -177,6 +177,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     payload = await ptcli_cli.retorrent_payload(args)
 
     pipeline_args = captured_args["args"]
+    assert payload["status"] == "complete"
+    assert payload["complete"] is True
+    assert payload["blockers"] == []
     assert payload["ready"] is True
     assert payload["closure"]["source"]["complete"] is True
     assert payload["closure"]["target"]["injected"] is True
@@ -248,7 +251,7 @@ async def test_retorrent_execute_can_disable_target_torrent_sanitizing(monkeypat
 
     async def fake_pipeline_payload(args):
         captured_args["args"] = args
-        return {"ready": True, "stages": [{"stage": "target-upload", "ok": True}]}
+        return {"ready": True, "closure": {"complete": True, "blockers": []}, "stages": [{"stage": "target-upload", "ok": True}]}
 
     monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
     parser = build_parser()
@@ -277,6 +280,48 @@ async def test_retorrent_execute_can_disable_target_torrent_sanitizing(monkeypat
 
     assert payload["ready"] is True
     assert captured_args["args"].sanitize_target_torrent is False
+
+
+@pytest.mark.asyncio
+async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monkeypatch, tmp_path) -> None:
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    async def fake_pipeline_payload(_args):
+        return {
+            "ready": False,
+            "closure": {"complete": False, "blockers": ["target.injected"]},
+            "stages": [{"stage": "target-upload", "ok": False}],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--path",
+            "/downloads/Name",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    assert payload["status"] == "blocked"
+    assert payload["complete"] is False
+    assert payload["ready"] is False
+    assert payload["blockers"] == ["target.injected", "pipeline did not report ready."]
 
 
 @pytest.mark.asyncio
@@ -315,7 +360,7 @@ async def test_retorrent_execute_can_use_target_torrent_export(monkeypatch, tmp_
 
     async def fake_pipeline_payload(args):
         captured_args["args"] = args
-        return {"ready": True, "target_torrent_file": str(tmp_path / "exported.torrent"), "stages": []}
+        return {"ready": True, "closure": {"complete": True, "blockers": []}, "target_torrent_file": str(tmp_path / "exported.torrent"), "stages": []}
 
     monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
     parser = build_parser()
