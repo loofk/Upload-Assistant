@@ -329,18 +329,11 @@ async def export_qbit(args: argparse.Namespace) -> dict[str, Any]:
 
 
 async def source_info(args: argparse.Namespace) -> dict[str, Any]:
-    config = load_config(args.config)
     tracker = normalize_tracker(args.tracker)
-    invalid = unsupported_trackers([tracker])
-    if invalid:
-        return {
-            "status": "blocked",
-            "tracker": tracker,
-            "requested_source_id": args.source_id,
-            "input_source_id": args.source_id,
-            "source_torrent_id": extract_torrent_id(args.source_id),
-            "blockers": [f"Unsupported tracker(s) for focused CLI scope: {', '.join(invalid)}"],
-        }
+    scope_block = _tracker_scope_block_payload("source-info", tracker, source_id=args.source_id)
+    if scope_block:
+        return {"tracker": tracker, **scope_block}
+    config = load_config(args.config)
     info = await fetch_source_info(config, tracker, args.source_id, base_dir=args.base_dir)
     source = info.to_dict()
     source_id_context = {
@@ -357,13 +350,16 @@ async def source_info(args: argparse.Namespace) -> dict[str, Any]:
 
 
 async def source_download(args: argparse.Namespace) -> dict[str, Any]:
-    config = load_config(args.config)
     source_tracker = normalize_tracker(args.tracker)
     source_id_context = {
         "requested_source_id": args.source_id,
         "input_source_id": args.source_id,
         "source_torrent_id": extract_torrent_id(args.source_id),
     }
+    target_trackers = parse_tracker_list(args.target_trackers) if args.target_trackers else []
+    source_scope_block = _tracker_scope_block_payload("source-download", source_tracker, target_trackers, source_id=args.source_id)
+    if source_scope_block:
+        return {"tracker": source_tracker, **source_scope_block}
     if not args.target_trackers:
         return {
             "status": "blocked",
@@ -371,7 +367,6 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
             **source_id_context,
             "blockers": ["--to is required so source-download can run source/target rule gates before downloading."],
         }
-    target_trackers = parse_tracker_list(args.target_trackers)
     rule_check = build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
     if not rule_check.get("ready"):
         return {
@@ -382,6 +377,7 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
             "rule_check": rule_check,
             "blockers": _rule_check_blockers(rule_check),
         }
+    config = load_config(args.config)
     info = await fetch_source_info(config, source_tracker, args.source_id, base_dir=args.base_dir)
     source = info.to_dict()
     if not source_info_has_signal(info):
@@ -599,17 +595,38 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
 
 
 def flow_check_payload(args: argparse.Namespace) -> dict[str, Any]:
+    source_tracker = normalize_tracker(args.source_tracker)
+    target_trackers = parse_tracker_list(args.target_trackers)
+    scope_block = _tracker_scope_block_payload("flow-check", source_tracker, target_trackers, source_id=args.source_id)
+    if scope_block:
+        return scope_block
     config = load_config(args.config)
-    return build_flow_check(config, args.source_tracker, args.source_id, args.target_trackers, args.client, base_dir=args.base_dir)
+    return build_flow_check(config, source_tracker, args.source_id, ",".join(target_trackers), args.client, base_dir=args.base_dir)
 
 
 async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
+    source_tracker = normalize_tracker(args.source_tracker)
+    target_trackers = parse_tracker_list(args.target_trackers)
+    scope_block = _tracker_scope_block_payload("doctor", source_tracker, target_trackers, source_id=args.source_id)
+    if scope_block:
+        return {
+            **scope_block,
+            "ready": False,
+            "live_safe_to_attempt": False,
+            "checks": [
+                {
+                    "name": "tracker_scope",
+                    "ok": False,
+                    "message": scope_block["blockers"][0],
+                }
+            ],
+        }
     config = load_config(args.config)
     payload = build_doctor_check(
         config,
-        source_tracker=args.source_tracker,
+        source_tracker=source_tracker,
         source_id=args.source_id,
-        target_trackers=args.target_trackers,
+        target_trackers=",".join(target_trackers),
         client=args.client,
         base_dir=args.base_dir,
         content_path=args.content_path,
@@ -2859,10 +2876,34 @@ def build_rules_payload(args: argparse.Namespace) -> dict[str, Any]:
 def build_rule_check_payload(args: argparse.Namespace) -> dict[str, Any]:
     source_tracker = normalize_tracker(args.source_tracker)
     target_trackers = parse_tracker_list(args.target_trackers)
-    invalid = unsupported_trackers([source_tracker, *target_trackers])
-    if invalid:
-        raise ValueError(f"Unsupported tracker(s) for focused CLI scope: {', '.join(invalid)}")
+    scope_block = _tracker_scope_block_payload("rule-check", source_tracker, target_trackers)
+    if scope_block:
+        return scope_block
     return build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
+
+
+def _tracker_scope_block_payload(command: str, source_tracker: str | None, target_trackers: list[str] | None = None, *, source_id: str | None = None) -> dict[str, Any] | None:
+    trackers = [tracker for tracker in [source_tracker, *(target_trackers or [])] if tracker]
+    invalid = unsupported_trackers(trackers)
+    if not invalid:
+        return None
+
+    payload: dict[str, Any] = {
+        "status": "blocked",
+        "command": command,
+        "source_tracker": source_tracker,
+        "target_trackers": target_trackers or [],
+        "blockers": [f"Unsupported tracker(s) for focused CLI scope: {', '.join(invalid)}"],
+    }
+    if source_id is not None:
+        payload.update(
+            {
+                "requested_source_id": source_id,
+                "input_source_id": source_id,
+                "source_torrent_id": extract_torrent_id(source_id),
+            }
+        )
+    return payload
 
 
 def _print_payload(payload: dict[str, Any], json_output: bool) -> None:
@@ -2950,6 +2991,12 @@ def _print_payload(payload: dict[str, Any], json_output: bool) -> None:
             print(f"  [{marker}] {check['name']}: {check['message']}")
         return
 
+    if payload["status"] == "blocked" and payload.get("blockers"):
+        print("Blocked:")
+        for blocker in payload["blockers"]:
+            print(f"  - {blocker}")
+        return
+
     if payload["status"] in {"ok", "blocked"} and "stages" in payload:
         print(f"Ready: {payload['ready']}")
         if payload.get("blockers"):
@@ -3008,8 +3055,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "rule-check":
-            _print_payload(build_rule_check_payload(args), json_output)
-            return 0
+            payload = build_rule_check_payload(args)
+            _print_payload(payload, json_output)
+            return 1 if payload.get("status") == "blocked" else 0
 
         if args.command == "retorrent":
             payload = _with_captured_stdout(lambda: asyncio.run(retorrent_payload(args)), json_output)
@@ -3042,8 +3090,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _source_download_exit_code(payload)
 
         if args.command == "flow-check":
-            _print_payload(_with_captured_stdout(lambda: flow_check_payload(args), json_output), json_output)
-            return 0
+            payload = _with_captured_stdout(lambda: flow_check_payload(args), json_output)
+            _print_payload(payload, json_output)
+            return 1 if payload.get("status") == "blocked" else 0
 
         if args.command == "doctor":
             payload = _with_captured_stdout(lambda: asyncio.run(doctor_payload(args)), json_output)
@@ -3086,6 +3135,8 @@ def _source_info_exit_code(payload: dict[str, Any]) -> int:
 
 
 def _doctor_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:
+    if payload.get("status") == "blocked":
+        return 1
     if not getattr(args, "target_execute", False):
         return 0
     return 0 if payload.get("ready") is True and payload.get("live_safe_to_attempt") is True else 1

@@ -795,6 +795,18 @@ def test_rule_check_command_requires_ack_for_ready(capsys) -> None:
     assert payload["manual_review"]["rules_urls"] == ["https://kp.m-team.cc/rules", "https://u2.dmhy.org/rules.php"]
 
 
+def test_rule_check_blocks_unsupported_tracker_as_scope_result(capsys) -> None:
+    code = main(["rule-check", "--from", "PTP", "--to", "MTEAM", "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["command"] == "rule-check"
+    assert payload["source_tracker"] == "PTP"
+    assert payload["target_trackers"] == ["MTEAM"]
+    assert payload["blockers"] == ["Unsupported tracker(s) for focused CLI scope: PTP"]
+
+
 def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
     code = main(["rule-check", "--from", "CHD", "--to", "MTEAM", "--accept-rules", "--json"])
 
@@ -904,7 +916,7 @@ def test_source_info_blocks_unsupported_tracker_before_fetch(monkeypatch, capsys
     async def fake_fetch_source_info(*_args, **_kwargs):
         raise AssertionError("unsupported tracker must not reach source fetch")
 
-    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: (_ for _ in ()).throw(AssertionError("unsupported tracker must not read config")))
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
 
     code = main(["source-info", "--tracker", "PTP", "--source-id", "123", "--json"])
@@ -929,6 +941,26 @@ def test_source_download_requires_rule_ack(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert '"status": "blocked"' in out
     assert "rules_acknowledged" in out
+
+
+def test_source_download_blocks_unsupported_tracker_before_config(monkeypatch, capsys) -> None:
+    async def fake_download_source_torrent(*_args, **_kwargs):
+        raise AssertionError("unsupported tracker must not reach source download")
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: (_ for _ in ()).throw(AssertionError("unsupported tracker must not read config")))
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+
+    code = main(["source-download", "--tracker", "PTP", "--source-id", "123", "--to", "MTEAM", "--output-dir", "/tmp/out", "--accept-rules", "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["command"] == "source-download"
+    assert payload["tracker"] == "PTP"
+    assert payload["source_tracker"] == "PTP"
+    assert payload["source_torrent_id"] == "123"
+    assert payload["target_trackers"] == ["MTEAM"]
+    assert payload["blockers"] == ["Unsupported tracker(s) for focused CLI scope: PTP"]
 
 
 def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> None:
@@ -1975,6 +2007,21 @@ def test_flow_check_reports_missing_cookie(tmp_path) -> None:
     assert any(check["name"] == "CHD.cookie" and check["ok"] is False for check in payload["checks"])
 
 
+def test_flow_check_blocks_unsupported_tracker_before_config(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: (_ for _ in ()).throw(AssertionError("unsupported tracker must not read config")))
+
+    code = main(["flow-check", "--from", "PTP", "--source-id", "123", "--to", "MTEAM", "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["command"] == "flow-check"
+    assert payload["source_tracker"] == "PTP"
+    assert payload["source_torrent_id"] == "123"
+    assert payload["target_trackers"] == ["MTEAM"]
+    assert payload["blockers"] == ["Unsupported tracker(s) for focused CLI scope: PTP"]
+
+
 def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -2334,6 +2381,29 @@ def test_doctor_command_outputs_json(monkeypatch, tmp_path, capsys) -> None:
     out = capsys.readouterr().out
     assert '"flow_check"' in out
     assert '"live_safe_to_attempt"' in out
+
+
+def test_doctor_blocks_unsupported_tracker_before_config(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: (_ for _ in ()).throw(AssertionError("unsupported tracker must not read config")))
+
+    code = main(["doctor", "--from", "PTP", "--source-id", "123", "--to", "MTEAM", "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["command"] == "doctor"
+    assert payload["source_tracker"] == "PTP"
+    assert payload["source_torrent_id"] == "123"
+    assert payload["target_trackers"] == ["MTEAM"]
+    assert payload["ready"] is False
+    assert payload["live_safe_to_attempt"] is False
+    assert payload["checks"] == [
+        {
+            "name": "tracker_scope",
+            "ok": False,
+            "message": "Unsupported tracker(s) for focused CLI scope: PTP",
+        }
+    ]
 
 
 def test_doctor_target_execute_not_live_safe_returns_nonzero(monkeypatch, tmp_path, capsys) -> None:
