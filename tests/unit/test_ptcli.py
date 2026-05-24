@@ -156,8 +156,6 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert "--uploaded-torrent-file" in out
     assert '"stage": "doctor-live"' in out
     assert "--target-execute --confirm-upload" in out
-    assert "--download-uploaded-torrent --inject-uploaded-torrent" in out
-    assert "--wait-uploaded-complete" in out
     assert '"stage": "retorrent-execute"' in out
     assert "--execute --accept-rules --confirm-upload" in out
     assert "--uploaded-qbit-category MTEAM" in out
@@ -192,9 +190,10 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
 
     resume_target = commands["resume-target-package"]
     assert "--target-execute --confirm-upload" in resume_target
-    assert "--download-uploaded-torrent" in resume_target
-    assert "--inject-uploaded-torrent --uploaded-save-path \"/downloads/Example\"" in resume_target
-    assert "--wait-uploaded-complete" in resume_target
+    assert "--uploaded-save-path \"/downloads/Example\"" in resume_target
+    assert "--download-uploaded-torrent" not in resume_target
+    assert "--inject-uploaded-torrent" not in resume_target
+    assert "--wait-uploaded-complete" not in resume_target
     assert "--uploaded-qbit-category MTEAM" in resume_target
     assert "--uploaded-qbit-tags retorrent" in resume_target
 
