@@ -201,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json during target upload preflight.")
     pipeline.add_argument("--download-uploaded-torrent", action="store_true", help="After target upload succeeds, download the generated MTEAM torrent file.")
     pipeline.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
+    pipeline.add_argument("--uploaded-torrent-id", help="Existing MTEAM torrent id to download and inject without re-submitting the upload.")
     pipeline.add_argument("--uploaded-torrent-file", help="Reuse an already downloaded MTEAM uploaded .torrent for qBittorrent injection.")
     pipeline.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded target torrent to qBittorrent after upload.")
     pipeline.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
@@ -1339,7 +1340,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "target-prepare", "ok": True, "skipped": True, "message": "--prepare-target not provided; target preparation skipped."})
 
-    export_target_torrent = args.export_target_torrent or bool(args.upload_target and not effective_target_torrent_file and not args.uploaded_torrent_file)
+    export_target_torrent = args.export_target_torrent or bool(args.upload_target and not effective_target_torrent_file and not args.uploaded_torrent_file and not args.uploaded_torrent_id)
     if export_target_torrent:
         match_stage = _find_stage(stages, "match")
         torrent_hash = _torrent_hash_from_stage(match_stage) if match_stage else None
@@ -1359,7 +1360,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "target-torrent-export", "ok": True, "skipped": True, "message": "--export-target-torrent not provided; target torrent export skipped."})
 
-    sanitize_target_torrent = args.sanitize_target_torrent or bool(args.upload_target and args.target_execute and effective_target_torrent_file and not args.uploaded_torrent_file)
+    sanitize_target_torrent = args.sanitize_target_torrent or bool(args.upload_target and args.target_execute and effective_target_torrent_file and not args.uploaded_torrent_file and not args.uploaded_torrent_id)
     if sanitize_target_torrent:
         if not effective_target_torrent_file:
             stages.append({"stage": "target-torrent-sanitize", "ok": False, "skipped": True, "message": "No target torrent file is available to sanitize."})
@@ -1391,14 +1392,14 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         target_prepare_stage = _find_stage(stages, "target-prepare")
         if not target_prepare_stage or not target_prepare_stage.get("ok") or target_prepare_stage.get("skipped"):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because target-prepare did not complete successfully."})
-        elif not effective_target_torrent_file and not args.uploaded_torrent_file:
+        elif not effective_target_torrent_file and not args.uploaded_torrent_file and not args.uploaded_torrent_id:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--target-torrent-file or --export-target-torrent is required when --upload-target is used."})
-        elif args.target_execute and not args.uploaded_torrent_file and not args.download_uploaded_torrent:
+        elif args.target_execute and not args.uploaded_torrent_file and not args.uploaded_torrent_id and not args.download_uploaded_torrent:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "pipeline --target-execute requires --download-uploaded-torrent so the generated target torrent can be seeded."})
         elif args.target_execute and not args.inject_uploaded_torrent:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "pipeline --target-execute requires --inject-uploaded-torrent for full live retorrent closure."})
-        elif args.inject_uploaded_torrent and not (args.download_uploaded_torrent or args.uploaded_torrent_file):
-            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--inject-uploaded-torrent requires --download-uploaded-torrent."})
+        elif args.inject_uploaded_torrent and not (args.download_uploaded_torrent or args.uploaded_torrent_file or args.uploaded_torrent_id):
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--inject-uploaded-torrent requires --download-uploaded-torrent, --uploaded-torrent-id, or --uploaded-torrent-file."})
         elif args.inject_uploaded_torrent and not (args.uploaded_save_path or effective_content_path):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--uploaded-save-path or an inferred completed content path is required with --inject-uploaded-torrent."})
         elif args.wait_uploaded_complete and not args.inject_uploaded_torrent:
@@ -1826,6 +1827,7 @@ def _pipeline_requested_actions(args: argparse.Namespace) -> dict[str, bool]:
         "upload_target": bool(args.upload_target),
         "target_execute": bool(args.target_execute),
         "download_uploaded_torrent": bool(args.download_uploaded_torrent),
+        "uploaded_torrent_id": bool(args.uploaded_torrent_id),
         "inject_uploaded_torrent": bool(args.inject_uploaded_torrent),
         "wait_uploaded_complete": bool(args.wait_uploaded_complete),
         "write_summary": bool(args.write_summary),
@@ -2602,6 +2604,11 @@ async def _target_upload_with_config(
     inferred_content_path: str | None = None,
     target_torrent_file: str | None = None,
 ) -> dict[str, Any]:
+    if args.uploaded_torrent_id:
+        output_dir = args.uploaded_output_dir or package_dir
+        result = await download_mteam_uploaded_torrent(config, args.uploaded_torrent_id, output_dir)
+        uploaded_save_path = args.uploaded_save_path or inferred_content_path
+        return await _apply_uploaded_torrent_followup(config, args, result, uploaded_save_path)
     if args.uploaded_torrent_file:
         result = await _existing_uploaded_torrent_payload(args.uploaded_torrent_file)
         uploaded_save_path = args.uploaded_save_path or inferred_content_path
