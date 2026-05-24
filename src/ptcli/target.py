@@ -132,6 +132,7 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
         "target_tracker": "MTEAM",
         "dry_run": not execute,
         "package_dir": str(Path(package_dir).expanduser()),
+        "content_path": _mteam_package_content_path(package),
         "files": files,
         "upload_gate": gate,
         "rule_review": rule_review if isinstance(rule_review, dict) else {},
@@ -140,6 +141,14 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
         "blockers": blockers,
         "next_actions": _upload_preflight_next_actions(blockers, execute),
     }
+
+
+def _mteam_package_content_path(package: dict[str, Any]) -> str | None:
+    preview = package.get("preview")
+    if not isinstance(preview, dict):
+        return None
+    content_path = preview.get("content_path")
+    return str(content_path) if content_path else None
 
 
 async def upload_mteam_from_package(

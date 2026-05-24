@@ -218,7 +218,7 @@ def build_parser() -> argparse.ArgumentParser:
     target_upload.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
     target_upload.add_argument("--uploaded-torrent-file", help="Reuse an already downloaded MTEAM uploaded .torrent for qBittorrent injection.")
     target_upload.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded target torrent to qBittorrent after upload.")
-    target_upload.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
+    target_upload.add_argument("--uploaded-save-path", help="qBittorrent save path for --inject-uploaded-torrent; defaults to the package content path when available.")
     target_upload.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for --inject-uploaded-torrent.")
     target_upload.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for --inject-uploaded-torrent.")
     target_upload.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent to qBittorrent paused.")
@@ -575,13 +575,14 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
     preflight_torrent_file = args.torrent_file or args.uploaded_torrent_file
     if args.uploaded_torrent_file:
         preflight = build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=preflight_torrent_file, write_payload=args.write_payload)
-        blockers = [*preflight["blockers"], *_uploaded_torrent_reuse_blockers(args)]
+        inferred_uploaded_save_path = _uploaded_save_path_from_preflight(args, preflight)
+        blockers = [*preflight["blockers"], *_uploaded_torrent_reuse_blockers(args, inferred_uploaded_save_path=inferred_uploaded_save_path)]
         if blockers:
             blocked = {**preflight, "status": "blocked", "dry_run": False, "blockers": blockers}
             return _maybe_write_target_upload_summary(args, blocked, preflight)
         config = load_config(args.config)
         result = await _existing_uploaded_torrent_payload(args.uploaded_torrent_file)
-        result = await _apply_uploaded_torrent_followup(config, args, result, args.uploaded_save_path)
+        result = await _apply_uploaded_torrent_followup(config, args, result, inferred_uploaded_save_path)
         return _maybe_write_target_upload_summary(args, result, preflight)
     if not args.execute:
         preflight = build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=args.torrent_file, write_payload=args.write_payload)
@@ -590,7 +591,8 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         preflight = build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
         return _maybe_write_target_upload_summary(args, preflight, preflight)
     preflight = build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
-    blockers = [*preflight["blockers"], *_target_upload_execute_blockers(args)]
+    inferred_uploaded_save_path = _uploaded_save_path_from_preflight(args, preflight)
+    blockers = [*preflight["blockers"], *_target_upload_execute_blockers(args, inferred_uploaded_save_path=inferred_uploaded_save_path)]
     if blockers:
         blocked = {**preflight, "status": "blocked", "dry_run": False, "blockers": blockers}
         return _maybe_write_target_upload_summary(args, blocked, preflight)
@@ -605,11 +607,26 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         download_uploaded=args.download_uploaded_torrent,
         uploaded_output_dir=args.uploaded_output_dir,
     )
-    result = await _apply_uploaded_torrent_followup(config, args, result, args.uploaded_save_path)
+    result = await _apply_uploaded_torrent_followup(config, args, result, inferred_uploaded_save_path)
     return _maybe_write_target_upload_summary(args, result, preflight)
 
 
-def _target_upload_execute_blockers(args: argparse.Namespace) -> list[str]:
+def _uploaded_save_path_from_preflight(args: argparse.Namespace, preflight: dict[str, Any]) -> str | None:
+    return args.uploaded_save_path or _mteam_package_content_path(preflight)
+
+
+def _mteam_package_content_path(preflight: dict[str, Any]) -> str | None:
+    content_path = preflight.get("content_path")
+    if content_path:
+        return str(content_path)
+    preview = preflight.get("preview")
+    if not isinstance(preview, dict):
+        return None
+    preview_content_path = preview.get("content_path")
+    return str(preview_content_path) if preview_content_path else None
+
+
+def _target_upload_execute_blockers(args: argparse.Namespace, *, inferred_uploaded_save_path: str | None = None) -> list[str]:
     blockers: list[str] = []
     if not args.confirm_upload:
         blockers.append("MTEAM live upload requires --confirm-upload.")
@@ -619,19 +636,19 @@ def _target_upload_execute_blockers(args: argparse.Namespace) -> list[str]:
         blockers.append("--inject-uploaded-torrent is required with target-upload --execute for full live retorrent closure.")
     elif not args.download_uploaded_torrent:
         blockers.append("--inject-uploaded-torrent requires --download-uploaded-torrent.")
-    elif not args.uploaded_save_path:
-        blockers.append("--uploaded-save-path is required with --inject-uploaded-torrent.")
+    elif not inferred_uploaded_save_path:
+        blockers.append("--uploaded-save-path is required with --inject-uploaded-torrent when the MTEAM package has no content path.")
     if args.wait_uploaded_complete and not args.inject_uploaded_torrent:
         blockers.append("--wait-uploaded-complete requires --inject-uploaded-torrent.")
     return blockers
 
 
-def _uploaded_torrent_reuse_blockers(args: argparse.Namespace) -> list[str]:
+def _uploaded_torrent_reuse_blockers(args: argparse.Namespace, *, inferred_uploaded_save_path: str | None = None) -> list[str]:
     blockers: list[str] = []
     if args.wait_uploaded_complete and not args.inject_uploaded_torrent:
         blockers.append("--wait-uploaded-complete requires --inject-uploaded-torrent.")
-    if args.inject_uploaded_torrent and not args.uploaded_save_path:
-        blockers.append("--uploaded-save-path is required with --inject-uploaded-torrent.")
+    if args.inject_uploaded_torrent and not inferred_uploaded_save_path:
+        blockers.append("--uploaded-save-path is required with --inject-uploaded-torrent when the MTEAM package has no content path.")
     return blockers
 
 
@@ -680,6 +697,7 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "injected": _injected_torrent_verified(injected_torrent),
         "injection_verified": _injected_torrent_verified(injected_torrent),
         "injected_torrent_hash": _torrent_hash_from_result(injected_torrent),
+        "uploaded_save_path": _uploaded_save_path_from_result(result),
         "seeding_verified": isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete")),
         "uploaded_torrent_hash": uploaded_torrent_hash,
         "uploaded_wait": uploaded_wait if isinstance(uploaded_wait, dict) else None,
@@ -688,6 +706,18 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "preflight_blockers": preflight.get("blockers", []),
         "rule_obligations": preflight.get("rule_obligation_review", {}),
     }
+
+
+def _uploaded_save_path_from_result(result: dict[str, Any]) -> str | None:
+    injected_torrent = result.get("injected_torrent")
+    if isinstance(injected_torrent, dict) and injected_torrent.get("save_path"):
+        return str(injected_torrent["save_path"])
+    uploaded_wait = result.get("uploaded_wait")
+    if isinstance(uploaded_wait, dict):
+        query = uploaded_wait.get("query")
+        if isinstance(query, dict) and query.get("content_path"):
+            return str(query["content_path"])
+    return None
 
 
 async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:

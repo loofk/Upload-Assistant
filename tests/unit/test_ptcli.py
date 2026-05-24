@@ -4687,7 +4687,7 @@ def test_target_upload_execute_requires_uploaded_torrent_followup_before_config_
     assert "Config file not found" not in out
 
 
-def test_target_upload_uploaded_torrent_followup_failure_returns_nonzero(tmp_path, capsys) -> None:
+def test_target_upload_uploaded_torrent_followup_requires_save_path_without_package_content(tmp_path, capsys) -> None:
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -4699,7 +4699,7 @@ def test_target_upload_uploaded_torrent_followup_failure_returns_nonzero(tmp_pat
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), None, str(tmp_path), accept_rules=True)
     uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
 
     code = main(
@@ -4782,8 +4782,6 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
             "--confirm-upload",
             "--download-uploaded-torrent",
             "--inject-uploaded-torrent",
-            "--uploaded-save-path",
-            "/downloads/Example",
             "--uploaded-qbit-category",
             "MTEAM",
             "--uploaded-qbit-tags",
@@ -4819,6 +4817,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["summary"]["seeding_verified"] is True
     assert summary_payload["summary"]["uploaded_torrent_hash"] == uploaded_hash
     assert summary_payload["summary"]["injected_torrent_hash"] == uploaded_hash
+    assert summary_payload["summary"]["uploaded_save_path"] == "/downloads/Example"
     assert summary_payload["summary"]["uploaded_torrent_path"] == str(tmp_path / "MTEAM-999.torrent")
     assert summary_payload["summary"]["uploaded_torrent"]["path"] == str(tmp_path / "MTEAM-999.torrent")
     assert summary_payload["summary"]["uploaded_torrent"]["exists"] is True
@@ -4874,8 +4873,6 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
             "--uploaded-torrent-file",
             str(uploaded_torrent),
             "--inject-uploaded-torrent",
-            "--uploaded-save-path",
-            "/downloads/Example",
             "--uploaded-qbit-category",
             "MTEAM",
             "--uploaded-qbit-tags",
@@ -4897,6 +4894,7 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
     assert len(result["downloaded_torrent"]["sha1"]) == 40
     assert result["uploaded_torrent_hash"] == uploaded_hash
     assert result["injected_torrent"]["save_path"] == "/downloads/Example"
+    assert result["summary"]["uploaded_save_path"] == "/downloads/Example"
     assert result["summary"]["downloaded"] is True
     assert result["summary"]["uploaded_torrent"]["path"] == str(uploaded_torrent)
     assert result["summary"]["uploaded_torrent"]["exists"] is True
