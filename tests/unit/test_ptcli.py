@@ -3423,6 +3423,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
             "--uploaded-qbit-tags",
             "retorrent",
             "--wait-uploaded-complete",
+            "--write-summary",
             "--client",
             "default",
             "--json",
@@ -3440,6 +3441,13 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert result["uploaded_wait"]["complete"] is True
     assert result["uploaded_wait"]["query"]["torrent_hash"] == uploaded_hash
     assert result["uploaded_wait"]["query"]["content_path"] == "/downloads/Example"
+    summary_path = Path(result["summary_file"])
+    assert summary_path == Path(package["package_dir"]) / "ptcli-target-upload-summary.json"
+    summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
+    assert summary_payload["summary"]["uploaded"] is True
+    assert summary_payload["summary"]["injected"] is True
+    assert summary_payload["summary"]["seeding_verified"] is True
+    assert summary_payload["summary"]["uploaded_torrent_hash"] == uploaded_hash
 
 
 @pytest.mark.asyncio

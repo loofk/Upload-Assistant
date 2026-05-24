@@ -197,6 +197,8 @@ def build_parser() -> argparse.ArgumentParser:
     target_upload.add_argument("--wait-uploaded-complete", action="store_true", help="Wait for the injected target torrent to become complete in qBittorrent.")
     target_upload.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait with --wait-uploaded-complete.")
     target_upload.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for --wait-uploaded-complete.")
+    target_upload.add_argument("--write-summary", action="store_true", help="Write ptcli-target-upload-summary.json for audit and automation handoff.")
+    target_upload.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --package-dir.")
     target_upload.add_argument("--client", default="default", help="Configured qBittorrent client name for --inject-uploaded-torrent.")
     target_upload.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
@@ -528,13 +530,16 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
     if not args.execute:
-        return build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=args.torrent_file, write_payload=args.write_payload)
+        preflight = build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=args.torrent_file, write_payload=args.write_payload)
+        return _maybe_write_target_upload_summary(args, preflight, preflight)
     if not args.torrent_file:
-        return build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
+        preflight = build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
+        return _maybe_write_target_upload_summary(args, preflight, preflight)
     preflight = build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
     blockers = [*preflight["blockers"], *_target_upload_execute_blockers(args)]
     if blockers:
-        return {**preflight, "status": "blocked", "dry_run": False, "blockers": blockers}
+        blocked = {**preflight, "status": "blocked", "dry_run": False, "blockers": blockers}
+        return _maybe_write_target_upload_summary(args, blocked, preflight)
     config = load_config(args.config)
     result = await upload_mteam_from_package(
         config,
@@ -559,9 +564,10 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         )
         injected_payload = _with_uploaded_injection(result, inject_result)
         if args.wait_uploaded_complete:
-            return await _with_uploaded_wait(config, args, injected_payload, args.uploaded_save_path)
-        return injected_payload
-    return result
+            waited_payload = await _with_uploaded_wait(config, args, injected_payload, args.uploaded_save_path)
+            return _maybe_write_target_upload_summary(args, waited_payload, preflight)
+        return _maybe_write_target_upload_summary(args, injected_payload, preflight)
+    return _maybe_write_target_upload_summary(args, result, preflight)
 
 
 def _target_upload_execute_blockers(args: argparse.Namespace) -> list[str]:
@@ -579,6 +585,44 @@ def _target_upload_execute_blockers(args: argparse.Namespace) -> list[str]:
     if args.wait_uploaded_complete and not args.inject_uploaded_torrent:
         blockers.append("--wait-uploaded-complete requires --inject-uploaded-torrent.")
     return blockers
+
+
+def _maybe_write_target_upload_summary(args: argparse.Namespace, result: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
+    if not getattr(args, "write_summary", False):
+        return result
+    summary_file = _write_target_upload_summary(result, preflight, args.summary_output_dir or args.package_dir)
+    summary = _target_upload_summary(result, preflight)
+    return {**result, "summary": summary, "summary_file": summary_file}
+
+
+def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, Any], output_dir: str) -> str:
+    destination_dir = Path(output_dir).expanduser()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / "ptcli-target-upload-summary.json"
+    payload = {
+        "summary": _target_upload_summary(result, preflight),
+        "preflight": preflight,
+        "result": result,
+    }
+    destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return str(destination)
+
+
+def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
+    injected_torrent = result.get("injected_torrent")
+    uploaded_wait = result.get("uploaded_wait")
+    return {
+        "status": result.get("status"),
+        "ready": result.get("status") in {"ready", "uploaded"} and not result.get("blockers"),
+        "uploaded": result.get("status") == "uploaded",
+        "downloaded": isinstance(result.get("downloaded_torrent"), dict),
+        "injected": _injected_torrent_verified(injected_torrent),
+        "seeding_verified": isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete")),
+        "uploaded_torrent_hash": result.get("uploaded_torrent_hash") or _torrent_hash_from_result(injected_torrent),
+        "blockers": result.get("blockers", []),
+        "preflight_status": preflight.get("status"),
+        "preflight_blockers": preflight.get("blockers", []),
+    }
 
 
 async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
