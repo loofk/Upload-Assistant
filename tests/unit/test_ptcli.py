@@ -3139,13 +3139,13 @@ async def test_pipeline_infers_content_path_from_completed_qbit_match(monkeypatc
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, content_path, torrent_hash, timeout, interval)
-        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name"}]}
+        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}
 
     async def fake_search_mteam_duplicates(_config, source_info):
         return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
 
     async def fake_match_with_config(_config, _client_name, content_path):
-        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path}]}
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
@@ -3207,7 +3207,7 @@ async def test_pipeline_prepare_target_preview(monkeypatch, tmp_path) -> None:
         return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
 
     async def fake_match_with_config(_config, _client_name, content_path):
-        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path}]}
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
@@ -3300,6 +3300,61 @@ async def test_pipeline_prepare_target_blocks_mismatched_existing_qbit_content(m
 
 
 @pytest.mark.asyncio
+async def test_pipeline_prepare_target_blocks_unhashed_existing_qbit_content(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path}]}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            "/downloads/Name",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    verify_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-content-verify")
+    target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
+    assert verify_stage["ok"] is False
+    assert verify_stage["result"]["expected_hash"] == "a" * 40
+    assert verify_stage["result"]["matched_hashes"] == []
+    assert target_stage["ok"] is False
+    assert target_stage["result"]["verified_content"] is False
+    assert "source-content-verify: Matched qBittorrent content did not expose torrent hash evidence for source verification." in payload["blockers"]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_check_dupes_runs_after_source_info(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -3350,7 +3405,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
         return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
 
     async def fake_match_with_config(_config, _client_name, content_path):
-        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path}]}
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
@@ -3432,7 +3487,7 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
         return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
 
     async def fake_match_with_config(_config, _client_name, content_path):
-        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path}]}
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
         return {
@@ -3686,13 +3741,13 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, content_path, torrent_hash, timeout, interval)
-        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name"}]}
+        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}
 
     async def fake_search_mteam_duplicates(_config, source_info):
         return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
 
     async def fake_match_with_config(_config, _client_name, content_path):
-        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path}]}
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
         return {

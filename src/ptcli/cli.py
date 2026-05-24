@@ -1449,6 +1449,19 @@ def _source_content_verify_stage(match_stage: dict[str, Any], expected_hash: str
     result = match_stage.get("result") if isinstance(match_stage, dict) else None
     expected = _normalize_torrent_hash(expected_hash)
     match_hashes = _match_hashes(result)
+    has_match_evidence = _result_has_match_evidence(result)
+    if expected and has_match_evidence and not match_hashes:
+        return {
+            "stage": "source-content-verify",
+            "ok": False,
+            "message": "Matched qBittorrent content did not expose torrent hash evidence for source verification.",
+            "result": {
+                "verified": False,
+                "expected_hash": expected,
+                "matched_hashes": [],
+                "blockers": [f"source content hash unavailable: expected {expected}, but qBittorrent match did not expose a hash"],
+            },
+        }
     if expected and match_hashes and expected not in match_hashes:
         return {
             "stage": "source-content-verify",
@@ -1471,6 +1484,13 @@ def _source_content_verify_stage(match_stage: dict[str, Any], expected_hash: str
             "message": "Matched qBittorrent content includes the source torrent hash." if expected and match_hashes else "Source content hash verification skipped because source hash or match hash evidence is unavailable.",
         },
     }
+
+
+def _result_has_match_evidence(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    matches = result.get("matches")
+    return isinstance(matches, list) and any(_match_has_evidence(match) for match in matches)
 
 
 def _match_hashes(result: Any) -> list[str]:
