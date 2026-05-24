@@ -4583,6 +4583,77 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_target_upload_wait_uses_hash_from_reused_uploaded_torrent_file(monkeypatch, tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
+    expected_hash = Torrent.read(str(uploaded_torrent), validate=False).infohash
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
+
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+        return {
+            "client": client_name,
+            "torrent_path": torrent_path,
+            "save_path": save_path,
+            "category": category,
+            "tags": tags,
+            "paused": paused,
+            "verified_in_client": True,
+        }
+
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {
+            "client": client_name,
+            "complete": True,
+            "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval},
+            "matches": [{"hash": torrent_hash, "content_path": content_path}],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--config",
+            "config.py",
+            "--package-dir",
+            package["package_dir"],
+            "--uploaded-torrent-file",
+            str(uploaded_torrent),
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--client",
+            "default",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["uploaded_torrent_hash"] == expected_hash
+    assert result["downloaded_torrent"]["hash"] == expected_hash
+    assert result["uploaded_wait"]["complete"] is True
+    assert result["uploaded_wait"]["query"]["torrent_hash"] == expected_hash
+    assert result["summary"]["uploaded_torrent_hash"] == expected_hash
+    assert result["summary"]["injected_torrent_hash"] is None
+    assert result["summary"]["seeding_verified"] is True
+
+
+@pytest.mark.asyncio
 async def test_target_upload_inject_requires_download_flag(tmp_path) -> None:
     source_info = {
         "tracker": "U2",

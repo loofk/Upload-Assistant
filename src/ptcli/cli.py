@@ -654,7 +654,7 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
     injected_torrent = result.get("injected_torrent")
     uploaded_wait = result.get("uploaded_wait")
     blockers = _target_upload_result_blockers(result)
-    uploaded_torrent_hash = result.get("uploaded_torrent_hash") or _torrent_hash_from_result(injected_torrent)
+    uploaded_torrent_hash = _uploaded_torrent_hash_from_result(result)
     return {
         "status": result.get("status"),
         "ready": result.get("status") in {"ready", "uploaded"} and not blockers,
@@ -1530,7 +1530,13 @@ def _torrent_hash_from_stage(stage: dict[str, Any] | None) -> str | None:
 def _torrent_hash_from_result(result: Any) -> str | None:
     if not isinstance(result, dict):
         return None
-    return _normalize_torrent_hash(result.get("hash") or result.get("torrent_hash") or result.get("torrenthash"))
+    return _normalize_torrent_hash(result.get("hash") or result.get("torrent_hash") or result.get("torrenthash") or result.get("infohash"))
+
+
+def _uploaded_torrent_hash_from_result(result: Any) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    return _torrent_hash_from_result(result.get("injected_torrent")) or _torrent_hash_from_result(result) or _torrent_hash_from_result(result.get("downloaded_torrent"))
 
 
 def _normalize_torrent_hash(value: Any) -> str | None:
@@ -1678,8 +1684,8 @@ async def _wait_complete_with_config(
 
 
 def _with_uploaded_injection(result: dict[str, Any], inject_result: dict[str, Any]) -> dict[str, Any]:
-    uploaded_torrent_hash = _torrent_hash_from_result(inject_result)
     payload = {**result, "injected_torrent": inject_result}
+    uploaded_torrent_hash = _uploaded_torrent_hash_from_result(payload)
     if uploaded_torrent_hash:
         payload["uploaded_torrent_hash"] = uploaded_torrent_hash
         downloaded_torrent = payload.get("downloaded_torrent")
@@ -1689,7 +1695,7 @@ def _with_uploaded_injection(result: dict[str, Any], inject_result: dict[str, An
 
 
 async def _with_uploaded_wait(config: dict[str, Any], args: argparse.Namespace, result: dict[str, Any], uploaded_save_path: str | None) -> dict[str, Any]:
-    uploaded_torrent_hash = _torrent_hash_from_result(result.get("injected_torrent")) or _normalize_torrent_hash(result.get("uploaded_torrent_hash"))
+    uploaded_torrent_hash = _uploaded_torrent_hash_from_result(result)
     if not uploaded_torrent_hash:
         return {**result, "uploaded_wait": {"complete": False, "blockers": ["uploaded torrent hash is unavailable for qBittorrent completion wait."]}}
     wait_result = await _wait_complete_with_config(
