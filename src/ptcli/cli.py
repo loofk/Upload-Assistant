@@ -611,15 +611,16 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
 def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
     injected_torrent = result.get("injected_torrent")
     uploaded_wait = result.get("uploaded_wait")
+    blockers = _target_upload_result_blockers(result)
     return {
         "status": result.get("status"),
-        "ready": result.get("status") in {"ready", "uploaded"} and not result.get("blockers"),
+        "ready": result.get("status") in {"ready", "uploaded"} and not blockers,
         "uploaded": result.get("status") == "uploaded",
         "downloaded": isinstance(result.get("downloaded_torrent"), dict),
         "injected": _injected_torrent_verified(injected_torrent),
         "seeding_verified": isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete")),
         "uploaded_torrent_hash": result.get("uploaded_torrent_hash") or _torrent_hash_from_result(injected_torrent),
-        "blockers": result.get("blockers", []),
+        "blockers": blockers,
         "preflight_status": preflight.get("status"),
         "preflight_blockers": preflight.get("blockers", []),
     }
@@ -891,7 +892,49 @@ def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:
         stage_name = str(stage.get("stage") or "unknown")
         reason = stage.get("error") or stage.get("message") or "stage did not complete."
         blockers.append(f"{stage_name}: {reason}")
+        blockers.extend(f"{stage_name}: {detail}" for detail in _stage_result_blockers(stage_name, stage.get("result")))
     return blockers
+
+
+def _stage_result_blockers(stage_name: str, result: Any) -> list[str]:
+    if not isinstance(result, dict):
+        return []
+    if stage_name == "target-upload":
+        return _target_upload_result_blockers(result)
+    return _string_list(result.get("blockers"))
+
+
+def _target_upload_result_blockers(result: dict[str, Any]) -> list[str]:
+    blockers = _string_list(result.get("blockers"))
+    _extend_unique_string(blockers, _nested_blockers(result.get("downloaded_torrent"), "downloaded_torrent"))
+    _extend_unique_string(blockers, _nested_blockers(result.get("injected_torrent"), "injected_torrent"))
+    _extend_unique_string(blockers, _nested_blockers(result.get("uploaded_wait"), "uploaded_wait"))
+    uploaded_wait = result.get("uploaded_wait")
+    if isinstance(uploaded_wait, dict) and uploaded_wait.get("complete") is False:
+        _append_unique_string(blockers, "uploaded_wait: qBittorrent did not report the uploaded target torrent as complete.")
+    return blockers
+
+
+def _nested_blockers(payload: Any, label: str) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    return [f"{label}: {blocker}" for blocker in _string_list(payload.get("blockers"))]
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str)]
+
+
+def _extend_unique_string(items: list[str], additions: list[str]) -> None:
+    for item in additions:
+        _append_unique_string(items, item)
+
+
+def _append_unique_string(items: list[str], item: str) -> None:
+    if item not in items:
+        items.append(item)
 
 
 def _pipeline_run_summary(stages: list[dict[str, Any]], ready: bool, blockers: list[str], closure: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:

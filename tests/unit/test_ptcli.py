@@ -677,6 +677,22 @@ def test_target_upload_result_requires_uploaded_torrent_completion_when_requeste
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True, wait_uploaded_complete=True) is False
 
 
+def test_target_upload_summary_surfaces_followup_blockers() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {"status": "blocked", "blockers": ["qBittorrent refused torrent"]},
+        "uploaded_wait": {"complete": False, "blockers": ["torrent hash missing"]},
+    }
+
+    summary = ptcli_cli._target_upload_summary(payload, {"status": "ready", "blockers": []})
+
+    assert summary["ready"] is False
+    assert "injected_torrent: qBittorrent refused torrent" in summary["blockers"]
+    assert "uploaded_wait: torrent hash missing" in summary["blockers"]
+    assert "uploaded_wait: qBittorrent did not report the uploaded target torrent as complete." in summary["blockers"]
+
+
 def test_target_upload_result_accepts_completed_uploaded_torrent_wait() -> None:
     payload = {
         "status": "uploaded",
@@ -724,6 +740,25 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
     assert evidence["target"]["uploaded_torrent_hash"] == "b" * 40
     assert evidence["target"]["injection_verified"] is True
     assert evidence["target"]["injected_torrent_hash"] == "b" * 40
+
+
+def test_pipeline_stage_blockers_include_target_upload_followup_details() -> None:
+    stages = [
+        {
+            "stage": "target-upload",
+            "ok": False,
+            "error": "Target upload stage did not complete every requested upload follow-up.",
+            "result": {
+                "status": "uploaded",
+                "injected_torrent": {"status": "blocked", "blockers": ["qBittorrent refused torrent"]},
+            },
+        }
+    ]
+
+    blockers = ptcli_cli._pipeline_stage_blockers(stages)
+
+    assert "target-upload: Target upload stage did not complete every requested upload follow-up." in blockers
+    assert "target-upload: injected_torrent: qBittorrent refused torrent" in blockers
 
 
 def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
