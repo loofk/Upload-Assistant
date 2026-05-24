@@ -7,6 +7,7 @@ import pytest
 from torf import Torrent
 
 import src.ptcli.cli as ptcli_cli
+import src.ptcli.source as ptcli_source
 from src.ptcli.cli import _with_captured_stdout, build_parser, build_plan, main
 from src.ptcli.config import resolve_client_config
 from src.ptcli.credentials import build_flow_check
@@ -1424,6 +1425,56 @@ def test_source_info_from_tuple_includes_meta_side_effects() -> None:
     assert info.name == "Release Name"
     assert info.description_length == 4
     assert info.douban_id == "1291546"
+
+
+@pytest.mark.asyncio
+async def test_fetch_source_info_closes_tracker_session(monkeypatch) -> None:
+    closed = {"value": False}
+
+    class FakeSession:
+        async def aclose(self):
+            closed["value"] = True
+
+    class FakeTracker:
+        def __init__(self, config):
+            self.config = config
+            self.session = FakeSession()
+
+        async def get_info_from_torrent_id(self, torrent_id, meta=None):
+            _ = meta
+            return (1234567, 2, f"Name-{torrent_id}", "a" * 40, "desc")
+
+    monkeypatch.setitem(ptcli_source.SOURCE_TRACKER_CLASSES, "U2", FakeTracker)
+
+    info = await ptcli_source.fetch_source_info({}, "U2", "60635")
+
+    assert info.name == "Name-60635"
+    assert closed["value"] is True
+
+
+@pytest.mark.asyncio
+async def test_fetch_source_info_closes_tracker_session_on_error(monkeypatch) -> None:
+    closed = {"value": False}
+
+    class FakeSession:
+        async def aclose(self):
+            closed["value"] = True
+
+    class FakeTracker:
+        def __init__(self, config):
+            self.config = config
+            self.session = FakeSession()
+
+        async def get_info_from_torrent_id(self, torrent_id, meta=None):
+            _ = (torrent_id, meta)
+            raise RuntimeError("metadata failed")
+
+    monkeypatch.setitem(ptcli_source.SOURCE_TRACKER_CLASSES, "U2", FakeTracker)
+
+    with pytest.raises(RuntimeError, match="metadata failed"):
+        await ptcli_source.fetch_source_info({}, "U2", "60635")
+
+    assert closed["value"] is True
 
 
 def test_flow_check_ready_for_u2_to_mteam(tmp_path) -> None:

@@ -122,8 +122,11 @@ async def fetch_source_info(config: dict[str, Any], tracker: str, source_id: str
 
     meta = create_source_meta(base_dir)
     tracker_instance = tracker_class(config=config)
-    result = await tracker_instance.get_info_from_torrent_id(torrent_id, meta=meta)
-    return source_info_from_tuple(source_tracker, torrent_id, result, meta)
+    try:
+        result = await tracker_instance.get_info_from_torrent_id(torrent_id, meta=meta)
+        return source_info_from_tuple(source_tracker, torrent_id, result, meta)
+    finally:
+        await _close_tracker_session(tracker_instance)
 
 
 async def download_source_torrent(config: dict[str, Any], tracker: str, source_id: str, output_dir: str, base_dir: str | None = None) -> Path:
@@ -133,7 +136,10 @@ async def download_source_torrent(config: dict[str, Any], tracker: str, source_i
 
     if source_tracker == "MTEAM":
         tracker_instance = MTEAM(config=config)
-        await tracker_instance.download_new_torrent(torrent_id, str(destination))
+        try:
+            await tracker_instance.download_new_torrent(torrent_id, str(destination))
+        finally:
+            await _close_tracker_session(tracker_instance)
         return _validate_downloaded_torrent(destination)
 
     if source_tracker in NEXUS_DOWNLOAD_BASE_URLS:
@@ -141,6 +147,16 @@ async def download_source_torrent(config: dict[str, Any], tracker: str, source_i
         return _validate_downloaded_torrent(destination)
 
     raise ValueError(f"Source torrent download is not enabled for tracker: {source_tracker}")
+
+
+async def _close_tracker_session(tracker_instance: Any) -> None:
+    session = getattr(tracker_instance, "session", None)
+    close = getattr(session, "aclose", None)
+    if not callable(close):
+        return
+    result = close()
+    if hasattr(result, "__await__"):
+        await result
 
 
 async def _download_nexus_torrent(config: dict[str, Any], tracker: str, torrent_id: str, destination: Path, base_dir: str | None) -> None:
