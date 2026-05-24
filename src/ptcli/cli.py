@@ -2079,7 +2079,15 @@ def _pipeline_has_action(args: argparse.Namespace) -> bool:
 
 def _target_upload_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:
     if not getattr(args, "execute", False):
-        return 0
+        if not _target_upload_has_followup_action(args):
+            return 0
+        return 0 if _target_upload_result_ready(
+            payload,
+            execute=False,
+            download_uploaded=bool(getattr(args, "download_uploaded_torrent", False) or getattr(args, "uploaded_torrent_file", None)),
+            inject_uploaded=bool(getattr(args, "inject_uploaded_torrent", False)),
+            wait_uploaded_complete=bool(getattr(args, "wait_uploaded_complete", False)),
+        ) else 1
     if _target_upload_result_ready(
         payload,
         execute=True,
@@ -2089,6 +2097,15 @@ def _target_upload_exit_code(args: argparse.Namespace, payload: dict[str, Any]) 
     ):
         return 0
     return 1
+
+
+def _target_upload_has_followup_action(args: argparse.Namespace) -> bool:
+    return bool(
+        getattr(args, "uploaded_torrent_file", None)
+        or getattr(args, "download_uploaded_torrent", False)
+        or getattr(args, "inject_uploaded_torrent", False)
+        or getattr(args, "wait_uploaded_complete", False)
+    )
 
 
 if __name__ == "__main__":
