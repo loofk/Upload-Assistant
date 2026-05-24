@@ -581,6 +581,9 @@ def build_mteam_field_mapping(meta_draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _has_verified_content(stages: list[dict[str, Any]]) -> bool:
+    source_content_verify = _find_stage(stages, "source-content-verify")
+    if source_content_verify and not source_content_verify.get("ok"):
+        return False
     for stage in stages:
         stage_name = stage.get("stage")
         result = stage.get("result", {})

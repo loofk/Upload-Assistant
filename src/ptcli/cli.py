@@ -1112,6 +1112,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             lambda payload: payload,
         )
         stages.append(match_result)
+        stages.append(_source_content_verify_stage(match_result, effective_source_torrent_hash))
     else:
         stages.append({"stage": "match", "ok": True, "skipped": True, "message": "--path not provided; qBittorrent match skipped."})
 
@@ -1413,6 +1414,50 @@ def _source_torrent_verify_stage(source_download_stage: dict[str, Any], expected
             "message": "Source torrent hash matched source metadata." if expected and actual_hash else "Source torrent hash verification skipped because one side did not expose an infohash.",
         },
     }
+
+
+def _source_content_verify_stage(match_stage: dict[str, Any], expected_hash: str | None) -> dict[str, Any]:
+    result = match_stage.get("result") if isinstance(match_stage, dict) else None
+    expected = _normalize_torrent_hash(expected_hash)
+    match_hashes = _match_hashes(result)
+    if expected and match_hashes and expected not in match_hashes:
+        return {
+            "stage": "source-content-verify",
+            "ok": False,
+            "message": "Matched qBittorrent content does not include the source tracker torrent hash.",
+            "result": {
+                "verified": False,
+                "expected_hash": expected,
+                "matched_hashes": match_hashes,
+                "blockers": [f"source content hash mismatch: expected {expected}, matched {', '.join(match_hashes)}"],
+            },
+        }
+    return {
+        "stage": "source-content-verify",
+        "ok": True,
+        "result": {
+            "verified": bool(expected and match_hashes),
+            "expected_hash": expected,
+            "matched_hashes": match_hashes,
+            "message": "Matched qBittorrent content includes the source torrent hash." if expected and match_hashes else "Source content hash verification skipped because source hash or match hash evidence is unavailable.",
+        },
+    }
+
+
+def _match_hashes(result: Any) -> list[str]:
+    if not isinstance(result, dict):
+        return []
+    matches = result.get("matches")
+    if not isinstance(matches, list):
+        return []
+    hashes: list[str] = []
+    for match in matches:
+        if not isinstance(match, dict):
+            continue
+        torrent_hash = _normalize_torrent_hash(match.get("hash") or match.get("torrent_hash") or match.get("torrenthash"))
+        if torrent_hash and torrent_hash not in hashes:
+            hashes.append(torrent_hash)
+    return hashes
 
 
 def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:
