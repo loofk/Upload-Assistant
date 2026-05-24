@@ -120,6 +120,18 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--target-output-dir", default="./tmp/target", help="Directory for --prepare-target review package files.")
     pipeline.add_argument("--check-dupes", action="store_true", help="Run target duplicate search after source metadata is available.")
     pipeline.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
+    pipeline.add_argument("--upload-target", action="store_true", help="Run the target upload stage after --prepare-target succeeds.")
+    pipeline.add_argument("--target-torrent-file", help="MTEAM .torrent file used by --upload-target.")
+    pipeline.add_argument("--target-execute", action="store_true", help="Submit the target upload when every gate passes.")
+    pipeline.add_argument("--confirm-upload", action="store_true", help="Required with --target-execute to confirm manual rule review and live upload intent.")
+    pipeline.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json during target upload preflight.")
+    pipeline.add_argument("--download-uploaded-torrent", action="store_true", help="After target upload succeeds, download the generated MTEAM torrent file.")
+    pipeline.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
+    pipeline.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded target torrent to qBittorrent after upload.")
+    pipeline.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
+    pipeline.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for --inject-uploaded-torrent.")
+    pipeline.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for --inject-uploaded-torrent.")
+    pipeline.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent to qBittorrent paused.")
     pipeline.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     target_upload = subparsers.add_parser("target-upload", help="Preflight a prepared target package before live upload.")
@@ -440,6 +452,29 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "target-prepare", "ok": True, "skipped": True, "message": "--prepare-target not provided; target preparation skipped."})
 
+    if args.upload_target:
+        target_prepare_stage = _find_stage(stages, "target-prepare")
+        if not target_prepare_stage or not target_prepare_stage.get("ok") or target_prepare_stage.get("skipped"):
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because target-prepare did not complete successfully."})
+        elif not args.target_torrent_file:
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--target-torrent-file is required when --upload-target is used."})
+        elif args.inject_uploaded_torrent and not args.download_uploaded_torrent:
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--inject-uploaded-torrent requires --download-uploaded-torrent."})
+        elif args.inject_uploaded_torrent and not args.uploaded_save_path:
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--uploaded-save-path is required with --inject-uploaded-torrent."})
+        else:
+            package_dir = str(target_prepare_stage.get("result", {}).get("package_dir", ""))
+            upload_stage = await _pipeline_stage(
+                "target-upload",
+                lambda: _target_upload_with_config(config, args, package_dir),
+                lambda payload: payload,
+                validate=lambda payload: payload.get("status") in {"ready", "uploaded"},
+                invalid_message="Target upload stage did not reach ready or uploaded status.",
+            )
+            stages.append(upload_stage)
+    else:
+        stages.append({"stage": "target-upload", "ok": True, "skipped": True, "message": "--upload-target not provided; target upload skipped."})
+
     return {
         "status": "ok",
         "source_tracker": source_tracker,
@@ -509,6 +544,32 @@ async def _inject_source_with_config(
         "client": resolved_client_name,
         **result,
     }
+
+
+async def _target_upload_with_config(config: dict[str, Any], args: argparse.Namespace, package_dir: str) -> dict[str, Any]:
+    result = await upload_mteam_from_package(
+        config,
+        package_dir,
+        args.target_torrent_file,
+        execute=args.target_execute,
+        confirm_upload=args.confirm_upload,
+        write_payload=args.write_payload,
+        download_uploaded=args.download_uploaded_torrent,
+        uploaded_output_dir=args.uploaded_output_dir,
+    )
+    if args.inject_uploaded_torrent and result.get("status") == "uploaded" and isinstance(result.get("downloaded_torrent"), dict):
+        downloaded_path = str(result["downloaded_torrent"]["path"])
+        inject_result = await _inject_source_with_config(
+            config,
+            args.client,
+            downloaded_path,
+            args.uploaded_save_path,
+            args.uploaded_qbit_category,
+            args.uploaded_qbit_tags,
+            args.uploaded_paused,
+        )
+        return {**result, "injected_torrent": inject_result}
+    return result
 
 
 async def _wait_complete_with_config(
