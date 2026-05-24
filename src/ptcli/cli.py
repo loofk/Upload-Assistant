@@ -699,6 +699,11 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         blocked = {**preflight, "status": "blocked", "dry_run": False, "blockers": blockers}
         return _maybe_write_target_upload_summary(args, blocked, preflight)
     config = load_config(args.config)
+    fresh_dupe_check = await _fresh_mteam_dupe_check_for_target_upload(config, preflight)
+    dupe_blockers = _fresh_mteam_dupe_check_blockers(fresh_dupe_check)
+    if dupe_blockers:
+        blocked = {**preflight, "status": "blocked", "dry_run": False, "fresh_duplicate_check": fresh_dupe_check, "blockers": [*blockers, *dupe_blockers]}
+        return _maybe_write_target_upload_summary(args, blocked, preflight)
     result = await upload_mteam_from_package(
         config,
         args.package_dir,
@@ -709,6 +714,7 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         download_uploaded=args.download_uploaded_torrent,
         uploaded_output_dir=args.uploaded_output_dir,
     )
+    result = {**result, "fresh_duplicate_check": fresh_dupe_check}
     result = await _apply_uploaded_torrent_followup(config, args, result, inferred_uploaded_save_path)
     return _maybe_write_target_upload_summary(args, result, preflight)
 
@@ -760,6 +766,48 @@ def _target_upload_execute_blockers(args: argparse.Namespace, *, inferred_upload
     if args.wait_uploaded_complete and not args.inject_uploaded_torrent:
         blockers.append("--wait-uploaded-complete requires --inject-uploaded-torrent.")
     return blockers
+
+
+async def _fresh_mteam_dupe_check_for_target_upload(config: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
+    return await search_mteam_duplicates(config, _source_info_from_mteam_preflight(preflight))
+
+
+def _fresh_mteam_dupe_check_blockers(dupe_check: dict[str, Any]) -> list[str]:
+    if not dupe_check.get("searched"):
+        reason = dupe_check.get("reason") or "MTEAM duplicate search did not run."
+        return [f"fresh_duplicate_check: {reason}"]
+    dupe_count = int(dupe_check.get("count", 0) or 0)
+    if dupe_count:
+        return [f"fresh_duplicate_check: MTEAM duplicate search found {dupe_count} possible existing torrent(s)."]
+    return []
+
+
+def _source_info_from_mteam_preflight(preflight: dict[str, Any]) -> dict[str, Any] | None:
+    package_manifest = preflight.get("package_manifest")
+    manifest_source = package_manifest.get("source") if isinstance(package_manifest, dict) else None
+    preview = preflight.get("preview")
+    preview_metadata = preview.get("metadata") if isinstance(preview, dict) else None
+    meta_draft = preflight.get("meta_draft")
+    if not isinstance(meta_draft, dict):
+        meta_draft = preview.get("meta_draft") if isinstance(preview, dict) else {}
+    if not isinstance(meta_draft, dict):
+        meta_draft = {}
+    source = manifest_source if isinstance(manifest_source, dict) else preview_metadata if isinstance(preview_metadata, dict) else {}
+    if not isinstance(source, dict):
+        return None
+    content_path = preflight.get("content_path") or (preview.get("content_path") if isinstance(preview, dict) else None)
+    return {
+        "tracker": source.get("tracker"),
+        "torrent_id": source.get("torrent_id"),
+        "name": source.get("name") or meta_draft.get("name"),
+        "imdb_id": source.get("imdb_id") or meta_draft.get("imdb_id"),
+        "tmdb_id": source.get("tmdb_id") or meta_draft.get("tmdb_id"),
+        "douban_id": source.get("douban_id") or meta_draft.get("douban_id"),
+        "douban_url": source.get("douban_url") or meta_draft.get("douban_url"),
+        "torrenthash": source.get("torrenthash") or meta_draft.get("torrenthash"),
+        "description_length": source.get("description_length"),
+        "content_path": content_path,
+    }
 
 
 def _uploaded_torrent_reuse_blockers(args: argparse.Namespace, *, inferred_uploaded_save_path: str | None = None) -> list[str]:

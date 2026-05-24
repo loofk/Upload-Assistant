@@ -6375,6 +6375,11 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
             "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)},
         }
 
+    async def fake_search_mteam_duplicates(_config, source_info):
+        assert source_info["imdb_id"] == 1234567
+        assert source_info["content_path"] == "/downloads/Example"
+        return {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
+
     async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
         return {
             "client": client_name,
@@ -6395,6 +6400,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
         }
 
     monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
     monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
     monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
     parser = build_parser()
@@ -6427,6 +6433,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     result = await ptcli_cli.target_upload_payload(args)
 
     assert result["status"] == "uploaded"
+    assert result["fresh_duplicate_check"]["searched"] is True
+    assert result["fresh_duplicate_check"]["count"] == 0
     assert result["uploaded_torrent_hash"] == uploaded_hash
     assert result["downloaded_torrent"]["hash"] == uploaded_hash
     assert result["downloaded_torrent"]["exists"] is True
@@ -6473,6 +6481,57 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent"]
     assert commands["verify-seeding"].startswith("python3 ptcli.py inspect")
+
+
+@pytest.mark.asyncio
+async def test_target_upload_execute_blocks_on_fresh_duplicate_check(monkeypatch, tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
+
+    async def fake_search_mteam_duplicates(_config, dupe_source_info):
+        assert dupe_source_info["imdb_id"] == 1234567
+        return {"searched": True, "query": {"imdb": "tt1234567"}, "count": 1, "dupes": [{"name": "Existing"}]}
+
+    async def fake_upload_mteam_from_package(*_args, **_kwargs):
+        raise AssertionError("live upload must not run when fresh MTEAM duplicate check finds matches")
+
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--config",
+            "config.py",
+            "--package-dir",
+            package["package_dir"],
+            "--torrent-file",
+            str(torrent_file),
+            "--execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["status"] == "blocked"
+    assert result["fresh_duplicate_check"]["count"] == 1
+    assert any("fresh_duplicate_check" in blocker for blocker in result["blockers"])
 
 
 def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
