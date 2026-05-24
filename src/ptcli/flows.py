@@ -27,8 +27,10 @@ NEXUSPHP_MTEAM_SOURCE_TRACKERS: Final[frozenset[str]] = frozenset(
         "CHD",
         "HDSKY",
         "HHAN",
+        "OB",
         "PTER",
         "TJUPT",
+        "TTG",
         "U2",
     }
 )

@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 import aiofiles
 import httpx
+from bs4 import BeautifulSoup
 
 from src.ptcli.mainland import normalize_tracker
 from src.trackers.AUDIENCES import AUDIENCES
@@ -19,8 +20,10 @@ from src.trackers.COMMON import COMMON
 from src.trackers.HDSKY import HDSKY
 from src.trackers.HHAN import HHAN
 from src.trackers.MTEAM import MTEAM
+from src.trackers.OB import OB
 from src.trackers.PTER import PTER
 from src.trackers.TJUPT import TJUPT
+from src.trackers.TTG import TTG
 from src.trackers.U2 import U2
 
 
@@ -47,9 +50,22 @@ NEXUS_DOWNLOAD_BASE_URLS: dict[str, str] = {
     "CHD": "https://ptchdbits.co",
     "HDSKY": "https://hdsky.me",
     "HHAN": "https://hhanclub.net",
+    "OB": "https://ourbits.club",
     "PTER": "https://pterclub.com",
     "TJUPT": "https://www.tjupt.org",
     "U2": "https://u2.dmhy.org",
+}
+
+DIRECT_DOWNLOAD_TRACKER_CLASSES: dict[str, type[Any]] = {
+    "MTEAM": MTEAM,
+    "OB": OB,
+    "TTG": TTG,
+}
+
+GENERIC_DETAILS_BASE_URLS: dict[str, str] = {
+    "HDS": "https://hd-space.org",
+    "OB": "https://ourbits.club",
+    "TTG": "https://totheglory.im",
 }
 
 
@@ -132,10 +148,12 @@ async def fetch_source_info(config: dict[str, Any], tracker: str, source_id: str
     source_tracker = normalize_tracker(tracker)
     torrent_id = extract_torrent_id(source_id)
     tracker_class = SOURCE_TRACKER_CLASSES.get(source_tracker)
+    meta = create_source_meta(base_dir)
     if tracker_class is None:
+        if source_tracker in GENERIC_DETAILS_BASE_URLS:
+            return await _fetch_generic_source_info(config, source_tracker, torrent_id, meta)
         raise ValueError(f"Source metadata is not enabled for tracker: {source_tracker}")
 
-    meta = create_source_meta(base_dir)
     tracker_instance = tracker_class(config=config)
     try:
         result = await tracker_instance.get_info_from_torrent_id(torrent_id, meta=meta)
@@ -149,8 +167,8 @@ async def download_source_torrent(config: dict[str, Any], tracker: str, source_i
     torrent_id = extract_torrent_id(source_id)
     destination = await asyncio.to_thread(_prepare_destination, output_dir, source_tracker, torrent_id)
 
-    if source_tracker == "MTEAM":
-        tracker_instance = MTEAM(config=config)
+    if source_tracker in DIRECT_DOWNLOAD_TRACKER_CLASSES:
+        tracker_instance = DIRECT_DOWNLOAD_TRACKER_CLASSES[source_tracker](config=config)
         try:
             await tracker_instance.download_new_torrent(torrent_id, str(destination))
         finally:
@@ -162,6 +180,95 @@ async def download_source_torrent(config: dict[str, Any], tracker: str, source_i
         return _validate_downloaded_torrent(destination)
 
     raise ValueError(f"Source torrent download is not enabled for tracker: {source_tracker}")
+
+
+async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torrent_id: str, meta: dict[str, Any]) -> SourceTorrentInfo:
+    common = COMMON(config=config)
+    cookiefile = os.path.join(meta["base_dir"], "data", "cookies", f"{tracker}.txt")
+    cookie_exists = await asyncio.to_thread(os.path.exists, cookiefile)
+    if not cookie_exists:
+        return SourceTorrentInfo(
+            tracker=tracker,
+            torrent_id=torrent_id,
+            imdb_id=None,
+            tmdb_id=None,
+            name=None,
+            torrenthash=None,
+            description_length=0,
+            douban_id=None,
+            douban_url=None,
+        )
+
+    cookies = await common.parseCookieFile(cookiefile)
+    async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
+        response = await client.get(_generic_details_url(tracker, torrent_id))
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "lxml")
+    page_text = soup.get_text("\n", strip=True)
+    douban_id, douban_url = _extract_douban(page_text, response.text)
+    return SourceTorrentInfo(
+        tracker=tracker,
+        torrent_id=torrent_id,
+        imdb_id=_extract_first_int(r"imdb\.com/title/tt(\d+)", response.text),
+        tmdb_id=_extract_first_int(r"themoviedb\.org/(?:movie|tv)/(\d+)", response.text),
+        name=_extract_generic_name(soup, page_text),
+        torrenthash=_extract_torrent_hash(page_text),
+        description_length=len(_extract_generic_description(soup, page_text)),
+        douban_id=douban_id,
+        douban_url=douban_url,
+    )
+
+
+def _generic_details_url(tracker: str, torrent_id: str) -> str:
+    base_url = GENERIC_DETAILS_BASE_URLS[tracker]
+    if tracker == "HDS":
+        return f"{base_url}/index.php?page=torrent-details&id={torrent_id}"
+    return f"{base_url}/details.php?id={torrent_id}"
+
+
+def _extract_first_int(pattern: str, text: str) -> int | None:
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def _extract_douban(page_text: str, html: str) -> tuple[str | None, str | None]:
+    match = re.search(r"douban\.com/subject/(\d+)", html, flags=re.IGNORECASE)
+    if not match:
+        match = re.search(r"(?:douban|豆瓣)[^\d]{0,32}(\d{5,})", page_text, flags=re.IGNORECASE)
+    if not match:
+        return None, None
+    douban_id = match.group(1)
+    return douban_id, f"https://movie.douban.com/subject/{douban_id}/"
+
+
+def _extract_generic_name(soup: BeautifulSoup, page_text: str) -> str | None:
+    candidates = [
+        soup.select_one("h1"),
+        soup.select_one("td.rowhead + td"),
+        soup.select_one("title"),
+    ]
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        name = " ".join(candidate.get_text(" ", strip=True).split())
+        if name and len(name) <= 240:
+            return name
+    first_line = next((line.strip() for line in page_text.splitlines() if line.strip()), "")
+    return first_line[:240] or None
+
+
+def _extract_torrent_hash(page_text: str) -> str | None:
+    match = re.search(r"(?:info\s*hash|torrent\s*hash|hash)[^A-Fa-f0-9]{0,48}([A-Fa-f0-9]{40})", page_text, flags=re.IGNORECASE)
+    return match.group(1).lower() if match else None
+
+
+def _extract_generic_description(soup: BeautifulSoup, page_text: str) -> str:
+    for selector in ("#kdescr", "div.nfo", "td.embedded", "div.torrent-description"):
+        node = soup.select_one(selector)
+        if node is not None:
+            return node.get_text("\n", strip=True)
+    return page_text
 
 
 async def _close_tracker_session(tracker_instance: Any) -> None:

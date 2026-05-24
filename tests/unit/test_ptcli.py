@@ -946,6 +946,80 @@ def test_source_module_registers_enabled_chinese_source_adapters() -> None:
     for tracker in ["AUDIENCES", "CHD", "HDSKY", "HHAN", "PTER", "TJUPT", "U2"]:
         assert tracker in ptcli_source.SOURCE_TRACKER_CLASSES
         assert tracker in ptcli_source.NEXUS_DOWNLOAD_BASE_URLS
+    for tracker in ["HDS", "OB", "TTG"]:
+        assert tracker in ptcli_source.GENERIC_DETAILS_BASE_URLS
+    for tracker in ["MTEAM", "OB", "TTG"]:
+        assert tracker in ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES
+
+
+@pytest.mark.asyncio
+async def test_generic_source_info_parses_hds_details(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "HDS.txt").write_text("uid=1;", encoding="utf-8")
+    html = """
+    <html>
+      <head><title>Example.Movie.2024.1080p - HD-Space</title></head>
+      <body>
+        <h1>Example.Movie.2024.1080p.BluRay-GROUP</h1>
+        <a href="https://www.imdb.com/title/tt1234567/">IMDb</a>
+        <a href="https://www.themoviedb.org/movie/76543">TMDb</a>
+        <a href="https://movie.douban.com/subject/1291546/">Douban</a>
+        <div class="torrent-description">Info hash: ABCDEF1234567890ABCDEF1234567890ABCDEF12</div>
+      </body>
+    </html>
+    """
+
+    class FakeResponse:
+        text = html
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url):
+            assert url == "https://hd-space.org/index.php?page=torrent-details&id=456"
+            return FakeResponse()
+
+    monkeypatch.setattr(ptcli_source.httpx, "AsyncClient", FakeClient)
+
+    info = await ptcli_source.fetch_source_info({}, "HDS", "456", base_dir=str(tmp_path))
+
+    assert info.tracker == "HDS"
+    assert info.torrent_id == "456"
+    assert info.imdb_id == 1234567
+    assert info.tmdb_id == 76543
+    assert info.name == "Example.Movie.2024.1080p.BluRay-GROUP"
+    assert info.torrenthash == "abcdef1234567890abcdef1234567890abcdef12"
+    assert info.douban_id == "1291546"
+    assert info.douban_url == "https://movie.douban.com/subject/1291546/"
+    assert info.description_length > 0
+
+
+@pytest.mark.asyncio
+async def test_source_download_uses_direct_chinese_tracker_downloader(monkeypatch, tmp_path) -> None:
+    class FakeTTG:
+        def __init__(self, config):
+            self.config = config
+
+        async def download_new_torrent(self, _torrent_id, torrent_path):
+            await asyncio.to_thread(Path(torrent_path).write_bytes, b"d4:infod")
+
+    monkeypatch.setitem(ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES, "TTG", FakeTTG)
+
+    path = await ptcli_source.download_source_torrent({"TRACKERS": {"TTG": {"announce_url": "https://example/announce/passkey"}}}, "TTG", "789", str(tmp_path))
+
+    assert path == tmp_path / "TTG-789.torrent"
+    assert path.read_bytes() == b"d4:infod"
 
 
 def test_source_info_blocks_unsupported_tracker_before_fetch(monkeypatch, capsys) -> None:
@@ -2046,6 +2120,27 @@ def test_flow_check_ready_for_enabled_chinese_nexus_source(tmp_path) -> None:
     assert payload["source_tracker"] == "PTER"
     assert any(check["name"] == "PTER.passkey" and check["ok"] is True for check in payload["checks"])
     assert any(check["name"] == "PTER.cookie" and check["ok"] is True for check in payload["checks"])
+    assert any(check["name"] == "reference_flow" and check["ok"] is True for check in payload["checks"])
+
+
+def test_flow_check_ready_for_ttg_to_mteam_uses_announce_url(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "TTG.txt").write_text("uid=1;", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {
+            "TTG": {"announce_url": "https://totheglory.im/announce/passkey"},
+            "MTEAM": {"api_key": "mteam-api"},
+        },
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+
+    payload = build_flow_check(config, "TTG", "123", "MTEAM", "default", base_dir=str(tmp_path))
+
+    assert payload["ready"] is True
+    assert any(check["name"] == "TTG.passkey" and check["ok"] is True for check in payload["checks"])
+    assert any(check["name"] == "TTG.cookie" and check["ok"] is True for check in payload["checks"])
     assert any(check["name"] == "reference_flow" and check["ok"] is True for check in payload["checks"])
 
 

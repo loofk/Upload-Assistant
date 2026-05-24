@@ -59,7 +59,7 @@ def _source_checks(config: dict[str, Any], source_tracker: str, base_dir: str | 
     tracker_config = config.get("TRACKERS", {}).get(source_tracker, {})
     checks: list[CheckItem] = []
     if source_tracker in NEXUSPHP_MTEAM_SOURCE_TRACKERS:
-        passkey = str(tracker_config.get("passkey", "")).strip() if isinstance(tracker_config, dict) else ""
+        passkey = _source_passkey(tracker_config, source_tracker)
         checks.append(CheckItem(name=f"{source_tracker}.passkey", ok=bool(passkey), message="Passkey configured." if passkey else "Passkey missing."))
         resolved_base_dir = os.path.abspath(base_dir or os.getcwd())
         cookiefile = os.path.join(resolved_base_dir, "data", "cookies", f"{source_tracker}.txt")
@@ -70,6 +70,14 @@ def _source_checks(config: dict[str, Any], source_tracker: str, base_dir: str | 
     else:
         checks.append(CheckItem(name=f"{source_tracker}.source", ok=False, message="Source checks are not implemented for this tracker."))
     return checks
+
+
+def _source_passkey(tracker_config: Any, source_tracker: str) -> str:
+    if not isinstance(tracker_config, dict):
+        return ""
+    if source_tracker == "TTG":
+        return str(tracker_config.get("announce_url") or tracker_config.get("passkey") or "").strip()
+    return str(tracker_config.get("passkey", "")).strip()
 
 
 def _target_checks(config: dict[str, Any], target_trackers: list[str]) -> list[CheckItem]:
