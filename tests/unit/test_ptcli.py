@@ -497,6 +497,57 @@ async def test_retorrent_execute_reuses_source_torrent_file(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_retorrent_execute_reuses_uploaded_torrent_id(monkeypatch) -> None:
+    captured_args = {}
+
+    async def fake_pipeline_payload(args):
+        captured_args["args"] = args
+        return {
+            "ready": True,
+            "closure": {"complete": True, "blockers": [], "target": {"downloaded": True, "injected": True}},
+            "artifacts": {"uploaded_torrent_id": "999"},
+            "stages": [{"stage": "target-upload", "ok": True}],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--path",
+            "/downloads/Name",
+            "--uploaded-torrent-id",
+            "999",
+            "--uploaded-qbit-category",
+            "MTEAM",
+            "--uploaded-qbit-tags",
+            "retorrent",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    pipeline_args = captured_args["args"]
+    assert payload["ready"] is True
+    assert pipeline_args.uploaded_torrent_id == "999"
+    assert pipeline_args.download_uploaded_torrent is True
+    assert pipeline_args.inject_uploaded_torrent is True
+    assert pipeline_args.wait_uploaded_complete is True
+    assert pipeline_args.uploaded_qbit_category == "MTEAM"
+    assert pipeline_args.uploaded_qbit_tags == "retorrent"
+
+
+@pytest.mark.asyncio
 async def test_retorrent_execute_defaults_to_export_target_torrent(monkeypatch) -> None:
     captured_args = {}
 
