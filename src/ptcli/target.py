@@ -9,6 +9,14 @@ from typing import Any
 
 from src.trackers.MTEAM import MTEAM
 
+REQUIRED_MTEAM_PACKAGE_FILES = {
+    "preview": "mteam-prepare-preview.json",
+    "meta_draft": "mteam-meta-draft.json",
+    "field_mapping": "mteam-field-mapping.json",
+    "description_draft": "mteam-description-draft.txt",
+    "upload_gate": "mteam-upload-gate.json",
+}
+
 
 def write_mteam_prepare_package(
     source_info: dict[str, Any] | None,
@@ -44,6 +52,67 @@ def write_mteam_prepare_package(
             "description_draft": str(description_path),
             "upload_gate": str(upload_gate_path),
         },
+    }
+
+
+def build_mteam_upload_preflight(package_dir: str, execute: bool = False) -> dict[str, Any]:
+    package = load_mteam_prepare_package(package_dir)
+    gate = package.get("upload_gate", {})
+    files = package.get("files", {})
+    blockers = list(package.get("blockers", []))
+
+    if not isinstance(gate, dict) or not gate.get("ready"):
+        blockers.append("MTEAM upload gate is not ready.")
+    if execute:
+        blockers.append("MTEAM live upload is not enabled in ptcli yet.")
+
+    return {
+        "status": "blocked" if blockers else "ready",
+        "target_tracker": "MTEAM",
+        "dry_run": not execute,
+        "package_dir": str(Path(package_dir).expanduser()),
+        "files": files,
+        "upload_gate": gate,
+        "blockers": blockers,
+        "next_actions": _upload_preflight_next_actions(blockers, execute),
+    }
+
+
+def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
+    root = Path(package_dir).expanduser()
+    if not root.exists() or not root.is_dir():
+        raise ValueError(f"MTEAM package directory not found: {root}")
+
+    paths = {key: root / filename for key, filename in REQUIRED_MTEAM_PACKAGE_FILES.items()}
+    missing = [str(path) for path in paths.values() if not path.exists()]
+    if missing:
+        raise ValueError(f"MTEAM package is missing required file(s): {', '.join(missing)}")
+
+    preview = _read_json(paths["preview"])
+    meta_draft = _read_json(paths["meta_draft"])
+    field_mapping = _read_json(paths["field_mapping"])
+    upload_gate = _read_json(paths["upload_gate"])
+    description = paths["description_draft"].read_text(encoding="utf-8")
+
+    blockers: list[str] = []
+    if not description.strip():
+        blockers.append("MTEAM description draft is empty.")
+    if not isinstance(upload_gate, dict):
+        blockers.append("MTEAM upload gate file is invalid.")
+        upload_gate = {}
+    if not isinstance(field_mapping, dict) or not field_mapping.get("name") or not field_mapping.get("category"):
+        blockers.append("MTEAM field mapping is missing name or category.")
+
+    return {
+        "target_tracker": "MTEAM",
+        "package_dir": str(root),
+        "files": {key: str(path) for key, path in paths.items()},
+        "preview": preview,
+        "meta_draft": meta_draft,
+        "field_mapping": field_mapping,
+        "description_length": len(description),
+        "upload_gate": upload_gate,
+        "blockers": blockers,
     }
 
 
@@ -339,3 +408,18 @@ def _prepare_package_dir(output_dir: str, source_info: dict[str, Any] | None) ->
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _read_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _upload_preflight_next_actions(blockers: list[str], execute: bool) -> list[str]:
+    if blockers:
+        return [
+            "Review every blocker before upload.",
+            "Regenerate the MTEAM package after fixing source metadata, qBittorrent evidence, duplicate check, or rules acknowledgement.",
+        ]
+    if execute:
+        return ["Live upload is still disabled; implement the MTEAM upload adapter handoff before retrying."]
+    return ["Review the package manually, then rerun with the future live upload flag after upload support is enabled."]

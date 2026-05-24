@@ -22,6 +22,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-sour
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path /downloads --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path /downloads --wait-complete --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path /downloads/movie --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --json
+python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --json
 python3 ptcli.py inspect --client default --limit 20 --json
 python3 ptcli.py match --path /downloads/movie --json
 python3 ptcli.py export --hash "<infohash>" --output-dir ./tmp/exported --json
@@ -66,6 +67,7 @@ python3 ptcli.py retorrent --from MTEAM --source-id 12345 --to TJUPT,CHD --path 
 - `pipeline`: 串联 `flow-check`、`source-info`、可选 `source-download`、可选 `inject-source`、可选 `wait-complete`、可选 `match`、可选 `target-dupe-check` 和可选 `target-prepare`；默认不下载、不注入、不等待、不上传。
 - `target-prepare`: 目前生成 MTEAM dry-run preview、meta draft、field mapping、description draft 和 upload gate 文件，不调用上传接口。
 - `target-dupe-check`: 可选调用 MTEAM API 按 IMDb 查重；没有 IMDb ID 时明确阻断。
+- `target-upload`: 读取 MTEAM 准备包并执行上传预检；真实上传仍被明确阻断。
 - `retorrent`: 生成可审计转种计划，并输出可逐步执行的 JSON command plan。
 - `inspect`: 只读列出 qBittorrent 任务。
 - `match`: 按盒子路径匹配 qBittorrent 任务。

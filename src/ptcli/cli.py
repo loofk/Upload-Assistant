@@ -19,7 +19,7 @@ from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tra
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import get_rule_profiles, rule_profiles_to_dicts
 from src.ptcli.source import download_source_torrent, extract_torrent_id, fetch_source_info, source_info_has_signal
-from src.ptcli.target import search_mteam_duplicates, write_mteam_prepare_package
+from src.ptcli.target import build_mteam_upload_preflight, search_mteam_duplicates, write_mteam_prepare_package
 
 
 @dataclass(frozen=True)
@@ -121,6 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--check-dupes", action="store_true", help="Run target duplicate search after source metadata is available.")
     pipeline.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
     pipeline.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
+    target_upload = subparsers.add_parser("target-upload", help="Preflight a prepared target package before live upload.")
+    target_upload.add_argument("--package-dir", required=True, help="Directory created by pipeline --prepare-target.")
+    target_upload.add_argument("--execute", action="store_true", help="Request live upload. Currently blocked until upload support is enabled.")
+    target_upload.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     retorrent = subparsers.add_parser("retorrent", help="Plan a retorrent workflow between supported trackers.")
     retorrent.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code, for example MTEAM.")
@@ -252,6 +257,10 @@ def build_plan(args: argparse.Namespace) -> RetorrentPlan:
 def flow_check_payload(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config(args.config)
     return build_flow_check(config, args.source_tracker, args.source_id, args.target_trackers, args.client, base_dir=args.base_dir)
+
+
+def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
+    return build_mteam_upload_preflight(args.package_dir, execute=args.execute)
 
 
 async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -585,6 +594,16 @@ def _print_payload(payload: dict[str, Any], json_output: bool) -> None:
             print(f"  [{marker}] {stage['stage']}{suffix}")
         return
 
+    if payload.get("target_tracker") == "MTEAM" and "upload_gate" in payload:
+        print(f"Target: {payload['target_tracker']}")
+        print(f"Status: {payload['status']}")
+        print(f"Dry run: {payload['dry_run']}")
+        if payload["blockers"]:
+            print("Blockers:")
+            for blocker in payload["blockers"]:
+                print(f"  - {blocker}")
+        return
+
     if payload["status"] == "ok" and "tracker" in payload and "path" in payload:
         print(f"Tracker: {payload['tracker']}")
         print(f"Path: {payload['path']}")
@@ -657,6 +676,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "pipeline":
             payload = _with_captured_stdout(lambda: asyncio.run(pipeline_payload(args)), json_output)
             _print_payload(payload, json_output)
+            return 0
+
+        if args.command == "target-upload":
+            _print_payload(target_upload_payload(args), json_output)
             return 0
 
         parser.error(f"Unknown command: {args.command}")

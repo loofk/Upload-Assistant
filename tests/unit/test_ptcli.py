@@ -13,6 +13,7 @@ from src.ptcli.target import (
     build_mteam_meta_draft,
     build_mteam_prepare_preview,
     build_mteam_upload_gate,
+    build_mteam_upload_preflight,
     search_mteam_duplicates,
     write_mteam_prepare_package,
 )
@@ -831,6 +832,77 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-prepare-preview.json").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-description-draft.txt").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-field-mapping.json").read_text(encoding="utf-8").strip().startswith("{")
+
+
+def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+
+    preflight = build_mteam_upload_preflight(package["package_dir"])
+
+    assert preflight["status"] == "ready"
+    assert preflight["dry_run"] is True
+    assert preflight["upload_gate"]["ready"] is True
+
+
+def test_mteam_upload_preflight_blocks_execute_until_live_upload_exists(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True)
+
+    assert preflight["status"] == "blocked"
+    assert "live upload is not enabled" in preflight["blockers"][0]
+
+
+def test_target_upload_command_outputs_preflight_json(tmp_path, capsys) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], [{"stage": "match", "ok": True, "result": {"count": 1}}], "/downloads/Example", str(tmp_path))
+
+    code = main(["target-upload", "--package-dir", package["package_dir"], "--json"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"target_tracker": "MTEAM"' in out
+    assert '"upload_gate"' in out
 
 
 @pytest.mark.asyncio
