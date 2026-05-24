@@ -717,6 +717,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
 
     ready = all(stage.get("ok", False) for stage in stages)
     blockers = _pipeline_stage_blockers(stages) if _pipeline_has_action(args) and not ready else []
+    closure = _pipeline_closure(stages, effective_content_path, effective_source_torrent_hash, effective_target_torrent_file)
     return {
         "status": "blocked" if blockers else "ok",
         "source_tracker": source_tracker,
@@ -728,7 +729,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "target_torrent_file": effective_target_torrent_file,
         "ready": ready,
         "blockers": blockers,
-        "closure": _pipeline_closure(stages, effective_content_path, effective_source_torrent_hash, effective_target_torrent_file),
+        "closure": closure,
+        "evidence": _pipeline_evidence(closure),
         "stages": stages,
     }
 
@@ -816,6 +818,27 @@ def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[st
         ("target.injected", target.get("injected")),
     ]
     return [name for name, ok in checks if not ok]
+
+
+def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
+    source = closure.get("source") if isinstance(closure.get("source"), dict) else {}
+    target = closure.get("target") if isinstance(closure.get("target"), dict) else {}
+    return {
+        "complete": bool(closure.get("complete")),
+        "blockers": closure.get("blockers") if isinstance(closure.get("blockers"), list) else [],
+        "source": {
+            "ready": bool(source.get("ready")),
+            "mode": "downloaded" if source.get("downloaded") and source.get("injected") and source.get("complete") else "matched" if source.get("matched") else "missing",
+            "torrent_hash": source.get("torrent_hash"),
+            "content_path": source.get("content_path"),
+        },
+        "target": {
+            "ready": bool(target.get("prepared") and target.get("uploaded") and target.get("downloaded") and target.get("injected")),
+            "torrent_file": target.get("torrent_file"),
+            "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
+            "uploaded_torrent_path": target.get("uploaded_torrent_path"),
+        },
+    }
 
 
 def _stage_completed(stage: dict[str, Any] | None) -> bool:

@@ -504,6 +504,39 @@ def test_target_upload_result_accepts_completed_uploaded_torrent_injection() -> 
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is True
 
 
+def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
+    closure = {
+        "complete": True,
+        "blockers": [],
+        "source": {
+            "ready": True,
+            "downloaded": True,
+            "injected": True,
+            "complete": True,
+            "matched": False,
+            "torrent_hash": "a" * 40,
+            "content_path": "/downloads/Name",
+        },
+        "target": {
+            "prepared": True,
+            "uploaded": True,
+            "downloaded": True,
+            "injected": True,
+            "torrent_file": "/tmp/mteam.torrent",
+            "uploaded_torrent_hash": "b" * 40,
+            "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
+        },
+    }
+
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    assert evidence["complete"] is True
+    assert evidence["source"]["mode"] == "downloaded"
+    assert evidence["source"]["torrent_hash"] == "a" * 40
+    assert evidence["target"]["ready"] is True
+    assert evidence["target"]["uploaded_torrent_hash"] == "b" * 40
+
+
 def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "skipped": True},
