@@ -703,8 +703,13 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 "target-upload",
                 lambda: _target_upload_with_config(config, args, package_dir, effective_content_path, effective_target_torrent_file),
                 lambda payload: payload,
-                validate=lambda payload: payload.get("status") in {"ready", "uploaded"},
-                invalid_message="Target upload stage did not reach ready or uploaded status.",
+                validate=lambda payload: _target_upload_result_ready(
+                    payload,
+                    execute=args.target_execute,
+                    download_uploaded=args.download_uploaded_torrent,
+                    inject_uploaded=args.inject_uploaded_torrent,
+                ),
+                invalid_message="Target upload stage did not complete every requested upload follow-up.",
             )
             stages.append(upload_stage)
     else:
@@ -1319,6 +1324,21 @@ def _retorrent_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> i
     return 1
 
 
+def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, download_uploaded: bool, inject_uploaded: bool) -> bool:
+    if payload.get("status") not in {"ready", "uploaded"}:
+        return False
+    if payload.get("blockers"):
+        return False
+    if execute and payload.get("status") != "uploaded":
+        return False
+    if download_uploaded and not isinstance(payload.get("downloaded_torrent"), dict):
+        return False
+    if inject_uploaded:
+        injected_torrent = payload.get("injected_torrent")
+        return isinstance(injected_torrent, dict) and not injected_torrent.get("blockers")
+    return True
+
+
 def _pipeline_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:
     if not _pipeline_has_action(args):
         return 0
@@ -1348,7 +1368,12 @@ def _pipeline_has_action(args: argparse.Namespace) -> bool:
 def _target_upload_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:
     if not getattr(args, "execute", False):
         return 0
-    if payload.get("status") == "uploaded":
+    if _target_upload_result_ready(
+        payload,
+        execute=True,
+        download_uploaded=bool(getattr(args, "download_uploaded_torrent", False)),
+        inject_uploaded=bool(getattr(args, "inject_uploaded_torrent", False)),
+    ):
         return 0
     return 1
 
