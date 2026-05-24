@@ -171,6 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json during target upload preflight.")
     pipeline.add_argument("--download-uploaded-torrent", action="store_true", help="After target upload succeeds, download the generated MTEAM torrent file.")
     pipeline.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
+    pipeline.add_argument("--uploaded-torrent-file", help="Reuse an already downloaded MTEAM uploaded .torrent for qBittorrent injection.")
     pipeline.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded target torrent to qBittorrent after upload.")
     pipeline.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
     pipeline.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for --inject-uploaded-torrent.")
@@ -192,6 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
     target_upload.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
     target_upload.add_argument("--download-uploaded-torrent", action="store_true", help="After live upload succeeds, download the generated MTEAM torrent file.")
     target_upload.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
+    target_upload.add_argument("--uploaded-torrent-file", help="Reuse an already downloaded MTEAM uploaded .torrent for qBittorrent injection.")
     target_upload.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded target torrent to qBittorrent after upload.")
     target_upload.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
     target_upload.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for --inject-uploaded-torrent.")
@@ -232,6 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
     retorrent.add_argument("--download-uploaded-torrent", action="store_true", help="After target upload succeeds, download the generated MTEAM torrent file. Enabled automatically by --execute.")
     retorrent.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
+    retorrent.add_argument("--uploaded-torrent-file", help="Reuse an already downloaded MTEAM uploaded .torrent during --execute.")
     retorrent.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded MTEAM torrent to qBittorrent after upload. Enabled automatically by --execute.")
     retorrent.add_argument("--uploaded-save-path", help="qBittorrent save path for uploaded target torrent injection.")
     retorrent.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for uploaded target torrent injection.")
@@ -481,6 +484,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         write_payload=args.write_payload,
         download_uploaded_torrent=True,
         uploaded_output_dir=args.uploaded_output_dir,
+        uploaded_torrent_file=args.uploaded_torrent_file,
         inject_uploaded_torrent=True,
         uploaded_save_path=args.uploaded_save_path,
         uploaded_qbit_category=args.uploaded_qbit_category,
@@ -536,6 +540,17 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 
 async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
+    preflight_torrent_file = args.torrent_file or args.uploaded_torrent_file
+    if args.uploaded_torrent_file:
+        preflight = build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=preflight_torrent_file, write_payload=args.write_payload)
+        blockers = [*preflight["blockers"], *_uploaded_torrent_reuse_blockers(args)]
+        if blockers:
+            blocked = {**preflight, "status": "blocked", "dry_run": False, "blockers": blockers}
+            return _maybe_write_target_upload_summary(args, blocked, preflight)
+        config = load_config(args.config)
+        result = await _existing_uploaded_torrent_payload(args.uploaded_torrent_file)
+        result = await _apply_uploaded_torrent_followup(config, args, result, args.uploaded_save_path)
+        return _maybe_write_target_upload_summary(args, result, preflight)
     if not args.execute:
         preflight = build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=args.torrent_file, write_payload=args.write_payload)
         return _maybe_write_target_upload_summary(args, preflight, preflight)
@@ -558,22 +573,7 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         download_uploaded=args.download_uploaded_torrent,
         uploaded_output_dir=args.uploaded_output_dir,
     )
-    if args.inject_uploaded_torrent and result.get("status") == "uploaded" and isinstance(result.get("downloaded_torrent"), dict):
-        downloaded_path = str(result["downloaded_torrent"]["path"])
-        inject_result = await _inject_source_with_config(
-            config,
-            args.client,
-            downloaded_path,
-            args.uploaded_save_path,
-            args.uploaded_qbit_category,
-            args.uploaded_qbit_tags,
-            args.uploaded_paused,
-        )
-        injected_payload = _with_uploaded_injection(result, inject_result)
-        if args.wait_uploaded_complete:
-            waited_payload = await _with_uploaded_wait(config, args, injected_payload, args.uploaded_save_path)
-            return _maybe_write_target_upload_summary(args, waited_payload, preflight)
-        return _maybe_write_target_upload_summary(args, injected_payload, preflight)
+    result = await _apply_uploaded_torrent_followup(config, args, result, args.uploaded_save_path)
     return _maybe_write_target_upload_summary(args, result, preflight)
 
 
@@ -591,6 +591,15 @@ def _target_upload_execute_blockers(args: argparse.Namespace) -> list[str]:
         blockers.append("--uploaded-save-path is required with --inject-uploaded-torrent.")
     if args.wait_uploaded_complete and not args.inject_uploaded_torrent:
         blockers.append("--wait-uploaded-complete requires --inject-uploaded-torrent.")
+    return blockers
+
+
+def _uploaded_torrent_reuse_blockers(args: argparse.Namespace) -> list[str]:
+    blockers: list[str] = []
+    if args.wait_uploaded_complete and not args.inject_uploaded_torrent:
+        blockers.append("--wait-uploaded-complete requires --inject-uploaded-torrent.")
+    if args.inject_uploaded_torrent and not args.uploaded_save_path:
+        blockers.append("--uploaded-save-path is required with --inject-uploaded-torrent.")
     return blockers
 
 
@@ -830,13 +839,13 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         target_prepare_stage = _find_stage(stages, "target-prepare")
         if not target_prepare_stage or not target_prepare_stage.get("ok") or target_prepare_stage.get("skipped"):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because target-prepare did not complete successfully."})
-        elif not effective_target_torrent_file:
+        elif not effective_target_torrent_file and not args.uploaded_torrent_file:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--target-torrent-file or --export-target-torrent is required when --upload-target is used."})
-        elif args.target_execute and not args.download_uploaded_torrent:
+        elif args.target_execute and not args.uploaded_torrent_file and not args.download_uploaded_torrent:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "pipeline --target-execute requires --download-uploaded-torrent so the generated target torrent can be seeded."})
         elif args.target_execute and not args.inject_uploaded_torrent:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "pipeline --target-execute requires --inject-uploaded-torrent for full live retorrent closure."})
-        elif args.inject_uploaded_torrent and not args.download_uploaded_torrent:
+        elif args.inject_uploaded_torrent and not (args.download_uploaded_torrent or args.uploaded_torrent_file):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--inject-uploaded-torrent requires --download-uploaded-torrent."})
         elif args.inject_uploaded_torrent and not (args.uploaded_save_path or effective_content_path):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--uploaded-save-path or an inferred completed content path is required with --inject-uploaded-torrent."})
@@ -944,18 +953,27 @@ def _existing_target_prepare_blockers(package: dict[str, Any]) -> list[str]:
 
 
 async def _existing_source_torrent_payload(source_torrent_file: str) -> dict[str, Any]:
-    return await asyncio.to_thread(_validate_existing_source_torrent_file, source_torrent_file)
+    return await asyncio.to_thread(_validate_existing_torrent_file, source_torrent_file, "Source")
 
 
-def _validate_existing_source_torrent_file(source_torrent_file: str) -> dict[str, Any]:
-    path = Path(source_torrent_file).expanduser()
+async def _existing_uploaded_torrent_payload(uploaded_torrent_file: str) -> dict[str, Any]:
+    torrent = await asyncio.to_thread(_validate_existing_torrent_file, uploaded_torrent_file, "Uploaded target")
+    return {
+        "status": "uploaded",
+        "downloaded_torrent": torrent,
+        "uploaded_torrent_file": torrent["path"],
+    }
+
+
+def _validate_existing_torrent_file(torrent_file: str, label: str) -> dict[str, Any]:
+    path = Path(torrent_file).expanduser()
     if not path.exists():
-        raise ValueError(f"Source torrent file not found: {path}")
+        raise ValueError(f"{label} torrent file not found: {path}")
     if not path.is_file():
-        raise ValueError(f"Source torrent path is not a file: {path}")
+        raise ValueError(f"{label} torrent path is not a file: {path}")
     with path.open("rb") as torrent_file:
         if torrent_file.read(1) != b"d":
-            raise ValueError("Source torrent file does not look like a .torrent file.")
+            raise ValueError(f"{label} torrent file does not look like a .torrent file.")
     return {
         "path": str(path),
         "reused": True,
@@ -1462,6 +1480,10 @@ async def _target_upload_with_config(
     inferred_content_path: str | None = None,
     target_torrent_file: str | None = None,
 ) -> dict[str, Any]:
+    if args.uploaded_torrent_file:
+        result = await _existing_uploaded_torrent_payload(args.uploaded_torrent_file)
+        uploaded_save_path = args.uploaded_save_path or inferred_content_path
+        return await _apply_uploaded_torrent_followup(config, args, result, uploaded_save_path)
     result = await upload_mteam_from_package(
         config,
         package_dir,
@@ -1472,9 +1494,12 @@ async def _target_upload_with_config(
         download_uploaded=args.download_uploaded_torrent,
         uploaded_output_dir=args.uploaded_output_dir,
     )
+    return await _apply_uploaded_torrent_followup(config, args, result, args.uploaded_save_path or inferred_content_path)
+
+
+async def _apply_uploaded_torrent_followup(config: dict[str, Any], args: argparse.Namespace, result: dict[str, Any], uploaded_save_path: str | None) -> dict[str, Any]:
     if args.inject_uploaded_torrent and result.get("status") == "uploaded" and isinstance(result.get("downloaded_torrent"), dict):
         downloaded_path = str(result["downloaded_torrent"]["path"])
-        uploaded_save_path = args.uploaded_save_path or inferred_content_path
         if not uploaded_save_path:
             return {**result, "injected_torrent": {"status": "blocked", "blockers": ["uploaded save path could not be inferred."]}}
         inject_result = await _inject_source_with_config(
