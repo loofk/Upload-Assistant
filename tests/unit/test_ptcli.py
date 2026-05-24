@@ -5055,6 +5055,9 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     summary_path = Path(result["summary_file"])
     assert summary_path == Path(package["package_dir"]) / "ptcli-target-upload-summary.json"
     summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
+    assert summary_payload["schema_version"] == 1
+    assert summary_payload["kind"] == "ptcli.target_upload.summary"
+    assert summary_payload["summary_file"] == str(summary_path)
     assert summary_payload["summary"]["uploaded"] is True
     assert summary_payload["summary"]["injected"] is True
     assert summary_payload["summary"]["injection_verified"] is True
@@ -5069,6 +5072,15 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert len(summary_payload["summary"]["uploaded_torrent"]["sha1"]) == 40
     assert summary_payload["summary"]["uploaded_wait"]["complete"] is True
     assert summary_payload["summary"]["rule_obligations"]["ready"] is True
+    assert summary_payload["artifacts"]["package_dir"]["is_dir"] is True
+    assert summary_payload["artifacts"]["target_torrent_file"]["is_file"] is True
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["path"] == str(tmp_path / "MTEAM-999.torrent")
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["is_file"] is True
+    commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    assert "target-upload-retry" in commands
+    assert str(tmp_path / "MTEAM-999.torrent") in commands["resume-uploaded-torrent"]
+    assert "--uploaded-save-path /downloads/Example" in commands["resume-uploaded-torrent"]
+    assert commands["verify-seeding"].startswith("python3 ptcli.py inspect")
 
 
 @pytest.mark.asyncio
