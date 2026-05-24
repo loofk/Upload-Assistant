@@ -38,6 +38,7 @@ from src.ptcli.target import (
 @dataclass(frozen=True)
 class RetorrentPlan:
     source_tracker: str
+    requested_source_id: str
     source_torrent_id: str
     target_trackers: list[str]
     content_path: str | None
@@ -443,6 +444,7 @@ def build_plan(args: argparse.Namespace) -> RetorrentPlan:
 
     return RetorrentPlan(
         source_tracker=source_tracker,
+        requested_source_id=args.source_id,
         source_torrent_id=source_torrent_id,
         target_trackers=target_trackers,
         content_path=args.content_path,
@@ -830,6 +832,8 @@ def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, s
         "ready": payload.get("ready"),
         "live_safe_to_attempt": payload.get("live_safe_to_attempt"),
         "source_tracker": normalize_tracker(args.source_tracker),
+        "requested_source_id": args.source_id,
+        "input_source_id": args.source_id,
         "source_torrent_id": extract_torrent_id(args.source_id),
         "target_trackers": parse_tracker_list(args.target_trackers),
         "client": args.client,
@@ -1289,9 +1293,14 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     summary = _pipeline_run_summary(stages, ready, blockers, closure, evidence)
     summary["requested_actions"] = requested_actions
     summary["effective_actions"] = effective_actions
+    summary["requested_source_id"] = args.source_id
+    summary["input_source_id"] = args.source_id
+    summary["source_torrent_id"] = source_torrent_id
     payload = {
         "status": "blocked" if blockers else "ok",
         "source_tracker": source_tracker,
+        "requested_source_id": args.source_id,
+        "input_source_id": args.source_id,
         "source_torrent_id": source_torrent_id,
         "source_torrent_hash": effective_source_torrent_hash,
         "target_trackers": target_trackers,
@@ -1873,6 +1882,8 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "summary_file": str(destination),
         "status": payload.get("status"),
         "source_tracker": payload.get("source_tracker"),
+        "requested_source_id": payload.get("requested_source_id"),
+        "input_source_id": payload.get("input_source_id"),
         "source_torrent_id": payload.get("source_torrent_id"),
         "target_trackers": payload.get("target_trackers"),
         "path": payload.get("path"),

@@ -197,10 +197,14 @@ def test_retorrent_plan_marks_non_reference_flow_blocker(capsys) -> None:
 
 
 def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys) -> None:
-    code = main(["retorrent", "--from", "U2", "--source-id", "https://u2.dmhy.org/details.php?id=123", "--to", "MTEAM", "--dry-run", "--json"])
+    source_url = "https://u2.dmhy.org/details.php?id=123"
+    code = main(["retorrent", "--from", "U2", "--source-id", source_url, "--to", "MTEAM", "--dry-run", "--json"])
 
     assert code == 0
     out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["plan"]["requested_source_id"] == source_url
+    assert payload["plan"]["source_torrent_id"] == "123"
     assert "not one of the first reference flows" not in out
     assert '"source_torrent_id": "123"' in out
     assert '"source_kind": "nexusphp"' in out
@@ -1777,6 +1781,8 @@ def test_flow_check_ready_for_u2_to_mteam(tmp_path) -> None:
     payload = build_flow_check(config, "U2", "https://u2.dmhy.org/details.php?id=60635", "MTEAM", "default", base_dir=str(tmp_path))
 
     assert payload["ready"] is True
+    assert payload["requested_source_id"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert payload["input_source_id"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["source_torrent_id"] == "60635"
 
 
@@ -2254,6 +2260,7 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
 
 
 def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> None:
+    source_url = "https://u2.dmhy.org/details.php?id=60635&hit=1"
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
@@ -2271,7 +2278,7 @@ def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> No
             "--from",
             "U2",
             "--source-id",
-            "60635",
+            source_url,
             "--to",
             "MTEAM",
             "--base-dir",
@@ -2291,7 +2298,12 @@ def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> No
     assert payload["schema_version"] == 1
     assert payload["kind"] == "ptcli.doctor.live_readiness"
     assert payload["summary_file"] == str(summary_path)
+    assert payload["requested_source_id"] == source_url
+    assert payload["input_source_id"] == source_url
+    assert payload["source_torrent_id"] == "60635"
     assert payload["flow_check"]["ready"] is True
+    assert payload["flow_check"]["requested_source_id"] == source_url
+    assert payload["flow_check"]["source_torrent_id"] == "60635"
     assert payload["live_safe_to_attempt"] is False
     assert "target_package" in payload["failed_check_names"]
     assert payload["recommended_commands"][0]["stage"] == "doctor-retry"
@@ -3484,6 +3496,7 @@ async def test_pipeline_check_dupes_runs_after_source_info(monkeypatch, tmp_path
 
 @pytest.mark.asyncio
 async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkeypatch, tmp_path) -> None:
+    source_url = "https://u2.dmhy.org/details.php?id=60635&hit=1"
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
@@ -3514,7 +3527,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
             "--from",
             "U2",
             "--source-id",
-            "60635",
+            source_url,
             "--to",
             "MTEAM",
             "--base-dir",
@@ -3533,6 +3546,9 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
 
     payload = await ptcli_cli.pipeline_payload(args)
 
+    assert payload["requested_source_id"] == source_url
+    assert payload["input_source_id"] == source_url
+    assert payload["source_torrent_id"] == "60635"
     target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
     assert target_stage["result"]["upload_gate"]["ready"] is True
     assert target_stage["result"]["upload_gate"]["dupe_count"] == 0
@@ -3540,11 +3556,16 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_path == Path(target_stage["result"]["package_dir"]) / "ptcli-run-summary.json"
     summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
     assert summary_payload["closure"] == payload["closure"]
+    assert summary_payload["requested_source_id"] == source_url
+    assert summary_payload["input_source_id"] == source_url
+    assert summary_payload["source_torrent_id"] == "60635"
     assert summary_payload["closure"]["complete"] is False
     assert summary_payload["closure"]["blockers"] == ["target.uploaded", "target.downloaded", "target.injected"]
     assert summary_payload["requested_actions"] == payload["requested_actions"]
     assert summary_payload["effective_actions"] == payload["effective_actions"]
     assert summary_payload["summary"]["ready"] is True
+    assert summary_payload["summary"]["requested_source_id"] == source_url
+    assert summary_payload["summary"]["source_torrent_id"] == "60635"
     assert summary_payload["summary"]["target"]["ready"] is False
     assert summary_payload["summary"]["gates"]["rule_check"]["rules_acknowledged"] is True
     assert summary_payload["summary"]["gates"]["duplicate_check"]["ok"] is True

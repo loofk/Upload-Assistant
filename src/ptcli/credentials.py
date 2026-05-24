@@ -46,6 +46,8 @@ def build_flow_check(config: dict[str, Any], source_tracker_raw: str, source_id_
     return {
         "status": "ok",
         "source_tracker": source_tracker,
+        "requested_source_id": source_id_raw,
+        "input_source_id": source_id_raw,
         "source_torrent_id": source_torrent_id,
         "target_trackers": target_trackers,
         "ready": all(item.ok for item in checks),
@@ -88,4 +90,3 @@ def _qbit_check(config: dict[str, Any], client_name: str) -> CheckItem:
     except ValueError as exc:
         return CheckItem(name="qbit.client", ok=False, message=str(exc))
     return CheckItem(name="qbit.client", ok=True, message=f"qBittorrent client configured: {resolved_name}")
-
