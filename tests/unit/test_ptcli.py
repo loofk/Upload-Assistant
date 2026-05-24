@@ -1422,11 +1422,120 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
     assert upload_stage["result"]["downloaded_torrent"]["hash"] == uploaded_hash
     assert upload_stage["result"]["injected_torrent"]["save_path"] == "/downloads/Name"
     assert upload_stage["result"]["injected_torrent"]["category"] == "MTEAM"
+    assert payload["closure"]["complete"] is False
+    assert payload["closure"]["blockers"] == ["source.downloaded", "source.injected", "source.complete"]
     assert payload["closure"]["source"]["content_path"] == "/downloads/Name"
     assert payload["closure"]["target"]["prepared"] is True
     assert payload["closure"]["target"]["uploaded"] is True
     assert payload["closure"]["target"]["downloaded"] is True
     assert payload["closure"]["target"]["injected"] is True
+    assert payload["closure"]["target"]["uploaded_torrent_hash"] == uploaded_hash
+
+
+@pytest.mark.asyncio
+async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+    uploaded_hash = "d" * 40
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (tracker, source_id, base_dir)
+        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path.parent.mkdir(parents=True, exist_ok=True)
+        torrent_path.write_bytes(b"d4:infod")
+        return torrent_path
+
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+        return {"hash": "a" * 40, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused}
+
+    async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
+        _ = (config, client_name, content_path, torrent_hash, timeout, interval)
+        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_upload_mteam_from_package(*_args, **_kwargs):
+        return {"status": "uploaded", "downloaded_torrent": {"torrent_id": "999", "path": str(tmp_path / "MTEAM-999.torrent")}}
+
+    async def fake_inject_uploaded_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused}
+
+    calls = {"inject": 0}
+
+    async def fake_inject_router(*args):
+        calls["inject"] += 1
+        if calls["inject"] == 1:
+            return await fake_inject_source_with_config(*args)
+        return await fake_inject_uploaded_with_config(*args)
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_router)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--download-source",
+            "--inject-source",
+            "--save-path",
+            "/downloads",
+            "--wait-complete",
+            "--check-dupes",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--accept-rules",
+            "--upload-target",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--target-execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-qbit-category",
+            "MTEAM",
+            "--uploaded-qbit-tags",
+            "retorrent",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    assert payload["closure"]["complete"] is True
+    assert payload["closure"]["blockers"] == []
+    assert payload["closure"]["source"]["downloaded"] is True
+    assert payload["closure"]["source"]["injected"] is True
+    assert payload["closure"]["source"]["complete"] is True
     assert payload["closure"]["target"]["uploaded_torrent_hash"] == uploaded_hash
 
 

@@ -734,24 +734,42 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     target_upload_result = target_upload.get("result") if target_upload and isinstance(target_upload.get("result"), dict) else {}
     downloaded_torrent = target_upload_result.get("downloaded_torrent") if isinstance(target_upload_result, dict) else None
     injected_torrent = target_upload_result.get("injected_torrent") if isinstance(target_upload_result, dict) else None
-    return {
-        "source": {
-            "downloaded": _stage_completed(source_download),
-            "injected": _stage_completed(inject_source),
-            "complete": _stage_completed(wait_complete),
-            "torrent_hash": source_torrent_hash,
-            "content_path": content_path,
-        },
-        "target": {
-            "prepared": _stage_completed(target_prepare),
-            "uploaded": isinstance(target_upload_result, dict) and target_upload_result.get("status") == "uploaded",
-            "downloaded": isinstance(downloaded_torrent, dict),
-            "injected": isinstance(injected_torrent, dict) and not injected_torrent.get("blockers"),
-            "torrent_file": target_torrent_file,
-            "uploaded_torrent_hash": target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None,
-            "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
-        },
+    source = {
+        "downloaded": _stage_completed(source_download),
+        "injected": _stage_completed(inject_source),
+        "complete": _stage_completed(wait_complete),
+        "torrent_hash": source_torrent_hash,
+        "content_path": content_path,
     }
+    target = {
+        "prepared": _stage_completed(target_prepare),
+        "uploaded": isinstance(target_upload_result, dict) and target_upload_result.get("status") == "uploaded",
+        "downloaded": isinstance(downloaded_torrent, dict),
+        "injected": isinstance(injected_torrent, dict) and not injected_torrent.get("blockers"),
+        "torrent_file": target_torrent_file,
+        "uploaded_torrent_hash": target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None,
+        "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
+    }
+    blockers = _closure_blockers(source, target)
+    return {
+        "complete": not blockers,
+        "blockers": blockers,
+        "source": source,
+        "target": target,
+    }
+
+
+def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[str]:
+    checks = [
+        ("source.downloaded", source.get("downloaded")),
+        ("source.injected", source.get("injected")),
+        ("source.complete", source.get("complete")),
+        ("target.prepared", target.get("prepared")),
+        ("target.uploaded", target.get("uploaded")),
+        ("target.downloaded", target.get("downloaded")),
+        ("target.injected", target.get("injected")),
+    ]
+    return [name for name, ok in checks if not ok]
 
 
 def _stage_completed(stage: dict[str, Any] | None) -> bool:
