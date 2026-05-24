@@ -4108,9 +4108,11 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     uploaded_hash = "f" * 40
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
+        uploaded_path = tmp_path / "MTEAM-999.torrent"
+        uploaded_path.write_bytes(b"d4:infod")
         return {
             "status": "uploaded",
-            "downloaded_torrent": {"torrent_id": "999", "path": str(tmp_path / "MTEAM-999.torrent")},
+            "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)},
         }
 
     async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
@@ -4168,6 +4170,9 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert result["status"] == "uploaded"
     assert result["uploaded_torrent_hash"] == uploaded_hash
     assert result["downloaded_torrent"]["hash"] == uploaded_hash
+    assert result["downloaded_torrent"]["exists"] is True
+    assert result["downloaded_torrent"]["size_bytes"] == len(b"d4:infod")
+    assert len(result["downloaded_torrent"]["sha1"]) == 40
     assert result["injected_torrent"]["save_path"] == "/downloads/Example"
     assert result["injected_torrent"]["category"] == "MTEAM"
     assert result["injected_torrent"]["tags"] == "retorrent"
@@ -4252,6 +4257,9 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
     assert result["status"] == "uploaded"
     assert result["downloaded_torrent"]["reused"] is True
     assert result["downloaded_torrent"]["path"] == str(uploaded_torrent)
+    assert result["downloaded_torrent"]["exists"] is True
+    assert result["downloaded_torrent"]["size_bytes"] > 0
+    assert len(result["downloaded_torrent"]["sha1"]) == 40
     assert result["uploaded_torrent_hash"] == uploaded_hash
     assert result["injected_torrent"]["save_path"] == "/downloads/Example"
     assert result["summary"]["downloaded"] is True

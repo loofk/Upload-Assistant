@@ -1590,6 +1590,7 @@ async def _target_upload_with_config(
 
 async def _apply_uploaded_torrent_followup(config: dict[str, Any], args: argparse.Namespace, result: dict[str, Any], uploaded_save_path: str | None) -> dict[str, Any]:
     if args.inject_uploaded_torrent and result.get("status") == "uploaded" and isinstance(result.get("downloaded_torrent"), dict):
+        result = _with_downloaded_torrent_file_evidence(result)
         downloaded_path = str(result["downloaded_torrent"]["path"])
         if not uploaded_save_path:
             return {**result, "injected_torrent": {"status": "blocked", "blockers": ["uploaded save path could not be inferred."]}}
@@ -1607,6 +1608,20 @@ async def _apply_uploaded_torrent_followup(config: dict[str, Any], args: argpars
             return await _with_uploaded_wait(config, args, injected_payload, uploaded_save_path)
         return injected_payload
     return result
+
+
+def _with_downloaded_torrent_file_evidence(result: dict[str, Any]) -> dict[str, Any]:
+    downloaded_torrent = result.get("downloaded_torrent")
+    if not isinstance(downloaded_torrent, dict) or not downloaded_torrent.get("path"):
+        return result
+    evidence = _torrent_file_evidence(str(downloaded_torrent["path"]))
+    return {
+        **result,
+        "downloaded_torrent": {
+            **downloaded_torrent,
+            **evidence,
+        },
+    }
 
 
 async def _wait_complete_with_config(
