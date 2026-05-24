@@ -14,6 +14,7 @@ from src.ptcli.target import (
     build_mteam_field_mapping,
     build_mteam_meta_draft,
     build_mteam_prepare_preview,
+    build_mteam_rule_review,
     build_mteam_upload_gate,
     build_mteam_upload_preflight,
     create_mteam_upload_torrent_candidate,
@@ -2603,6 +2604,21 @@ def test_mteam_description_draft_and_upload_gate() -> None:
     assert gate["ready"] is True
 
 
+def test_mteam_rule_review_records_rule_gate() -> None:
+    review = build_mteam_rule_review(mteam_ready_stages(), accept_rules=True)
+
+    assert review["rules_acknowledged"] is True
+    assert review["rule_check_ready"] is True
+    assert review["blockers"] == []
+
+
+def test_mteam_rule_review_blocks_without_ack() -> None:
+    review = build_mteam_rule_review(mteam_ready_stages(), accept_rules=False)
+
+    assert review["rules_acknowledged"] is False
+    assert any("rules_acknowledged" in blocker for blocker in review["blockers"])
+
+
 def test_mteam_prepare_preview_contains_package_fields() -> None:
     source_info = {
         "name": "Example.Movie.2024.2160p.BluRay.REMUX.HEVC-GROUP",
@@ -2668,9 +2684,11 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     assert package["files"]["meta_draft"].endswith("mteam-meta-draft.json")
     assert package["files"]["field_mapping"].endswith("mteam-field-mapping.json")
     assert package["files"]["description_draft"].endswith("mteam-description-draft.txt")
+    assert package["files"]["rule_review"].endswith("mteam-rule-review.json")
     assert package["files"]["upload_gate"].endswith("mteam-upload-gate.json")
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-prepare-preview.json").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-description-draft.txt").exists()
+    assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-rule-review.json").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-field-mapping.json").read_text(encoding="utf-8").strip().startswith("{")
 
 
@@ -2714,6 +2732,7 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     assert preflight["status"] == "ready"
     assert preflight["dry_run"] is True
     assert preflight["upload_gate"]["ready"] is True
+    assert preflight["rule_review"]["rule_check_ready"] is True
     assert preflight["upload_payload"]["form_fields"]["name"] == source_info["name"]
     assert preflight["upload_payload"]["torrent_file"]["sha1"]
 

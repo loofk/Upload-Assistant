@@ -19,6 +19,7 @@ REQUIRED_MTEAM_PACKAGE_FILES = {
     "meta_draft": "mteam-meta-draft.json",
     "field_mapping": "mteam-field-mapping.json",
     "description_draft": "mteam-description-draft.txt",
+    "rule_review": "mteam-rule-review.json",
     "upload_gate": "mteam-upload-gate.json",
 }
 
@@ -67,17 +68,21 @@ def write_mteam_prepare_package(
     meta_draft_path = package_dir / "mteam-meta-draft.json"
     field_mapping_path = package_dir / "mteam-field-mapping.json"
     description_path = package_dir / "mteam-description-draft.txt"
+    rule_review_path = package_dir / "mteam-rule-review.json"
     upload_gate_path = package_dir / "mteam-upload-gate.json"
+    rule_review = build_mteam_rule_review(stages, accept_rules=accept_rules)
     upload_gate = build_mteam_upload_gate(preview, stages, accept_rules=accept_rules)
 
     _write_json(preview_path, preview)
     _write_json(meta_draft_path, preview["meta_draft"])
     _write_json(field_mapping_path, preview["field_mapping"])
     description_path.write_text(build_mteam_description_draft(preview["meta_draft"], source_info), encoding="utf-8")
+    _write_json(rule_review_path, rule_review)
     _write_json(upload_gate_path, upload_gate)
 
     return {
         **preview,
+        "rule_review": rule_review,
         "upload_gate": upload_gate,
         "package_dir": str(package_dir),
         "files": {
@@ -85,6 +90,7 @@ def write_mteam_prepare_package(
             "meta_draft": str(meta_draft_path),
             "field_mapping": str(field_mapping_path),
             "description_draft": str(description_path),
+            "rule_review": str(rule_review_path),
             "upload_gate": str(upload_gate_path),
         },
     }
@@ -116,6 +122,7 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
         "package_dir": str(Path(package_dir).expanduser()),
         "files": files,
         "upload_gate": gate,
+        "rule_review": package.get("rule_review", {}),
         "upload_payload": payload_summary,
         "blockers": blockers,
         "next_actions": _upload_preflight_next_actions(blockers, execute),
@@ -217,6 +224,7 @@ def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
     preview = _read_json(paths["preview"])
     meta_draft = _read_json(paths["meta_draft"])
     field_mapping = _read_json(paths["field_mapping"])
+    rule_review = _read_json(paths["rule_review"])
     upload_gate = _read_json(paths["upload_gate"])
     description = paths["description_draft"].read_text(encoding="utf-8")
 
@@ -226,6 +234,9 @@ def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
     if not isinstance(upload_gate, dict):
         blockers.append("MTEAM upload gate file is invalid.")
         upload_gate = {}
+    if not isinstance(rule_review, dict):
+        blockers.append("MTEAM rule review file is invalid.")
+        rule_review = {}
     if not isinstance(field_mapping, dict) or not field_mapping.get("name") or not field_mapping.get("category"):
         blockers.append("MTEAM field mapping is missing name or category.")
 
@@ -237,6 +248,7 @@ def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
         "meta_draft": meta_draft,
         "field_mapping": field_mapping,
         "description_length": len(description),
+        "rule_review": rule_review,
         "upload_gate": upload_gate,
         "blockers": blockers,
     }
@@ -345,6 +357,26 @@ def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[
         "Confirm source-site and MTEAM rules, transfer permissions, description requirements, screenshots, subtitles, naming, and duplicate status before upload.",
     ]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def build_mteam_rule_review(stages: list[dict[str, Any]], accept_rules: bool) -> dict[str, Any]:
+    rule_stage = _find_stage(stages, "rule-check")
+    rule_result = rule_stage.get("result", {}) if rule_stage else {}
+    rule_checks = rule_result.get("checks") if isinstance(rule_result, dict) else []
+    failed_checks = [check for check in rule_checks if isinstance(check, dict) and not check.get("ok")] if isinstance(rule_checks, list) else []
+    blockers = [f"{check.get('name', 'rule_check')}: {check.get('message', 'Executable rule check did not pass.')}" for check in failed_checks]
+    if not accept_rules:
+        blockers.append("rules_acknowledged: Rules must be manually reviewed and acknowledged.")
+    return {
+        "target_tracker": "MTEAM",
+        "rules_acknowledged": accept_rules,
+        "rule_check_ready": bool(rule_result.get("ready")) if isinstance(rule_result, dict) else False,
+        "source_tracker": rule_result.get("source_tracker") if isinstance(rule_result, dict) else None,
+        "target_trackers": rule_result.get("target_trackers") if isinstance(rule_result, dict) else [],
+        "rule_profiles": rule_result.get("rule_profiles") if isinstance(rule_result, dict) else [],
+        "checks": rule_checks if isinstance(rule_checks, list) else [],
+        "blockers": blockers,
+    }
 
 
 def build_mteam_upload_gate(preview: dict[str, Any], stages: list[dict[str, Any]], accept_rules: bool) -> dict[str, Any]:
