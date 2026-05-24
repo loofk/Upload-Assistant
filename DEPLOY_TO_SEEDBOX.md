@@ -77,6 +77,38 @@ mediainfo --version
 
 ### 8. 运行测试
 
+#### 聚焦版 PT 转种 CLI（推荐新流程）
+
+```bash
+# 快速检查新 CLI 是否可加载
+make smoke-ptcli PYTHON=python3
+
+# 查看支持的中文圈 PT 站点和规则确认项
+python3 ptcli.py sites --json
+python3 ptcli.py rules --trackers U2,MTEAM --json
+
+# 检查参考流配置、cookie、MTEAM API key、qBittorrent client
+python3 ptcli.py flow-check --from U2 --source-id 60635 --to MTEAM --json
+
+# 一键闭环入口（真实上传前必须确认源站和 MTEAM 规则）
+python3 ptcli.py retorrent \
+  --from U2 \
+  --source-id 60635 \
+  --to MTEAM \
+  --execute \
+  --accept-rules \
+  --confirm-upload \
+  --save-path "/downloads" \
+  --uploaded-qbit-category MTEAM \
+  --uploaded-qbit-tags retorrent \
+  --write-summary \
+  --json
+```
+
+输出中的顶层 `complete: true` 表示闭环已经完成；若为 `false`，按 `next_actions` 或 `resume_commands` 恢复执行。
+
+#### 旧 Upload Assistant 流程
+
 ```bash
 # Debug 模式测试（不会实际上传）
 python3 upload.py "/path/to/test/video.mkv" --trackers MTEAM --debug --no-seed
@@ -110,6 +142,28 @@ scp data/config.py user@your-seedbox-ip:/path/to/config.py
 docker pull ghcr.io/loofk/upload-assistant:latest
 
 # 运行测试（Debug 模式）
+docker run --rm -it --network=host \
+  -v /path/to/config.py:/Upload-Assistant/data/config.py \
+  -v /path/to/downloads:/downloads \
+  --entrypoint ptcli \
+  ghcr.io/loofk/upload-assistant:latest \
+  retorrent \
+  --from U2 \
+  --source-id 60635 \
+  --to MTEAM \
+  --execute \
+  --accept-rules \
+  --confirm-upload \
+  --save-path /downloads \
+  --uploaded-qbit-category MTEAM \
+  --uploaded-qbit-tags retorrent \
+  --write-summary \
+  --json
+```
+
+如需运行旧 `upload.py` debug 流程，保留镜像默认 entrypoint：
+
+```bash
 docker run --rm -it --network=host \
   -v /path/to/config.py:/Upload-Assistant/data/config.py \
   -v /path/to/downloads:/downloads \

@@ -38,6 +38,11 @@ RUN pip install -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
+# Expose the focused PT retorrent CLI as a first-class command while keeping
+# the legacy upload.py entrypoint compatible for existing users.
+RUN chmod +x /Upload-Assistant/ptcli.py && \
+    ln -sf /Upload-Assistant/ptcli.py /usr/local/bin/ptcli
+
 # Download only the required mkbrr binary (requires full repo for src imports)
 RUN python3 -c "from bin.get_mkbrr import MkbrrBinaryManager; MkbrrBinaryManager.download_mkbrr_for_docker()"
 
