@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from src.ptcli.credentials import build_flow_check
+from src.ptcli.mainland import normalize_tracker, parse_tracker_list
+from src.ptcli.rules import build_rule_check
 from src.ptcli.target import build_mteam_upload_preflight
 
 
@@ -32,7 +34,10 @@ def build_doctor_check(
     checks.append(_check("flow_check", bool(flow_check.get("ready")), "Reference flow config is ready." if flow_check.get("ready") else "Reference flow config has blockers."))
     checks.extend(_prefix_checks("flow.", flow_check.get("checks", [])))
     checks.append(_path_check("content_path", content_path, required=False))
+    rule_check = build_rule_check(normalize_tracker(source_tracker), parse_tracker_list(target_trackers), accept_rules=accept_rules)
     checks.append(_rules_check(accept_rules))
+    checks.append(_check("rule_check", bool(rule_check.get("ready")), "Executable rule check passed." if rule_check.get("ready") else "Executable rule check has blockers."))
+    checks.extend(_prefix_checks("rule.", rule_check.get("checks", [])))
     checks.append(_confirmation_check(target_execute, confirm_upload))
     checks.append(_target_torrent_check(target_torrent_file, required=bool(package_dir or target_execute)))
     package_preflight = _package_preflight(package_dir, target_execute, target_torrent_file)
@@ -47,6 +52,7 @@ def build_doctor_check(
         "ready": all(check["ok"] for check in checks),
         "live_safe_to_attempt": _live_safe_to_attempt(checks, target_execute),
         "flow_check": flow_check,
+        "rule_check": rule_check,
         "package_preflight": package_preflight.get("preflight") if package_preflight else None,
         "checks": checks,
         "next_actions": _next_actions(checks, target_execute),
@@ -157,6 +163,7 @@ def _live_safe_to_attempt(checks: list[dict[str, Any]], target_execute: bool) ->
         return False
     required_names = {
         "flow_check",
+        "rule_check",
         "rules_acknowledged",
         "live_upload_confirmation",
         "target_torrent_file",

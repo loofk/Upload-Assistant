@@ -352,11 +352,19 @@ def build_mteam_upload_gate(preview: dict[str, Any], stages: list[dict[str, Any]
     dupe_result = dupe_stage.get("result", {}) if dupe_stage else {}
     dupe_count = int(dupe_result.get("count", 0) or 0) if isinstance(dupe_result, dict) else 0
     dupe_searched = bool(dupe_result.get("searched")) if isinstance(dupe_result, dict) else False
+    rule_stage = _find_stage(stages, "rule-check")
+    rule_result = rule_stage.get("result", {}) if rule_stage else {}
+    rule_ready = bool(rule_result.get("ready")) if isinstance(rule_result, dict) else False
     checks = [
         {
             "name": "rules_acknowledged",
             "ok": accept_rules,
             "message": "Rules have been acknowledged." if accept_rules else "Rules must be manually reviewed and acknowledged.",
+        },
+        {
+            "name": "executable_rule_check",
+            "ok": rule_ready,
+            "message": _rule_gate_message(rule_stage, rule_ready),
         },
         {
             "name": "verified_content",
@@ -450,6 +458,14 @@ def _dupe_gate_message(dupe_stage: dict[str, Any] | None, searched: bool, count:
     if count > 0:
         return f"MTEAM duplicate search found {count} possible existing torrent(s)."
     return "MTEAM duplicate search found no existing torrents."
+
+
+def _rule_gate_message(rule_stage: dict[str, Any] | None, ready: bool) -> str:
+    if not rule_stage or rule_stage.get("skipped"):
+        return "Executable rule check has not been run."
+    if not rule_stage.get("ok") or not ready:
+        return "Executable rule check did not pass."
+    return "Executable rule check passed."
 
 
 def _infer_resolution(name: str) -> str | None:

@@ -54,6 +54,14 @@ def make_mteam_safe_torrent(tmp_path, name: str = "upload") -> str:
     return create_mteam_upload_torrent_candidate(str(source_torrent), str(tmp_path / "exported"))["path"]
 
 
+def mteam_ready_stages() -> list[dict]:
+    return [
+        {"stage": "rule-check", "ok": True, "result": {"ready": True}},
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+
+
 def test_normalize_tracker_aliases() -> None:
     assert normalize_tracker("m-team") == "MTEAM"
     assert normalize_tracker("pterclub") == "PTER"
@@ -299,6 +307,26 @@ def test_rules_command_outputs_profile_json(capsys) -> None:
     assert '"automation_status": "enabled"' in out
 
 
+def test_rule_check_command_requires_ack_for_ready(capsys) -> None:
+    code = main(["rule-check", "--from", "U2", "--to", "MTEAM", "--json"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"ready": false' in out
+    assert '"rules_acknowledged"' in out
+    assert '"reference_flow_enabled"' in out
+
+
+def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
+    code = main(["rule-check", "--from", "CHD", "--to", "MTEAM", "--accept-rules", "--json"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"ready": true' in out
+    assert '"source_tracker": "CHD"' in out
+    assert '"target_trackers": [' in out
+
+
 def test_json_capture_moves_stdout_to_logs() -> None:
     def noisy_payload():
         print("noisy tracker log")
@@ -455,10 +483,7 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, str(content_path), str(tmp_path / "target"), accept_rules=True)
 
     payload = build_doctor_check(
@@ -1588,10 +1613,10 @@ def test_mteam_description_draft_and_upload_gate() -> None:
     }
     meta_draft = build_mteam_meta_draft(source_info, "/downloads/Example")
     description = build_mteam_description_draft(meta_draft, source_info)
-    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], [{"stage": "match", "ok": True, "result": {"count": 1}}], "/downloads/Example")
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
     gate = build_mteam_upload_gate(
         preview,
-        [{"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}}],
+        mteam_ready_stages(),
         accept_rules=True,
     )
 
@@ -1610,7 +1635,7 @@ def test_mteam_prepare_preview_contains_package_fields() -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [{"stage": "match", "ok": True, "result": {"count": 1}}]
+    stages = mteam_ready_stages()
 
     preview = build_mteam_prepare_preview(source_info, ["MTEAM"], stages, "/downloads/Example.Movie.2024")
 
@@ -1634,7 +1659,7 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
         "description_length": 100,
     }
 
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], [{"stage": "match", "ok": True, "result": {"count": 1}}], "/downloads/Example", str(tmp_path))
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path))
 
     assert package["package_dir"].endswith("U2-60635-to-MTEAM")
     assert package["files"]["preview"].endswith("mteam-prepare-preview.json")
@@ -1678,10 +1703,7 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
@@ -1706,10 +1728,7 @@ def test_mteam_upload_preflight_reports_torrent_safety_metadata(tmp_path) -> Non
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     content = tmp_path / "Example.mkv"
     content.write_bytes(b"content")
@@ -1741,10 +1760,7 @@ def test_mteam_upload_preflight_blocks_unsafe_target_torrent(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     content = tmp_path / "Example.mkv"
     content.write_bytes(b"content")
@@ -1773,10 +1789,7 @@ def test_mteam_upload_preflight_allows_execute_when_payload_is_ready(tmp_path) -
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
@@ -1799,10 +1812,7 @@ async def test_mteam_live_upload_requires_confirmation(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
@@ -1825,10 +1835,7 @@ async def test_mteam_live_upload_blocks_unsafe_torrent_before_uploader(tmp_path)
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     unsafe_torrent = tmp_path / "unsafe.torrent"
     unsafe_torrent.write_bytes(b"d4:infod")
@@ -1862,10 +1869,7 @@ async def test_mteam_live_upload_uses_injected_uploader(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
@@ -1900,10 +1904,7 @@ async def test_mteam_live_upload_can_download_uploaded_torrent(tmp_path) -> None
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
@@ -1946,10 +1947,7 @@ async def test_mteam_live_upload_reports_missing_uploaded_torrent_id(tmp_path) -
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
@@ -1989,7 +1987,7 @@ def test_mteam_upload_payload_summary_blocks_missing_torrent(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], [{"stage": "match", "ok": True, "result": {"count": 1}}], "/downloads/Example", str(tmp_path))
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path))
     from_disk = build_mteam_upload_preflight(package["package_dir"])
 
     assert from_disk["status"] == "blocked"
@@ -2008,10 +2006,7 @@ def test_mteam_upload_payload_summary_writes_payload_file(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
@@ -2034,7 +2029,7 @@ def test_target_upload_command_outputs_preflight_json(tmp_path, capsys) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], [{"stage": "match", "ok": True, "result": {"count": 1}}], "/downloads/Example", str(tmp_path))
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path))
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     code = main(["target-upload", "--package-dir", package["package_dir"], "--torrent-file", str(torrent_file), "--write-payload", "--json"])
@@ -2058,10 +2053,7 @@ def test_target_upload_execute_requires_confirmation_before_config_load(tmp_path
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
@@ -2086,10 +2078,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
@@ -2159,10 +2148,7 @@ async def test_target_upload_inject_requires_download_flag(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = [
-        {"stage": "match", "ok": True, "result": {"count": 1}},
-        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-    ]
+    stages = mteam_ready_stages()
     package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
     parser = build_parser()

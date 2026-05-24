@@ -18,7 +18,7 @@ from src.ptcli.doctor import build_doctor_check, extend_doctor_check
 from src.ptcli.flows import flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
-from src.ptcli.rules import get_rule_profiles, rule_profiles_to_dicts
+from src.ptcli.rules import build_rule_check, get_rule_profiles, rule_profiles_to_dicts
 from src.ptcli.source import download_source_torrent, extract_torrent_id, fetch_source_info, source_info_has_signal
 from src.ptcli.target import (
     build_mteam_upload_preflight,
@@ -60,6 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
     rules = subparsers.add_parser("rules", help="Show rule review profiles for supported trackers.")
     rules.add_argument("--trackers", help="Optional comma-separated tracker codes. Defaults to all supported trackers.")
     rules.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
+    rule_check = subparsers.add_parser("rule-check", help="Run executable rule gates for a source/target workflow.")
+    rule_check.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code.")
+    rule_check.add_argument("--to", dest="target_trackers", required=True, help="Target tracker codes, comma-separated.")
+    rule_check.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
+    rule_check.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     inspect = subparsers.add_parser("inspect", help="Read qBittorrent torrent state without modifying anything.")
     inspect.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
@@ -507,6 +513,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         invalid_message="Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
     )
     stages.append(source_info_result)
+    rule_check_result = build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
+    stages.append({"stage": "rule-check", "ok": True, "result": rule_check_result})
 
     if args.download_source:
         if _required_stages_ok(stages, {"flow-check", "source-info"}):
@@ -934,6 +942,15 @@ def build_rules_payload(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def build_rule_check_payload(args: argparse.Namespace) -> dict[str, Any]:
+    source_tracker = normalize_tracker(args.source_tracker)
+    target_trackers = parse_tracker_list(args.target_trackers)
+    invalid = unsupported_trackers([source_tracker, *target_trackers])
+    if invalid:
+        raise ValueError(f"Unsupported tracker(s) for focused CLI scope: {', '.join(invalid)}")
+    return build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
+
+
 def _print_payload(payload: dict[str, Any], json_output: bool) -> None:
     if json_output:
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
@@ -1058,6 +1075,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "rules":
             _print_payload(build_rules_payload(args), json_output)
+            return 0
+
+        if args.command == "rule-check":
+            _print_payload(build_rule_check_payload(args), json_output)
             return 0
 
         if args.command == "retorrent":
