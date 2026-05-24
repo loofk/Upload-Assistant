@@ -58,6 +58,7 @@ class RetorrentPlan:
     flow_profiles: list[dict[str, Any]]
     rule_profiles: list[dict[str, Any]]
     rule_check: dict[str, Any]
+    capability: dict[str, Any]
     blockers: list[str]
     commands: list[dict[str, str]]
     steps: list[str]
@@ -452,7 +453,10 @@ def build_plan(args: argparse.Namespace) -> RetorrentPlan:
         blockers.append("Tracker rule profiles are in planning mode; upload/download automation is not enabled yet.")
     flow_profiles = get_flow_profiles(source_tracker, target_trackers)
     if not flow_profiles:
-        blockers.append("This source/target combination is not one of the first reference flows yet.")
+        blockers.append("This source/target combination is not enabled for ptcli retorrent flow execution.")
+    capability = _retorrent_plan_capability(source_tracker, target_trackers)
+    if flow_profiles and not capability["full_live_closure"]:
+        blockers.append("This source/target combination has partial ptcli support but is not eligible for full live closure.")
 
     steps = [
         "validate source and target tracker scope",
@@ -478,10 +482,27 @@ def build_plan(args: argparse.Namespace) -> RetorrentPlan:
         flow_profiles=flow_profiles_to_dicts(flow_profiles),
         rule_profiles=rule_profiles_to_dicts(rule_profiles),
         rule_check=rule_check,
+        capability=capability,
         blockers=blockers,
         commands=commands,
         steps=steps,
     )
+
+
+def _retorrent_plan_capability(source_tracker: str, target_trackers: list[str]) -> dict[str, Any]:
+    sites_payload = build_sites_payload()
+    capabilities = sites_payload["capabilities"]
+    source_capability = capabilities.get(source_tracker, {})
+    full_live_sources = sites_payload["full_live_closure_sources"]
+    return {
+        "source_tracker": source_tracker,
+        "target_trackers": target_trackers,
+        "source_info": bool(source_capability.get("source_info")),
+        "source_download": bool(source_capability.get("source_download")),
+        "mteam_source_flow": bool(source_capability.get("mteam_source_flow")),
+        "target_upload": target_trackers == ["MTEAM"],
+        "full_live_closure": target_trackers == ["MTEAM"] and source_tracker in full_live_sources,
+    }
 
 
 async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:

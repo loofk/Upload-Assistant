@@ -227,6 +227,7 @@ def test_retorrent_plan_json_exit_ok(capsys) -> None:
     assert '"rule_check"' in out
     assert '"rule_obligations"' in out
     assert '"flow_profiles"' in out
+    assert '"capability"' in out
     assert '"blockers"' in out
 
 
@@ -235,7 +236,9 @@ def test_retorrent_plan_marks_non_reference_flow_blocker(capsys) -> None:
 
     assert code == 0
     out = capsys.readouterr().out
-    assert "not one of the first reference flows" in out
+    payload = json.loads(out)
+    assert "not enabled for ptcli retorrent flow execution" in out
+    assert payload["plan"]["capability"]["full_live_closure"] is False
 
 
 def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys) -> None:
@@ -247,7 +250,8 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     payload = json.loads(out)
     assert payload["plan"]["requested_source_id"] == source_url
     assert payload["plan"]["source_torrent_id"] == "123"
-    assert "not one of the first reference flows" not in out
+    assert "not enabled for ptcli retorrent flow execution" not in out
+    assert payload["plan"]["capability"]["full_live_closure"] is True
     assert '"source_torrent_id": "123"' in out
     assert '"source_kind": "nexusphp"' in out
     assert '"target_kind": "mteam_api"' in out
