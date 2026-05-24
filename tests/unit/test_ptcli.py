@@ -4788,6 +4788,51 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     assert preflight["next_actions"] == ["Review the package manually, then rerun with --execute --confirm-upload and the reviewed target torrent file when ready."]
 
 
+def test_mteam_upload_preflight_blocks_tampered_package_file(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+    description_path = Path(package["files"]["description_draft"])
+    description_path.write_text(description_path.read_text(encoding="utf-8") + "\nmanual edit after manifest\n", encoding="utf-8")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    assert "MTEAM package file integrity mismatch for description_draft: size_bytes changed." in preflight["blockers"]
+
+
+def test_mteam_upload_preflight_blocks_missing_package_manifest(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+    Path(package["files"]["manifest"]).unlink()
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    assert "MTEAM package manifest is missing; regenerate the package before upload." in preflight["blockers"]
+
+
 def test_mteam_upload_preflight_blocks_execute_without_rule_obligations(tmp_path) -> None:
     source_info = {
         "tracker": "U2",

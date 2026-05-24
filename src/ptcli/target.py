@@ -336,6 +336,7 @@ def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
         rule_review = {}
     if not isinstance(field_mapping, dict) or not field_mapping.get("name") or not field_mapping.get("category"):
         blockers.append("MTEAM field mapping is missing name or category.")
+    _extend_unique(blockers, _package_manifest_integrity_blockers(package_manifest, paths))
 
     return {
         "target_tracker": "MTEAM",
@@ -350,6 +351,29 @@ def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
         "package_manifest": package_manifest,
         "blockers": blockers,
     }
+
+
+def _package_manifest_integrity_blockers(package_manifest: Any, paths: dict[str, Path]) -> list[str]:
+    if package_manifest is None:
+        return ["MTEAM package manifest is missing; regenerate the package before upload."]
+    if not isinstance(package_manifest, dict):
+        return ["MTEAM package manifest is invalid; regenerate the package before upload."]
+    manifest_files = package_manifest.get("files")
+    if not isinstance(manifest_files, dict):
+        return ["MTEAM package manifest has no file integrity records; regenerate the package before upload."]
+
+    blockers: list[str] = []
+    for key, path in paths.items():
+        expected = manifest_files.get(key)
+        if not isinstance(expected, dict):
+            blockers.append(f"MTEAM package manifest is missing integrity record for {key}.")
+            continue
+        actual = _file_artifact(path)
+        for field in ("exists", "is_file", "size_bytes", "sha1"):
+            if expected.get(field) != actual.get(field):
+                blockers.append(f"MTEAM package file integrity mismatch for {key}: {field} changed.")
+                break
+    return blockers
 
 
 async def search_mteam_duplicates(config: dict[str, Any], source_info: dict[str, Any] | None) -> dict[str, Any]:
