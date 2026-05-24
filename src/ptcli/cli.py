@@ -330,12 +330,14 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
             "blockers": _rule_check_blockers(rule_check),
         }
     output_path = await download_source_torrent(config, source_tracker, args.source_id, args.output_dir, base_dir=args.base_dir)
+    source_torrent = _torrent_file_evidence(output_path)
     return {
         "status": "ok",
         "tracker": source_tracker,
         "target_trackers": target_trackers,
         "rule_check": rule_check,
-        "path": str(output_path),
+        "source_torrent": source_torrent,
+        "path": source_torrent["path"],
     }
 
 

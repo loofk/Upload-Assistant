@@ -679,9 +679,14 @@ def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> 
 
     assert code == 0
     out = capsys.readouterr().out
-    assert '"status": "ok"' in out
-    assert '"rule_check"' in out
-    assert "source-out/U2-60635.torrent" in out
+    payload = json.loads(out)
+    assert payload["status"] == "ok"
+    assert payload["rule_check"]["ready"] is True
+    assert payload["path"] == payload["source_torrent"]["path"]
+    assert payload["source_torrent"]["path"].endswith("source-out/U2-60635.torrent")
+    assert payload["source_torrent"]["exists"] is True
+    assert payload["source_torrent"]["size_bytes"] == len(b"d4:infod")
+    assert len(payload["source_torrent"]["sha1"]) == 40
 
 
 def test_json_capture_moves_stdout_to_logs() -> None:
