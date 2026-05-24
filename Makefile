@@ -1,4 +1,4 @@
-.PHONY: help lint test check smoke test-live
+.PHONY: help lint test check smoke smoke-ptcli test-live
 
 PYTHON ?= python3
 
@@ -14,12 +14,18 @@ test: ## 运行 pytest（排除 live 标记的测试）
 
 check: lint test ## 运行 lint + test
 
-smoke: ## 快速导入检查（验证核心模块可正常导入）
+smoke: smoke-ptcli ## 快速导入检查（验证核心模块可正常导入）
 	$(PYTHON) -c "from src.args import Args; print('✓ args')"
 	$(PYTHON) -c "from src.prep import Prep; print('✓ prep')"
 	$(PYTHON) -c "from src.trackersetup import TRACKER_SETUP; print('✓ trackersetup')"
 	$(PYTHON) -c "from src.trackerhandle import process_trackers; print('✓ trackerhandle')"
 	@echo "All smoke checks passed."
+
+smoke-ptcli: ## 快速导入检查（验证聚焦版 PT CLI 可正常导入）
+	$(PYTHON) -c "from src.ptcli.cli import build_parser, main; build_parser(); print('✓ ptcli.cli')"
+	$(PYTHON) -c "from src.ptcli.mainland import CHINESE_PT_TRACKERS; assert 'MTEAM' in CHINESE_PT_TRACKERS; print('✓ ptcli.mainland')"
+	$(PYTHON) -c "from src.ptcli.source import fetch_source_info; from src.ptcli.target import build_mteam_upload_preflight; print('✓ ptcli.source/target')"
+	@echo "PT CLI smoke checks passed."
 
 test-live: ## 运行实时集成测试（需要 data/cookies + data/config.py）
 	$(PYTHON) -m pytest -m live -v --tb=short
