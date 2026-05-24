@@ -698,6 +698,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     effective_content_path = args.content_path
     effective_target_torrent_file = args.target_torrent_file
     effective_source_torrent_hash: str | None = None
+    requested_actions = _pipeline_requested_actions(args)
     live_target_upload = bool(args.upload_target and args.target_execute)
     source_download_requested = bool(args.download_source or (live_target_upload and not args.content_path and not args.source_torrent_file))
     source_injection_requested = bool(args.inject_source or (live_target_upload and not args.content_path))
@@ -896,6 +897,16 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "target-torrent-sanitize", "ok": True, "skipped": True, "message": "--sanitize-target-torrent not provided; target torrent sanitizing skipped."})
 
+    effective_actions = _pipeline_effective_actions(
+        args,
+        live_target_upload=live_target_upload,
+        source_download=source_download_requested,
+        source_injection=source_injection_requested,
+        source_wait=source_wait_requested,
+        target_torrent_export=export_target_torrent,
+        target_torrent_sanitize=sanitize_target_torrent,
+    )
+
     if args.upload_target:
         target_prepare_stage = _find_stage(stages, "target-prepare")
         if not target_prepare_stage or not target_prepare_stage.get("ok") or target_prepare_stage.get("skipped"):
@@ -936,6 +947,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     closure = _pipeline_closure(stages, effective_content_path, effective_source_torrent_hash, effective_target_torrent_file)
     evidence = _pipeline_evidence(closure)
     summary = _pipeline_run_summary(stages, ready, blockers, closure, evidence)
+    summary["requested_actions"] = requested_actions
+    summary["effective_actions"] = effective_actions
     payload = {
         "status": "blocked" if blockers else "ok",
         "source_tracker": source_tracker,
@@ -947,6 +960,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "target_torrent_file": effective_target_torrent_file,
         "ready": ready,
         "blockers": blockers,
+        "requested_actions": requested_actions,
+        "effective_actions": effective_actions,
         "closure": closure,
         "evidence": evidence,
         "summary": summary,
@@ -1155,6 +1170,52 @@ def _pipeline_run_summary(stages: list[dict[str, Any]], ready: bool, blockers: l
         "resume": evidence.get("resume", {}),
         "source": evidence.get("source", {}),
         "target": evidence.get("target", {}),
+    }
+
+
+def _pipeline_requested_actions(args: argparse.Namespace) -> dict[str, bool]:
+    return {
+        "download_source": bool(args.download_source),
+        "inject_source": bool(args.inject_source),
+        "wait_complete": bool(args.wait_complete),
+        "check_dupes": bool(args.check_dupes),
+        "prepare_target": bool(args.prepare_target),
+        "target_torrent_export": bool(args.export_target_torrent),
+        "target_torrent_sanitize": bool(args.sanitize_target_torrent),
+        "upload_target": bool(args.upload_target),
+        "target_execute": bool(args.target_execute),
+        "download_uploaded_torrent": bool(args.download_uploaded_torrent),
+        "inject_uploaded_torrent": bool(args.inject_uploaded_torrent),
+        "wait_uploaded_complete": bool(args.wait_uploaded_complete),
+        "write_summary": bool(args.write_summary),
+    }
+
+
+def _pipeline_effective_actions(
+    args: argparse.Namespace,
+    *,
+    live_target_upload: bool,
+    source_download: bool,
+    source_injection: bool,
+    source_wait: bool,
+    target_torrent_export: bool,
+    target_torrent_sanitize: bool,
+) -> dict[str, bool]:
+    return {
+        "live_target_upload": live_target_upload,
+        "download_source": source_download,
+        "inject_source": source_injection,
+        "wait_complete": source_wait,
+        "check_dupes": bool(args.check_dupes),
+        "prepare_target": bool(args.prepare_target),
+        "target_torrent_export": target_torrent_export,
+        "target_torrent_sanitize": target_torrent_sanitize,
+        "upload_target": bool(args.upload_target),
+        "target_execute": bool(args.target_execute),
+        "download_uploaded_torrent": bool(args.download_uploaded_torrent),
+        "inject_uploaded_torrent": bool(args.inject_uploaded_torrent),
+        "wait_uploaded_complete": bool(args.wait_uploaded_complete),
+        "write_summary": bool(args.write_summary),
     }
 
 

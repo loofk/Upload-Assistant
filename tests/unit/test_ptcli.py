@@ -1980,6 +1980,15 @@ async def test_pipeline_skips_match_without_path(monkeypatch, tmp_path) -> None:
     assert any(stage["stage"] == "source-download" and stage["skipped"] is True for stage in payload["stages"])
     match_stage = next(stage for stage in payload["stages"] if stage["stage"] == "match")
     assert match_stage["skipped"] is True
+    assert payload["requested_actions"]["download_source"] is False
+    assert payload["requested_actions"]["inject_source"] is False
+    assert payload["requested_actions"]["wait_complete"] is False
+    assert payload["effective_actions"]["live_target_upload"] is False
+    assert payload["effective_actions"]["download_source"] is False
+    assert payload["effective_actions"]["inject_source"] is False
+    assert payload["effective_actions"]["wait_complete"] is False
+    assert payload["summary"]["requested_actions"] == payload["requested_actions"]
+    assert payload["summary"]["effective_actions"] == payload["effective_actions"]
 
 
 @pytest.mark.asyncio
@@ -3932,6 +3941,19 @@ async def test_pipeline_target_execute_auto_downloads_injects_and_waits_source(m
     assert payload["closure"]["complete"] is True
     assert payload["closure"]["source"]["complete"] is True
     assert payload["closure"]["target"]["seeding"] is True
+    assert payload["requested_actions"]["download_source"] is False
+    assert payload["requested_actions"]["inject_source"] is False
+    assert payload["requested_actions"]["wait_complete"] is False
+    assert payload["effective_actions"]["live_target_upload"] is True
+    assert payload["effective_actions"]["download_source"] is True
+    assert payload["effective_actions"]["inject_source"] is True
+    assert payload["effective_actions"]["wait_complete"] is True
+    assert payload["effective_actions"]["target_torrent_export"] is True
+    assert payload["effective_actions"]["target_torrent_sanitize"] is True
+    assert payload["effective_actions"]["download_uploaded_torrent"] is True
+    assert payload["effective_actions"]["inject_uploaded_torrent"] is True
+    assert payload["effective_actions"]["wait_uploaded_complete"] is True
+    assert payload["summary"]["effective_actions"] == payload["effective_actions"]
 
 
 @pytest.mark.asyncio
