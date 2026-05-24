@@ -779,13 +779,15 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     downloaded_torrent = target_upload_result.get("downloaded_torrent") if isinstance(target_upload_result, dict) else None
     injected_torrent = target_upload_result.get("injected_torrent") if isinstance(target_upload_result, dict) else None
     source_downloaded = _stage_completed(source_download)
-    source_injected = _stage_completed(inject_source)
+    source_injected = _source_injection_verified(inject_source)
     source_complete = _stage_completed(wait_complete)
     source_matched = _match_stage_has_match(match)
     source = {
         "ready": (source_downloaded and source_injected and source_complete) or source_matched,
         "downloaded": source_downloaded,
         "injected": source_injected,
+        "injection_verified": source_injected,
+        "injected_torrent_hash": _torrent_hash_from_stage(inject_source),
         "complete": source_complete,
         "matched": source_matched,
         "torrent_hash": source_torrent_hash,
@@ -830,6 +832,8 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "ready": bool(source.get("ready")),
             "mode": "downloaded" if source.get("downloaded") and source.get("injected") and source.get("complete") else "matched" if source.get("matched") else "missing",
             "torrent_hash": source.get("torrent_hash"),
+            "injected_torrent_hash": source.get("injected_torrent_hash"),
+            "injection_verified": bool(source.get("injection_verified")),
             "content_path": source.get("content_path"),
         },
         "target": {
@@ -847,6 +851,12 @@ def _injected_torrent_verified(injected_torrent: Any) -> bool:
     if "verified_in_client" in injected_torrent:
         return bool(injected_torrent.get("verified_in_client"))
     return True
+
+
+def _source_injection_verified(stage: dict[str, Any] | None) -> bool:
+    if not _stage_completed(stage):
+        return False
+    return _injected_torrent_verified(stage.get("result"))
 
 
 def _stage_completed(stage: dict[str, Any] | None) -> bool:
