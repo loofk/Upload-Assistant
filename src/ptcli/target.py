@@ -848,4 +848,4 @@ def _upload_preflight_next_actions(blockers: list[str], execute: bool) -> list[s
         ]
     if execute:
         return ["Check MTEAM upload result, then download the generated target torrent and inject it into qBittorrent for seeding."]
-    return ["Review the package manually, then rerun with the future live upload flag after upload support is enabled."]
+    return ["Review the package manually, then rerun with --execute --confirm-upload and the reviewed target torrent file when ready."]

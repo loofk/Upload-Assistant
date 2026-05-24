@@ -3048,6 +3048,8 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["closure"] == payload["closure"]
     assert summary_payload["closure"]["complete"] is False
     assert summary_payload["closure"]["blockers"] == ["target.uploaded", "target.downloaded", "target.injected"]
+    assert summary_payload["requested_actions"] == payload["requested_actions"]
+    assert summary_payload["effective_actions"] == payload["effective_actions"]
     assert summary_payload["summary"]["ready"] is True
     assert summary_payload["summary"]["target"]["ready"] is False
     assert summary_payload["summary"]["gates"]["rule_check"]["rules_acknowledged"] is True
@@ -4337,6 +4339,7 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     assert preflight["rule_obligation_review"]["ready"] is True
     assert preflight["upload_payload"]["form_fields"]["name"] == source_info["name"]
     assert preflight["upload_payload"]["torrent_file"]["sha1"]
+    assert preflight["next_actions"] == ["Review the package manually, then rerun with --execute --confirm-upload and the reviewed target torrent file when ready."]
 
 
 def test_mteam_upload_preflight_blocks_execute_without_rule_obligations(tmp_path) -> None:
