@@ -53,6 +53,17 @@ def build_doctor_check(
     }
 
 
+def extend_doctor_check(payload: dict[str, Any], checks: list[dict[str, Any]], *, target_execute: bool) -> dict[str, Any]:
+    merged_checks = [*payload.get("checks", []), *checks]
+    return {
+        **payload,
+        "ready": all(check.get("ok") for check in merged_checks),
+        "live_safe_to_attempt": bool(payload.get("live_safe_to_attempt")) and all(check.get("ok") for check in checks),
+        "checks": merged_checks,
+        "next_actions": _next_actions(merged_checks, target_execute),
+    }
+
+
 def _prefix_checks(prefix: str, checks: list[Any]) -> list[dict[str, Any]]:
     prefixed: list[dict[str, Any]] = []
     for check in checks:

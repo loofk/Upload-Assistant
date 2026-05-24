@@ -441,6 +441,39 @@ def test_doctor_command_outputs_json(monkeypatch, tmp_path, capsys) -> None:
     assert '"live_safe_to_attempt"' in out
 
 
+def test_doctor_command_can_probe_qbit_connection(monkeypatch, tmp_path, capsys) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_qbit_connection_check(_config, client_name):
+        return {"name": "qbit.connection", "ok": True, "message": f"connected: {client_name}"}
+
+    monkeypatch.setattr(ptcli_cli, "_qbit_connection_check", fake_qbit_connection_check)
+
+    code = main(["doctor", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--base-dir", str(tmp_path), "--connect-qbit", "--json"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"name": "qbit.connection"' in out
+    assert "connected: default" in out
+
+
+@pytest.mark.asyncio
+async def test_qbit_connection_check_reports_failure() -> None:
+    payload = await ptcli_cli._qbit_connection_check({"TORRENT_CLIENTS": {}}, "default")
+
+    assert payload["name"] == "qbit.connection"
+    assert payload["ok"] is False
+    assert "DEFAULT" in payload["message"] or "Torrent client" in payload["message"]
+
+
 @pytest.mark.asyncio
 async def test_pipeline_skips_match_without_path(monkeypatch, tmp_path) -> None:
     config = {

@@ -14,7 +14,7 @@ from typing import Any
 
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
-from src.ptcli.doctor import build_doctor_check
+from src.ptcli.doctor import build_doctor_check, extend_doctor_check
 from src.ptcli.flows import flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
@@ -115,6 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--download-uploaded-torrent", action="store_true", help="Check follow-up download of the generated MTEAM torrent file.")
     doctor.add_argument("--inject-uploaded-torrent", action="store_true", help="Check follow-up qBittorrent injection after target upload.")
     doctor.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
+    doctor.add_argument("--connect-qbit", action="store_true", help="Probe qBittorrent connectivity by listing one torrent.")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     pipeline = subparsers.add_parser("pipeline", help="Run a read-only dry-run pipeline: flow-check, source-info, and optional qBittorrent match.")
@@ -390,9 +391,9 @@ def flow_check_payload(args: argparse.Namespace) -> dict[str, Any]:
     return build_flow_check(config, args.source_tracker, args.source_id, args.target_trackers, args.client, base_dir=args.base_dir)
 
 
-def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
+async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config(args.config)
-    return build_doctor_check(
+    payload = build_doctor_check(
         config,
         source_tracker=args.source_tracker,
         source_id=args.source_id,
@@ -409,6 +410,9 @@ def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
         inject_uploaded_torrent=args.inject_uploaded_torrent,
         uploaded_save_path=args.uploaded_save_path,
     )
+    if args.connect_qbit:
+        payload = extend_doctor_check(payload, [await _qbit_connection_check(config, args.client)], target_execute=args.target_execute)
+    return payload
 
 
 async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -739,6 +743,20 @@ async def _wait_complete_with_config(
     }
 
 
+async def _qbit_connection_check(config: dict[str, Any], client_name: str) -> dict[str, Any]:
+    try:
+        resolved_client_name, client_config = resolve_client_config(config, client_name)
+        service = QbitReadOnlyService(client_config)
+        torrents = await service.list_torrents(limit=1)
+    except Exception as exc:
+        return {"name": "qbit.connection", "ok": False, "message": str(exc)}
+    return {
+        "name": "qbit.connection",
+        "ok": True,
+        "message": f"qBittorrent connection ok: {resolved_client_name}, sample_count={len(torrents)}",
+    }
+
+
 def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trackers: list[str], content_path: str | None) -> list[dict[str, str]]:
     commands = [
         {
@@ -938,7 +956,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "doctor":
-            _print_payload(_with_captured_stdout(lambda: doctor_payload(args), json_output), json_output)
+            payload = _with_captured_stdout(lambda: asyncio.run(doctor_payload(args)), json_output)
+            _print_payload(payload, json_output)
             return 0
 
         if args.command == "pipeline":
