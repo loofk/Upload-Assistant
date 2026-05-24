@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import re
+import shlex
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -281,6 +282,7 @@ def build_mteam_package_manifest(
         },
         "files": {key: _file_artifact(Path(path)) for key, path in files.items() if key != "manifest"},
         "manifest_file": files.get("manifest"),
+        "commands": _package_manifest_commands(package_dir, preview.get("content_path")),
         "next_actions": _package_manifest_next_actions(blockers),
     }
 
@@ -317,6 +319,80 @@ def _package_manifest_next_actions(blockers: list[str]) -> list[str]:
     if blockers:
         return ["Fix package blockers, regenerate the MTEAM package, then rerun target-upload preflight."]
     return ["Review mteam-package-manifest.json, then run target-upload with the sanitized MTEAM torrent candidate."]
+
+
+def _package_manifest_commands(package_dir: Path, content_path: Any) -> list[dict[str, str]]:
+    package_arg = str(package_dir)
+    target_torrent = "./tmp/exported/mteam.mteam-upload.torrent"
+    uploaded_save_path = str(content_path or "/downloads")
+    return [
+        {
+            "stage": "target-upload-preflight",
+            "command": _ptcli_command(
+                [
+                    "target-upload",
+                    "--package-dir",
+                    package_arg,
+                    "--torrent-file",
+                    target_torrent,
+                    "--write-payload",
+                    "--json",
+                ]
+            ),
+        },
+        {
+            "stage": "target-upload-live",
+            "command": _ptcli_command(
+                [
+                    "target-upload",
+                    "--package-dir",
+                    package_arg,
+                    "--torrent-file",
+                    target_torrent,
+                    "--execute",
+                    "--confirm-upload",
+                    "--download-uploaded-torrent",
+                    "--inject-uploaded-torrent",
+                    "--uploaded-save-path",
+                    uploaded_save_path,
+                    "--uploaded-qbit-category",
+                    "MTEAM",
+                    "--uploaded-qbit-tags",
+                    "retorrent",
+                    "--wait-uploaded-complete",
+                    "--write-summary",
+                    "--json",
+                ]
+            ),
+        },
+        {
+            "stage": "resume-uploaded-torrent-id",
+            "command": _ptcli_command(
+                [
+                    "target-upload",
+                    "--package-dir",
+                    package_arg,
+                    "--uploaded-torrent-id",
+                    "<id>",
+                    "--download-uploaded-torrent",
+                    "--inject-uploaded-torrent",
+                    "--uploaded-save-path",
+                    uploaded_save_path,
+                    "--uploaded-qbit-category",
+                    "MTEAM",
+                    "--uploaded-qbit-tags",
+                    "retorrent",
+                    "--wait-uploaded-complete",
+                    "--write-summary",
+                    "--json",
+                ]
+            ),
+        },
+    ]
+
+
+def _ptcli_command(args: list[str]) -> str:
+    return "python3 ptcli.py " + " ".join(shlex.quote(arg) for arg in args)
 
 
 def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:

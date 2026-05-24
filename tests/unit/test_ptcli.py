@@ -5253,6 +5253,16 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     assert package["package_manifest"]["kind"] == "ptcli.mteam.prepare_package"
     assert package["package_manifest"]["files"]["preview"]["sha1"]
     assert package["package_manifest"]["rule_obligations"]["count"] == 2
+    manifest_commands = {command["stage"]: command["command"] for command in package["package_manifest"]["commands"]}
+    assert "--package-dir" in manifest_commands["target-upload-preflight"]
+    assert shlex.quote(package["package_dir"]) in manifest_commands["target-upload-preflight"]
+    assert "--write-payload" in manifest_commands["target-upload-preflight"]
+    assert "--execute --confirm-upload" in manifest_commands["target-upload-live"]
+    assert "--download-uploaded-torrent" in manifest_commands["target-upload-live"]
+    assert "--inject-uploaded-torrent" in manifest_commands["target-upload-live"]
+    assert "--uploaded-save-path /downloads/Example" in manifest_commands["target-upload-live"]
+    assert "--wait-uploaded-complete" in manifest_commands["target-upload-live"]
+    assert "--uploaded-torrent-id '<id>'" in manifest_commands["resume-uploaded-torrent-id"]
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-prepare-preview.json").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-description-draft.txt").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-rule-review.json").exists()
