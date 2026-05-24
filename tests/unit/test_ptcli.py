@@ -1939,6 +1939,9 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
             "--uploaded-save-path",
             str(content_path),
             "--wait-uploaded-complete",
+            "--write-summary",
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
             "--json",
         ]
     )
@@ -3056,6 +3059,13 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["summary"]["gates"]["rule_check"]["rules_acknowledged"] is True
     assert summary_payload["summary"]["gates"]["duplicate_check"]["ok"] is True
     assert summary_payload["summary"]["gates"]["upload_gate"]["ready"] is True
+    assert summary_payload["schema_version"] == 1
+    assert summary_payload["kind"] == "ptcli.pipeline.run_summary"
+    assert summary_payload["summary_file"] == str(summary_path)
+    assert summary_payload["stages"] == payload["stages"]
+    assert summary_payload["artifacts"]["summary_file"] == str(summary_path)
+    assert summary_payload["artifacts"]["target_package_dir"] == target_stage["result"]["package_dir"]
+    assert summary_payload["artifacts"]["target_package_files"] == target_stage["result"]["files"]
     assert summary_payload["next_actions"]
 
 
@@ -3264,6 +3274,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
             "--uploaded-qbit-tags",
             "retorrent",
             "--wait-uploaded-complete",
+            "--write-summary",
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
             "--json",
         ]
     )
@@ -3280,6 +3293,12 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert payload["closure"]["target"]["uploaded_wait"]["complete"] is True
     assert wait_calls[-1]["torrent_hash"] == uploaded_hash
     assert wait_calls[-1]["content_path"] == "/downloads"
+    summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
+    assert summary_payload["artifacts"]["source_torrent_file"].endswith("U2-60635.torrent")
+    assert summary_payload["artifacts"]["target_torrent_file"] == str(torrent_file)
+    assert summary_payload["artifacts"]["target_package_dir"]
+    assert summary_payload["artifacts"]["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
+    assert any(stage["stage"] == "target-upload" and stage["ok"] is True for stage in summary_payload["stages"])
 
 
 @pytest.mark.asyncio

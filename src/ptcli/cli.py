@@ -1371,6 +1371,9 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / "ptcli-run-summary.json"
     summary_payload = {
+        "schema_version": 1,
+        "kind": "ptcli.pipeline.run_summary",
+        "summary_file": str(destination),
         "status": payload.get("status"),
         "source_tracker": payload.get("source_tracker"),
         "source_torrent_id": payload.get("source_torrent_id"),
@@ -1385,9 +1388,39 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),
         "next_actions": payload.get("next_actions", []),
+        "artifacts": _run_summary_artifacts(payload, str(destination)),
+        "stages": payload.get("stages", []),
     }
     destination.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return str(destination)
+
+
+def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
+    stages = payload.get("stages")
+    source_download = _find_stage(stages, "source-download") if isinstance(stages, list) else None
+    target_prepare = _find_stage(stages, "target-prepare") if isinstance(stages, list) else None
+    target_upload = _find_stage(stages, "target-upload") if isinstance(stages, list) else None
+
+    artifacts: dict[str, Any] = {
+        "summary_file": summary_file,
+        "target_torrent_file": payload.get("target_torrent_file"),
+    }
+    if isinstance(source_download, dict):
+        source_result = source_download.get("result")
+        if isinstance(source_result, dict):
+            artifacts["source_torrent_file"] = source_result.get("path")
+    if isinstance(target_prepare, dict):
+        prepare_result = target_prepare.get("result")
+        if isinstance(prepare_result, dict):
+            artifacts["target_package_dir"] = prepare_result.get("package_dir")
+            artifacts["target_package_files"] = prepare_result.get("files")
+    if isinstance(target_upload, dict):
+        upload_result = target_upload.get("result")
+        if isinstance(upload_result, dict):
+            downloaded_torrent = upload_result.get("downloaded_torrent")
+            if isinstance(downloaded_torrent, dict):
+                artifacts["uploaded_torrent_file"] = downloaded_torrent.get("path")
+    return artifacts
 
 
 def _run_summary_dir(payload: dict[str, Any], output_dir: str | None) -> Path:
