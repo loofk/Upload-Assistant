@@ -905,6 +905,7 @@ def _pipeline_run_summary(stages: list[dict[str, Any]], ready: bool, blockers: l
         "failed_stages": [stage["stage"] for stage in stage_statuses if not stage["ok"]],
         "completed_stages": [stage["stage"] for stage in stage_statuses if stage["ok"] and not stage["skipped"]],
         "skipped_stages": [stage["stage"] for stage in stage_statuses if stage["skipped"]],
+        "gates": _pipeline_gate_summary(stages),
         "source": evidence.get("source", {}),
         "target": evidence.get("target", {}),
     }
@@ -917,6 +918,60 @@ def _pipeline_stage_status(stage: dict[str, Any]) -> dict[str, Any]:
         "skipped": bool(stage.get("skipped")),
         "message": stage.get("error") or stage.get("message"),
     }
+
+
+def _pipeline_gate_summary(stages: list[dict[str, Any]]) -> dict[str, Any]:
+    flow_stage = _find_stage(stages, "flow-check")
+    rule_stage = _find_stage(stages, "rule-check")
+    dupe_stage = _find_stage(stages, "target-dupe-check")
+    target_prepare_stage = _find_stage(stages, "target-prepare")
+    flow_result = flow_stage.get("result") if isinstance(flow_stage, dict) else None
+    rule_result = rule_stage.get("result") if isinstance(rule_stage, dict) else None
+    dupe_result = dupe_stage.get("result") if isinstance(dupe_stage, dict) else None
+    target_prepare_result = target_prepare_stage.get("result") if isinstance(target_prepare_stage, dict) else None
+    upload_gate = target_prepare_result.get("upload_gate") if isinstance(target_prepare_result, dict) else None
+    rule_review = target_prepare_result.get("rule_review") if isinstance(target_prepare_result, dict) else None
+    return {
+        "flow_check": {
+            "ready": bool(flow_result.get("ready")) if isinstance(flow_result, dict) else False,
+            "blockers": _failed_check_messages(flow_result.get("checks")) if isinstance(flow_result, dict) else [],
+        },
+        "rule_check": {
+            "ready": bool(rule_result.get("ready")) if isinstance(rule_result, dict) else False,
+            "rules_acknowledged": _check_ok(rule_result.get("checks"), "rules_acknowledged") if isinstance(rule_result, dict) else False,
+            "blockers": _failed_check_messages(rule_result.get("checks")) if isinstance(rule_result, dict) else [],
+        },
+        "duplicate_check": {
+            "searched": bool(dupe_result.get("searched")) if isinstance(dupe_result, dict) else False,
+            "count": int(dupe_result.get("count", 0) or 0) if isinstance(dupe_result, dict) else 0,
+            "ok": bool(dupe_result.get("searched")) and int(dupe_result.get("count", 0) or 0) == 0 if isinstance(dupe_result, dict) else False,
+        },
+        "upload_gate": {
+            "ready": bool(upload_gate.get("ready")) if isinstance(upload_gate, dict) else False,
+            "dupe_count": upload_gate.get("dupe_count") if isinstance(upload_gate, dict) else None,
+            "blockers": upload_gate.get("blockers", []) if isinstance(upload_gate, dict) else [],
+        },
+        "rule_review": {
+            "ready": bool(rule_review.get("rule_check_ready")) if isinstance(rule_review, dict) else False,
+            "blockers": rule_review.get("blockers", []) if isinstance(rule_review, dict) else [],
+        },
+    }
+
+
+def _failed_check_messages(checks: Any) -> list[str]:
+    if not isinstance(checks, list):
+        return []
+    return [
+        f"{check.get('name', 'check')}: {check.get('message', 'check failed')}"
+        for check in checks
+        if isinstance(check, dict) and not check.get("ok")
+    ]
+
+
+def _check_ok(checks: Any, name: str) -> bool:
+    if not isinstance(checks, list):
+        return False
+    return any(isinstance(check, dict) and check.get("name") == name and bool(check.get("ok")) for check in checks)
 
 
 def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:

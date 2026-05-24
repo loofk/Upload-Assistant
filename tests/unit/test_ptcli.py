@@ -727,8 +727,11 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
 
 def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
     stages = [
-        {"stage": "flow-check", "ok": True, "result": {}},
+        {"stage": "flow-check", "ok": True, "result": {"ready": True, "checks": []}},
+        {"stage": "rule-check", "ok": True, "result": {"ready": True, "checks": [{"name": "rules_acknowledged", "ok": True, "message": "ok"}]}},
         {"stage": "source-download", "ok": True, "skipped": True, "message": "--download-source not provided; source download skipped."},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+        {"stage": "target-prepare", "ok": True, "result": {"upload_gate": {"ready": True, "dupe_count": 0, "blockers": []}, "rule_review": {"rule_check_ready": True, "blockers": []}}},
         {"stage": "target-upload", "ok": False, "error": "Target upload stage did not complete every requested upload follow-up."},
     ]
     closure = {
@@ -745,9 +748,12 @@ def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
     assert summary["complete"] is False
     assert summary["blockers"] == ["target-upload: failed"]
     assert summary["failed_stages"] == ["target-upload"]
-    assert summary["completed_stages"] == ["flow-check"]
+    assert summary["completed_stages"] == ["flow-check", "rule-check", "target-dupe-check", "target-prepare"]
     assert summary["skipped_stages"] == ["source-download"]
-    assert summary["stage_statuses"][2]["message"] == "Target upload stage did not complete every requested upload follow-up."
+    assert summary["stage_statuses"][-1]["message"] == "Target upload stage did not complete every requested upload follow-up."
+    assert summary["gates"]["rule_check"]["rules_acknowledged"] is True
+    assert summary["gates"]["duplicate_check"]["ok"] is True
+    assert summary["gates"]["upload_gate"]["ready"] is True
     assert summary["source"]["mode"] == "matched"
 
 
@@ -2115,6 +2121,9 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
     assert summary_payload["summary"]["ready"] is True
     assert summary_payload["summary"]["target"]["ready"] is False
+    assert summary_payload["summary"]["gates"]["rule_check"]["rules_acknowledged"] is True
+    assert summary_payload["summary"]["gates"]["duplicate_check"]["ok"] is True
+    assert summary_payload["summary"]["gates"]["upload_gate"]["ready"] is True
     assert summary_payload["next_actions"]
 
 
