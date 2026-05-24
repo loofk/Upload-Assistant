@@ -57,7 +57,7 @@ def make_mteam_safe_torrent(tmp_path, name: str = "upload") -> str:
 def mteam_ready_stages() -> list[dict]:
     return [
         {"stage": "rule-check", "ok": True, "result": {"ready": True}},
-        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "match", "ok": True, "result": {"count": 1, "matches": [{"content_path": "/downloads/Example", "hash": "a" * 40}]}},
         {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
     ]
 
@@ -2302,6 +2302,30 @@ def test_mteam_prepare_preview_contains_package_fields() -> None:
     assert preview["meta_draft"]["type"] == "REMUX"
     assert preview["field_mapping"]["category"] == 439
     assert preview["field_mapping"]["standard"] == 6
+
+
+def test_mteam_prepare_preview_rejects_empty_qbit_match_evidence() -> None:
+    source_info = {
+        "name": "Example.Movie.2024.2160p.BluRay.REMUX.HEVC-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "rule-check", "ok": True, "result": {"ready": True}},
+        {"stage": "match", "ok": True, "result": {"count": 1, "matches": [{}]}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], stages, "/downloads/Example.Movie.2024")
+    gate = build_mteam_upload_gate(preview, stages, accept_rules=True)
+
+    assert preview["verified_content"] is False
+    assert gate["ready"] is False
+    assert any(check["name"] == "verified_content" and check["ok"] is False for check in gate["checks"])
 
 
 def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:

@@ -436,11 +436,23 @@ def _has_verified_content(stages: list[dict[str, Any]]) -> bool:
     for stage in stages:
         stage_name = stage.get("stage")
         result = stage.get("result", {})
-        if stage_name == "wait-complete" and stage.get("ok") and isinstance(result, dict) and result.get("complete"):
+        if stage_name == "wait-complete" and stage.get("ok") and isinstance(result, dict) and result.get("complete") and _has_match_evidence(result.get("matches")):
             return True
-        if stage_name == "match" and stage.get("ok") and isinstance(result, dict) and int(result.get("count", 0) or 0) > 0:
+        if stage_name == "match" and stage.get("ok") and isinstance(result, dict) and _has_match_evidence(result.get("matches")):
             return True
     return False
+
+
+def _has_match_evidence(matches: Any) -> bool:
+    if not isinstance(matches, list):
+        return False
+    return any(_match_has_evidence(match) for match in matches)
+
+
+def _match_has_evidence(match: Any) -> bool:
+    if not isinstance(match, dict):
+        return False
+    return bool(match.get("hash") or match.get("torrent_hash") or match.get("torrenthash") or match.get("content_path"))
 
 
 def _find_stage(stages: list[dict[str, Any]], stage_name: str) -> dict[str, Any] | None:
