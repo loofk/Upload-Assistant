@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -77,7 +78,7 @@ def match_torrents(torrents: list[QbitTorrentSummary], content_path: str) -> lis
         if any(candidate == normalized_target or candidate.startswith(f"{normalized_target}{os.sep}") for candidate in normalized_candidates):
             matches.append(torrent)
             continue
-        if target_name and any(target_name in os.path.basename(candidate).lower() for candidate in normalized_candidates):
+        if target_name and any(_basename_matches_target(os.path.basename(candidate).lower(), target_name) for candidate in normalized_candidates):
             matches.append(torrent)
 
     return matches
@@ -85,6 +86,15 @@ def match_torrents(torrents: list[QbitTorrentSummary], content_path: str) -> lis
 
 def summaries_to_dicts(torrents: list[QbitTorrentSummary]) -> list[dict[str, Any]]:
     return [asdict(torrent) for torrent in torrents]
+
+
+def _basename_matches_target(candidate_name: str, target_name: str) -> bool:
+    if candidate_name == target_name:
+        return True
+    if not candidate_name.startswith(target_name):
+        return False
+    suffix = candidate_name[len(target_name) :]
+    return bool(suffix) and bool(re.match(r"^[\s._\-\[\]()]+", suffix))
 
 
 class QbitReadOnlyService:

@@ -1351,6 +1351,15 @@ def test_match_torrents_by_content_path() -> None:
     assert [match.hash for match in matches] == ["A"]
 
 
+def test_match_torrents_avoids_loose_substring_false_positive() -> None:
+    false_positive = summarize_torrent({"name": "Someone.2024", "hash": "A", "content_path": "/downloads/Someone.2024"})
+    release_match = summarize_torrent({"name": "One.2024.1080p", "hash": "B", "content_path": "/downloads/One.2024.1080p"})
+
+    matches = match_torrents([false_positive, release_match], "/downloads/One")
+
+    assert [match.hash for match in matches] == ["B"]
+
+
 def test_inspect_reports_missing_config_as_json(capsys) -> None:
     code = main(["inspect", "--config", "/missing/config.py", "--json"])
 
