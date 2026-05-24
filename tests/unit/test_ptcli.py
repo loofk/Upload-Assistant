@@ -1564,6 +1564,41 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     assert preflight["upload_payload"]["torrent_file"]["sha1"]
 
 
+def test_mteam_upload_preflight_reports_torrent_safety_metadata(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    content = tmp_path / "Example.mkv"
+    content.write_bytes(b"content")
+    source_torrent = tmp_path / "source.torrent"
+    torrent = Torrent(path=str(content), trackers=["https://source.example/passkey/announce"], comment="private comment")
+    torrent.generate()
+    torrent.write(str(source_torrent), overwrite=True)
+    candidate = create_mteam_upload_torrent_candidate(str(source_torrent), str(tmp_path / "exported"))
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=candidate["path"])
+
+    torrent_summary = preflight["upload_payload"]["torrent_file"]
+    assert torrent_summary["metadata_readable"] is True
+    assert torrent_summary["announce"] == "https://fake.tracker"
+    assert torrent_summary["source_flag"] == "MTEAM"
+    assert torrent_summary["comment_length"] == 0
+    assert torrent_summary["mteam_safe"] is True
+
+
 def test_mteam_upload_preflight_allows_execute_when_payload_is_ready(tmp_path) -> None:
     source_info = {
         "tracker": "U2",

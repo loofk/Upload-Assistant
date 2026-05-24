@@ -624,12 +624,35 @@ def _torrent_file_summary(torrent_file: str | None) -> tuple[dict[str, Any] | No
     blockers: list[str] = []
     if not data.startswith(b"d"):
         blockers.append("MTEAM upload torrent file does not look like a .torrent file.")
-    return {
+    summary = {
         "path": str(path),
         "filename": path.name,
         "size": len(data),
         "sha1": hashlib.sha1(data).hexdigest(),
-    }, blockers
+    }
+    summary.update(_torrent_metadata_summary(path))
+    return summary, blockers
+
+
+def _torrent_metadata_summary(path: Path) -> dict[str, Any]:
+    try:
+        torrent = Torrent.read(str(path), validate=False)
+    except Exception as exc:
+        return {
+            "metadata_readable": False,
+            "metadata_error": str(exc),
+            "mteam_safe": False,
+        }
+    announce = torrent.metainfo.get("announce")
+    comment = torrent.metainfo.get("comment")
+    source_flag = torrent.metainfo.get("info", {}).get("source")
+    return {
+        "metadata_readable": True,
+        "announce": announce,
+        "comment_length": len(str(comment or "")),
+        "source_flag": source_flag,
+        "mteam_safe": announce == MTEAM_UPLOAD_ANNOUNCE and source_flag == MTEAM_SOURCE_FLAG and not comment,
+    }
 
 
 def _read_json(path: Path) -> Any:
