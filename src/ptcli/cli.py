@@ -28,6 +28,7 @@ from src.ptcli.source import download_source_torrent, extract_torrent_id, fetch_
 from src.ptcli.target import (
     build_mteam_upload_preflight,
     create_mteam_upload_torrent_candidate,
+    download_mteam_uploaded_torrent,
     load_mteam_prepare_package,
     search_mteam_duplicates,
     upload_mteam_from_package,
@@ -218,6 +219,7 @@ def build_parser() -> argparse.ArgumentParser:
     target_upload.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
     target_upload.add_argument("--download-uploaded-torrent", action="store_true", help="After live upload succeeds, download the generated MTEAM torrent file.")
     target_upload.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
+    target_upload.add_argument("--uploaded-torrent-id", help="Existing MTEAM torrent id to download and inject without re-submitting the upload.")
     target_upload.add_argument("--uploaded-torrent-file", help="Reuse an already downloaded MTEAM uploaded .torrent for qBittorrent injection.")
     target_upload.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded target torrent to qBittorrent after upload.")
     target_upload.add_argument("--uploaded-save-path", help="qBittorrent save path for --inject-uploaded-torrent; defaults to the package content path when available.")
@@ -623,6 +625,18 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
     preflight_torrent_file = args.torrent_file or args.uploaded_torrent_file
+    if args.uploaded_torrent_id:
+        preflight = _target_upload_recovery_preflight(args, preflight_torrent_file)
+        inferred_uploaded_save_path = _uploaded_save_path_from_preflight(args, preflight)
+        blockers = [*preflight["blockers"], *_uploaded_torrent_id_reuse_blockers(args, inferred_uploaded_save_path=inferred_uploaded_save_path)]
+        if blockers:
+            blocked = {**preflight, "status": "blocked", "dry_run": False, "uploaded_torrent_id": args.uploaded_torrent_id, "blockers": blockers}
+            return _maybe_write_target_upload_summary(args, blocked, preflight)
+        config = load_config(args.config)
+        output_dir = args.uploaded_output_dir or args.package_dir
+        result = await download_mteam_uploaded_torrent(config, args.uploaded_torrent_id, output_dir)
+        result = await _apply_uploaded_torrent_followup(config, args, result, inferred_uploaded_save_path)
+        return _maybe_write_target_upload_summary(args, result, preflight)
     if args.uploaded_torrent_file:
         preflight = build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=preflight_torrent_file, write_payload=args.write_payload)
         inferred_uploaded_save_path = _uploaded_save_path_from_preflight(args, preflight)
@@ -659,6 +673,23 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
     )
     result = await _apply_uploaded_torrent_followup(config, args, result, inferred_uploaded_save_path)
     return _maybe_write_target_upload_summary(args, result, preflight)
+
+
+def _target_upload_recovery_preflight(args: argparse.Namespace, torrent_file: str | None) -> dict[str, Any]:
+    preflight = build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=torrent_file, write_payload=args.write_payload)
+    blockers = [blocker for blocker in _string_list(preflight.get("blockers")) if blocker != "MTEAM upload torrent file is required."]
+    payload_summary = preflight.get("upload_payload")
+    if isinstance(payload_summary, dict):
+        payload_summary = {
+            **payload_summary,
+            "blockers": [blocker for blocker in _string_list(payload_summary.get("blockers")) if blocker != "MTEAM upload torrent file is required."],
+        }
+    return {
+        **preflight,
+        "status": "blocked" if blockers else "ready",
+        "blockers": blockers,
+        "upload_payload": payload_summary if isinstance(payload_summary, dict) else preflight.get("upload_payload"),
+    }
 
 
 def _uploaded_save_path_from_preflight(args: argparse.Namespace, preflight: dict[str, Any]) -> str | None:
@@ -702,6 +733,14 @@ def _uploaded_torrent_reuse_blockers(args: argparse.Namespace, *, inferred_uploa
     return blockers
 
 
+def _uploaded_torrent_id_reuse_blockers(args: argparse.Namespace, *, inferred_uploaded_save_path: str | None = None) -> list[str]:
+    blockers: list[str] = []
+    if not args.download_uploaded_torrent:
+        blockers.append("--download-uploaded-torrent is required with --uploaded-torrent-id.")
+    blockers.extend(_uploaded_torrent_reuse_blockers(args, inferred_uploaded_save_path=inferred_uploaded_save_path))
+    return blockers
+
+
 def _maybe_write_target_upload_summary(args: argparse.Namespace, result: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
     if not getattr(args, "write_summary", False):
         return result
@@ -739,6 +778,7 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
         "summary_file": summary_file,
         "package_dir": _path_artifact(args.package_dir),
         "target_torrent_file": _path_artifact(args.torrent_file),
+        "uploaded_torrent_id": _uploaded_torrent_id_from_result(result) or args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(uploaded_torrent_path),
         "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or _mteam_package_content_path(preflight) or args.uploaded_save_path),
     }
@@ -753,7 +793,34 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
     ]
     package_artifact = artifacts.get("package_dir")
     uploaded_torrent_artifact = artifacts.get("uploaded_torrent_file")
+    uploaded_torrent_id = artifacts.get("uploaded_torrent_id")
     uploaded_save_path_artifact = artifacts.get("uploaded_save_path")
+    if isinstance(package_artifact, dict) and uploaded_torrent_id and not (isinstance(uploaded_torrent_artifact, dict) and uploaded_torrent_artifact.get("path")):
+        download_args = [
+            "target-upload",
+            "--package-dir",
+            str(package_artifact.get("path") or args.package_dir),
+            "--client",
+            args.client,
+            "--uploaded-torrent-id",
+            str(uploaded_torrent_id),
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+        if args.uploaded_output_dir:
+            download_args.extend(["--uploaded-output-dir", args.uploaded_output_dir])
+        if isinstance(uploaded_save_path_artifact, dict) and uploaded_save_path_artifact.get("path"):
+            download_args.extend(["--uploaded-save-path", str(uploaded_save_path_artifact["path"])])
+        if args.uploaded_qbit_category:
+            download_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
+        if args.uploaded_qbit_tags:
+            download_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
+        if args.uploaded_paused:
+            download_args.append("--uploaded-paused")
+        commands.append({"stage": "resume-uploaded-torrent-download", "command": _ptcli_command(download_args)})
     if isinstance(package_artifact, dict) and isinstance(uploaded_torrent_artifact, dict) and uploaded_torrent_artifact.get("path"):
         resume_args = [
             "target-upload",
@@ -793,6 +860,7 @@ def _target_upload_retry_command(args: argparse.Namespace) -> str:
     for option, value in (
         ("--config", args.config),
         ("--torrent-file", args.torrent_file),
+        ("--uploaded-torrent-id", args.uploaded_torrent_id),
         ("--uploaded-torrent-file", args.uploaded_torrent_file),
         ("--uploaded-output-dir", args.uploaded_output_dir),
         ("--uploaded-save-path", args.uploaded_save_path),
@@ -1008,6 +1076,7 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "status": result.get("status"),
         "ready": result.get("status") in {"ready", "uploaded"} and not blockers,
         "uploaded": result.get("status") == "uploaded",
+        "uploaded_torrent_id": _uploaded_torrent_id_from_result(result),
         "downloaded": isinstance(downloaded_torrent, dict),
         "uploaded_torrent": downloaded_torrent if isinstance(downloaded_torrent, dict) else None,
         "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
@@ -1034,6 +1103,15 @@ def _uploaded_save_path_from_result(result: dict[str, Any]) -> str | None:
         query = uploaded_wait.get("query")
         if isinstance(query, dict) and query.get("content_path"):
             return str(query["content_path"])
+    return None
+
+
+def _uploaded_torrent_id_from_result(result: dict[str, Any]) -> str | None:
+    if result.get("uploaded_torrent_id"):
+        return str(result["uploaded_torrent_id"])
+    downloaded_torrent = result.get("downloaded_torrent")
+    if isinstance(downloaded_torrent, dict) and downloaded_torrent.get("torrent_id"):
+        return str(downloaded_torrent["torrent_id"])
     return None
 
 

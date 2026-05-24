@@ -183,14 +183,15 @@ async def upload_mteam_from_package(
 
     upload_func = uploader or _submit_mteam_upload
     upload_result = await upload_func(config, package_dir, torrent_file)
+    torrent_id = extract_mteam_uploaded_torrent_id(upload_result)
     result = {
         **preflight,
         "status": "uploaded",
         "dry_run": False,
         "upload_result": upload_result,
+        "uploaded_torrent_id": torrent_id,
     }
     if download_uploaded:
-        torrent_id = extract_mteam_uploaded_torrent_id(upload_result)
         if not torrent_id:
             return {
                 **result,
@@ -208,6 +209,18 @@ async def upload_mteam_from_package(
             },
         }
     return result
+
+
+async def download_mteam_uploaded_torrent(config: dict[str, Any], torrent_id: str, output_dir: str) -> dict[str, Any]:
+    downloaded_path = await _download_mteam_uploaded_torrent(config, torrent_id, output_dir)
+    return {
+        "status": "uploaded",
+        "uploaded_torrent_id": str(torrent_id),
+        "downloaded_torrent": {
+            "torrent_id": str(torrent_id),
+            "path": downloaded_path,
+        },
+    }
 
 
 def extract_mteam_uploaded_torrent_id(upload_result: dict[str, Any]) -> str | None:

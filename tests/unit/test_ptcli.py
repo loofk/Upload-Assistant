@@ -5229,6 +5229,7 @@ async def test_mteam_live_upload_uses_injected_uploader(tmp_path) -> None:
 
     assert result["status"] == "uploaded"
     assert result["upload_result"]["response"]["id"] == "999"
+    assert result["uploaded_torrent_id"] == "999"
 
 
 @pytest.mark.asyncio
@@ -5610,6 +5611,135 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent"]
     assert commands["verify-seeding"].startswith("python3 ptcli.py inspect")
+
+
+def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            package["package_dir"],
+            "--torrent-file",
+            str(torrent_file),
+            "--execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-qbit-category",
+            "MTEAM",
+            "--uploaded-qbit-tags",
+            "retorrent",
+            "--uploaded-paused",
+            "--write-summary",
+            "--client",
+            "default",
+            "--json",
+        ]
+    )
+
+    summary_file = ptcli_cli._write_target_upload_summary({"status": "uploaded", "uploaded_torrent_id": "999"}, preflight, args, package["package_dir"])
+
+    summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+    assert summary_payload["summary"]["uploaded_torrent_id"] == "999"
+    assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
+    commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    assert "--uploaded-torrent-id 999" in commands["resume-uploaded-torrent-download"]
+    assert "--download-uploaded-torrent" in commands["resume-uploaded-torrent-download"]
+    assert "--inject-uploaded-torrent" in commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-paused" in commands["resume-uploaded-torrent-download"]
+
+
+@pytest.mark.asyncio
+async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
+    uploaded_path = tmp_path / "uploaded" / "MTEAM-999.torrent"
+    uploaded_hash = "e" * 40
+
+    async def fake_download_mteam_uploaded_torrent(_config, torrent_id, output_dir):
+        assert torrent_id == "999"
+        assert output_dir == "uploaded"
+        uploaded_path.parent.mkdir(parents=True, exist_ok=True)
+        uploaded_path.write_bytes(b"d4:infod")
+        return {"status": "uploaded", "uploaded_torrent_id": torrent_id, "downloaded_torrent": {"torrent_id": torrent_id, "path": str(uploaded_path)}}
+
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+        return {
+            "client": client_name,
+            "hash": uploaded_hash,
+            "torrent_path": torrent_path,
+            "save_path": save_path,
+            "category": category,
+            "tags": tags,
+            "paused": paused,
+        }
+
+    monkeypatch.setattr(ptcli_cli, "download_mteam_uploaded_torrent", fake_download_mteam_uploaded_torrent)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--config",
+            "config.py",
+            "--package-dir",
+            package["package_dir"],
+            "--uploaded-torrent-id",
+            "999",
+            "--download-uploaded-torrent",
+            "--uploaded-output-dir",
+            "uploaded",
+            "--inject-uploaded-torrent",
+            "--uploaded-qbit-category",
+            "MTEAM",
+            "--uploaded-qbit-tags",
+            "retorrent",
+            "--uploaded-paused",
+            "--write-summary",
+            "--client",
+            "default",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["status"] == "uploaded"
+    assert result["uploaded_torrent_id"] == "999"
+    assert result["downloaded_torrent"]["path"] == str(uploaded_path)
+    assert result["downloaded_torrent"]["exists"] is True
+    assert result["injected_torrent"]["save_path"] == "/downloads/Example"
+    assert result["injected_torrent"]["category"] == "MTEAM"
+    assert result["injected_torrent"]["tags"] == "retorrent"
+    assert result["injected_torrent"]["paused"] is True
 
 
 @pytest.mark.asyncio
