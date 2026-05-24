@@ -6322,6 +6322,33 @@ def test_mteam_upload_payload_summary_writes_payload_file(tmp_path) -> None:
     assert preflight["status"] == "ready"
     assert preflight["files"]["upload_payload"].endswith("mteam-upload-payload.json")
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-upload-payload.json").exists()
+    assert preflight["upload_payload"]["description_file"]["exists"] is True
+    assert preflight["upload_payload"]["description_file"]["char_length"] == preflight["upload_payload"]["form_fields"]["descr"]["length"]
+    assert all(check["ok"] for check in preflight["upload_payload"]["material_checks"])
+
+
+def test_mteam_upload_payload_summary_blocks_missing_description_file(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    package_from_disk = load_mteam_prepare_package(package["package_dir"])
+    Path(package_from_disk["files"]["description_draft"]).unlink()
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    payload = ptcli_target.build_mteam_upload_payload_summary(package_from_disk, torrent_file=str(torrent_file))
+
+    assert payload["description_file"]["exists"] is False
+    assert any(check["name"] == "payload.description_file" and check["ok"] is False for check in payload["material_checks"])
+    assert any("payload.description_file" in blocker for blocker in payload["blockers"])
 
 
 def test_target_upload_command_outputs_preflight_json(tmp_path, capsys) -> None:

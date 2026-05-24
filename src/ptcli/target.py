@@ -253,9 +253,12 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
     field_mapping = package.get("field_mapping", {})
     description_length = int(package.get("description_length", 0) or 0)
     form_fields = _mteam_upload_form_fields(field_mapping, description_length)
+    description_summary = _mteam_description_summary(package, description_length)
     torrent_summary, torrent_blockers = _torrent_file_summary(torrent_file)
     field_checks = _mteam_upload_field_checks(form_fields)
+    material_checks = _mteam_upload_material_checks(description_summary, description_length)
     blockers = [f"{check['name']}: {check['message']}" for check in field_checks if not check["ok"]]
+    blockers.extend(f"{check['name']}: {check['message']}" for check in material_checks if not check["ok"])
     blockers.extend(torrent_blockers)
 
     return {
@@ -264,7 +267,9 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
         "multipart": True,
         "form_fields": form_fields,
         "field_checks": field_checks,
+        "material_checks": material_checks,
         "file_field": "file",
+        "description_file": description_summary,
         "torrent_file": torrent_summary,
         "blockers": blockers,
     }
@@ -994,6 +999,55 @@ def _mteam_upload_field_checks(form_fields: dict[str, Any]) -> list[dict[str, An
         douban_url = str(form_fields["douban"])
         checks.append(_payload_field_check("payload.douban", bool(re.match(r"^https://movie\.douban\.com/subject/\d+/?$", douban_url)), "MTEAM upload payload Douban URL is valid.", "MTEAM upload payload Douban URL must look like https://movie.douban.com/subject/1234567/."))
     return checks
+
+
+def _mteam_description_summary(package: dict[str, Any], expected_length: int) -> dict[str, Any]:
+    files = package.get("files")
+    description_path = files.get("description_draft") if isinstance(files, dict) else None
+    if not description_path:
+        return {
+            "source": "mteam-description-draft.txt",
+            "expected_length": expected_length,
+            "exists": False,
+            "blockers": ["MTEAM description draft path is missing from package files."],
+        }
+
+    path = Path(str(description_path)).expanduser()
+    summary = {
+        **_file_artifact(path),
+        "source": "mteam-description-draft.txt",
+        "expected_length": expected_length,
+        "char_length": None,
+        "blockers": [],
+    }
+    if path.is_file():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            summary["blockers"] = [f"MTEAM description draft is not valid UTF-8: {exc}"]
+        else:
+            summary["char_length"] = len(text)
+    return summary
+
+
+def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_length: int) -> list[dict[str, Any]]:
+    exists = bool(description_summary.get("exists")) and bool(description_summary.get("is_file"))
+    char_length = description_summary.get("char_length")
+    blockers = description_summary.get("blockers") if isinstance(description_summary.get("blockers"), list) else []
+    return [
+        _payload_field_check(
+            "payload.description_file",
+            exists and not blockers,
+            "MTEAM description draft file exists and is readable.",
+            blockers[0] if blockers else "MTEAM description draft file is missing or not a file.",
+        ),
+        _payload_field_check(
+            "payload.description_length",
+            isinstance(char_length, int) and char_length > 0 and char_length == expected_length,
+            "MTEAM description draft length matches the upload payload.",
+            f"MTEAM description draft length mismatch: expected {expected_length}, got {char_length}.",
+        ),
+    ]
 
 
 def _payload_field_check(name: str, ok: bool, ok_message: str, failed_message: str) -> dict[str, Any]:
