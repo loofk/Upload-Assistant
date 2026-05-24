@@ -646,6 +646,7 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "blockers": blockers,
         "preflight_status": preflight.get("status"),
         "preflight_blockers": preflight.get("blockers", []),
+        "rule_obligations": preflight.get("rule_obligation_review", {}),
     }
 
 

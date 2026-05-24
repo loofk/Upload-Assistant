@@ -824,9 +824,10 @@ def test_target_upload_summary_surfaces_followup_blockers() -> None:
         "uploaded_wait": {"complete": False, "blockers": ["torrent hash missing"]},
     }
 
-    summary = ptcli_cli._target_upload_summary(payload, {"status": "ready", "blockers": []})
+    summary = ptcli_cli._target_upload_summary(payload, {"status": "ready", "blockers": [], "rule_obligation_review": {"ready": True, "blockers": []}})
 
     assert summary["ready"] is False
+    assert summary["rule_obligations"]["ready"] is True
     assert "injected_torrent: qBittorrent refused torrent" in summary["blockers"]
     assert "uploaded_wait: torrent hash missing" in summary["blockers"]
     assert "uploaded_wait: qBittorrent did not report the uploaded target torrent as complete." in summary["blockers"]
@@ -4160,6 +4161,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["summary"]["injected"] is True
     assert summary_payload["summary"]["seeding_verified"] is True
     assert summary_payload["summary"]["uploaded_torrent_hash"] == uploaded_hash
+    assert summary_payload["summary"]["rule_obligations"]["ready"] is True
 
 
 @pytest.mark.asyncio
