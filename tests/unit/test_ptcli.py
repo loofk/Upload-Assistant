@@ -129,6 +129,35 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert "source-download" in out
 
 
+def test_retorrent_execute_blocked_returns_nonzero(capsys, tmp_path) -> None:
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    code = main(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--save-path",
+            "/downloads",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--json",
+        ]
+    )
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert '"status": "blocked"' in out
+    assert "--confirm-upload" in out
+
+
 @pytest.mark.asyncio
 async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) -> None:
     torrent_file = tmp_path / "target.torrent"

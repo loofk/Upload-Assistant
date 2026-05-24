@@ -1240,7 +1240,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "retorrent":
             payload = _with_captured_stdout(lambda: asyncio.run(retorrent_payload(args)), json_output)
             _print_payload(payload, json_output)
-            return 0
+            return _retorrent_exit_code(args, payload)
 
         if args.command == "inspect":
             payload = _with_captured_stdout(lambda: asyncio.run(inspect_qbit(args)), json_output)
@@ -1291,6 +1291,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception as exc:
         _print_payload({"status": "error", "message": str(exc)}, json_output)
         return 2
+
+
+def _retorrent_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:
+    if not getattr(args, "execute", False):
+        return 0
+    if payload.get("status") in {"complete", "ok"}:
+        return 0
+    return 1
 
 
 if __name__ == "__main__":
