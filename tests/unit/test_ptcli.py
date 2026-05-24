@@ -5037,6 +5037,87 @@ async def test_pipeline_target_execute_requires_current_source_ready_evidence(mo
 
 
 @pytest.mark.asyncio
+async def test_pipeline_target_execute_requires_current_duplicate_check(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_hash = "a" * 40
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 2,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": source_hash,
+        "description_length": 4,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Name", str(tmp_path / "target"), accept_rules=True)
+    target_torrent = tmp_path / "target.mteam-upload.torrent"
+    target_torrent.write_bytes(b"d4:infod")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (base_dir, source_id)
+        return source_info_from_tuple(tracker, "60635", (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", source_hash, "desc"), {})
+
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {"client": client_name, "complete": True, "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval}, "matches": [{"hash": source_hash, "content_path": content_path}]}
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": source_hash}]}
+
+    async def fake_target_upload_with_config(*_args, **_kwargs):
+        raise AssertionError("live target upload must not run before current duplicate check")
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "_target_upload_with_config", fake_target_upload_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            "/downloads/Name",
+            "--package-dir",
+            package["package_dir"],
+            "--accept-rules",
+            "--upload-target",
+            "--target-torrent-file",
+            str(target_torrent),
+            "--target-execute",
+            "--confirm-upload",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    dupe_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-dupe-check")
+    upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
+    assert dupe_stage["skipped"] is True
+    assert upload_stage["ok"] is False
+    assert upload_stage["skipped"] is True
+    assert "current pipeline run did not complete a clean MTEAM duplicate check" in upload_stage["message"]
+    assert "target-upload: Skipped because current pipeline run did not complete a clean MTEAM duplicate check before live target upload." in payload["blockers"]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_sanitizes_manual_target_torrent_for_upload(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},

@@ -1443,6 +1443,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--wait-uploaded-complete requires --inject-uploaded-torrent."})
         elif args.target_execute and not _source_ready_for_live_target_upload(stages):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because current pipeline run did not verify complete source qBittorrent content before live target upload."})
+        elif args.target_execute and not (args.uploaded_torrent_file or args.uploaded_torrent_id) and not _target_duplicate_ready_for_live_upload(stages):
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because current pipeline run did not complete a clean MTEAM duplicate check before live target upload."})
         else:
             package_dir = str(target_prepare_stage.get("result", {}).get("package_dir", ""))
             upload_stage = await _pipeline_stage(
@@ -1538,6 +1540,16 @@ def _source_ready_for_live_target_upload(stages: list[dict[str, Any]]) -> bool:
     source_downloaded_flow_ready = _stage_completed(source_download) and _source_injection_verified(inject_source) and _stage_completed(wait_complete)
     existing_content_ready = _match_stage_has_match(match) and _source_content_verified(source_content_verify)
     return source_downloaded_flow_ready or existing_content_ready
+
+
+def _target_duplicate_ready_for_live_upload(stages: list[dict[str, Any]]) -> bool:
+    dupe_stage = _find_stage(stages, "target-dupe-check")
+    if not _stage_completed(dupe_stage):
+        return False
+    result = dupe_stage.get("result")
+    if not isinstance(result, dict):
+        return False
+    return bool(result.get("searched")) and int(result.get("count", 0) or 0) == 0
 
 
 def _load_existing_target_prepare_package(package_dir: str) -> dict[str, Any]:
