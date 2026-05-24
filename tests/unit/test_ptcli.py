@@ -3211,7 +3211,23 @@ async def test_qbit_service_waits_for_completed_match() -> None:
     result = await service.wait_for_completion(content_path="/downloads/One", timeout=0, interval=0.1)
 
     assert result["complete"] is True
+    assert result["query"]["mode"] == "content_path"
+    assert result["query"]["content_path"] == "/downloads/One"
+    assert result["matched_count"] == 1
     assert result["matches"][0]["hash"] == "a" * 40
+
+
+@pytest.mark.asyncio
+async def test_qbit_service_wait_reports_hash_query() -> None:
+    service = QbitReadOnlyService({}, qbit_client=FakeQbitClient())
+
+    result = await service.wait_for_completion(torrent_hash="b" * 40, timeout=0, interval=0.1)
+
+    assert result["complete"] is True
+    assert result["query"]["mode"] == "hash"
+    assert result["query"]["torrent_hash"] == "b" * 40
+    assert result["matched_count"] == 1
+    assert result["matches"][0]["hash"] == "b" * 40
 
 
 @pytest.mark.asyncio

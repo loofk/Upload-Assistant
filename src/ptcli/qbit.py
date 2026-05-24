@@ -183,6 +183,13 @@ class QbitReadOnlyService:
 
         deadline = asyncio.get_running_loop().time() + timeout
         last_matches: list[QbitTorrentSummary] = []
+        query = {
+            "mode": "hash" if torrent_hash else "content_path",
+            "torrent_hash": torrent_hash,
+            "content_path": content_path,
+            "timeout": timeout,
+            "interval": interval,
+        }
 
         while True:
             if torrent_hash:
@@ -194,12 +201,16 @@ class QbitReadOnlyService:
             if completed:
                 return {
                     "complete": True,
+                    "query": query,
+                    "matched_count": len(matches),
                     "matches": summaries_to_dicts(completed),
                 }
 
             if asyncio.get_running_loop().time() >= deadline:
                 return {
                     "complete": False,
+                    "query": query,
+                    "matched_count": len(last_matches),
                     "matches": summaries_to_dicts(last_matches),
                 }
 
