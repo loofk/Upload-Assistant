@@ -4583,6 +4583,7 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     assert preflight["package_manifest"]["kind"] == "ptcli.mteam.prepare_package"
     assert preflight["package_manifest"]["files"]["description_draft"]["size_bytes"] > 0
     assert preflight["upload_payload"]["form_fields"]["name"] == source_info["name"]
+    assert all(check["ok"] for check in preflight["upload_payload"]["field_checks"])
     assert preflight["upload_payload"]["torrent_file"]["sha1"]
     assert preflight["next_actions"] == ["Review the package manually, then rerun with --execute --confirm-upload and the reviewed target torrent file when ready."]
 
@@ -4946,6 +4947,29 @@ def test_mteam_upload_payload_summary_blocks_missing_torrent(tmp_path) -> None:
 
     assert from_disk["status"] == "blocked"
     assert "torrent file is required" in from_disk["upload_payload"]["blockers"][0]
+
+
+def test_mteam_upload_payload_summary_blocks_invalid_optional_urls(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": "1291546",
+        "douban_url": "https://example.com/not-douban",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    douban_check = next(check for check in preflight["upload_payload"]["field_checks"] if check["name"] == "payload.douban")
+    assert douban_check["ok"] is False
+    assert any("payload.douban" in blocker for blocker in preflight["upload_payload"]["blockers"])
 
 
 def test_mteam_upload_payload_summary_writes_payload_file(tmp_path) -> None:

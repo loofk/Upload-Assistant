@@ -226,8 +226,8 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
     description_length = int(package.get("description_length", 0) or 0)
     form_fields = _mteam_upload_form_fields(field_mapping, description_length)
     torrent_summary, torrent_blockers = _torrent_file_summary(torrent_file)
-    missing_fields = [field for field in ("name", "smallDescr", "descr", "category") if not form_fields.get(field)]
-    blockers = [f"MTEAM upload payload is missing required field(s): {', '.join(missing_fields)}."] if missing_fields else []
+    field_checks = _mteam_upload_field_checks(form_fields)
+    blockers = [f"{check['name']}: {check['message']}" for check in field_checks if not check["ok"]]
     blockers.extend(torrent_blockers)
 
     return {
@@ -235,6 +235,7 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
         "method": "POST",
         "multipart": True,
         "form_fields": form_fields,
+        "field_checks": field_checks,
         "file_field": "file",
         "torrent_file": torrent_summary,
         "blockers": blockers,
@@ -848,6 +849,31 @@ def _mteam_upload_form_fields(field_mapping: dict[str, Any], description_length:
         if field_mapping.get(optional_field):
             form_fields[optional_field] = field_mapping[optional_field]
     return form_fields
+
+
+def _mteam_upload_field_checks(form_fields: dict[str, Any]) -> list[dict[str, Any]]:
+    checks = [
+        _payload_field_check("payload.name", bool(form_fields.get("name")), "MTEAM upload payload name is present.", "MTEAM upload payload is missing required field: name."),
+        _payload_field_check("payload.smallDescr", bool(form_fields.get("smallDescr")), "MTEAM upload payload smallDescr is present.", "MTEAM upload payload is missing required field: smallDescr."),
+        _payload_field_check("payload.descr", bool(form_fields.get("descr")), "MTEAM upload payload description is present.", "MTEAM upload payload is missing required field: descr."),
+        _payload_field_check("payload.category", bool(form_fields.get("category")), "MTEAM upload payload category is present.", "MTEAM upload payload is missing required field: category."),
+        _payload_field_check("payload.anonymous", isinstance(form_fields.get("anonymous"), bool), "MTEAM upload payload anonymous flag is boolean.", "MTEAM upload payload anonymous flag must be boolean."),
+    ]
+    if form_fields.get("imdb"):
+        imdb_url = str(form_fields["imdb"])
+        checks.append(_payload_field_check("payload.imdb", bool(re.match(r"^https://www\.imdb\.com/title/tt\d+/?$", imdb_url)), "MTEAM upload payload IMDb URL is valid.", "MTEAM upload payload IMDb URL must look like https://www.imdb.com/title/tt1234567."))
+    if form_fields.get("douban"):
+        douban_url = str(form_fields["douban"])
+        checks.append(_payload_field_check("payload.douban", bool(re.match(r"^https://movie\.douban\.com/subject/\d+/?$", douban_url)), "MTEAM upload payload Douban URL is valid.", "MTEAM upload payload Douban URL must look like https://movie.douban.com/subject/1234567/."))
+    return checks
+
+
+def _payload_field_check(name: str, ok: bool, ok_message: str, failed_message: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "ok": ok,
+        "message": ok_message if ok else failed_message,
+    }
 
 
 def _read_mteam_upload_files(package: dict[str, Any], torrent_file: str) -> tuple[Path, bytes, str]:
