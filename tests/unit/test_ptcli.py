@@ -137,7 +137,11 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
 
     async def fake_pipeline_payload(args):
         captured_args["args"] = args
-        return {"ready": True, "stages": [{"stage": "target-upload", "ok": True}]}
+        return {
+            "ready": True,
+            "closure": {"source": {"complete": True}, "target": {"uploaded": True, "injected": True}},
+            "stages": [{"stage": "target-upload", "ok": True}],
+        }
 
     monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
     parser = build_parser()
@@ -174,6 +178,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
 
     pipeline_args = captured_args["args"]
     assert payload["ready"] is True
+    assert payload["closure"]["source"]["complete"] is True
+    assert payload["closure"]["target"]["injected"] is True
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True

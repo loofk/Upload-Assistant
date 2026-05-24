@@ -361,6 +361,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "status": "ok",
         "plan": plan_payload,
         "pipeline": pipeline_result,
+        "closure": pipeline_result.get("closure") if isinstance(pipeline_result.get("closure"), dict) else None,
         "ready": bool(pipeline_result.get("ready")),
     }
 
