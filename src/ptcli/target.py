@@ -119,6 +119,9 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
         if isinstance(rule_review, dict):
             _extend_unique(blockers, rule_review.get("blockers", []))
         _append_unique(blockers, "MTEAM rule review has blockers.")
+    obligation_review = _mteam_rule_obligation_review(rule_review if isinstance(rule_review, dict) else {})
+    if execute:
+        _extend_unique(blockers, obligation_review["blockers"])
     if write_payload:
         payload_path = Path(package_dir).expanduser() / "mteam-upload-payload.json"
         _write_json(payload_path, payload_summary)
@@ -132,6 +135,7 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
         "files": files,
         "upload_gate": gate,
         "rule_review": rule_review if isinstance(rule_review, dict) else {},
+        "rule_obligation_review": obligation_review,
         "upload_payload": payload_summary,
         "blockers": blockers,
         "next_actions": _upload_preflight_next_actions(blockers, execute),
@@ -532,6 +536,57 @@ def _mteam_prepare_package_blockers(preview: dict[str, Any], rule_review: dict[s
     _extend_unique(blockers, rule_review.get("blockers", []))
     _extend_unique(blockers, upload_gate.get("blockers", []))
     return blockers
+
+
+def _mteam_rule_obligation_review(rule_review: dict[str, Any]) -> dict[str, Any]:
+    obligations = rule_review.get("rule_obligations")
+    checks = [
+        _rule_obligation_check(
+            "source_download_and_retorrent_rules",
+            obligations,
+            role="source",
+            action="download_and_retorrent",
+            tracker=str(rule_review.get("source_tracker") or ""),
+        ),
+        _rule_obligation_check(
+            "mteam_upload_and_seed_rules",
+            obligations,
+            role="target",
+            action="upload_and_seed",
+            tracker="MTEAM",
+        ),
+    ]
+    blockers = [
+        f"{check['name']}: {check['message']}"
+        for check in checks
+        if not check["ok"]
+    ]
+    return {
+        "ready": not blockers,
+        "checks": checks,
+        "blockers": blockers,
+    }
+
+
+def _rule_obligation_check(name: str, obligations: Any, *, role: str, action: str, tracker: str) -> dict[str, Any]:
+    if not isinstance(obligations, list):
+        return {"name": name, "ok": False, "message": "Rule obligations are missing from the MTEAM rule review package."}
+    matching = [
+        obligation
+        for obligation in obligations
+        if isinstance(obligation, dict)
+        and obligation.get("role") == role
+        and obligation.get("action") == action
+        and (not tracker or obligation.get("tracker") == tracker)
+    ]
+    if not matching:
+        tracker_label = tracker or role
+        return {"name": name, "ok": False, "message": f"No acknowledged {tracker_label} {role} {action} rule obligation is present."}
+    if not all(obligation.get("rules_url") for obligation in matching):
+        return {"name": name, "ok": False, "message": f"{role} {action} rule obligation is missing a rules URL."}
+    if not all(obligation.get("acknowledged") is True for obligation in matching):
+        return {"name": name, "ok": False, "message": f"{role} {action} rule obligation has not been acknowledged."}
+    return {"name": name, "ok": True, "message": f"{role} {action} rule obligation is acknowledged."}
 
 
 def _extend_unique(items: list[str], additions: Any) -> None:

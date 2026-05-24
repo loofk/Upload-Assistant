@@ -62,7 +62,7 @@ def make_mteam_safe_torrent(tmp_path, name: str = "upload") -> str:
 
 def mteam_ready_stages() -> list[dict]:
     return [
-        {"stage": "rule-check", "ok": True, "result": {"ready": True}},
+        {"stage": "rule-check", "ok": True, "result": build_rule_check("U2", ["MTEAM"], accept_rules=True)},
         {"stage": "match", "ok": True, "result": {"count": 1, "matches": [{"content_path": "/downloads/Example", "hash": "a" * 40}]}},
         {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
     ]
@@ -3492,8 +3492,38 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     assert preflight["dry_run"] is True
     assert preflight["upload_gate"]["ready"] is True
     assert preflight["rule_review"]["rule_check_ready"] is True
+    assert preflight["rule_obligation_review"]["ready"] is True
     assert preflight["upload_payload"]["form_fields"]["name"] == source_info["name"]
     assert preflight["upload_payload"]["torrent_file"]["sha1"]
+
+
+def test_mteam_upload_preflight_blocks_execute_without_rule_obligations(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    legacy_stages = [
+        {"stage": "rule-check", "ok": True, "result": {"ready": True, "source_tracker": "U2", "target_trackers": ["MTEAM"], "checks": []}},
+        {"stage": "match", "ok": True, "result": {"count": 1, "matches": [{"content_path": "/downloads/Example", "hash": "a" * 40}]}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], legacy_stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preview = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
+    execute = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preview["status"] == "ready"
+    assert preview["rule_obligation_review"]["ready"] is False
+    assert execute["status"] == "blocked"
+    assert any("Rule obligations are missing" in blocker for blocker in execute["blockers"])
 
 
 def test_mteam_upload_preflight_blocks_rule_review_blockers(tmp_path) -> None:
@@ -3630,6 +3660,7 @@ def test_mteam_upload_preflight_allows_execute_when_payload_is_ready(tmp_path) -
 
     assert preflight["status"] == "ready"
     assert preflight["dry_run"] is False
+    assert preflight["rule_obligation_review"]["ready"] is True
 
 
 @pytest.mark.asyncio
