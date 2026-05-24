@@ -720,6 +720,8 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
         "schema_version": 1,
         "kind": "ptcli.target_upload.summary",
         "summary_file": str(destination),
+        "client": args.client,
+        "qbit_options": _target_upload_qbit_options(args),
         "summary": _target_upload_summary(result, preflight),
         "artifacts": artifacts,
         "recommended_commands": _target_upload_recommended_commands(summary, args, artifacts),
@@ -757,6 +759,8 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             "target-upload",
             "--package-dir",
             str(package_artifact.get("path") or args.package_dir),
+            "--client",
+            args.client,
             "--uploaded-torrent-file",
             str(uploaded_torrent_artifact["path"]),
             "--inject-uploaded-torrent",
@@ -770,6 +774,8 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             resume_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
         if args.uploaded_qbit_tags:
             resume_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
+        if args.uploaded_paused:
+            resume_args.append("--uploaded-paused")
         commands.append({"stage": "resume-uploaded-torrent", "command": _ptcli_command(resume_args)})
     if summary.get("ready"):
         commands.append({"stage": "verify-seeding", "command": _ptcli_command(["inspect", "--client", args.client, "--json"])})
@@ -809,6 +815,16 @@ def _target_upload_retry_command(args: argparse.Namespace) -> str:
         if enabled:
             retry_args.append(option)
     return _ptcli_command(retry_args)
+
+
+def _target_upload_qbit_options(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "uploaded": {
+            "category": args.uploaded_qbit_category,
+            "tags": args.uploaded_qbit_tags,
+            "paused": bool(args.uploaded_paused),
+        },
+    }
 
 
 def _write_doctor_summary(payload: dict[str, Any], args: argparse.Namespace, output_dir: str | None) -> str:

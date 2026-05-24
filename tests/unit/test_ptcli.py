@@ -5552,6 +5552,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
             "MTEAM",
             "--uploaded-qbit-tags",
             "retorrent",
+            "--uploaded-paused",
             "--wait-uploaded-complete",
             "--write-summary",
             "--client",
@@ -5580,6 +5581,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["schema_version"] == 1
     assert summary_payload["kind"] == "ptcli.target_upload.summary"
     assert summary_payload["summary_file"] == str(summary_path)
+    assert summary_payload["client"] == "default"
+    assert summary_payload["qbit_options"] == {"uploaded": {"category": "MTEAM", "tags": "retorrent", "paused": True}}
     assert summary_payload["summary"]["uploaded"] is True
     assert summary_payload["summary"]["injected"] is True
     assert summary_payload["summary"]["injection_verified"] is True
@@ -5601,7 +5604,11 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     assert "target-upload-retry" in commands
     assert str(tmp_path / "MTEAM-999.torrent") in commands["resume-uploaded-torrent"]
+    assert "--client default" in commands["resume-uploaded-torrent"]
     assert "--uploaded-save-path /downloads/Example" in commands["resume-uploaded-torrent"]
+    assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent"]
+    assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent"]
+    assert "--uploaded-paused" in commands["resume-uploaded-torrent"]
     assert commands["verify-seeding"].startswith("python3 ptcli.py inspect")
 
 
