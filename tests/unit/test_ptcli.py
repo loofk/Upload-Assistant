@@ -1038,6 +1038,76 @@ async def test_pipeline_wait_complete_prefers_injected_hash(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_pipeline_wait_complete_uses_hash_from_real_injected_torrent(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    fake_client = FakeQbitClient()
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", None, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (tracker, source_id, base_dir)
+        content = tmp_path / "source-content.mkv"
+        content.write_bytes(b"content")
+        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path.parent.mkdir(parents=True, exist_ok=True)
+        torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+        torrent.generate()
+        torrent.write(str(torrent_path), overwrite=True)
+        return torrent_path
+
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+        _ = (config, client_name)
+        service = QbitReadOnlyService({}, qbit_client=fake_client)
+        return await service.add_torrent_file(torrent_path, save_path, category=category, tags=tags, paused=paused)
+
+    async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
+        _ = (config, client_name, content_path, timeout, interval)
+        assert torrent_hash
+        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": torrent_hash}]}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--download-source",
+            "--inject-source",
+            "--save-path",
+            "/downloads",
+            "--wait-complete",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    assert payload["source_torrent_hash"]
+    assert fake_client.added_kwargs["save_path"] == "/downloads"
+    assert next(stage for stage in payload["stages"] if stage["stage"] == "wait-complete")["ok"] is True
+
+
+@pytest.mark.asyncio
 async def test_pipeline_infers_content_path_from_completed_qbit_match(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -2246,8 +2316,12 @@ async def test_target_upload_inject_requires_download_flag(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None:
     fake_client = FakeQbitClient()
+    content = tmp_path / "source.mkv"
+    content.write_bytes(b"content")
     torrent_path = tmp_path / "source.torrent"
-    torrent_path.write_bytes(b"d4:infod")
+    torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+    torrent.generate()
+    torrent.write(str(torrent_path), overwrite=True)
     service = QbitReadOnlyService({}, qbit_client=fake_client)
 
     result = await service.add_torrent_file(
@@ -2259,6 +2333,7 @@ async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None
     )
 
     assert result["save_path"] == "/downloads"
+    assert result["hash"] == torrent.infohash
     assert result["category"] == "pt"
     assert result["tags"] == "U2"
     assert fake_client.added_kwargs["save_path"] == "/downloads"

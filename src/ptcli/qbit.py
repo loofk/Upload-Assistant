@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import qbittorrentapi
+from torf import Torrent
 
 
 class QbitClientProtocol(Protocol):
@@ -137,7 +138,7 @@ class QbitReadOnlyService:
         skip_checking: bool = False,
     ) -> dict[str, Any]:
         client = await self.connect()
-        resolved_torrent_path, torrent_bytes = await asyncio.to_thread(_read_torrent_bytes, torrent_path)
+        resolved_torrent_path, torrent_bytes, torrent_hash = await asyncio.to_thread(_read_torrent_payload, torrent_path)
         if not torrent_bytes.startswith(b"d"):
             raise ValueError("Torrent file does not look like a .torrent file.")
 
@@ -155,6 +156,7 @@ class QbitReadOnlyService:
         await asyncio.to_thread(client.torrents_add, **add_kwargs)
         return {
             "torrent_path": str(resolved_torrent_path),
+            "hash": torrent_hash,
             "save_path": save_path,
             "category": category,
             "tags": tags,
@@ -216,9 +218,11 @@ def _write_torrent_bytes(output_dir: str, torrent_hash: str, torrent_bytes: byte
     return destination
 
 
-def _read_torrent_bytes(torrent_path: str) -> tuple[Path, bytes]:
+def _read_torrent_payload(torrent_path: str) -> tuple[Path, bytes, str]:
     resolved_torrent_path = Path(torrent_path).expanduser()
-    return resolved_torrent_path, resolved_torrent_path.read_bytes()
+    torrent_bytes = resolved_torrent_path.read_bytes()
+    torrent = Torrent.read(str(resolved_torrent_path), validate=False)
+    return resolved_torrent_path, torrent_bytes, str(torrent.infohash)
 
 
 def _optional_int(value: Any) -> int | None:
