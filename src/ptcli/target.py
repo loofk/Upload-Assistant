@@ -228,12 +228,24 @@ async def download_mteam_uploaded_torrent(config: dict[str, Any], torrent_id: st
 
 def extract_mteam_uploaded_torrent_id(upload_result: dict[str, Any]) -> str | None:
     response = upload_result.get("response") if isinstance(upload_result, dict) else None
+    return _extract_mteam_torrent_id(response)
+
+
+def _extract_mteam_torrent_id(response: Any) -> str | None:
+    if isinstance(response, int):
+        return str(response)
+    if isinstance(response, str):
+        value = response.strip()
+        return value if value.isdigit() else None
     if not isinstance(response, dict):
         return None
     for key in ("id", "torrentId", "torrent_id"):
         value = response.get(key)
         if value:
             return str(value)
+    data = response.get("data")
+    if data is not response:
+        return _extract_mteam_torrent_id(data)
     return None
 
 
@@ -1081,12 +1093,18 @@ def _read_json(path: Path) -> Any:
 
 
 def _summarize_mteam_upload_response(response: Any) -> dict[str, Any]:
+    torrent_id = _extract_mteam_torrent_id(response)
     if not isinstance(response, dict):
-        return {"raw_type": type(response).__name__}
+        summary: dict[str, Any] = {"raw_type": type(response).__name__}
+        if torrent_id:
+            summary["id"] = torrent_id
+        return summary
     summary: dict[str, Any] = {}
     for key in ("id", "torrentId", "torrent_id", "status", "message"):
         if key in response:
             summary[key] = response[key]
+    if torrent_id and not any(key in summary for key in ("id", "torrentId", "torrent_id")):
+        summary["id"] = torrent_id
     return summary or {"keys": sorted(str(key) for key in response)}
 
 

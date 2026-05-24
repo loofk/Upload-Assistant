@@ -9,6 +9,7 @@ from torf import Torrent
 
 import src.ptcli.cli as ptcli_cli
 import src.ptcli.source as ptcli_source
+import src.ptcli.target as ptcli_target
 from src.ptcli.cli import _with_captured_stdout, build_parser, build_plan, main
 from src.ptcli.config import resolve_client_config
 from src.ptcli.credentials import build_flow_check
@@ -6213,7 +6214,16 @@ def test_extract_mteam_uploaded_torrent_id_accepts_known_keys() -> None:
     assert extract_mteam_uploaded_torrent_id({"response": {"id": 1}}) == "1"
     assert extract_mteam_uploaded_torrent_id({"response": {"torrentId": "2"}}) == "2"
     assert extract_mteam_uploaded_torrent_id({"response": {"torrent_id": "3"}}) == "3"
+    assert extract_mteam_uploaded_torrent_id({"response": {"data": {"id": 4}}}) == "4"
+    assert extract_mteam_uploaded_torrent_id({"response": {"data": "5"}}) == "5"
+    assert extract_mteam_uploaded_torrent_id({"response": 6}) == "6"
+    assert extract_mteam_uploaded_torrent_id({"response": "7"}) == "7"
     assert extract_mteam_uploaded_torrent_id({"response": {"message": "ok"}}) is None
+
+
+def test_mteam_upload_response_summary_preserves_scalar_torrent_id() -> None:
+    assert ptcli_target._summarize_mteam_upload_response("999") == {"raw_type": "str", "id": "999"}
+    assert ptcli_target._summarize_mteam_upload_response({"data": {"torrentId": "1000"}, "message": "ok"}) == {"message": "ok", "id": "1000"}
 
 
 def test_mteam_upload_payload_summary_blocks_missing_torrent(tmp_path) -> None:
