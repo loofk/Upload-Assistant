@@ -1905,6 +1905,7 @@ def _wait_complete_result_blockers(result: dict[str, Any]) -> list[str]:
 def _target_upload_result_blockers(result: dict[str, Any]) -> list[str]:
     blockers = _string_list(result.get("blockers"))
     _extend_unique_string(blockers, _nested_blockers(result.get("downloaded_torrent"), "downloaded_torrent"))
+    _extend_unique_string(blockers, _downloaded_torrent_file_blockers(result.get("downloaded_torrent")))
     _extend_unique_string(blockers, _nested_blockers(result.get("injected_torrent"), "injected_torrent"))
     _extend_unique_string(blockers, _uploaded_torrent_hash_consistency_blockers(result))
     injected_torrent = result.get("injected_torrent")
@@ -1914,6 +1915,21 @@ def _target_upload_result_blockers(result: dict[str, Any]) -> list[str]:
     uploaded_wait = result.get("uploaded_wait")
     if isinstance(uploaded_wait, dict) and uploaded_wait.get("complete") is False:
         _append_unique_string(blockers, "uploaded_wait: qBittorrent did not report the uploaded target torrent as complete.")
+    return blockers
+
+
+def _downloaded_torrent_file_blockers(downloaded_torrent: Any) -> list[str]:
+    if not isinstance(downloaded_torrent, dict):
+        return []
+    blockers: list[str] = []
+    if not downloaded_torrent.get("path"):
+        blockers.append("downloaded_torrent: target torrent file path is missing.")
+    if downloaded_torrent.get("exists") is False:
+        blockers.append("downloaded_torrent: target torrent file does not exist on disk.")
+    if downloaded_torrent.get("size_bytes") == 0:
+        blockers.append("downloaded_torrent: target torrent file is empty.")
+    if downloaded_torrent.get("metadata_readable") is False:
+        blockers.append("downloaded_torrent: target torrent metadata is not readable.")
     return blockers
 
 
@@ -3300,6 +3316,8 @@ def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, downl
     if payload.get("status") not in {"ready", "uploaded"}:
         return False
     if payload.get("blockers"):
+        return False
+    if _target_upload_result_blockers(payload):
         return False
     if _uploaded_torrent_hash_consistency_blockers(payload):
         return False

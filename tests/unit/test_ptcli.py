@@ -1444,6 +1444,29 @@ def test_target_upload_summary_surfaces_followup_blockers() -> None:
     assert "uploaded_wait: qBittorrent did not report the uploaded target torrent as complete." in summary["blockers"]
 
 
+def test_target_upload_summary_surfaces_downloaded_torrent_file_evidence_blockers() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "exists": False},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+    }
+
+    summary = ptcli_cli._target_upload_summary(payload, {"status": "ready", "blockers": [], "rule_obligation_review": {"ready": True, "blockers": []}})
+
+    assert summary["ready"] is False
+    assert "downloaded_torrent: target torrent file does not exist on disk." in summary["blockers"]
+
+
+def test_target_upload_result_requires_downloaded_torrent_file_evidence_when_available() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "exists": False},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+    }
+
+    assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
+
+
 def test_target_upload_summary_surfaces_client_metadata_mismatch() -> None:
     payload = {
         "status": "uploaded",
@@ -4127,9 +4150,11 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
         return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
+        uploaded_path = tmp_path / "MTEAM-999.torrent"
+        uploaded_path.write_bytes(b"d4:infod")
         return {
             "status": "uploaded",
-            "downloaded_torrent": {"torrent_id": "999", "path": str(tmp_path / "MTEAM-999.torrent")},
+            "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)},
         }
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
@@ -4253,7 +4278,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
-        return {"status": "uploaded", "downloaded_torrent": {"torrent_id": "999", "path": str(tmp_path / "MTEAM-999.torrent")}}
+        uploaded_path = tmp_path / "MTEAM-999.torrent"
+        uploaded_path.write_bytes(b"d4:infod")
+        return {"status": "uploaded", "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)}}
 
     async def fake_inject_uploaded_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused}
@@ -4499,9 +4526,11 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
         return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
+        uploaded_path = tmp_path / "MTEAM-999.torrent"
+        uploaded_path.write_bytes(b"d4:infod")
         return {
             "status": "uploaded",
-            "downloaded_torrent": {"torrent_id": "999", "path": str(tmp_path / "MTEAM-999.torrent")},
+            "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)},
         }
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
@@ -4593,7 +4622,9 @@ async def test_pipeline_exports_matched_torrent_for_target_upload(monkeypatch, t
         return {"source_path": torrent_file, "path": str(sanitized_torrent), "output_dir": output_dir}
 
     async def fake_upload_mteam_from_package(_config, _package_dir, torrent_file, **_kwargs):
-        return {"status": "uploaded", "torrent_file": torrent_file, "downloaded_torrent": {"torrent_id": "999", "path": str(tmp_path / "MTEAM-999.torrent")}}
+        uploaded_path = tmp_path / "MTEAM-999.torrent"
+        uploaded_path.write_bytes(b"d4:infod")
+        return {"status": "uploaded", "torrent_file": torrent_file, "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)}}
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         _ = (torrent_path, category, tags, paused)
@@ -5189,7 +5220,9 @@ async def test_pipeline_sanitizes_manual_target_torrent_for_upload(monkeypatch, 
         return {"source_path": torrent_file, "path": str(sanitized_torrent), "announce": "https://fake.tracker", "source_flag": "MTEAM", "removed_fields": ["announce-list"]}
 
     async def fake_upload_mteam_from_package(_config, _package_dir, torrent_file, **_kwargs):
-        return {"status": "uploaded", "torrent_file": torrent_file, "downloaded_torrent": {"torrent_id": "999", "path": str(tmp_path / "MTEAM-999.torrent")}}
+        uploaded_path = tmp_path / "MTEAM-999.torrent"
+        uploaded_path.write_bytes(b"d4:infod")
+        return {"status": "uploaded", "torrent_file": torrent_file, "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)}}
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         _ = (torrent_path, category, tags, paused)
