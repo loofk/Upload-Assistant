@@ -185,12 +185,14 @@ async def upload_mteam_from_package(
     upload_func = uploader or _submit_mteam_upload
     upload_result = await upload_func(config, package_dir, torrent_file)
     torrent_id = extract_mteam_uploaded_torrent_id(upload_result)
+    submitted_torrent_hash = _torrent_hash_from_upload_payload(preflight.get("upload_payload"))
     result = {
         **preflight,
         "status": "uploaded",
         "dry_run": False,
         "upload_result": upload_result,
         "uploaded_torrent_id": torrent_id,
+        "submitted_torrent_hash": submitted_torrent_hash,
     }
     if download_uploaded:
         if not torrent_id:
@@ -1054,11 +1056,23 @@ def _torrent_metadata_summary(path: Path) -> dict[str, Any]:
     source_flag = torrent.metainfo.get("info", {}).get("source")
     return {
         "metadata_readable": True,
+        "torrent_hash": str(torrent.infohash),
+        "infohash": str(torrent.infohash),
         "announce": announce,
         "comment_length": len(str(comment or "")),
         "source_flag": source_flag,
         "mteam_safe": announce == MTEAM_UPLOAD_ANNOUNCE and source_flag == MTEAM_SOURCE_FLAG and not comment,
     }
+
+
+def _torrent_hash_from_upload_payload(upload_payload: Any) -> str | None:
+    if not isinstance(upload_payload, dict):
+        return None
+    torrent_file = upload_payload.get("torrent_file")
+    if not isinstance(torrent_file, dict):
+        return None
+    torrent_hash = torrent_file.get("torrent_hash") or torrent_file.get("infohash")
+    return str(torrent_hash) if torrent_hash else None
 
 
 def _read_json(path: Path) -> Any:

@@ -1180,6 +1180,7 @@ def test_target_upload_result_accepts_completed_uploaded_torrent_injection() -> 
 def test_target_upload_result_requires_uploaded_torrent_hash_consistency() -> None:
     payload = {
         "status": "uploaded",
+        "submitted_torrent_hash": "a" * 40,
         "uploaded_torrent_hash": "a" * 40,
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "torrent_hash": "b" * 40},
         "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
@@ -1242,6 +1243,7 @@ def test_target_upload_summary_surfaces_client_metadata_mismatch() -> None:
 def test_target_upload_summary_surfaces_uploaded_torrent_hash_mismatch() -> None:
     payload = {
         "status": "uploaded",
+        "submitted_torrent_hash": "a" * 40,
         "uploaded_torrent_hash": "a" * 40,
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "torrent_hash": "b" * 40},
         "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
@@ -1252,6 +1254,7 @@ def test_target_upload_summary_surfaces_uploaded_torrent_hash_mismatch() -> None
 
     assert summary["ready"] is False
     assert "uploaded_torrent_hash: inconsistent target torrent hashes" in summary["blockers"][0]
+    assert f"submitted_torrent={'a' * 40}" in summary["blockers"][0]
     assert f"downloaded_torrent={'b' * 40}" in summary["blockers"][0]
 
 
@@ -5320,6 +5323,8 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     assert preflight["upload_payload"]["form_fields"]["name"] == source_info["name"]
     assert all(check["ok"] for check in preflight["upload_payload"]["field_checks"])
     assert preflight["upload_payload"]["torrent_file"]["sha1"]
+    assert len(preflight["upload_payload"]["torrent_file"]["torrent_hash"]) == 40
+    assert preflight["upload_payload"]["torrent_file"]["infohash"] == preflight["upload_payload"]["torrent_file"]["torrent_hash"]
     assert preflight["next_actions"] == ["Review the package manually, then rerun with --execute --confirm-upload and the reviewed target torrent file when ready."]
 
 
@@ -5476,6 +5481,8 @@ def test_mteam_upload_preflight_reports_torrent_safety_metadata(tmp_path) -> Non
 
     torrent_summary = preflight["upload_payload"]["torrent_file"]
     assert torrent_summary["metadata_readable"] is True
+    assert len(torrent_summary["torrent_hash"]) == 40
+    assert torrent_summary["infohash"] == torrent_summary["torrent_hash"]
     assert torrent_summary["announce"] == "https://fake.tracker"
     assert torrent_summary["source_flag"] == "MTEAM"
     assert torrent_summary["comment_length"] == 0
@@ -5625,6 +5632,7 @@ async def test_mteam_live_upload_uses_injected_uploader(tmp_path) -> None:
     assert result["status"] == "uploaded"
     assert result["upload_result"]["response"]["id"] == "999"
     assert result["uploaded_torrent_id"] == "999"
+    assert len(result["submitted_torrent_hash"]) == 40
 
 
 @pytest.mark.asyncio

@@ -1763,6 +1763,9 @@ def _uploaded_torrent_hash_consistency_blockers(result: dict[str, Any]) -> list[
 
 def _uploaded_torrent_hash_evidence(result: dict[str, Any]) -> dict[str, str]:
     evidence: dict[str, str] = {}
+    submitted_hash = _normalize_torrent_hash(result.get("submitted_torrent_hash"))
+    if submitted_hash:
+        evidence["submitted_torrent"] = submitted_hash
     response_hash = _normalize_torrent_hash(result.get("uploaded_torrent_hash"))
     if response_hash:
         evidence["upload_response"] = response_hash
