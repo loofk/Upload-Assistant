@@ -1230,7 +1230,20 @@ def test_pipeline_stage_blockers_include_source_followup_details() -> None:
 def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
     stages = [
         {"stage": "flow-check", "ok": True, "result": {"ready": True, "checks": []}},
-        {"stage": "rule-check", "ok": True, "result": {"ready": True, "checks": [{"name": "rules_acknowledged", "ok": True, "message": "ok"}]}},
+        {
+            "stage": "rule-check",
+            "ok": True,
+            "result": {
+                "ready": True,
+                "checks": [{"name": "rules_acknowledged", "ok": True, "message": "ok"}],
+                "manual_review": {"required": True, "acknowledged": True},
+                "automation_scope": {"site_specific_rules_encoded": False, "concrete_policy_checks": "tracker_adapters"},
+                "rule_obligations": [
+                    {"tracker": "U2", "role": "source", "action": "download_and_retorrent", "rules_url": "https://u2.dmhy.org/rules.php", "acknowledged": True},
+                    {"tracker": "MTEAM", "role": "target", "action": "upload_and_seed", "rules_url": "https://kp.m-team.cc/rules", "acknowledged": True},
+                ],
+            },
+        },
         {"stage": "source-download", "ok": True, "skipped": True, "message": "--download-source not provided; source download skipped."},
         {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
         {
@@ -1273,8 +1286,24 @@ def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
     assert summary["gates"]["rule_review"]["rule_obligations"]["ready"] is True
     assert summary["gates"]["rule_review"]["rule_obligations"]["source_acknowledged"] is True
     assert summary["gates"]["rule_review"]["rule_obligations"]["mteam_acknowledged"] is True
+    assert summary["compliance"]["ready"] is True
+    assert summary["compliance"]["rules_acknowledged"] is True
+    assert summary["compliance"]["site_specific_rules_encoded"] is False
+    assert summary["compliance"]["policy_checks"] == "tracker_adapters"
+    assert summary["compliance"]["rule_obligations"]["acknowledged_count"] == 2
+    assert "requires manual source/target rule review" in summary["compliance"]["disclaimer"]
     assert summary["resume"]["used"] is False
     assert summary["source"]["mode"] == "matched"
+
+
+def test_pipeline_compliance_summary_blocks_missing_rule_check() -> None:
+    summary = ptcli_cli._pipeline_compliance_summary([])
+
+    assert summary["ready"] is False
+    assert summary["rules_acknowledged"] is False
+    assert summary["site_specific_rules_encoded"] is False
+    assert summary["policy_checks"] == "missing_rule_check"
+    assert summary["blockers"] == ["rule-check stage did not produce compliance evidence."]
 
 
 def test_pipeline_gate_summary_reports_missing_rule_obligations() -> None:

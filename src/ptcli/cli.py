@@ -1638,6 +1638,7 @@ def _pipeline_run_summary(stages: list[dict[str, Any]], ready: bool, blockers: l
         "completed_stages": [stage["stage"] for stage in stage_statuses if stage["ok"] and not stage["skipped"]],
         "skipped_stages": [stage["stage"] for stage in stage_statuses if stage["skipped"]],
         "gates": _pipeline_gate_summary(stages),
+        "compliance": _pipeline_compliance_summary(stages),
         "resume": evidence.get("resume", {}),
         "source": evidence.get("source", {}),
         "target": evidence.get("target", {}),
@@ -1736,6 +1737,56 @@ def _pipeline_gate_summary(stages: list[dict[str, Any]]) -> dict[str, Any]:
             "rule_obligations": _rule_obligation_summary(rule_review),
         },
     }
+
+
+def _pipeline_compliance_summary(stages: list[dict[str, Any]]) -> dict[str, Any]:
+    rule_stage = _find_stage(stages, "rule-check")
+    rule_result = rule_stage.get("result") if isinstance(rule_stage, dict) else None
+    target_prepare_stage = _find_stage(stages, "target-prepare")
+    target_prepare_result = target_prepare_stage.get("result") if isinstance(target_prepare_stage, dict) else None
+    rule_review = target_prepare_result.get("rule_review") if isinstance(target_prepare_result, dict) else None
+    if not isinstance(rule_result, dict):
+        return {
+            "ready": False,
+            "rules_acknowledged": False,
+            "site_specific_rules_encoded": False,
+            "policy_checks": "missing_rule_check",
+            "manual_review": {"required": True, "acknowledged": False},
+            "rule_obligations": {"ready": False, "count": 0, "acknowledged_count": 0, "items": []},
+            "blockers": ["rule-check stage did not produce compliance evidence."],
+        }
+
+    automation_scope = rule_result.get("automation_scope") if isinstance(rule_result.get("automation_scope"), dict) else {}
+    obligations = _rule_obligations_from_result(rule_result, rule_review)
+    acknowledged = [obligation for obligation in obligations if obligation.get("acknowledged") is True]
+    blockers = _failed_check_messages(rule_result.get("checks"))
+    if isinstance(rule_review, dict):
+        _extend_unique_string(blockers, _string_list(rule_review.get("blockers")))
+    return {
+        "ready": bool(rule_result.get("ready")) and not blockers,
+        "rules_acknowledged": _check_ok(rule_result.get("checks"), "rules_acknowledged"),
+        "site_specific_rules_encoded": bool(automation_scope.get("site_specific_rules_encoded")),
+        "policy_checks": automation_scope.get("concrete_policy_checks") or "unknown",
+        "manual_review": rule_result.get("manual_review") if isinstance(rule_result.get("manual_review"), dict) else {"required": True, "acknowledged": False},
+        "automation_scope": automation_scope,
+        "rule_obligations": {
+            "ready": bool(obligations) and len(acknowledged) == len(obligations),
+            "count": len(obligations),
+            "acknowledged_count": len(acknowledged),
+            "items": obligations,
+        },
+        "blockers": blockers,
+        "disclaimer": "Site-specific tracker rules are not fully encoded; this workflow requires manual source/target rule review before live automation.",
+    }
+
+
+def _rule_obligations_from_result(rule_result: dict[str, Any], rule_review: Any) -> list[dict[str, Any]]:
+    obligations = rule_result.get("rule_obligations")
+    if not isinstance(obligations, list) and isinstance(rule_review, dict):
+        obligations = rule_review.get("rule_obligations")
+    if not isinstance(obligations, list):
+        return []
+    return [obligation for obligation in obligations if isinstance(obligation, dict)]
 
 
 def _rule_obligation_summary(rule_review: Any) -> dict[str, Any]:
