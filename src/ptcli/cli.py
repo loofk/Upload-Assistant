@@ -683,6 +683,10 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     effective_content_path = args.content_path
     effective_target_torrent_file = args.target_torrent_file
     effective_source_torrent_hash: str | None = None
+    live_target_upload = bool(args.upload_target and args.target_execute)
+    source_download_requested = bool(args.download_source or (live_target_upload and not args.content_path and not args.source_torrent_file))
+    source_injection_requested = bool(args.inject_source or (live_target_upload and not args.content_path))
+    source_wait_requested = bool(args.wait_complete or (live_target_upload and (source_injection_requested or args.content_path)))
 
     stages: list[dict[str, Any]] = []
     flow_check_result = build_flow_check(config, source_tracker, source_torrent_id, ",".join(target_trackers), args.client, base_dir=args.base_dir)
@@ -718,7 +722,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                     "message": "Skipped because flow-check, source-info, or executable rule-check did not pass.",
                 }
             )
-    elif args.download_source:
+    elif source_download_requested:
         if _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages):
             source_download_result = await _pipeline_stage(
                 "source-download",
@@ -739,7 +743,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "source-download", "ok": True, "skipped": True, "message": "--download-source not provided; source download skipped."})
 
-    if args.inject_source:
+    if source_injection_requested:
         source_download_stage = _find_stage(stages, "source-download")
         if not args.save_path:
             stages.append({"stage": "inject-source", "ok": False, "skipped": True, "message": "--save-path is required when --inject-source is used."})
@@ -759,7 +763,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "inject-source", "ok": True, "skipped": True, "message": "--inject-source not provided; qBittorrent injection skipped."})
 
-    if args.wait_complete:
+    if source_wait_requested:
         inject_stage = _find_stage(stages, "inject-source")
         if inject_stage and inject_stage.get("ok") and not inject_stage.get("skipped"):
             wait_path = args.content_path or args.save_path
