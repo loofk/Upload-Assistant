@@ -147,6 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--base-dir", help="Project/base directory used for cookies, defaults to current directory.")
     pipeline.add_argument("--download-source", action="store_true", help="Download the source .torrent only after earlier pipeline stages pass.")
     pipeline.add_argument("--output-dir", default="./tmp/source", help="Directory for --download-source output.")
+    pipeline.add_argument("--source-torrent-file", help="Reuse an existing source .torrent file instead of downloading it again.")
     pipeline.add_argument("--inject-source", action="store_true", help="Add the downloaded source .torrent to qBittorrent after download succeeds.")
     pipeline.add_argument("--save-path", help="qBittorrent save path required by --inject-source.")
     pipeline.add_argument("--qbit-category", help="Optional qBittorrent category for --inject-source.")
@@ -215,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--execute", action="store_true", help="Run the full reference pipeline after every gate passes.")
     retorrent.add_argument("--dry-run", action="store_true", help="Plan only; do not download, upload, or inject torrents.")
     retorrent.add_argument("--output-dir", default="./tmp/source", help="Directory for downloaded source .torrent files.")
+    retorrent.add_argument("--source-torrent-file", help="Reuse an existing source .torrent file during --execute instead of downloading it again.")
     retorrent.add_argument("--save-path", help="qBittorrent save path for source injection. Required for --execute without --path.")
     retorrent.add_argument("--qbit-category", help="Optional qBittorrent category for source injection.")
     retorrent.add_argument("--qbit-tags", help="Optional qBittorrent tags for source injection.")
@@ -442,7 +444,8 @@ def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: l
 
 
 def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespace:
-    needs_source_download = not bool(args.content_path)
+    needs_source_download = not bool(args.content_path or args.source_torrent_file)
+    needs_source_injection = not bool(args.content_path)
     return argparse.Namespace(
         command="pipeline",
         config=args.config,
@@ -454,12 +457,13 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         base_dir=args.base_dir,
         download_source=needs_source_download,
         output_dir=args.output_dir,
-        inject_source=needs_source_download,
+        source_torrent_file=args.source_torrent_file,
+        inject_source=needs_source_injection,
         save_path=args.save_path,
         qbit_category=args.qbit_category,
         qbit_tags=args.qbit_tags,
         paused=args.paused,
-        wait_complete=needs_source_download or bool(args.content_path),
+        wait_complete=needs_source_injection or bool(args.content_path),
         wait_timeout=args.wait_timeout,
         wait_interval=args.wait_interval,
         prepare_target=True,
@@ -654,7 +658,24 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     rule_check_result = build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
     stages.append({"stage": "rule-check", "ok": True, "result": rule_check_result})
 
-    if args.download_source:
+    if args.source_torrent_file:
+        if _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages):
+            source_download_result = await _pipeline_stage(
+                "source-download",
+                lambda: _existing_source_torrent_payload(args.source_torrent_file),
+                lambda payload: payload,
+            )
+            stages.append(source_download_result)
+        else:
+            stages.append(
+                {
+                    "stage": "source-download",
+                    "ok": False,
+                    "skipped": True,
+                    "message": "Skipped because flow-check, source-info, or executable rule-check did not pass.",
+                }
+            )
+    elif args.download_source:
         if _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages):
             source_download_result = await _pipeline_stage(
                 "source-download",
@@ -920,6 +941,25 @@ def _existing_target_prepare_blockers(package: dict[str, Any]) -> list[str]:
         if upload_gate.get("ready") is False:
             _append_unique_string(blockers, "MTEAM upload gate is not ready.")
     return blockers
+
+
+async def _existing_source_torrent_payload(source_torrent_file: str) -> dict[str, Any]:
+    return await asyncio.to_thread(_validate_existing_source_torrent_file, source_torrent_file)
+
+
+def _validate_existing_source_torrent_file(source_torrent_file: str) -> dict[str, Any]:
+    path = Path(source_torrent_file).expanduser()
+    if not path.exists():
+        raise ValueError(f"Source torrent file not found: {path}")
+    if not path.is_file():
+        raise ValueError(f"Source torrent path is not a file: {path}")
+    with path.open("rb") as torrent_file:
+        if torrent_file.read(1) != b"d":
+            raise ValueError("Source torrent file does not look like a .torrent file.")
+    return {
+        "path": str(path),
+        "reused": True,
+    }
 
 
 def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:

@@ -306,6 +306,52 @@ async def test_retorrent_execute_enables_uploaded_torrent_followup_by_default(mo
 
 
 @pytest.mark.asyncio
+async def test_retorrent_execute_reuses_source_torrent_file(monkeypatch, tmp_path) -> None:
+    source_torrent = tmp_path / "U2-60635.torrent"
+    source_torrent.write_bytes(b"d4:infod")
+    captured_args = {}
+
+    async def fake_pipeline_payload(args):
+        captured_args["args"] = args
+        return {
+            "ready": True,
+            "closure": {"complete": True, "blockers": []},
+            "stages": [{"stage": "target-upload", "ok": True}],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--source-torrent-file",
+            str(source_torrent),
+            "--save-path",
+            "/downloads",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    pipeline_args = captured_args["args"]
+    assert payload["ready"] is True
+    assert pipeline_args.download_source is False
+    assert pipeline_args.source_torrent_file == str(source_torrent)
+    assert pipeline_args.inject_source is True
+    assert pipeline_args.wait_complete is True
+
+
+@pytest.mark.asyncio
 async def test_retorrent_execute_defaults_to_export_target_torrent(monkeypatch) -> None:
     captured_args = {}
 
@@ -1783,6 +1829,67 @@ async def test_pipeline_inject_source_runs_after_download(monkeypatch, tmp_path)
     assert inject_stage["result"]["category"] == "pt"
     assert inject_stage["result"]["tags"] == "U2"
     assert inject_stage["result"]["paused"] is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_inject_source_reuses_existing_source_torrent(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_torrent = tmp_path / "U2-60635.torrent"
+    source_torrent.write_bytes(b"d4:infod")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+
+    async def fake_download_source_torrent(*_args, **_kwargs):
+        raise AssertionError("source download must not run when --source-torrent-file is provided")
+
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+        _ = (config, client_name, category, tags, paused)
+        return {"client": "qbittorrent", "torrent_path": torrent_path, "save_path": save_path, "hash": "a" * 40, "verified_in_client": True}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--source-torrent-file",
+            str(source_torrent),
+            "--inject-source",
+            "--save-path",
+            "/downloads",
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    download_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-download")
+    inject_stage = next(stage for stage in payload["stages"] if stage["stage"] == "inject-source")
+    assert download_stage["ok"] is True
+    assert download_stage["result"]["reused"] is True
+    assert download_stage["result"]["path"] == str(source_torrent)
+    assert inject_stage["ok"] is True
+    assert inject_stage["result"]["torrent_path"] == str(source_torrent)
 
 
 @pytest.mark.asyncio
