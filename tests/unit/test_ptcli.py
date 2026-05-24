@@ -98,6 +98,7 @@ def test_help_surfaces_short_live_closure_commands() -> None:
     assert "ptcli retorrent --from U2 --source-id 60635 --to MTEAM --execute" in help_text
     assert "ptcli pipeline --from U2 --source-id 60635 --to MTEAM --save-path /downloads" in help_text
     assert "ptcli doctor --from U2 --source-id 60635 --to MTEAM" in help_text
+    assert "--target-torrent-file ./tmp/exported/mteam.torrent" in help_text
 
 
 def test_pipeline_help_describes_live_closure_defaults() -> None:
@@ -176,6 +177,8 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert "--uploaded-torrent-file" in out
     assert '"stage": "doctor-live"' in out
     assert "--target-execute --confirm-upload" in out
+    assert "--package-dir ./tmp/target/U2-123-to-MTEAM" in out
+    assert "--target-torrent-file ./tmp/exported/mteam.torrent" in out
     assert '"stage": "retorrent-execute"' in out
     assert "--execute --accept-rules --confirm-upload" in out
     assert "--uploaded-qbit-category MTEAM" in out

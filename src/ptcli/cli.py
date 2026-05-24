@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Common live closure commands:\n"
             "  ptcli retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --json\n"
             "  ptcli pipeline --from U2 --source-id 60635 --to MTEAM --save-path /downloads --check-dupes --prepare-target --accept-rules --upload-target --target-execute --confirm-upload --json\n"
-            "  ptcli doctor --from U2 --source-id 60635 --to MTEAM --path /downloads/movie --package-dir ./tmp/target/U2-60635-to-MTEAM --target-execute --confirm-upload --accept-rules --json"
+            "  ptcli doctor --from U2 --source-id 60635 --to MTEAM --path /downloads/movie --package-dir ./tmp/target/U2-60635-to-MTEAM --target-torrent-file ./tmp/exported/mteam.torrent --target-execute --confirm-upload --accept-rules --json"
         ),
     )
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
@@ -1816,7 +1816,7 @@ def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trac
         },
         {
             "stage": "doctor-live",
-            "command": f"python3 ptcli.py doctor --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} {doctor_path_arg} --accept-rules --target-execute --confirm-upload --json",
+            "command": f"python3 ptcli.py doctor --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} {doctor_path_arg} --package-dir ./tmp/target/{source_tracker}-{source_torrent_id}-to-{target_trackers_arg} --target-torrent-file ./tmp/exported/mteam.torrent --accept-rules --target-execute --confirm-upload --json",
         },
         {
             "stage": "retorrent-execute",
