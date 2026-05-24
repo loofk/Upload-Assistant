@@ -347,14 +347,43 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
             "rule_check": rule_check,
             "blockers": _rule_check_blockers(rule_check),
         }
+    info = await fetch_source_info(config, source_tracker, args.source_id, base_dir=args.base_dir)
+    source = info.to_dict()
+    if not source_info_has_signal(info):
+        return {
+            "status": "blocked",
+            "tracker": source_tracker,
+            "target_trackers": target_trackers,
+            "rule_check": rule_check,
+            "source": source,
+            "blockers": ["source-info: Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data."],
+        }
     output_path = await download_source_torrent(config, source_tracker, args.source_id, args.output_dir, base_dir=args.base_dir)
     source_torrent = _torrent_file_evidence(output_path)
+    source_torrent_verification = _source_torrent_verify_stage({"result": source_torrent}, source.get("torrenthash"))
+    if not source_torrent_verification.get("ok"):
+        verification = source_torrent_verification.get("result", {})
+        verification_blockers = verification.get("blockers") if isinstance(verification, dict) else None
+        blockers = [f"source-torrent-verify: {blocker}" for blocker in verification_blockers] if isinstance(verification_blockers, list) else ["source-torrent-verify: Downloaded source torrent infohash does not match source tracker metadata."]
+        return {
+            "status": "blocked",
+            "tracker": source_tracker,
+            "target_trackers": target_trackers,
+            "rule_check": rule_check,
+            "source": source,
+            "source_torrent": source_torrent,
+            "source_torrent_verification": verification,
+            "path": source_torrent["path"],
+            "blockers": blockers,
+        }
     return {
         "status": "ok",
         "tracker": source_tracker,
         "target_trackers": target_trackers,
         "rule_check": rule_check,
+        "source": source,
         "source_torrent": source_torrent,
+        "source_torrent_verification": source_torrent_verification["result"],
         "path": source_torrent["path"],
     }
 

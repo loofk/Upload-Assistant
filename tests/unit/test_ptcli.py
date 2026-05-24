@@ -768,6 +768,10 @@ def test_source_download_requires_rule_ack(monkeypatch, capsys) -> None:
 
 
 def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> None:
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (_config, base_dir)
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
         _ = (tracker, source_id, base_dir)
         torrent_path = tmp_path / output_dir / "U2-60635.torrent"
@@ -776,6 +780,7 @@ def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> 
         return torrent_path
 
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
 
     code = main(
@@ -804,6 +809,104 @@ def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> 
     assert payload["source_torrent"]["exists"] is True
     assert payload["source_torrent"]["size_bytes"] == len(b"d4:infod")
     assert len(payload["source_torrent"]["sha1"]) == 40
+    assert payload["source_torrent_verification"]["expected_hash"] == "a" * 40
+    assert payload["source_torrent_verification"]["actual_hash"] is None
+    assert payload["source_torrent_verification"]["verified"] is False
+
+
+def test_source_download_verifies_downloaded_torrent_hash(monkeypatch, capsys, tmp_path) -> None:
+    content = tmp_path / "source-content.mkv"
+    content.write_bytes(b"content")
+    torrent_path = tmp_path / "source-out" / "U2-60635.torrent"
+    torrent_path.parent.mkdir(parents=True, exist_ok=True)
+    torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+    torrent.generate()
+    torrent.write(str(torrent_path), overwrite=True)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (_config, base_dir)
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", torrent.infohash, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (_config, tracker, source_id, output_dir, base_dir)
+        return torrent_path
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+
+    code = main(
+        [
+            "source-download",
+            "--tracker",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--output-dir",
+            "source-out",
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ok"
+    assert payload["source_torrent"]["torrent_hash"] == torrent.infohash
+    assert payload["source_torrent_verification"] == {
+        "verified": True,
+        "expected_hash": torrent.infohash,
+        "actual_hash": torrent.infohash,
+        "message": "Source torrent hash matched source metadata.",
+    }
+
+
+def test_source_download_blocks_downloaded_torrent_hash_mismatch(monkeypatch, capsys, tmp_path) -> None:
+    content = tmp_path / "source-content.mkv"
+    content.write_bytes(b"content")
+    torrent_path = tmp_path / "source-out" / "U2-60635.torrent"
+    torrent_path.parent.mkdir(parents=True, exist_ok=True)
+    torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+    torrent.generate()
+    torrent.write(str(torrent_path), overwrite=True)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (_config, base_dir)
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (_config, tracker, source_id, output_dir, base_dir)
+        return torrent_path
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+
+    code = main(
+        [
+            "source-download",
+            "--tracker",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--output-dir",
+            "source-out",
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["source_torrent_verification"]["verified"] is False
+    assert payload["source_torrent_verification"]["expected_hash"] == "a" * 40
+    assert payload["source_torrent_verification"]["actual_hash"] == torrent.infohash
+    assert payload["blockers"] == [f"source-torrent-verify: source torrent hash mismatch: expected {'a' * 40}, got {torrent.infohash}"]
 
 
 def test_json_capture_moves_stdout_to_logs() -> None:
