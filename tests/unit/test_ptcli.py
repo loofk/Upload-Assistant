@@ -15,6 +15,7 @@ from src.ptcli.target import (
     build_mteam_upload_gate,
     build_mteam_upload_preflight,
     search_mteam_duplicates,
+    upload_mteam_from_package,
     write_mteam_prepare_package,
 )
 
@@ -863,7 +864,7 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     assert preflight["upload_payload"]["torrent_file"]["sha1"]
 
 
-def test_mteam_upload_preflight_blocks_execute_until_live_upload_exists(tmp_path) -> None:
+def test_mteam_upload_preflight_allows_execute_when_payload_is_ready(tmp_path) -> None:
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -885,8 +886,74 @@ def test_mteam_upload_preflight_blocks_execute_until_live_upload_exists(tmp_path
 
     preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
 
-    assert preflight["status"] == "blocked"
-    assert "live upload is not enabled" in preflight["blockers"][0]
+    assert preflight["status"] == "ready"
+    assert preflight["dry_run"] is False
+
+
+@pytest.mark.asyncio
+async def test_mteam_live_upload_requires_confirmation(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    result = await upload_mteam_from_package({}, package["package_dir"], str(torrent_file), execute=True)
+
+    assert result["status"] == "blocked"
+    assert "confirm-upload" in result["blockers"][0]
+
+
+@pytest.mark.asyncio
+async def test_mteam_live_upload_uses_injected_uploader(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    async def fake_uploader(_config, package_dir, torrent_file_path):
+        assert package_dir == package["package_dir"]
+        assert torrent_file_path == str(torrent_file)
+        return {"submitted": True, "response": {"id": "999"}}
+
+    result = await upload_mteam_from_package(
+        {"TRACKERS": {"MTEAM": {"api_key": "fake"}}},
+        package["package_dir"],
+        str(torrent_file),
+        execute=True,
+        confirm_upload=True,
+        uploader=fake_uploader,
+    )
+
+    assert result["status"] == "uploaded"
+    assert result["upload_result"]["response"]["id"] == "999"
 
 
 def test_mteam_upload_payload_summary_blocks_missing_torrent(tmp_path) -> None:
@@ -958,6 +1025,34 @@ def test_target_upload_command_outputs_preflight_json(tmp_path, capsys) -> None:
     assert '"target_tracker": "MTEAM"' in out
     assert '"upload_gate"' in out
     assert '"upload_payload"' in out
+
+
+def test_target_upload_execute_requires_confirmation_before_config_load(tmp_path, capsys) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    code = main(["target-upload", "--config", "/missing/config.py", "--package-dir", package["package_dir"], "--torrent-file", str(torrent_file), "--execute", "--json"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "confirm-upload" in out
+    assert "Config file not found" not in out
 
 
 @pytest.mark.asyncio

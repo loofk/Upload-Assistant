@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +58,9 @@ def write_mteam_prepare_package(
     }
 
 
+MTeamUploadCallable = Callable[[dict[str, Any], str, str], Awaitable[dict[str, Any]]]
+
+
 def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torrent_file: str | None = None, write_payload: bool = False) -> dict[str, Any]:
     package = load_mteam_prepare_package(package_dir)
     gate = package.get("upload_gate", {})
@@ -66,9 +71,6 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
 
     if not isinstance(gate, dict) or not gate.get("ready"):
         blockers.append("MTEAM upload gate is not ready.")
-    if execute:
-        blockers.append("MTEAM live upload is not enabled in ptcli yet.")
-
     if write_payload:
         payload_path = Path(package_dir).expanduser() / "mteam-upload-payload.json"
         _write_json(payload_path, payload_summary)
@@ -84,6 +86,35 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
         "upload_payload": payload_summary,
         "blockers": blockers,
         "next_actions": _upload_preflight_next_actions(blockers, execute),
+    }
+
+
+async def upload_mteam_from_package(
+    config: dict[str, Any],
+    package_dir: str,
+    torrent_file: str,
+    *,
+    execute: bool = False,
+    confirm_upload: bool = False,
+    write_payload: bool = False,
+    uploader: MTeamUploadCallable | None = None,
+) -> dict[str, Any]:
+    preflight = build_mteam_upload_preflight(package_dir, execute=execute, torrent_file=torrent_file, write_payload=write_payload)
+    blockers = list(preflight["blockers"])
+    if not execute:
+        return preflight
+    if not confirm_upload:
+        blockers.append("MTEAM live upload requires --confirm-upload.")
+    if blockers:
+        return {**preflight, "status": "blocked", "dry_run": False, "blockers": blockers}
+
+    upload_func = uploader or _submit_mteam_upload
+    upload_result = await upload_func(config, package_dir, torrent_file)
+    return {
+        **preflight,
+        "status": "uploaded",
+        "dry_run": False,
+        "upload_result": upload_result,
     }
 
 
@@ -439,6 +470,27 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+async def _submit_mteam_upload(config: dict[str, Any], package_dir: str, torrent_file: str) -> dict[str, Any]:
+    package = load_mteam_prepare_package(package_dir)
+    torrent_path, torrent_bytes, description = await asyncio.to_thread(_read_mteam_upload_files, package, torrent_file)
+    data = _mteam_upload_form_fields(package["field_mapping"], len(description))
+    data["descr"] = description
+    files = {
+        "file": (torrent_path.name, torrent_bytes, "application/x-bittorrent"),
+    }
+
+    tracker = MTEAM(config=config)
+    try:
+        response = await tracker._request("https://api.m-team.cc/api/torrent/createOredit", data=data, files=files)
+    finally:
+        await tracker.session.aclose()
+
+    return {
+        "submitted": True,
+        "response": _summarize_mteam_upload_response(response),
+    }
+
+
 def _mteam_upload_form_fields(field_mapping: dict[str, Any], description_length: int) -> dict[str, Any]:
     form_fields: dict[str, Any] = {
         "name": field_mapping.get("name"),
@@ -456,6 +508,13 @@ def _mteam_upload_form_fields(field_mapping: dict[str, Any], description_length:
         if field_mapping.get(optional_field):
             form_fields[optional_field] = field_mapping[optional_field]
     return form_fields
+
+
+def _read_mteam_upload_files(package: dict[str, Any], torrent_file: str) -> tuple[Path, bytes, str]:
+    torrent_path = Path(torrent_file).expanduser()
+    torrent_bytes = torrent_path.read_bytes()
+    description = Path(package["files"]["description_draft"]).read_text(encoding="utf-8")
+    return torrent_path, torrent_bytes, description
 
 
 def _torrent_file_summary(torrent_file: str | None) -> tuple[dict[str, Any] | None, list[str]]:
@@ -482,6 +541,16 @@ def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _summarize_mteam_upload_response(response: Any) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        return {"raw_type": type(response).__name__}
+    summary: dict[str, Any] = {}
+    for key in ("id", "torrentId", "torrent_id", "status", "message"):
+        if key in response:
+            summary[key] = response[key]
+    return summary or {"keys": sorted(str(key) for key in response)}
+
+
 def _upload_preflight_next_actions(blockers: list[str], execute: bool) -> list[str]:
     if blockers:
         return [
@@ -489,5 +558,5 @@ def _upload_preflight_next_actions(blockers: list[str], execute: bool) -> list[s
             "Regenerate the MTEAM package after fixing source metadata, qBittorrent evidence, duplicate check, or rules acknowledgement.",
         ]
     if execute:
-        return ["Live upload is still disabled; implement the MTEAM upload adapter handoff before retrying."]
+        return ["Check MTEAM upload result, then download the generated target torrent and inject it into qBittorrent for seeding."]
     return ["Review the package manually, then rerun with the future live upload flag after upload support is enabled."]

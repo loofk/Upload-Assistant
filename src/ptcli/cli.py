@@ -19,7 +19,7 @@ from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tra
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import get_rule_profiles, rule_profiles_to_dicts
 from src.ptcli.source import download_source_torrent, extract_torrent_id, fetch_source_info, source_info_has_signal
-from src.ptcli.target import build_mteam_upload_preflight, search_mteam_duplicates, write_mteam_prepare_package
+from src.ptcli.target import build_mteam_upload_preflight, search_mteam_duplicates, upload_mteam_from_package, write_mteam_prepare_package
 
 
 @dataclass(frozen=True)
@@ -123,10 +123,12 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     target_upload = subparsers.add_parser("target-upload", help="Preflight a prepared target package before live upload.")
+    target_upload.add_argument("--config", help="Path to config.py, defaults to data/config.py. Required for --execute.")
     target_upload.add_argument("--package-dir", required=True, help="Directory created by pipeline --prepare-target.")
     target_upload.add_argument("--torrent-file", help="MTEAM .torrent file to include in the upload payload summary.")
     target_upload.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json into the package directory.")
-    target_upload.add_argument("--execute", action="store_true", help="Request live upload. Currently blocked until upload support is enabled.")
+    target_upload.add_argument("--execute", action="store_true", help="Submit the prepared payload to MTEAM after every gate passes.")
+    target_upload.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
     target_upload.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     retorrent = subparsers.add_parser("retorrent", help="Plan a retorrent workflow between supported trackers.")
@@ -261,8 +263,30 @@ def flow_check_payload(args: argparse.Namespace) -> dict[str, Any]:
     return build_flow_check(config, args.source_tracker, args.source_id, args.target_trackers, args.client, base_dir=args.base_dir)
 
 
-def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
-    return build_mteam_upload_preflight(args.package_dir, execute=args.execute, torrent_file=args.torrent_file, write_payload=args.write_payload)
+async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.execute:
+        return build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=args.torrent_file, write_payload=args.write_payload)
+    if not args.torrent_file:
+        return build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
+    preflight = build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
+    if preflight["blockers"] or not args.confirm_upload:
+        return await upload_mteam_from_package(
+            {},
+            args.package_dir,
+            args.torrent_file,
+            execute=args.execute,
+            confirm_upload=args.confirm_upload,
+            write_payload=args.write_payload,
+        )
+    config = load_config(args.config)
+    return await upload_mteam_from_package(
+        config,
+        args.package_dir,
+        args.torrent_file,
+        execute=args.execute,
+        confirm_upload=args.confirm_upload,
+        write_payload=args.write_payload,
+    )
 
 
 async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -681,7 +705,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "target-upload":
-            _print_payload(target_upload_payload(args), json_output)
+            payload = _with_captured_stdout(lambda: asyncio.run(target_upload_payload(args)), json_output)
+            _print_payload(payload, json_output)
             return 0
 
         parser.error(f"Unknown command: {args.command}")
