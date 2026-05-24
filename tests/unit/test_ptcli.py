@@ -4159,8 +4159,12 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
     assert summary_payload["summary"]["uploaded"] is True
     assert summary_payload["summary"]["injected"] is True
+    assert summary_payload["summary"]["injection_verified"] is True
     assert summary_payload["summary"]["seeding_verified"] is True
     assert summary_payload["summary"]["uploaded_torrent_hash"] == uploaded_hash
+    assert summary_payload["summary"]["injected_torrent_hash"] == uploaded_hash
+    assert summary_payload["summary"]["uploaded_torrent_path"] == str(tmp_path / "MTEAM-999.torrent")
+    assert summary_payload["summary"]["uploaded_wait"]["complete"] is True
     assert summary_payload["summary"]["rule_obligations"]["ready"] is True
 
 
@@ -4232,6 +4236,9 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
     assert result["injected_torrent"]["save_path"] == "/downloads/Example"
     assert result["summary"]["downloaded"] is True
     assert result["summary"]["injected"] is True
+    assert result["summary"]["injection_verified"] is True
+    assert result["summary"]["uploaded_torrent_path"] == str(uploaded_torrent)
+    assert result["summary"]["injected_torrent_hash"] == uploaded_hash
 
 
 @pytest.mark.asyncio

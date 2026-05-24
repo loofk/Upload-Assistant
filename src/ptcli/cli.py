@@ -632,17 +632,23 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
 
 
 def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
+    downloaded_torrent = result.get("downloaded_torrent")
     injected_torrent = result.get("injected_torrent")
     uploaded_wait = result.get("uploaded_wait")
     blockers = _target_upload_result_blockers(result)
+    uploaded_torrent_hash = result.get("uploaded_torrent_hash") or _torrent_hash_from_result(injected_torrent)
     return {
         "status": result.get("status"),
         "ready": result.get("status") in {"ready", "uploaded"} and not blockers,
         "uploaded": result.get("status") == "uploaded",
-        "downloaded": isinstance(result.get("downloaded_torrent"), dict),
+        "downloaded": isinstance(downloaded_torrent, dict),
+        "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
         "injected": _injected_torrent_verified(injected_torrent),
+        "injection_verified": _injected_torrent_verified(injected_torrent),
+        "injected_torrent_hash": _torrent_hash_from_result(injected_torrent),
         "seeding_verified": isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete")),
-        "uploaded_torrent_hash": result.get("uploaded_torrent_hash") or _torrent_hash_from_result(injected_torrent),
+        "uploaded_torrent_hash": uploaded_torrent_hash,
+        "uploaded_wait": uploaded_wait if isinstance(uploaded_wait, dict) else None,
         "blockers": blockers,
         "preflight_status": preflight.get("status"),
         "preflight_blockers": preflight.get("blockers", []),
