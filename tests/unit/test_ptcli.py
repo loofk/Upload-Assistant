@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import shlex
 from pathlib import Path
 
 import pytest
@@ -3066,6 +3067,8 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["artifacts"]["summary_file"] == str(summary_path)
     assert summary_payload["artifacts"]["target_package_dir"] == target_stage["result"]["package_dir"]
     assert summary_payload["artifacts"]["target_package_files"] == target_stage["result"]["files"]
+    resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
+    assert "resume-target-upload" not in resume_commands
     assert summary_payload["next_actions"]
 
 
@@ -3298,6 +3301,13 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["target_torrent_file"] == str(torrent_file)
     assert summary_payload["artifacts"]["target_package_dir"]
     assert summary_payload["artifacts"]["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
+    resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
+    assert summary_payload["artifacts"]["source_torrent_file"] in resume_commands["resume-source-torrent"]
+    assert str(torrent_file) in resume_commands["resume-target-upload"]
+    assert str(tmp_path / "MTEAM-999.torrent") in resume_commands["resume-uploaded-torrent"]
+    assert shlex.quote(summary_payload["artifacts"]["target_package_dir"]) in resume_commands["resume-target-upload"]
+    assert "--uploaded-save-path /downloads" in resume_commands["resume-target-upload"]
+    assert "--uploaded-save-path /downloads" in resume_commands["resume-uploaded-torrent"]
     assert any(stage["stage"] == "target-upload" and stage["ok"] is True for stage in summary_payload["stages"])
 
 

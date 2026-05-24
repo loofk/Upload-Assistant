@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import io
 import json
+import shlex
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
@@ -1370,6 +1371,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
     destination_dir = _run_summary_dir(payload, output_dir)
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / "ptcli-run-summary.json"
+    artifacts = _run_summary_artifacts(payload, str(destination))
     summary_payload = {
         "schema_version": 1,
         "kind": "ptcli.pipeline.run_summary",
@@ -1388,7 +1390,8 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),
         "next_actions": payload.get("next_actions", []),
-        "artifacts": _run_summary_artifacts(payload, str(destination)),
+        "artifacts": artifacts,
+        "resume_commands": _run_summary_resume_commands(payload, artifacts),
         "stages": payload.get("stages", []),
     }
     destination.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1421,6 +1424,107 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
             if isinstance(downloaded_torrent, dict):
                 artifacts["uploaded_torrent_file"] = downloaded_torrent.get("path")
     return artifacts
+
+
+def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, Any]) -> list[dict[str, str]]:
+    source_tracker = str(payload.get("source_tracker") or "")
+    source_torrent_id = str(payload.get("source_torrent_id") or "")
+    target_trackers = payload.get("target_trackers")
+    target_trackers_arg = ",".join(str(tracker) for tracker in target_trackers) if isinstance(target_trackers, list) else str(target_trackers or "")
+    content_path = payload.get("path")
+    path_args = ["--path", str(content_path)] if content_path else []
+    uploaded_save_path_args = ["--uploaded-save-path", str(content_path)] if content_path else []
+    commands: list[dict[str, str]] = []
+
+    source_torrent_file = artifacts.get("source_torrent_file")
+    if source_torrent_file:
+        commands.append(
+            {
+                "stage": "resume-source-torrent",
+                "command": _ptcli_command(
+                    [
+                        "pipeline",
+                        "--from",
+                        source_tracker,
+                        "--source-id",
+                        source_torrent_id,
+                        "--to",
+                        target_trackers_arg,
+                        "--source-torrent-file",
+                        str(source_torrent_file),
+                        "--inject-source",
+                        "--save-path",
+                        str(content_path or "/downloads"),
+                        "--wait-complete",
+                        "--accept-rules",
+                        "--write-summary",
+                        "--json",
+                    ]
+                ),
+            }
+        )
+
+    target_package_dir = artifacts.get("target_package_dir")
+    target_torrent_file = artifacts.get("target_torrent_file")
+    if target_package_dir and target_torrent_file:
+        commands.append(
+            {
+                "stage": "resume-target-upload",
+                "command": _ptcli_command(
+                    [
+                        "pipeline",
+                        "--from",
+                        source_tracker,
+                        "--source-id",
+                        source_torrent_id,
+                        "--to",
+                        target_trackers_arg,
+                        *path_args,
+                        "--package-dir",
+                        str(target_package_dir),
+                        "--upload-target",
+                        "--target-torrent-file",
+                        str(target_torrent_file),
+                        "--accept-rules",
+                        "--target-execute",
+                        "--confirm-upload",
+                        "--download-uploaded-torrent",
+                        "--inject-uploaded-torrent",
+                        *uploaded_save_path_args,
+                        "--wait-uploaded-complete",
+                        "--write-summary",
+                        "--json",
+                    ]
+                ),
+            }
+        )
+
+    uploaded_torrent_file = artifacts.get("uploaded_torrent_file")
+    if target_package_dir and uploaded_torrent_file:
+        commands.append(
+            {
+                "stage": "resume-uploaded-torrent",
+                "command": _ptcli_command(
+                    [
+                        "target-upload",
+                        "--package-dir",
+                        str(target_package_dir),
+                        "--uploaded-torrent-file",
+                        str(uploaded_torrent_file),
+                        "--inject-uploaded-torrent",
+                        *uploaded_save_path_args,
+                        "--wait-uploaded-complete",
+                        "--write-summary",
+                        "--json",
+                    ]
+                ),
+            }
+        )
+    return commands
+
+
+def _ptcli_command(args: list[str]) -> str:
+    return shlex.join(["python3", "ptcli.py", *args])
 
 
 def _run_summary_dir(payload: dict[str, Any], output_dir: str | None) -> Path:
