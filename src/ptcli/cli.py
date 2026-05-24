@@ -42,6 +42,7 @@ class RetorrentPlan:
     accept_rules: bool
     flow_profiles: list[dict[str, Any]]
     rule_profiles: list[dict[str, Any]]
+    rule_check: dict[str, Any]
     blockers: list[str]
     commands: list[dict[str, str]]
     steps: list[str]
@@ -348,6 +349,7 @@ def build_plan(args: argparse.Namespace) -> RetorrentPlan:
         raise ValueError("Non-dry-run retorrent requires --accept-rules.")
 
     rule_profiles = get_rule_profiles([source_tracker, *target_trackers])
+    rule_check = build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
     blockers: list[str] = []
     if not args.dry_run and any(profile.review_required for profile in rule_profiles) and not args.accept_rules:
         blockers.append("Rule review acknowledgement is required before any non-dry-run action.")
@@ -379,6 +381,7 @@ def build_plan(args: argparse.Namespace) -> RetorrentPlan:
         accept_rules=bool(args.accept_rules),
         flow_profiles=flow_profiles_to_dicts(flow_profiles),
         rule_profiles=rule_profiles_to_dicts(rule_profiles),
+        rule_check=rule_check,
         blockers=blockers,
         commands=commands,
         steps=steps,

@@ -110,6 +110,8 @@ def test_retorrent_plan_json_exit_ok(capsys) -> None:
     assert '"TJUPT"' in out
     assert '"CHD"' in out
     assert '"rule_profiles"' in out
+    assert '"rule_check"' in out
+    assert '"rule_obligations"' in out
     assert '"flow_profiles"' in out
     assert '"blockers"' in out
 
@@ -147,6 +149,29 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert "--execute --accept-rules --confirm-upload" in out
     assert "--uploaded-qbit-category MTEAM" in out
     assert "--write-summary" in out
+
+
+def test_retorrent_plan_includes_rule_check_obligations() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["retorrent", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--dry-run"])
+
+    plan = build_plan(args)
+
+    assert plan.rule_check["ready"] is False
+    assert plan.rule_check["source_tracker"] == "U2"
+    assert plan.rule_check["target_trackers"] == ["MTEAM"]
+    assert [obligation["action"] for obligation in plan.rule_check["rule_obligations"]] == ["download_and_retorrent", "upload_and_seed"]
+    assert any(check["name"] == "site_rule_obligations_acknowledged" and check["ok"] is False for check in plan.rule_check["checks"])
+
+
+def test_retorrent_plan_marks_rule_check_ready_with_ack() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["retorrent", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--dry-run", "--accept-rules"])
+
+    plan = build_plan(args)
+
+    assert plan.rule_check["ready"] is True
+    assert all(obligation["acknowledged"] is True for obligation in plan.rule_check["rule_obligations"])
 
 
 def test_retorrent_execute_blocked_returns_nonzero(capsys, tmp_path) -> None:
