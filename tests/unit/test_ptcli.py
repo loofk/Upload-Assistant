@@ -5593,6 +5593,25 @@ def test_mteam_meta_draft_and_field_mapping_from_name() -> None:
     assert mapping["douban"] == "https://movie.douban.com/subject/1291546/"
 
 
+def test_mteam_meta_draft_normalizes_tt_prefixed_imdb() -> None:
+    source_info = {
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": "tt1234567",
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+
+    meta_draft = build_mteam_meta_draft(source_info, "/downloads/Example.Movie.2024")
+    mapping = build_mteam_field_mapping(meta_draft)
+
+    assert meta_draft["imdb_id"] == 1234567
+    assert meta_draft["imdb"] == "1234567"
+    assert mapping["imdb"] == "https://www.imdb.com/title/tt1234567"
+
+
 def test_mteam_description_draft_and_upload_gate() -> None:
     source_info = {
         "tracker": "U2",
@@ -6299,6 +6318,29 @@ def test_mteam_upload_payload_summary_blocks_invalid_optional_urls(tmp_path) -> 
     douban_check = next(check for check in preflight["upload_payload"]["field_checks"] if check["name"] == "payload.douban")
     assert douban_check["ok"] is False
     assert any("payload.douban" in blocker for blocker in preflight["upload_payload"]["blockers"])
+
+
+def test_mteam_upload_payload_summary_blocks_unknown_standard(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    standard_check = next(check for check in preflight["upload_payload"]["field_checks"] if check["name"] == "payload.standard")
+    assert standard_check["ok"] is False
+    assert any("payload.standard" in blocker for blocker in preflight["upload_payload"]["blockers"])
 
 
 def test_mteam_upload_payload_summary_writes_payload_file(tmp_path) -> None:

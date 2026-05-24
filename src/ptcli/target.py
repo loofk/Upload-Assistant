@@ -677,7 +677,7 @@ def build_mteam_meta_draft(source_info: dict[str, Any] | None, content_path: str
     resolution = _infer_resolution(name)
     media_type = _infer_type(name)
     category = _infer_category(name)
-    imdb_id = source_info.get("imdb_id") if source_info else None
+    imdb_id = _normalize_imdb_id(source_info.get("imdb_id")) if source_info else None
     douban_id = source_info.get("douban_id") if source_info else None
     return {
         "name": name or None,
@@ -986,10 +986,11 @@ def _mteam_upload_form_fields(field_mapping: dict[str, Any], description_length:
 
 def _mteam_upload_field_checks(form_fields: dict[str, Any]) -> list[dict[str, Any]]:
     checks = [
-        _payload_field_check("payload.name", bool(form_fields.get("name")), "MTEAM upload payload name is present.", "MTEAM upload payload is missing required field: name."),
-        _payload_field_check("payload.smallDescr", bool(form_fields.get("smallDescr")), "MTEAM upload payload smallDescr is present.", "MTEAM upload payload is missing required field: smallDescr."),
+        _payload_field_check("payload.name", _non_empty_string(form_fields.get("name")), "MTEAM upload payload name is present.", "MTEAM upload payload is missing required field: name."),
+        _payload_field_check("payload.smallDescr", _non_empty_string(form_fields.get("smallDescr")), "MTEAM upload payload smallDescr is present.", "MTEAM upload payload is missing required field: smallDescr."),
         _payload_field_check("payload.descr", bool(form_fields.get("descr")), "MTEAM upload payload description is present.", "MTEAM upload payload is missing required field: descr."),
-        _payload_field_check("payload.category", bool(form_fields.get("category")), "MTEAM upload payload category is present.", "MTEAM upload payload is missing required field: category."),
+        _payload_field_check("payload.category", _mteam_category_payload_value_ok(form_fields.get("category")), "MTEAM upload payload category is a known MTEAM category id.", "MTEAM upload payload category is missing or unknown."),
+        _payload_field_check("payload.standard", _mteam_standard_payload_value_ok(form_fields.get("standard")), "MTEAM upload payload standard is a known MTEAM resolution id.", "MTEAM upload payload standard is missing or unknown."),
         _payload_field_check("payload.anonymous", isinstance(form_fields.get("anonymous"), bool), "MTEAM upload payload anonymous flag is boolean.", "MTEAM upload payload anonymous flag must be boolean."),
     ]
     if form_fields.get("imdb"):
@@ -999,6 +1000,25 @@ def _mteam_upload_field_checks(form_fields: dict[str, Any]) -> list[dict[str, An
         douban_url = str(form_fields["douban"])
         checks.append(_payload_field_check("payload.douban", bool(re.match(r"^https://movie\.douban\.com/subject/\d+/?$", douban_url)), "MTEAM upload payload Douban URL is valid.", "MTEAM upload payload Douban URL must look like https://movie.douban.com/subject/1234567/."))
     return checks
+
+
+def _non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _mteam_category_payload_value_ok(value: Any) -> bool:
+    return value in {401, 402, 403, 419, 439}
+
+
+def _mteam_standard_payload_value_ok(value: Any) -> bool:
+    return value in {1, 2, 3, 5, 6, 7}
+
+
+def _normalize_imdb_id(value: Any) -> int | None:
+    if value is None:
+        return None
+    match = re.search(r"(?:tt)?(\d+)", str(value), flags=re.IGNORECASE)
+    return int(match.group(1)) if match else None
 
 
 def _mteam_description_summary(package: dict[str, Any], expected_length: int) -> dict[str, Any]:
