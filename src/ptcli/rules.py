@@ -76,6 +76,7 @@ def build_rule_check(source_tracker: str, target_trackers: list[str], *, accept_
     """Build machine-checkable rule gates without inventing tracker-specific policy."""
     trackers = [source_tracker, *target_trackers]
     profiles = get_rule_profiles(trackers)
+    obligations = _rule_obligations(source_tracker, target_trackers, profiles, accept_rules=accept_rules)
     automation_enabled = all(profile.automation_status == "enabled" for profile in profiles)
     reference_flow_enabled = bool(get_flow_profiles(source_tracker, target_trackers))
     target_adapter_enabled = target_trackers == ["MTEAM"]
@@ -106,6 +107,11 @@ def build_rule_check(source_tracker: str, target_trackers: list[str], *, accept_
             "ok": target_adapter_enabled,
             "message": "MTEAM target prepare/check/upload adapter is enabled." if target_adapter_enabled else "Only the MTEAM target upload adapter is enabled right now.",
         },
+        {
+            "name": "site_rule_obligations_acknowledged",
+            "ok": all(obligation["acknowledged"] for obligation in obligations),
+            "message": "Every source/target rule obligation has been acknowledged." if accept_rules else "Every involved site rule obligation must be acknowledged before automation.",
+        },
     ]
     return {
         "status": "ok",
@@ -113,8 +119,44 @@ def build_rule_check(source_tracker: str, target_trackers: list[str], *, accept_
         "source_tracker": source_tracker,
         "target_trackers": target_trackers,
         "rule_profiles": rule_profiles_to_dicts(profiles),
+        "rule_obligations": obligations,
         "checks": checks,
         "next_actions": _rule_check_next_actions(checks),
+    }
+
+
+def _rule_obligations(source_tracker: str, target_trackers: list[str], profiles: list[RuleProfile], *, accept_rules: bool) -> list[dict[str, Any]]:
+    profiles_by_tracker = {profile.tracker: profile for profile in profiles}
+    obligations = [
+        _rule_obligation(
+            source_tracker,
+            profiles_by_tracker[source_tracker],
+            role="source",
+            action="download_and_retorrent",
+            accept_rules=accept_rules,
+        )
+    ]
+    obligations.extend(
+        _rule_obligation(
+            tracker,
+            profiles_by_tracker[tracker],
+            role="target",
+            action="upload_and_seed",
+            accept_rules=accept_rules,
+        )
+        for tracker in target_trackers
+    )
+    return obligations
+
+
+def _rule_obligation(tracker: str, profile: RuleProfile, *, role: str, action: str, accept_rules: bool) -> dict[str, Any]:
+    return {
+        "tracker": tracker,
+        "role": role,
+        "action": action,
+        "rules_url": profile.rules_url,
+        "acknowledged": accept_rules,
+        "message": f"{tracker} {role} {action} rules have been acknowledged." if accept_rules else f"Review and acknowledge {tracker} {role} {action} rules before automation.",
     }
 
 

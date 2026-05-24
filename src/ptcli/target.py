@@ -383,6 +383,7 @@ def build_mteam_rule_review(stages: list[dict[str, Any]], accept_rules: bool) ->
         "source_tracker": rule_result.get("source_tracker") if isinstance(rule_result, dict) else None,
         "target_trackers": rule_result.get("target_trackers") if isinstance(rule_result, dict) else [],
         "rule_profiles": rule_result.get("rule_profiles") if isinstance(rule_result, dict) else [],
+        "rule_obligations": rule_result.get("rule_obligations") if isinstance(rule_result, dict) else [],
         "checks": rule_checks if isinstance(rule_checks, list) else [],
         "blockers": blockers,
     }

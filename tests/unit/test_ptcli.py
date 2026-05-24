@@ -12,6 +12,7 @@ from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summarize_torrent
+from src.ptcli.rules import build_rule_check
 from src.ptcli.source import create_source_meta, extract_torrent_id, source_info_from_tuple
 from src.ptcli.target import (
     build_mteam_description_draft,
@@ -563,6 +564,10 @@ def test_rule_check_command_requires_ack_for_ready(capsys) -> None:
     assert '"ready": false' in out
     assert '"rules_acknowledged"' in out
     assert '"reference_flow_enabled"' in out
+    assert '"rule_obligations"' in out
+    assert '"action": "download_and_retorrent"' in out
+    assert '"action": "upload_and_seed"' in out
+    assert '"site_rule_obligations_acknowledged"' in out
 
 
 def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
@@ -573,6 +578,25 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
     assert '"ready": true' in out
     assert '"source_tracker": "CHD"' in out
     assert '"target_trackers": [' in out
+    payload = json.loads(out)
+    assert payload["rule_obligations"] == [
+        {
+            "tracker": "CHD",
+            "role": "source",
+            "action": "download_and_retorrent",
+            "rules_url": "https://ptchdbits.co/rules.php",
+            "acknowledged": True,
+            "message": "CHD source download_and_retorrent rules have been acknowledged.",
+        },
+        {
+            "tracker": "MTEAM",
+            "role": "target",
+            "action": "upload_and_seed",
+            "rules_url": "https://kp.m-team.cc/rules",
+            "acknowledged": True,
+            "message": "MTEAM target upload_and_seed rules have been acknowledged.",
+        },
+    ]
 
 
 def test_source_download_requires_target_rule_context(monkeypatch, capsys) -> None:
@@ -3320,6 +3344,31 @@ def test_mteam_rule_review_records_rule_gate() -> None:
     assert review["rules_acknowledged"] is True
     assert review["rule_check_ready"] is True
     assert review["blockers"] == []
+
+
+def test_mteam_rule_review_records_site_rule_obligations() -> None:
+    stages = [{"stage": "rule-check", "ok": True, "result": build_rule_check("U2", ["MTEAM"], accept_rules=True)}]
+
+    review = build_mteam_rule_review(stages, accept_rules=True)
+
+    assert review["rule_obligations"] == [
+        {
+            "tracker": "U2",
+            "role": "source",
+            "action": "download_and_retorrent",
+            "rules_url": "https://u2.dmhy.org/rules.php",
+            "acknowledged": True,
+            "message": "U2 source download_and_retorrent rules have been acknowledged.",
+        },
+        {
+            "tracker": "MTEAM",
+            "role": "target",
+            "action": "upload_and_seed",
+            "rules_url": "https://kp.m-team.cc/rules",
+            "acknowledged": True,
+            "message": "MTEAM target upload_and_seed rules have been acknowledged.",
+        },
+    ]
 
 
 def test_mteam_rule_review_blocks_without_ack() -> None:
