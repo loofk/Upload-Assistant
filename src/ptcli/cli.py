@@ -358,6 +358,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     pipeline_args = _pipeline_args_from_retorrent(args)
     pipeline_result = await pipeline_payload(pipeline_args)
     closure = pipeline_result.get("closure") if isinstance(pipeline_result.get("closure"), dict) else None
+    evidence = pipeline_result.get("evidence") if isinstance(pipeline_result.get("evidence"), dict) else None
     ready = bool(pipeline_result.get("ready"))
     blockers = _retorrent_execute_blockers(pipeline_result, closure, ready)
     return {
@@ -365,6 +366,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "plan": plan_payload,
         "pipeline": pipeline_result,
         "closure": closure,
+        "evidence": evidence,
         "ready": ready,
         "complete": not blockers,
         "blockers": blockers,

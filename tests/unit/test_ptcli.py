@@ -169,6 +169,11 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         return {
             "ready": True,
             "closure": {"complete": True, "blockers": [], "source": {"complete": True}, "target": {"uploaded": True, "injected": True}},
+            "evidence": {
+                "complete": True,
+                "source": {"mode": "downloaded", "torrent_hash": "a" * 40, "content_path": "/downloads/Name"},
+                "target": {"ready": True, "uploaded_torrent_hash": "b" * 40},
+            },
             "stages": [{"stage": "target-upload", "ok": True}],
         }
 
@@ -212,6 +217,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["ready"] is True
     assert payload["closure"]["source"]["complete"] is True
     assert payload["closure"]["target"]["injected"] is True
+    assert payload["evidence"]["source"]["mode"] == "downloaded"
+    assert payload["evidence"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True
