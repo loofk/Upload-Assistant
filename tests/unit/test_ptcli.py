@@ -240,6 +240,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.target_execute is True
     assert pipeline_args.download_uploaded_torrent is True
     assert pipeline_args.inject_uploaded_torrent is True
+    assert pipeline_args.wait_uploaded_complete is True
     assert pipeline_args.save_path == "/downloads"
     assert pipeline_args.target_torrent_file == str(torrent_file)
     assert pipeline_args.sanitize_target_torrent is True
@@ -287,6 +288,7 @@ async def test_retorrent_execute_enables_uploaded_torrent_followup_by_default(mo
     assert payload["ready"] is True
     assert pipeline_args.download_uploaded_torrent is True
     assert pipeline_args.inject_uploaded_torrent is True
+    assert pipeline_args.wait_uploaded_complete is True
     assert pipeline_args.uploaded_save_path is None
     assert pipeline_args.content_path == "/downloads/Name"
 
@@ -652,6 +654,28 @@ def test_target_upload_result_accepts_completed_uploaded_torrent_injection() -> 
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is True
 
 
+def test_target_upload_result_requires_uploaded_torrent_completion_when_requested() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "uploaded_wait": {"complete": False, "matches": []},
+    }
+
+    assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True, wait_uploaded_complete=True) is False
+
+
+def test_target_upload_result_accepts_completed_uploaded_torrent_wait() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "uploaded_wait": {"complete": True, "matches": [{"hash": "a" * 40}]},
+    }
+
+    assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True, wait_uploaded_complete=True) is True
+
+
 def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
     closure = {
         "complete": True,
@@ -671,6 +695,7 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
             "downloaded": True,
             "injected": True,
             "injection_verified": True,
+            "seeding": True,
             "torrent_file": "/tmp/mteam.torrent",
             "uploaded_torrent_hash": "b" * 40,
             "injected_torrent_hash": "b" * 40,
@@ -742,6 +767,34 @@ def test_pipeline_closure_requires_target_injection_client_verification() -> Non
     assert closure["target"]["injection_verified"] is False
     assert closure["target"]["injected_torrent_hash"] == "b" * 40
     assert closure["target"]["uploaded_torrent_hash"] == "b" * 40
+
+
+def test_pipeline_closure_requires_uploaded_torrent_completion_when_waited() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {"stage": "target-prepare", "ok": True, "result": {}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": False, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+
+    assert closure["complete"] is False
+    assert closure["blockers"] == ["target.seeding"]
+    assert closure["target"]["injected"] is True
+    assert closure["target"]["seeding"] is False
+    assert closure["target"]["uploaded_wait"]["complete"] is False
 
 
 def test_pipeline_closure_requires_source_injection_client_verification() -> None:
@@ -2094,9 +2147,12 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         return {"hash": "a" * 40, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused}
 
+    wait_calls = []
+
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
-        _ = (config, client_name, content_path, torrent_hash, timeout, interval)
-        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}
+        _ = (config, timeout, interval)
+        wait_calls.append({"client_name": client_name, "content_path": content_path, "torrent_hash": torrent_hash})
+        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": content_path or "/downloads/Name", "hash": torrent_hash or "a" * 40}]}
 
     async def fake_search_mteam_duplicates(_config, source_info):
         return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
@@ -2158,6 +2214,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
             "MTEAM",
             "--uploaded-qbit-tags",
             "retorrent",
+            "--wait-uploaded-complete",
             "--json",
         ]
     )
@@ -2170,6 +2227,10 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert payload["closure"]["source"]["injected"] is True
     assert payload["closure"]["source"]["complete"] is True
     assert payload["closure"]["target"]["uploaded_torrent_hash"] == uploaded_hash
+    assert payload["closure"]["target"]["seeding"] is True
+    assert payload["closure"]["target"]["uploaded_wait"]["complete"] is True
+    assert wait_calls[-1]["torrent_hash"] == uploaded_hash
+    assert wait_calls[-1]["content_path"] == "/downloads"
 
 
 @pytest.mark.asyncio
@@ -3176,8 +3237,17 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
             "paused": paused,
         }
 
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {
+            "client": client_name,
+            "complete": True,
+            "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval},
+            "matches": [{"hash": torrent_hash, "content_path": content_path}],
+        }
+
     monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
     monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
     parser = build_parser()
     args = parser.parse_args(
         [
@@ -3198,6 +3268,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
             "MTEAM",
             "--uploaded-qbit-tags",
             "retorrent",
+            "--wait-uploaded-complete",
             "--client",
             "default",
             "--json",
@@ -3212,6 +3283,9 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert result["injected_torrent"]["save_path"] == "/downloads/Example"
     assert result["injected_torrent"]["category"] == "MTEAM"
     assert result["injected_torrent"]["tags"] == "retorrent"
+    assert result["uploaded_wait"]["complete"] is True
+    assert result["uploaded_wait"]["query"]["torrent_hash"] == uploaded_hash
+    assert result["uploaded_wait"]["query"]["content_path"] == "/downloads/Example"
 
 
 @pytest.mark.asyncio

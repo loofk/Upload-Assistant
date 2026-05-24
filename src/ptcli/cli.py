@@ -171,6 +171,9 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for --inject-uploaded-torrent.")
     pipeline.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for --inject-uploaded-torrent.")
     pipeline.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent to qBittorrent paused.")
+    pipeline.add_argument("--wait-uploaded-complete", action="store_true", help="Wait for the injected target torrent to become complete in qBittorrent.")
+    pipeline.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait with --wait-uploaded-complete.")
+    pipeline.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for --wait-uploaded-complete.")
     pipeline.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     target_upload = subparsers.add_parser("target-upload", help="Preflight a prepared target package before live upload.")
@@ -187,6 +190,9 @@ def build_parser() -> argparse.ArgumentParser:
     target_upload.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for --inject-uploaded-torrent.")
     target_upload.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for --inject-uploaded-torrent.")
     target_upload.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent to qBittorrent paused.")
+    target_upload.add_argument("--wait-uploaded-complete", action="store_true", help="Wait for the injected target torrent to become complete in qBittorrent.")
+    target_upload.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait with --wait-uploaded-complete.")
+    target_upload.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for --wait-uploaded-complete.")
     target_upload.add_argument("--client", default="default", help="Configured qBittorrent client name for --inject-uploaded-torrent.")
     target_upload.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
@@ -221,6 +227,8 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for uploaded target torrent injection.")
     retorrent.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for uploaded target torrent injection.")
     retorrent.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent paused.")
+    retorrent.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait for the uploaded target torrent to become complete during --execute.")
+    retorrent.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for uploaded target torrent completion during --execute.")
     retorrent.add_argument(
         "--accept-rules",
         action="store_true",
@@ -460,6 +468,9 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         uploaded_qbit_category=args.uploaded_qbit_category,
         uploaded_qbit_tags=args.uploaded_qbit_tags,
         uploaded_paused=args.uploaded_paused,
+        wait_uploaded_complete=True,
+        uploaded_wait_timeout=args.uploaded_wait_timeout,
+        uploaded_wait_interval=args.uploaded_wait_interval,
         json=getattr(args, "json", False),
     )
 
@@ -534,7 +545,10 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
             args.uploaded_qbit_tags,
             args.uploaded_paused,
         )
-        return _with_uploaded_injection(result, inject_result)
+        injected_payload = _with_uploaded_injection(result, inject_result)
+        if args.wait_uploaded_complete:
+            return await _with_uploaded_wait(config, args, injected_payload, args.uploaded_save_path)
+        return injected_payload
     return result
 
 
@@ -550,6 +564,8 @@ def _target_upload_execute_blockers(args: argparse.Namespace) -> list[str]:
         blockers.append("--inject-uploaded-torrent requires --download-uploaded-torrent.")
     elif not args.uploaded_save_path:
         blockers.append("--uploaded-save-path is required with --inject-uploaded-torrent.")
+    if args.wait_uploaded_complete and not args.inject_uploaded_torrent:
+        blockers.append("--wait-uploaded-complete requires --inject-uploaded-torrent.")
     return blockers
 
 
@@ -738,6 +754,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--inject-uploaded-torrent requires --download-uploaded-torrent."})
         elif args.inject_uploaded_torrent and not (args.uploaded_save_path or effective_content_path):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--uploaded-save-path or an inferred completed content path is required with --inject-uploaded-torrent."})
+        elif args.wait_uploaded_complete and not args.inject_uploaded_torrent:
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--wait-uploaded-complete requires --inject-uploaded-torrent."})
         else:
             package_dir = str(target_prepare_stage.get("result", {}).get("package_dir", ""))
             upload_stage = await _pipeline_stage(
@@ -749,6 +767,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                     execute=args.target_execute,
                     download_uploaded=args.download_uploaded_torrent,
                     inject_uploaded=args.inject_uploaded_torrent,
+                    wait_uploaded_complete=args.wait_uploaded_complete,
                 ),
                 invalid_message="Target upload stage did not complete every requested upload follow-up.",
             )
@@ -830,6 +849,7 @@ def _pipeline_closure_next_action(blocker: str) -> str:
         "target.uploaded": "Run the target upload with --upload-target --target-execute --confirm-upload after the package and torrent candidate are ready.",
         "target.downloaded": "Download the generated target torrent with --download-uploaded-torrent after live upload succeeds.",
         "target.injected": "Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path.",
+        "target.seeding": "Wait for the injected target torrent to become complete in qBittorrent with --wait-uploaded-complete.",
     }
     return mapping.get(blocker, f"Resolve closure blocker: {blocker}")
 
@@ -851,11 +871,13 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     target_upload_result = target_upload.get("result") if target_upload and isinstance(target_upload.get("result"), dict) else {}
     downloaded_torrent = target_upload_result.get("downloaded_torrent") if isinstance(target_upload_result, dict) else None
     injected_torrent = target_upload_result.get("injected_torrent") if isinstance(target_upload_result, dict) else None
+    uploaded_wait = target_upload_result.get("uploaded_wait") if isinstance(target_upload_result, dict) else None
     source_downloaded = _stage_completed(source_download)
     source_injected = _source_injection_verified(inject_source)
     source_complete = _stage_completed(wait_complete)
     source_matched = _match_stage_has_match(match)
     target_injected = _injected_torrent_verified(injected_torrent)
+    target_seeding = target_injected and (not isinstance(uploaded_wait, dict) or bool(uploaded_wait.get("complete")))
     injected_target_hash = _torrent_hash_from_result(injected_torrent)
     uploaded_target_hash = target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None
     source = {
@@ -875,6 +897,8 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "downloaded": isinstance(downloaded_torrent, dict),
         "injected": target_injected,
         "injection_verified": target_injected,
+        "seeding": target_seeding,
+        "uploaded_wait": uploaded_wait if isinstance(uploaded_wait, dict) else None,
         "torrent_file": target_torrent_file,
         "uploaded_torrent_hash": uploaded_target_hash or injected_target_hash,
         "injected_torrent_hash": injected_target_hash,
@@ -897,7 +921,10 @@ def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[st
         ("target.downloaded", target.get("downloaded")),
         ("target.injected", target.get("injected")),
     ]
-    return [name for name, ok in checks if not ok]
+    blockers = [name for name, ok in checks if not ok]
+    if target.get("injected") and not target.get("seeding"):
+        blockers.append("target.seeding")
+    return blockers
 
 
 def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
@@ -915,11 +942,13 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "content_path": source.get("content_path"),
         },
         "target": {
-            "ready": bool(target.get("prepared") and target.get("uploaded") and target.get("downloaded") and target.get("injected")),
+            "ready": bool(target.get("prepared") and target.get("uploaded") and target.get("downloaded") and target.get("injected") and target.get("seeding")),
             "torrent_file": target.get("torrent_file"),
             "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
             "injected_torrent_hash": target.get("injected_torrent_hash"),
             "injection_verified": bool(target.get("injection_verified")),
+            "seeding_verified": bool(target.get("seeding")),
+            "uploaded_wait": target.get("uploaded_wait"),
             "uploaded_torrent_path": target.get("uploaded_torrent_path"),
         },
     }
@@ -1107,7 +1136,10 @@ async def _target_upload_with_config(
             args.uploaded_qbit_tags,
             args.uploaded_paused,
         )
-        return _with_uploaded_injection(result, inject_result)
+        injected_payload = _with_uploaded_injection(result, inject_result)
+        if args.wait_uploaded_complete:
+            return await _with_uploaded_wait(config, args, injected_payload, uploaded_save_path)
+        return injected_payload
     return result
 
 
@@ -1137,6 +1169,21 @@ def _with_uploaded_injection(result: dict[str, Any], inject_result: dict[str, An
         if isinstance(downloaded_torrent, dict):
             payload["downloaded_torrent"] = {**downloaded_torrent, "hash": uploaded_torrent_hash}
     return payload
+
+
+async def _with_uploaded_wait(config: dict[str, Any], args: argparse.Namespace, result: dict[str, Any], uploaded_save_path: str | None) -> dict[str, Any]:
+    uploaded_torrent_hash = _torrent_hash_from_result(result.get("injected_torrent")) or _normalize_torrent_hash(result.get("uploaded_torrent_hash"))
+    if not uploaded_torrent_hash:
+        return {**result, "uploaded_wait": {"complete": False, "blockers": ["uploaded torrent hash is unavailable for qBittorrent completion wait."]}}
+    wait_result = await _wait_complete_with_config(
+        config,
+        args.client,
+        content_path=uploaded_save_path,
+        torrent_hash=uploaded_torrent_hash,
+        timeout=args.uploaded_wait_timeout,
+        interval=args.uploaded_wait_interval,
+    )
+    return {**result, "uploaded_wait": wait_result}
 
 
 async def _qbit_connection_check(config: dict[str, Any], client_name: str) -> dict[str, Any]:
@@ -1470,7 +1517,7 @@ def _rule_check_blockers(rule_check: dict[str, Any]) -> list[str]:
     return blockers or ["Executable rule check did not pass."]
 
 
-def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, download_uploaded: bool, inject_uploaded: bool) -> bool:
+def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, download_uploaded: bool, inject_uploaded: bool, wait_uploaded_complete: bool = False) -> bool:
     if payload.get("status") not in {"ready", "uploaded"}:
         return False
     if payload.get("blockers"):
@@ -1481,7 +1528,11 @@ def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, downl
         return False
     if inject_uploaded:
         injected_torrent = payload.get("injected_torrent")
-        return _injected_torrent_verified(injected_torrent)
+        if not _injected_torrent_verified(injected_torrent):
+            return False
+    if wait_uploaded_complete:
+        uploaded_wait = payload.get("uploaded_wait")
+        return isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete"))
     return True
 
 
@@ -1507,6 +1558,7 @@ def _pipeline_has_action(args: argparse.Namespace) -> bool:
         "write_payload",
         "download_uploaded_torrent",
         "inject_uploaded_torrent",
+        "wait_uploaded_complete",
     )
     return any(bool(getattr(args, name, False)) for name in action_names)
 
@@ -1519,6 +1571,7 @@ def _target_upload_exit_code(args: argparse.Namespace, payload: dict[str, Any]) 
         execute=True,
         download_uploaded=bool(getattr(args, "download_uploaded_torrent", False)),
         inject_uploaded=bool(getattr(args, "inject_uploaded_torrent", False)),
+        wait_uploaded_complete=bool(getattr(args, "wait_uploaded_complete", False)),
     ):
         return 0
     return 1
