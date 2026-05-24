@@ -905,7 +905,21 @@ def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
         {"stage": "rule-check", "ok": True, "result": {"ready": True, "checks": [{"name": "rules_acknowledged", "ok": True, "message": "ok"}]}},
         {"stage": "source-download", "ok": True, "skipped": True, "message": "--download-source not provided; source download skipped."},
         {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
-        {"stage": "target-prepare", "ok": True, "result": {"upload_gate": {"ready": True, "dupe_count": 0, "blockers": []}, "rule_review": {"rule_check_ready": True, "blockers": []}}},
+        {
+            "stage": "target-prepare",
+            "ok": True,
+            "result": {
+                "upload_gate": {"ready": True, "dupe_count": 0, "blockers": []},
+                "rule_review": {
+                    "rule_check_ready": True,
+                    "blockers": [],
+                    "rule_obligations": [
+                        {"tracker": "U2", "role": "source", "action": "download_and_retorrent", "rules_url": "https://u2.dmhy.org/rules.php", "acknowledged": True},
+                        {"tracker": "MTEAM", "role": "target", "action": "upload_and_seed", "rules_url": "https://kp.m-team.cc/rules", "acknowledged": True},
+                    ],
+                },
+            },
+        },
         {"stage": "target-upload", "ok": False, "error": "Target upload stage did not complete every requested upload follow-up."},
     ]
     closure = {
@@ -928,8 +942,25 @@ def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
     assert summary["gates"]["rule_check"]["rules_acknowledged"] is True
     assert summary["gates"]["duplicate_check"]["ok"] is True
     assert summary["gates"]["upload_gate"]["ready"] is True
+    assert summary["gates"]["rule_review"]["rule_obligations"]["ready"] is True
+    assert summary["gates"]["rule_review"]["rule_obligations"]["source_acknowledged"] is True
+    assert summary["gates"]["rule_review"]["rule_obligations"]["mteam_acknowledged"] is True
     assert summary["resume"]["used"] is False
     assert summary["source"]["mode"] == "matched"
+
+
+def test_pipeline_gate_summary_reports_missing_rule_obligations() -> None:
+    summary = ptcli_cli._pipeline_gate_summary(
+        [
+            {"stage": "target-prepare", "ok": True, "result": {"rule_review": {"rule_check_ready": True, "blockers": [], "rule_obligations": []}}},
+        ]
+    )
+
+    obligations = summary["rule_review"]["rule_obligations"]
+    assert obligations["ready"] is False
+    assert obligations["missing"] == ["source_download_and_retorrent", "mteam_upload_and_seed"]
+    assert obligations["source_acknowledged"] is False
+    assert obligations["mteam_acknowledged"] is False
 
 
 def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:

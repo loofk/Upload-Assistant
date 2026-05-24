@@ -1116,8 +1116,47 @@ def _pipeline_gate_summary(stages: list[dict[str, Any]]) -> dict[str, Any]:
         "rule_review": {
             "ready": bool(rule_review.get("rule_check_ready")) if isinstance(rule_review, dict) else False,
             "blockers": rule_review.get("blockers", []) if isinstance(rule_review, dict) else [],
+            "rule_obligations": _rule_obligation_summary(rule_review),
         },
     }
+
+
+def _rule_obligation_summary(rule_review: Any) -> dict[str, Any]:
+    obligations = rule_review.get("rule_obligations") if isinstance(rule_review, dict) else None
+    if not isinstance(obligations, list):
+        return {
+            "ready": False,
+            "count": 0,
+            "source_acknowledged": False,
+            "mteam_acknowledged": False,
+            "missing": ["source_download_and_retorrent", "mteam_upload_and_seed"],
+        }
+    source_acknowledged = _rule_obligation_acknowledged(obligations, role="source", action="download_and_retorrent")
+    mteam_acknowledged = _rule_obligation_acknowledged(obligations, role="target", action="upload_and_seed", tracker="MTEAM")
+    missing = []
+    if not source_acknowledged:
+        missing.append("source_download_and_retorrent")
+    if not mteam_acknowledged:
+        missing.append("mteam_upload_and_seed")
+    return {
+        "ready": not missing,
+        "count": len([obligation for obligation in obligations if isinstance(obligation, dict)]),
+        "source_acknowledged": source_acknowledged,
+        "mteam_acknowledged": mteam_acknowledged,
+        "missing": missing,
+    }
+
+
+def _rule_obligation_acknowledged(obligations: list[Any], *, role: str, action: str, tracker: str | None = None) -> bool:
+    return any(
+        isinstance(obligation, dict)
+        and obligation.get("role") == role
+        and obligation.get("action") == action
+        and (tracker is None or obligation.get("tracker") == tracker)
+        and bool(obligation.get("rules_url"))
+        and obligation.get("acknowledged") is True
+        for obligation in obligations
+    )
 
 
 def _failed_check_messages(checks: Any) -> list[str]:
