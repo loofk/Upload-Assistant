@@ -4196,6 +4196,16 @@ def test_mteam_rule_review_records_site_rule_obligations() -> None:
 
     review = build_mteam_rule_review(stages, accept_rules=True)
 
+    assert review["manual_review"] == {
+        "required": True,
+        "acknowledged": True,
+        "source_tracker": "U2",
+        "target_trackers": ["MTEAM"],
+        "obligation_count": 2,
+        "rules_urls": ["https://kp.m-team.cc/rules", "https://u2.dmhy.org/rules.php"],
+        "site_specific_rules_encoded": False,
+        "message": "Manual source/target rule review has been acknowledged.",
+    }
     assert review["rule_obligations"] == [
         {
             "tracker": "U2",
@@ -4220,6 +4230,8 @@ def test_mteam_rule_review_blocks_without_ack() -> None:
     review = build_mteam_rule_review(mteam_ready_stages(), accept_rules=False)
 
     assert review["rules_acknowledged"] is False
+    assert review["manual_review"]["acknowledged"] is False
+    assert review["manual_review"]["site_specific_rules_encoded"] is False
     assert any("rules_acknowledged" in blocker for blocker in review["blockers"])
 
 

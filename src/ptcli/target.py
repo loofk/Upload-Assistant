@@ -385,6 +385,7 @@ def build_mteam_rule_review(stages: list[dict[str, Any]], accept_rules: bool) ->
     rule_stage = _find_stage(stages, "rule-check")
     rule_result = rule_stage.get("result", {}) if rule_stage else {}
     rule_checks = rule_result.get("checks") if isinstance(rule_result, dict) else []
+    rule_obligations = rule_result.get("rule_obligations") if isinstance(rule_result, dict) else []
     failed_checks = [check for check in rule_checks if isinstance(check, dict) and not check.get("ok")] if isinstance(rule_checks, list) else []
     blockers = [f"{check.get('name', 'rule_check')}: {check.get('message', 'Executable rule check did not pass.')}" for check in failed_checks]
     if not accept_rules:
@@ -396,9 +397,24 @@ def build_mteam_rule_review(stages: list[dict[str, Any]], accept_rules: bool) ->
         "source_tracker": rule_result.get("source_tracker") if isinstance(rule_result, dict) else None,
         "target_trackers": rule_result.get("target_trackers") if isinstance(rule_result, dict) else [],
         "rule_profiles": rule_result.get("rule_profiles") if isinstance(rule_result, dict) else [],
-        "rule_obligations": rule_result.get("rule_obligations") if isinstance(rule_result, dict) else [],
+        "rule_obligations": rule_obligations if isinstance(rule_obligations, list) else [],
+        "manual_review": _manual_rule_review_summary(rule_result, rule_obligations, accept_rules),
         "checks": rule_checks if isinstance(rule_checks, list) else [],
         "blockers": blockers,
+    }
+
+
+def _manual_rule_review_summary(rule_result: dict[str, Any], rule_obligations: Any, accept_rules: bool) -> dict[str, Any]:
+    obligations = rule_obligations if isinstance(rule_obligations, list) else []
+    return {
+        "required": True,
+        "acknowledged": accept_rules,
+        "source_tracker": rule_result.get("source_tracker"),
+        "target_trackers": rule_result.get("target_trackers") if isinstance(rule_result.get("target_trackers"), list) else [],
+        "obligation_count": len([obligation for obligation in obligations if isinstance(obligation, dict)]),
+        "rules_urls": sorted({str(obligation.get("rules_url")) for obligation in obligations if isinstance(obligation, dict) and obligation.get("rules_url")}),
+        "site_specific_rules_encoded": False,
+        "message": "Manual source/target rule review has been acknowledged." if accept_rules else "Manual source/target rule review is required before live upload.",
     }
 
 
@@ -579,6 +595,8 @@ def _mteam_rule_obligation_review(rule_review: dict[str, Any]) -> dict[str, Any]
 
 def _rule_obligation_check(name: str, obligations: Any, *, role: str, action: str, tracker: str) -> dict[str, Any]:
     if not isinstance(obligations, list):
+        return {"name": name, "ok": False, "message": "Rule obligations are missing from the MTEAM rule review package."}
+    if not any(isinstance(obligation, dict) for obligation in obligations):
         return {"name": name, "ok": False, "message": "Rule obligations are missing from the MTEAM rule review package."}
     matching = [
         obligation
