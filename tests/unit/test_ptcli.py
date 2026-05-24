@@ -2950,6 +2950,31 @@ def test_target_upload_execute_requires_confirmation_before_config_load(tmp_path
     assert "Config file not found" not in out
 
 
+def test_target_upload_execute_requires_uploaded_torrent_followup_before_config_load(tmp_path, capsys) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = mteam_ready_stages()
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    code = main(["target-upload", "--config", "/missing/config.py", "--package-dir", package["package_dir"], "--torrent-file", str(torrent_file), "--execute", "--confirm-upload", "--json"])
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "download-uploaded-torrent" in out
+    assert "inject-uploaded-torrent" in out
+    assert "Config file not found" not in out
+
+
 @pytest.mark.asyncio
 async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -> None:
     source_info = {
@@ -3060,7 +3085,7 @@ async def test_target_upload_inject_requires_download_flag(tmp_path) -> None:
     result = await ptcli_cli.target_upload_payload(args)
 
     assert result["status"] == "blocked"
-    assert "requires --download-uploaded-torrent" in result["blockers"][0]
+    assert any("requires --download-uploaded-torrent" in blocker for blocker in result["blockers"])
 
 
 @pytest.mark.asyncio

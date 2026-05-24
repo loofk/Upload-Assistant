@@ -498,19 +498,9 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
     if not args.torrent_file:
         return build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
     preflight = build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
-    if preflight["blockers"] or not args.confirm_upload:
-        return await upload_mteam_from_package(
-            {},
-            args.package_dir,
-            args.torrent_file,
-            execute=args.execute,
-            confirm_upload=args.confirm_upload,
-            write_payload=args.write_payload,
-        )
-    if args.inject_uploaded_torrent and not args.download_uploaded_torrent:
-        return {**preflight, "status": "blocked", "blockers": ["--inject-uploaded-torrent requires --download-uploaded-torrent."]}
-    if args.inject_uploaded_torrent and not args.uploaded_save_path:
-        return {**preflight, "status": "blocked", "blockers": ["--uploaded-save-path is required with --inject-uploaded-torrent."]}
+    blockers = [*preflight["blockers"], *_target_upload_execute_blockers(args)]
+    if blockers:
+        return {**preflight, "status": "blocked", "dry_run": False, "blockers": blockers}
     config = load_config(args.config)
     result = await upload_mteam_from_package(
         config,
@@ -535,6 +525,21 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         )
         return _with_uploaded_injection(result, inject_result)
     return result
+
+
+def _target_upload_execute_blockers(args: argparse.Namespace) -> list[str]:
+    blockers: list[str] = []
+    if not args.confirm_upload:
+        blockers.append("MTEAM live upload requires --confirm-upload.")
+    if not args.download_uploaded_torrent:
+        blockers.append("target-upload --execute requires --download-uploaded-torrent so the generated MTEAM torrent can be seeded.")
+    if not args.inject_uploaded_torrent:
+        blockers.append("--inject-uploaded-torrent is required with target-upload --execute for full live retorrent closure.")
+    elif not args.download_uploaded_torrent:
+        blockers.append("--inject-uploaded-torrent requires --download-uploaded-torrent.")
+    elif not args.uploaded_save_path:
+        blockers.append("--uploaded-save-path is required with --inject-uploaded-torrent.")
+    return blockers
 
 
 async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
