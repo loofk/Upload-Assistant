@@ -217,6 +217,9 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert "--package-dir" in out
     assert '"stage": "resume-uploaded-torrent"' in out
     assert "--uploaded-torrent-file" in out
+    assert '"stage": "resume-uploaded-torrent-download"' in out
+    assert "--uploaded-torrent-id <id>" in out
+    assert "--download-uploaded-torrent" in out
     assert '"stage": "doctor-live"' in out
     assert "--target-execute --confirm-upload" in out
     assert "--package-dir ./tmp/target/U2-123-to-MTEAM" in out
@@ -269,6 +272,14 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
     assert "--wait-uploaded-complete" in resume_uploaded
     assert "--uploaded-qbit-category MTEAM" in resume_uploaded
     assert "--uploaded-qbit-tags retorrent" in resume_uploaded
+
+    resume_uploaded_download = commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-torrent-id <id>" in resume_uploaded_download
+    assert "--download-uploaded-torrent" in resume_uploaded_download
+    assert "--inject-uploaded-torrent" in resume_uploaded_download
+    assert "--wait-uploaded-complete" in resume_uploaded_download
+    assert "--uploaded-qbit-category MTEAM" in resume_uploaded_download
+    assert "--uploaded-qbit-tags retorrent" in resume_uploaded_download
 
 
 def test_retorrent_execute_blocked_returns_nonzero(capsys, tmp_path) -> None:
