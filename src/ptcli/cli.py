@@ -1896,7 +1896,6 @@ def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trac
     target_trackers_arg = ",".join(target_trackers)
     retorrent_path_arg = f"--path {json.dumps(content_path, ensure_ascii=False)}" if content_path else '--save-path "/downloads"'
     doctor_path_arg = f"--path {json.dumps(content_path, ensure_ascii=False)}" if content_path else '--uploaded-save-path "/downloads"'
-    uploaded_save_path_arg = f"--uploaded-save-path {json.dumps(content_path, ensure_ascii=False)}" if content_path else '--uploaded-save-path "/downloads"'
     commands = [
         {
             "stage": "source-info",
@@ -1916,11 +1915,11 @@ def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trac
         },
         {
             "stage": "resume-target-package",
-            "command": f"python3 ptcli.py pipeline --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} --package-dir ./tmp/target/{source_tracker}-{source_torrent_id}-to-{target_trackers_arg} --upload-target --target-torrent-file ./tmp/exported/mteam.torrent --accept-rules --target-execute --confirm-upload {uploaded_save_path_arg} --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json",
+            "command": f"python3 ptcli.py pipeline --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} --package-dir ./tmp/target/{source_tracker}-{source_torrent_id}-to-{target_trackers_arg} --upload-target --target-torrent-file ./tmp/exported/mteam.torrent --accept-rules --target-execute --confirm-upload --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json",
         },
         {
             "stage": "resume-uploaded-torrent",
-            "command": f"python3 ptcli.py target-upload --package-dir ./tmp/target/{source_tracker}-{source_torrent_id}-to-{target_trackers_arg} --uploaded-torrent-file ./tmp/uploaded/MTEAM-<id>.torrent --inject-uploaded-torrent {uploaded_save_path_arg} --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --wait-uploaded-complete --json",
+            "command": f"python3 ptcli.py target-upload --package-dir ./tmp/target/{source_tracker}-{source_torrent_id}-to-{target_trackers_arg} --uploaded-torrent-file ./tmp/uploaded/MTEAM-<id>.torrent --inject-uploaded-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --wait-uploaded-complete --json",
         },
         {
             "stage": "doctor-live",
