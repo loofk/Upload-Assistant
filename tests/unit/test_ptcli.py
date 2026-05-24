@@ -139,6 +139,7 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert '"stage": "retorrent-execute"' in out
     assert "--execute --accept-rules --confirm-upload" in out
     assert "--uploaded-qbit-category MTEAM" in out
+    assert "--write-summary" in out
 
 
 def test_retorrent_execute_blocked_returns_nonzero(capsys, tmp_path) -> None:
