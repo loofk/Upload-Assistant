@@ -139,6 +139,8 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--connect-qbit", action="store_true", help="Probe qBittorrent connectivity by listing one torrent.")
     doctor.add_argument("--probe-source", action="store_true", help="Probe source tracker metadata lookup with the configured credentials/cookies.")
     doctor.add_argument("--probe-target", action="store_true", help="Probe MTEAM target duplicate-search API with the source metadata signal.")
+    doctor.add_argument("--write-summary", action="store_true", help="Write ptcli-doctor-summary.json for live-readiness audit handoff.")
+    doctor.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --package-dir or ./tmp/retorrent-runs.")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     pipeline = subparsers.add_parser("pipeline", help="Run a read-only dry-run pipeline: flow-check, source-info, and optional qBittorrent match.")
@@ -544,6 +546,9 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
         live_checks.append(await _target_connection_check(config, args.target_trackers, source_probe_info))
     if live_checks:
         payload = extend_doctor_check(payload, live_checks, target_execute=args.target_execute)
+    if getattr(args, "write_summary", False):
+        summary_file = _write_doctor_summary(payload, args.summary_output_dir or args.package_dir)
+        payload = {**payload, "summary_file": summary_file}
     return payload
 
 
@@ -628,6 +633,14 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
         "preflight": preflight,
         "result": result,
     }
+    destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return str(destination)
+
+
+def _write_doctor_summary(payload: dict[str, Any], output_dir: str | None) -> str:
+    destination_dir = Path(output_dir).expanduser() if output_dir else Path("./tmp/retorrent-runs").expanduser()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / "ptcli-doctor-summary.json"
     destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return str(destination)
 

@@ -1657,6 +1657,46 @@ def test_doctor_command_outputs_json(monkeypatch, tmp_path, capsys) -> None:
     assert '"live_safe_to_attempt"' in out
 
 
+def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    summary_dir = tmp_path / "doctor-summary"
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    code = main(
+        [
+            "doctor",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--write-summary",
+            "--summary-output-dir",
+            str(summary_dir),
+            "--json",
+        ]
+    )
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"summary_file"' in out
+    summary_path = summary_dir / "ptcli-doctor-summary.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["flow_check"]["ready"] is True
+    assert payload["live_safe_to_attempt"] is False
+    assert isinstance(payload["checks"], list)
+
+
 def test_doctor_command_can_probe_qbit_connection(monkeypatch, tmp_path, capsys) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
