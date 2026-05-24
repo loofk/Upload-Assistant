@@ -116,6 +116,8 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--inject-uploaded-torrent", action="store_true", help="Check follow-up qBittorrent injection after target upload.")
     doctor.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
     doctor.add_argument("--connect-qbit", action="store_true", help="Probe qBittorrent connectivity by listing one torrent.")
+    doctor.add_argument("--probe-source", action="store_true", help="Probe source tracker metadata lookup with the configured credentials/cookies.")
+    doctor.add_argument("--probe-target", action="store_true", help="Probe MTEAM target duplicate-search API with the source metadata signal.")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     pipeline = subparsers.add_parser("pipeline", help="Run a read-only dry-run pipeline: flow-check, source-info, and optional qBittorrent match.")
@@ -416,8 +418,18 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
         inject_uploaded_torrent=args.inject_uploaded_torrent,
         uploaded_save_path=args.uploaded_save_path,
     )
+    live_checks = []
     if args.connect_qbit:
-        payload = extend_doctor_check(payload, [await _qbit_connection_check(config, args.client)], target_execute=args.target_execute)
+        live_checks.append(await _qbit_connection_check(config, args.client))
+    source_probe_info = None
+    if args.probe_source or args.probe_target:
+        source_probe = await _source_connection_check(config, args.source_tracker, args.source_id, args.base_dir)
+        live_checks.append(source_probe["check"])
+        source_probe_info = source_probe.get("source")
+    if args.probe_target:
+        live_checks.append(await _target_connection_check(config, args.target_trackers, source_probe_info))
+    if live_checks:
+        payload = extend_doctor_check(payload, live_checks, target_execute=args.target_execute)
     return payload
 
 
@@ -813,6 +825,41 @@ async def _qbit_connection_check(config: dict[str, Any], client_name: str) -> di
         "name": "qbit.connection",
         "ok": True,
         "message": f"qBittorrent connection ok: {resolved_client_name}, sample_count={len(torrents)}",
+    }
+
+
+async def _source_connection_check(config: dict[str, Any], source_tracker: str, source_id: str, base_dir: str | None) -> dict[str, Any]:
+    try:
+        source_info = await fetch_source_info(config, source_tracker, source_id, base_dir=base_dir)
+    except Exception as exc:
+        return {"check": {"name": "source.connection", "ok": False, "message": str(exc)}, "source": None}
+    ok = source_info_has_signal(source_info)
+    source_payload = source_info.to_dict()
+    return {
+        "check": {
+            "name": "source.connection",
+            "ok": ok,
+            "message": f"Source metadata probe ok: {source_payload.get('tracker')} #{source_payload.get('torrent_id')}" if ok else "Source metadata probe returned no usable signal.",
+        },
+        "source": source_payload,
+    }
+
+
+async def _target_connection_check(config: dict[str, Any], target_trackers_raw: str, source_info: dict[str, Any] | None) -> dict[str, Any]:
+    target_trackers = parse_tracker_list(target_trackers_raw)
+    if "MTEAM" not in target_trackers:
+        return {"name": "target.connection", "ok": False, "message": "Only MTEAM target API probe is implemented."}
+    if not source_info:
+        return {"name": "target.connection", "ok": False, "message": "Source metadata is required before probing MTEAM target API."}
+    try:
+        result = await search_mteam_duplicates(config, source_info)
+    except Exception as exc:
+        return {"name": "target.connection", "ok": False, "message": str(exc)}
+    searched = bool(result.get("searched"))
+    return {
+        "name": "target.connection",
+        "ok": searched,
+        "message": f"MTEAM duplicate-search probe ok, dupes={result.get('count', 0)}" if searched else str(result.get("reason") or "MTEAM duplicate-search probe did not run."),
     }
 
 

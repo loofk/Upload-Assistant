@@ -504,6 +504,39 @@ def test_doctor_command_can_probe_qbit_connection(monkeypatch, tmp_path, capsys)
     assert "connected: default" in out
 
 
+def test_doctor_command_can_probe_source_and_target(monkeypatch, tmp_path, capsys) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_source_connection_check(_config, source_tracker, source_id, base_dir):
+        _ = base_dir
+        return {
+            "check": {"name": "source.connection", "ok": True, "message": f"source ok: {source_tracker} {source_id}"},
+            "source": {"tracker": source_tracker, "torrent_id": source_id, "imdb_id": 1234567},
+        }
+
+    async def fake_target_connection_check(_config, target_trackers, source_info):
+        return {"name": "target.connection", "ok": True, "message": f"target ok: {target_trackers} tt{source_info['imdb_id']}"}
+
+    monkeypatch.setattr(ptcli_cli, "_source_connection_check", fake_source_connection_check)
+    monkeypatch.setattr(ptcli_cli, "_target_connection_check", fake_target_connection_check)
+
+    code = main(["doctor", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--base-dir", str(tmp_path), "--probe-source", "--probe-target", "--json"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"name": "source.connection"' in out
+    assert '"name": "target.connection"' in out
+    assert "target ok: MTEAM tt1234567" in out
+
+
 @pytest.mark.asyncio
 async def test_qbit_connection_check_reports_failure() -> None:
     payload = await ptcli_cli._qbit_connection_check({"TORRENT_CLIENTS": {}}, "default")
@@ -511,6 +544,15 @@ async def test_qbit_connection_check_reports_failure() -> None:
     assert payload["name"] == "qbit.connection"
     assert payload["ok"] is False
     assert "DEFAULT" in payload["message"] or "Torrent client" in payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_target_connection_check_requires_source_info() -> None:
+    payload = await ptcli_cli._target_connection_check({}, "MTEAM", None)
+
+    assert payload["name"] == "target.connection"
+    assert payload["ok"] is False
+    assert "Source metadata" in payload["message"]
 
 
 @pytest.mark.asyncio

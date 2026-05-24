@@ -19,6 +19,7 @@ python3 ptcli.py source-download --tracker CHD --source-id 12345 --output-dir ./
 python3 ptcli.py flow-check --from U2 --source-id 60635 --to MTEAM --json
 python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --path /downloads/movie --package-dir ./tmp/target/U2-60635-to-MTEAM --target-torrent-file ./tmp/exported/mteam.torrent --accept-rules --target-execute --confirm-upload --download-uploaded-torrent --inject-uploaded-torrent --uploaded-save-path /downloads/movie --json
 python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --connect-qbit --json
+python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --probe-source --probe-target --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path /downloads/movie --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --output-dir ./tmp/source --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path /downloads --json
@@ -72,7 +73,7 @@ python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --ac
 - `source-info`: 首批支持 `U2` / `CHD` / `MTEAM` 的源站详情读取。
 - `source-download`: 首批支持 `U2` / `CHD` / `MTEAM` 的源种下载。
 - `flow-check`: 本地检查 U2/CHD → MTEAM 参考流所需配置、cookie 和 qBittorrent client。
-- `doctor`: live 前 checklist，检查 flow/config/cookie/qBittorrent、路径、目标站准备包、MTEAM upload gate、确认参数和后续下载/注入条件；`--connect-qbit` 会真实连接 qBittorrent 并读取一个任务作为盒子连通性探针。
+- `doctor`: live 前 checklist，检查 flow/config/cookie/qBittorrent、路径、目标站准备包、MTEAM upload gate、确认参数和后续下载/注入条件；`--connect-qbit` 会真实连接 qBittorrent 并读取一个任务作为盒子连通性探针；`--probe-source/--probe-target` 会显式探测源站详情读取和 MTEAM 查重 API。
 - `pipeline`: 串联 `flow-check`、`source-info`、可选 `source-download`、可选 `inject-source`、可选 `wait-complete`、可选 `match`、可选 `target-dupe-check`、可选 `target-prepare`、可选 `target-torrent-export` 和可选 `target-upload`；默认不下载、不注入、不等待、不上传；当未显式传 `--path` 时，可从完成的 QB match 结果推导后续内容路径；`--export-target-torrent` 可从匹配 QB 任务导出目标上传种子候选。
 - `target-prepare`: 目前生成 MTEAM dry-run preview、meta draft、field mapping、description draft 和 upload gate 文件，不调用上传接口。
 - `target-dupe-check`: 可选调用 MTEAM API 按 IMDb 查重；没有 IMDb ID 时明确阻断。
