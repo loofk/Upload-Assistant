@@ -172,6 +172,7 @@ class QbitReadOnlyService:
 
         await asyncio.to_thread(client.torrents_add, **add_kwargs)
         client_matches, verification_attempts = await self._wait_for_added_torrent(torrent_hash, verify_timeout, verify_interval)
+        client_verification = _added_torrent_client_verification(client_matches, save_path=save_path, category=category, tags=tags)
         return {
             "torrent_path": str(resolved_torrent_path),
             "hash": torrent_hash,
@@ -182,6 +183,7 @@ class QbitReadOnlyService:
             "skip_checking": skip_checking,
             "verification_attempts": verification_attempts,
             "verified_in_client": bool(client_matches),
+            "client_verification": client_verification,
             "client_matches": summaries_to_dicts(client_matches),
         }
 
@@ -266,6 +268,46 @@ def _read_torrent_payload(torrent_path: str) -> tuple[Path, bytes, str]:
     torrent_bytes = resolved_torrent_path.read_bytes()
     torrent = Torrent.read(str(resolved_torrent_path), validate=False)
     return resolved_torrent_path, torrent_bytes, str(torrent.infohash)
+
+
+def _added_torrent_client_verification(
+    matches: list[QbitTorrentSummary],
+    *,
+    save_path: str,
+    category: str | None,
+    tags: str | None,
+) -> dict[str, Any]:
+    requested_tags = _tag_set(tags)
+    return {
+        "visible": bool(matches),
+        "save_path_matched": any(_torrent_matches_save_path(match, save_path) for match in matches),
+        "category_matched": category is None or any(match.category == category for match in matches),
+        "tags_matched": not requested_tags or any(requested_tags.issubset(_tag_set(match.tags)) for match in matches),
+        "requested": {
+            "save_path": save_path,
+            "category": category,
+            "tags": tags,
+        },
+        "observed": summaries_to_dicts(matches),
+    }
+
+
+def _torrent_matches_save_path(torrent: QbitTorrentSummary, save_path: str) -> bool:
+    normalized_save_path = os.path.normpath(save_path)
+    candidates = [torrent.save_path, torrent.content_path]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        normalized_candidate = os.path.normpath(candidate)
+        if normalized_candidate == normalized_save_path or normalized_candidate.startswith(f"{normalized_save_path}{os.sep}"):
+            return True
+    return False
+
+
+def _tag_set(tags: str | None) -> set[str]:
+    if not tags:
+        return set()
+    return {tag.strip() for tag in re.split(r"[,;]", tags) if tag.strip()}
 
 
 def _optional_int(value: Any) -> int | None:

@@ -54,6 +54,22 @@ class FakeQbitClient:
         self.added_kwargs = kwargs
 
 
+class TaggedQbitClient(FakeQbitClient):
+    def torrents_info(self, **kwargs):
+        torrent_hash = kwargs.get("torrent_hashes") or "a" * 40
+        return [
+            {
+                "name": "One",
+                "hash": torrent_hash,
+                "save_path": "/downloads",
+                "content_path": "/downloads/One",
+                "progress": 1.0,
+                "category": "MTEAM",
+                "tags": "retorrent,uploaded",
+            }
+        ]
+
+
 class IncompleteQbitClient(FakeQbitClient):
     def torrents_info(self, **kwargs):
         if kwargs.get("torrent_hashes"):
@@ -5403,6 +5419,11 @@ async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None
     assert result["hash"] == torrent.infohash
     assert result["verified_in_client"] is True
     assert result["verification_attempts"] == 1
+    assert result["client_verification"]["visible"] is True
+    assert result["client_verification"]["save_path_matched"] is True
+    assert result["client_verification"]["category_matched"] is False
+    assert result["client_verification"]["tags_matched"] is False
+    assert result["client_verification"]["requested"] == {"save_path": "/downloads", "category": "pt", "tags": "U2"}
     assert result["client_matches"][0]["hash"] == torrent.infohash
     assert result["category"] == "pt"
     assert result["tags"] == "U2"
@@ -5433,6 +5454,29 @@ async def test_qbit_service_waits_for_added_torrent_visibility(tmp_path) -> None
     assert result["verified_in_client"] is True
     assert result["verification_attempts"] == 3
     assert result["client_matches"][0]["hash"] == torrent.infohash
+
+
+@pytest.mark.asyncio
+async def test_qbit_service_reports_client_verification_for_requested_metadata(tmp_path) -> None:
+    content = tmp_path / "source.mkv"
+    content.write_bytes(b"content")
+    torrent_path = tmp_path / "source.torrent"
+    torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+    torrent.generate()
+    torrent.write(str(torrent_path), overwrite=True)
+    service = QbitReadOnlyService({}, qbit_client=TaggedQbitClient())
+
+    result = await service.add_torrent_file(
+        torrent_path=str(torrent_path),
+        save_path="/downloads",
+        category="MTEAM",
+        tags="retorrent",
+    )
+
+    assert result["client_verification"]["visible"] is True
+    assert result["client_verification"]["save_path_matched"] is True
+    assert result["client_verification"]["category_matched"] is True
+    assert result["client_verification"]["tags_matched"] is True
 
 
 @pytest.mark.asyncio
