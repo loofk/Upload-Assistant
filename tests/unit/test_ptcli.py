@@ -619,6 +619,24 @@ def test_pipeline_next_actions_reports_stage_blockers() -> None:
     assert actions == ["Fix inject-source: --save-path is required when --inject-source is used."]
 
 
+def test_pipeline_next_actions_explain_target_upload_followup_blockers() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--upload-target", "--json"])
+    actions = ptcli_cli._pipeline_next_actions(
+        args,
+        [
+            "target-upload: Target upload stage did not complete every requested upload follow-up.",
+            "target-upload: injected_torrent: qBittorrent refused torrent",
+            "target-upload: uploaded_wait: torrent hash missing",
+        ],
+        {"complete": False},
+    )
+
+    assert any("Inspect target-upload follow-up blockers" in action for action in actions)
+    assert any("--inject-uploaded-torrent" in action and "--uploaded-save-path" in action for action in actions)
+    assert any("--wait-uploaded-complete" in action for action in actions)
+
+
 def test_pipeline_next_actions_reports_closure_blockers() -> None:
     parser = build_parser()
     args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--prepare-target", "--json"])

@@ -1059,7 +1059,10 @@ def _target_package_dir_from_stages(stages: Any) -> str | None:
 
 def _pipeline_next_actions(args: argparse.Namespace, blockers: list[str], closure: dict[str, Any]) -> list[str]:
     if blockers:
-        return [f"Fix {blocker}" for blocker in blockers]
+        actions: list[str] = []
+        for blocker in blockers:
+            _append_unique_string(actions, _pipeline_stage_blocker_next_action(blocker))
+        return actions
     if bool(closure.get("complete")):
         return ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
     closure_blockers = closure.get("blockers") if isinstance(closure.get("blockers"), list) else []
@@ -1067,6 +1070,22 @@ def _pipeline_next_actions(args: argparse.Namespace, blockers: list[str], closur
         return ["Provide --path for already completed content, or run with --download-source --inject-source --save-path and --wait-complete before target upload."]
     actions = [_pipeline_closure_next_action(str(blocker)) for blocker in closure_blockers]
     return [action for action in actions if action]
+
+
+def _pipeline_stage_blocker_next_action(blocker: str) -> str:
+    if blocker.startswith("target-upload: downloaded_torrent:"):
+        return "Fix target torrent download from MTEAM, then re-run target upload follow-up with --download-uploaded-torrent and --inject-uploaded-torrent."
+    if blocker.startswith("target-upload: injected_torrent:"):
+        return "Fix qBittorrent target torrent injection, then re-run with --inject-uploaded-torrent and a valid --uploaded-save-path."
+    if blocker.startswith("target-upload: uploaded_wait:"):
+        return "Verify the uploaded target torrent is in qBittorrent, then re-run with --wait-uploaded-complete or inspect qBittorrent by the uploaded torrent hash."
+    if blocker.startswith("target-upload: Target upload stage did not complete every requested upload follow-up."):
+        return "Inspect target-upload follow-up blockers, then retry the failed MTEAM torrent download, qBittorrent injection, or uploaded completion wait."
+    if "target-prepare" in blocker and ("rules_acknowledged" in blocker or "rule" in blocker):
+        return "Review the tracker rules, then re-run with --accept-rules only if the transfer complies with the source and target site rules."
+    if "target-prepare" in blocker and "duplicate_check" in blocker:
+        return "Run target duplicate checking with --check-dupes and stop if MTEAM reports an existing torrent."
+    return f"Fix {blocker}"
 
 
 def _pipeline_closure_next_action(blocker: str) -> str:
