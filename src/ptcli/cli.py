@@ -14,6 +14,7 @@ from typing import Any
 
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
+from src.ptcli.doctor import build_doctor_check
 from src.ptcli.flows import flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
@@ -97,6 +98,24 @@ def build_parser() -> argparse.ArgumentParser:
     flow_check.add_argument("--client", default="default", help="Configured qBittorrent client name, defaults to config default.")
     flow_check.add_argument("--base-dir", help="Project/base directory used for cookies, defaults to current directory.")
     flow_check.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
+    doctor = subparsers.add_parser("doctor", help="Run a live-readiness checklist before executing a retorrent workflow.")
+    doctor.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
+    doctor.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code.")
+    doctor.add_argument("--source-id", required=True, help="Source tracker torrent id or details URL.")
+    doctor.add_argument("--to", dest="target_trackers", required=True, help="Target tracker codes, comma-separated.")
+    doctor.add_argument("--client", default="default", help="Configured qBittorrent client name, defaults to config default.")
+    doctor.add_argument("--base-dir", help="Project/base directory used for cookies, defaults to current directory.")
+    doctor.add_argument("--path", dest="content_path", help="Existing local content path on the seedbox.")
+    doctor.add_argument("--package-dir", help="Directory created by pipeline --prepare-target.")
+    doctor.add_argument("--target-torrent-file", help="MTEAM .torrent file intended for target upload.")
+    doctor.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
+    doctor.add_argument("--target-execute", action="store_true", help="Check readiness for a live target upload.")
+    doctor.add_argument("--confirm-upload", action="store_true", help="Confirm manual rule review and live upload intent.")
+    doctor.add_argument("--download-uploaded-torrent", action="store_true", help="Check follow-up download of the generated MTEAM torrent file.")
+    doctor.add_argument("--inject-uploaded-torrent", action="store_true", help="Check follow-up qBittorrent injection after target upload.")
+    doctor.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
+    doctor.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     pipeline = subparsers.add_parser("pipeline", help="Run a read-only dry-run pipeline: flow-check, source-info, and optional qBittorrent match.")
     pipeline.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
@@ -281,6 +300,27 @@ def build_plan(args: argparse.Namespace) -> RetorrentPlan:
 def flow_check_payload(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config(args.config)
     return build_flow_check(config, args.source_tracker, args.source_id, args.target_trackers, args.client, base_dir=args.base_dir)
+
+
+def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
+    config = load_config(args.config)
+    return build_doctor_check(
+        config,
+        source_tracker=args.source_tracker,
+        source_id=args.source_id,
+        target_trackers=args.target_trackers,
+        client=args.client,
+        base_dir=args.base_dir,
+        content_path=args.content_path,
+        package_dir=args.package_dir,
+        target_torrent_file=args.target_torrent_file,
+        accept_rules=args.accept_rules,
+        target_execute=args.target_execute,
+        confirm_upload=args.confirm_upload,
+        download_uploaded_torrent=args.download_uploaded_torrent,
+        inject_uploaded_torrent=args.inject_uploaded_torrent,
+        uploaded_save_path=args.uploaded_save_path,
+    )
 
 
 async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -785,6 +825,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "flow-check":
             _print_payload(_with_captured_stdout(lambda: flow_check_payload(args), json_output), json_output)
+            return 0
+
+        if args.command == "doctor":
+            _print_payload(_with_captured_stdout(lambda: doctor_payload(args), json_output), json_output)
             return 0
 
         if args.command == "pipeline":

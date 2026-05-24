@@ -4,6 +4,7 @@ import src.ptcli.cli as ptcli_cli
 from src.ptcli.cli import _with_captured_stdout, build_parser, build_plan, main
 from src.ptcli.config import resolve_client_config
 from src.ptcli.credentials import build_flow_check
+from src.ptcli.doctor import build_doctor_check
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summarize_torrent
 from src.ptcli.source import create_source_meta, extract_torrent_id, source_info_from_tuple
@@ -249,6 +250,106 @@ def test_flow_check_reports_missing_cookie(tmp_path) -> None:
 
     assert payload["ready"] is False
     assert any(check["name"] == "CHD.cookie" and check["ok"] is False for check in payload["checks"])
+
+
+def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    content_path = tmp_path / "downloads" / "Name"
+    content_path.mkdir(parents=True)
+    target_torrent = tmp_path / "target.torrent"
+    target_torrent.write_bytes(b"d4:infod")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, str(content_path), str(tmp_path / "target"), accept_rules=True)
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        content_path=str(content_path),
+        package_dir=package["package_dir"],
+        target_torrent_file=str(target_torrent),
+        accept_rules=True,
+        target_execute=True,
+        confirm_upload=True,
+        download_uploaded_torrent=True,
+        inject_uploaded_torrent=True,
+        uploaded_save_path=str(content_path),
+    )
+
+    assert payload["ready"] is True
+    assert payload["live_safe_to_attempt"] is True
+    assert payload["package_preflight"]["status"] == "ready"
+
+
+def test_doctor_reports_blockers_for_missing_package(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        accept_rules=False,
+        target_execute=True,
+        confirm_upload=False,
+    )
+
+    assert payload["ready"] is False
+    assert payload["live_safe_to_attempt"] is False
+    assert any(check["name"] == "rules_acknowledged" and check["ok"] is False for check in payload["checks"])
+    assert any(check["name"] == "target_package" and check["ok"] is False for check in payload["checks"])
+
+
+def test_doctor_command_outputs_json(monkeypatch, tmp_path, capsys) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    code = main(["doctor", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--base-dir", str(tmp_path), "--json"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"flow_check"' in out
+    assert '"live_safe_to_attempt"' in out
 
 
 @pytest.mark.asyncio
