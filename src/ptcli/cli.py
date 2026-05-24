@@ -1552,6 +1552,7 @@ def _target_upload_result_blockers(result: dict[str, Any]) -> list[str]:
     blockers = _string_list(result.get("blockers"))
     _extend_unique_string(blockers, _nested_blockers(result.get("downloaded_torrent"), "downloaded_torrent"))
     _extend_unique_string(blockers, _nested_blockers(result.get("injected_torrent"), "injected_torrent"))
+    _extend_unique_string(blockers, _uploaded_torrent_hash_consistency_blockers(result))
     injected_torrent = result.get("injected_torrent")
     if isinstance(injected_torrent, dict):
         _extend_unique_string(blockers, [f"injected_torrent: {blocker}" for blocker in _client_verification_blockers(injected_torrent.get("client_verification"))])
@@ -1578,6 +1579,35 @@ def _client_verification_blockers(client_verification: Any) -> list[str]:
         "tags_matched": "qBittorrent did not report the requested tags for the injected torrent.",
     }
     return [message for key, message in checks.items() if client_verification.get(key) is False]
+
+
+def _uploaded_torrent_hash_consistency_blockers(result: dict[str, Any]) -> list[str]:
+    hashes = _uploaded_torrent_hash_evidence(result)
+    if len(set(hashes.values())) <= 1:
+        return []
+    evidence = ", ".join(f"{label}={torrent_hash}" for label, torrent_hash in hashes.items())
+    return [f"uploaded_torrent_hash: inconsistent target torrent hashes ({evidence})"]
+
+
+def _uploaded_torrent_hash_evidence(result: dict[str, Any]) -> dict[str, str]:
+    evidence: dict[str, str] = {}
+    response_hash = _normalize_torrent_hash(result.get("uploaded_torrent_hash"))
+    if response_hash:
+        evidence["upload_response"] = response_hash
+    downloaded_hash = _torrent_hash_from_result(result.get("downloaded_torrent"))
+    if downloaded_hash:
+        evidence["downloaded_torrent"] = downloaded_hash
+    injected_hash = _torrent_hash_from_result(result.get("injected_torrent"))
+    if injected_hash:
+        evidence["injected_torrent"] = injected_hash
+    uploaded_wait = result.get("uploaded_wait")
+    if isinstance(uploaded_wait, dict):
+        query = uploaded_wait.get("query")
+        if isinstance(query, dict):
+            wait_hash = _normalize_torrent_hash(query.get("torrent_hash"))
+            if wait_hash:
+                evidence["uploaded_wait"] = wait_hash
+    return evidence
 
 
 def _string_list(value: Any) -> list[str]:
@@ -2358,7 +2388,8 @@ def _with_uploaded_injection(result: dict[str, Any], inject_result: dict[str, An
         payload["uploaded_torrent_hash"] = uploaded_torrent_hash
         downloaded_torrent = payload.get("downloaded_torrent")
         if isinstance(downloaded_torrent, dict):
-            payload["downloaded_torrent"] = {**downloaded_torrent, "hash": uploaded_torrent_hash}
+            downloaded_hash = _torrent_hash_from_result(downloaded_torrent)
+            payload["downloaded_torrent"] = {**downloaded_torrent, "hash": downloaded_hash or uploaded_torrent_hash}
     return payload
 
 
@@ -2730,6 +2761,8 @@ def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, downl
     if payload.get("status") not in {"ready", "uploaded"}:
         return False
     if payload.get("blockers"):
+        return False
+    if _uploaded_torrent_hash_consistency_blockers(payload):
         return False
     if execute and payload.get("status") != "uploaded":
         return False

@@ -1052,6 +1052,17 @@ def test_target_upload_result_accepts_completed_uploaded_torrent_injection() -> 
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is True
 
 
+def test_target_upload_result_requires_uploaded_torrent_hash_consistency() -> None:
+    payload = {
+        "status": "uploaded",
+        "uploaded_torrent_hash": "a" * 40,
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "torrent_hash": "b" * 40},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+    }
+
+    assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
+
+
 def test_target_upload_result_requires_uploaded_torrent_completion_when_requested() -> None:
     payload = {
         "status": "uploaded",
@@ -1101,6 +1112,22 @@ def test_target_upload_summary_surfaces_client_metadata_mismatch() -> None:
     assert summary["ready"] is False
     assert "injected_torrent: qBittorrent did not report the requested save path for the injected torrent." in summary["blockers"]
     assert "injected_torrent: qBittorrent did not report the requested tags for the injected torrent." in summary["blockers"]
+
+
+def test_target_upload_summary_surfaces_uploaded_torrent_hash_mismatch() -> None:
+    payload = {
+        "status": "uploaded",
+        "uploaded_torrent_hash": "a" * 40,
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "torrent_hash": "b" * 40},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "uploaded_wait": {"complete": True, "query": {"torrent_hash": "a" * 40}, "matches": [{"hash": "a" * 40}]},
+    }
+
+    summary = ptcli_cli._target_upload_summary(payload, {"status": "ready", "blockers": [], "rule_obligation_review": {"ready": True, "blockers": []}})
+
+    assert summary["ready"] is False
+    assert "uploaded_torrent_hash: inconsistent target torrent hashes" in summary["blockers"][0]
+    assert f"downloaded_torrent={'b' * 40}" in summary["blockers"][0]
 
 
 def test_target_upload_result_accepts_completed_uploaded_torrent_wait() -> None:
@@ -3996,7 +4023,7 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
     }
     package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path / "target"), accept_rules=True)
     uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
-    uploaded_hash = "b" * 40
+    uploaded_hash = str(Torrent.read(str(uploaded_torrent), validate=False).infohash)
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
