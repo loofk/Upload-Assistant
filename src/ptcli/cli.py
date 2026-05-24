@@ -761,6 +761,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "blockers": blockers,
         "closure": closure,
         "evidence": _pipeline_evidence(closure),
+        "next_actions": _pipeline_next_actions(args, blockers, closure),
         "stages": stages,
     }
 
@@ -797,6 +798,29 @@ def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:
         reason = stage.get("error") or stage.get("message") or "stage did not complete."
         blockers.append(f"{stage_name}: {reason}")
     return blockers
+
+
+def _pipeline_next_actions(args: argparse.Namespace, blockers: list[str], closure: dict[str, Any]) -> list[str]:
+    if blockers:
+        return [f"Fix {blocker}" for blocker in blockers]
+    if bool(closure.get("complete")):
+        return ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
+    closure_blockers = closure.get("blockers") if isinstance(closure.get("blockers"), list) else []
+    if not _pipeline_has_action(args):
+        return ["Provide --path for already completed content, or run with --download-source --inject-source --save-path and --wait-complete before target upload."]
+    actions = [_pipeline_closure_next_action(str(blocker)) for blocker in closure_blockers]
+    return [action for action in actions if action]
+
+
+def _pipeline_closure_next_action(blocker: str) -> str:
+    mapping = {
+        "source.ready": "Complete the source side: use --path for existing qBittorrent content, or use --download-source --inject-source --save-path and --wait-complete.",
+        "target.prepared": "Prepare the target package with --check-dupes --prepare-target --target-output-dir after source content is verified.",
+        "target.uploaded": "Run the target upload with --upload-target --target-execute --confirm-upload after the package and torrent candidate are ready.",
+        "target.downloaded": "Download the generated target torrent with --download-uploaded-torrent after live upload succeeds.",
+        "target.injected": "Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path.",
+    }
+    return mapping.get(blocker, f"Resolve closure blocker: {blocker}")
 
 
 def _find_stage(stages: list[dict[str, Any]], stage_name: str) -> dict[str, Any] | None:

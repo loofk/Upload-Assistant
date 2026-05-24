@@ -589,6 +589,31 @@ def test_pipeline_exit_code_returns_zero_for_ready_action() -> None:
     assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": True}) == 0
 
 
+def test_pipeline_next_actions_reports_stage_blockers() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--inject-source", "--json"])
+    actions = ptcli_cli._pipeline_next_actions(args, ["inject-source: --save-path is required when --inject-source is used."], {"complete": False})
+
+    assert actions == ["Fix inject-source: --save-path is required when --inject-source is used."]
+
+
+def test_pipeline_next_actions_reports_closure_blockers() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--prepare-target", "--json"])
+    actions = ptcli_cli._pipeline_next_actions(args, [], {"complete": False, "blockers": ["source.ready", "target.uploaded"]})
+
+    assert any("--download-source --inject-source --save-path" in action for action in actions)
+    assert any("--upload-target --target-execute --confirm-upload" in action for action in actions)
+
+
+def test_pipeline_next_actions_reports_completed_closure() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--upload-target", "--json"])
+    actions = ptcli_cli._pipeline_next_actions(args, [], {"complete": True, "blockers": []})
+
+    assert actions == ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
+
+
 def test_target_upload_result_requires_requested_uploaded_torrent_injection() -> None:
     payload = {
         "status": "uploaded",
