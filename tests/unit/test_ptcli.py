@@ -1715,6 +1715,25 @@ def test_doctor_command_outputs_json(monkeypatch, tmp_path, capsys) -> None:
     assert '"live_safe_to_attempt"' in out
 
 
+def test_doctor_target_execute_not_live_safe_returns_nonzero(monkeypatch, tmp_path, capsys) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    code = main(["doctor", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--base-dir", str(tmp_path), "--target-execute", "--json"])
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert '"live_safe_to_attempt": false' in out
+    assert '"live_upload_confirmation"' in out
+
+
 def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},

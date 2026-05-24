@@ -1991,7 +1991,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "doctor":
             payload = _with_captured_stdout(lambda: asyncio.run(doctor_payload(args)), json_output)
             _print_payload(payload, json_output)
-            return 0
+            return _doctor_exit_code(args, payload)
 
         if args.command == "pipeline":
             payload = _with_captured_stdout(lambda: asyncio.run(pipeline_payload(args)), json_output)
@@ -2022,6 +2022,12 @@ def _source_download_exit_code(payload: dict[str, Any]) -> int:
     if payload.get("status") == "ok" and not payload.get("blockers"):
         return 0
     return 1
+
+
+def _doctor_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:
+    if not getattr(args, "target_execute", False):
+        return 0
+    return 0 if payload.get("ready") is True and payload.get("live_safe_to_attempt") is True else 1
 
 
 def _rule_check_blockers(rule_check: dict[str, Any]) -> list[str]:
