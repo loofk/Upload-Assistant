@@ -2025,11 +2025,13 @@ async def test_pipeline_prepare_target_preview(monkeypatch, tmp_path) -> None:
     payload = await ptcli_cli.pipeline_payload(args)
 
     target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
-    assert target_stage["ok"] is True
+    assert target_stage["ok"] is False
     assert target_stage["result"]["target_tracker"] == "MTEAM"
     assert target_stage["result"]["verified_content"] is True
     assert target_stage["result"]["metadata"]["name"] == "Name"
     assert target_stage["result"]["files"]["preview"].endswith("mteam-prepare-preview.json")
+    assert any("rules_acknowledged" in blocker for blocker in target_stage["result"]["blockers"])
+    assert any("duplicate_check" in blocker for blocker in target_stage["result"]["blockers"])
 
 
 @pytest.mark.asyncio
@@ -2987,6 +2989,7 @@ def test_mteam_upload_preflight_reports_duplicate_gate_blocker(tmp_path) -> None
 
     preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
 
+    assert any("duplicate_check" in blocker and "found 1" in blocker for blocker in package["blockers"])
     assert preflight["status"] == "blocked"
     assert any("duplicate_check" in blocker and "found 1" in blocker for blocker in preflight["blockers"])
 

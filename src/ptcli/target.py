@@ -72,6 +72,7 @@ def write_mteam_prepare_package(
     upload_gate_path = package_dir / "mteam-upload-gate.json"
     rule_review = build_mteam_rule_review(stages, accept_rules=accept_rules)
     upload_gate = build_mteam_upload_gate(preview, stages, accept_rules=accept_rules)
+    package_blockers = _mteam_prepare_package_blockers(preview, rule_review, upload_gate)
 
     _write_json(preview_path, preview)
     _write_json(meta_draft_path, preview["meta_draft"])
@@ -82,6 +83,7 @@ def write_mteam_prepare_package(
 
     return {
         **preview,
+        "blockers": package_blockers,
         "rule_review": rule_review,
         "upload_gate": upload_gate,
         "package_dir": str(package_dir),
@@ -107,14 +109,16 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
     files = package.get("files", {})
     blockers = list(package.get("blockers", []))
     payload_summary = build_mteam_upload_payload_summary(package, torrent_file=torrent_file)
-    blockers.extend(payload_summary["blockers"])
+    _extend_unique(blockers, payload_summary["blockers"])
 
     if not isinstance(gate, dict) or not gate.get("ready"):
-        blockers.append("MTEAM upload gate is not ready.")
+        _append_unique(blockers, "MTEAM upload gate is not ready.")
         if isinstance(gate, dict):
-            blockers.extend(_mteam_upload_gate_blockers(gate))
+            _extend_unique(blockers, _mteam_upload_gate_blockers(gate))
     if not isinstance(rule_review, dict) or rule_review.get("blockers"):
-        blockers.append("MTEAM rule review has blockers.")
+        if isinstance(rule_review, dict):
+            _extend_unique(blockers, rule_review.get("blockers", []))
+        _append_unique(blockers, "MTEAM rule review has blockers.")
     if write_payload:
         payload_path = Path(package_dir).expanduser() / "mteam-upload-payload.json"
         _write_json(payload_path, payload_summary)
@@ -520,6 +524,26 @@ def _mteam_upload_gate_blockers(gate: dict[str, Any]) -> list[str]:
         for check in checks
         if isinstance(check, dict) and not check.get("ok")
     ]
+
+
+def _mteam_prepare_package_blockers(preview: dict[str, Any], rule_review: dict[str, Any], upload_gate: dict[str, Any]) -> list[str]:
+    blockers = list(preview.get("blockers", []))
+    _extend_unique(blockers, rule_review.get("blockers", []))
+    _extend_unique(blockers, upload_gate.get("blockers", []))
+    return blockers
+
+
+def _extend_unique(items: list[str], additions: Any) -> None:
+    if not isinstance(additions, list):
+        return
+    for item in additions:
+        if isinstance(item, str):
+            _append_unique(items, item)
+
+
+def _append_unique(items: list[str], item: str) -> None:
+    if item not in items:
+        items.append(item)
 
 
 def _rule_gate_message(rule_stage: dict[str, Any] | None, ready: bool) -> str:
