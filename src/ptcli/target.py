@@ -111,6 +111,8 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
 
     if not isinstance(gate, dict) or not gate.get("ready"):
         blockers.append("MTEAM upload gate is not ready.")
+        if isinstance(gate, dict):
+            blockers.extend(_mteam_upload_gate_blockers(gate))
     if not isinstance(rule_review, dict) or rule_review.get("blockers"):
         blockers.append("MTEAM rule review has blockers.")
     if write_payload:
@@ -417,11 +419,13 @@ def build_mteam_upload_gate(preview: dict[str, Any], stages: list[dict[str, Any]
             "message": _dupe_gate_message(dupe_stage, dupe_searched, dupe_count),
         },
     ]
+    blockers = _mteam_upload_gate_blockers({"checks": checks})
     return {
         "target_tracker": "MTEAM",
         "ready": all(check["ok"] for check in checks),
         "checks": checks,
         "dupe_count": dupe_count,
+        "blockers": blockers,
     }
 
 
@@ -505,6 +509,17 @@ def _dupe_gate_message(dupe_stage: dict[str, Any] | None, searched: bool, count:
     if count > 0:
         return f"MTEAM duplicate search found {count} possible existing torrent(s)."
     return "MTEAM duplicate search found no existing torrents."
+
+
+def _mteam_upload_gate_blockers(gate: dict[str, Any]) -> list[str]:
+    checks = gate.get("checks")
+    if not isinstance(checks, list):
+        return ["upload_gate: MTEAM upload gate has no check details."]
+    return [
+        f"{check.get('name', 'upload_gate')}: {check.get('message', 'MTEAM upload gate check failed.')}"
+        for check in checks
+        if isinstance(check, dict) and not check.get("ok")
+    ]
 
 
 def _rule_gate_message(rule_stage: dict[str, Any] | None, ready: bool) -> str:

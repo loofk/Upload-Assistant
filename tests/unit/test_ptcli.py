@@ -2670,6 +2670,31 @@ def test_mteam_description_draft_and_upload_gate() -> None:
     assert "Retorrent review draft" in description
     assert "Source tracker: U2" in description
     assert gate["ready"] is True
+    assert gate["blockers"] == []
+
+
+def test_mteam_upload_gate_surfaces_duplicate_blocker() -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "torrenthash": "a" * 40,
+    }
+    stages = [
+        {"stage": "rule-check", "ok": True, "result": {"ready": True}},
+        {"stage": "match", "ok": True, "result": {"count": 1, "matches": [{"content_path": "/downloads/Example", "hash": "a" * 40}]}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 2, "dupes": [{"name": "Existing"}]}},
+    ]
+
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], stages, "/downloads/Example")
+    gate = build_mteam_upload_gate(preview, stages, accept_rules=True)
+
+    assert gate["ready"] is False
+    assert gate["dupe_count"] == 2
+    assert any("duplicate search found 2" in blocker for blocker in gate["blockers"])
 
 
 def test_mteam_rule_review_records_rule_gate() -> None:
@@ -2829,6 +2854,32 @@ def test_mteam_upload_preflight_blocks_rule_review_blockers(tmp_path) -> None:
     assert preflight["status"] == "blocked"
     assert preflight["rule_review"]["blockers"]
     assert "MTEAM rule review has blockers." in preflight["blockers"]
+
+
+def test_mteam_upload_preflight_reports_duplicate_gate_blocker(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "rule-check", "ok": True, "result": {"ready": True}},
+        {"stage": "match", "ok": True, "result": {"count": 1, "matches": [{"content_path": "/downloads/Example", "hash": "a" * 40}]}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 1, "dupes": [{"name": "Existing"}]}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    assert any("duplicate_check" in blocker and "found 1" in blocker for blocker in preflight["blockers"])
 
 
 def test_mteam_upload_preflight_reports_torrent_safety_metadata(tmp_path) -> None:
