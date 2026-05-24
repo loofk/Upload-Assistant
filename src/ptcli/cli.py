@@ -810,7 +810,13 @@ def _match_stage_has_match(stage: dict[str, Any] | None) -> bool:
     if not isinstance(result, dict):
         return False
     matches = result.get("matches")
-    return isinstance(matches, list) and any(isinstance(match, dict) for match in matches)
+    return isinstance(matches, list) and any(_match_has_evidence(match) for match in matches)
+
+
+def _match_has_evidence(match: Any) -> bool:
+    if not isinstance(match, dict):
+        return False
+    return bool(_normalize_torrent_hash(match.get("hash") or match.get("torrent_hash") or match.get("torrenthash")) or match.get("content_path"))
 
 
 def _content_path_from_stage(stage: dict[str, Any]) -> str | None:

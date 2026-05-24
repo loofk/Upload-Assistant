@@ -487,6 +487,31 @@ def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:
     assert closure["source"]["matched"] is False
 
 
+def test_pipeline_closure_rejects_empty_qbit_match_evidence() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{}]}},
+        {"stage": "target-prepare", "ok": True, "result": {}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", None, "/tmp/target.torrent")
+
+    assert closure["complete"] is False
+    assert closure["blockers"] == ["source.ready"]
+    assert closure["source"]["matched"] is False
+
+
 def test_resolve_default_qbit_client() -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
