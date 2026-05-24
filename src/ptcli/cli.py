@@ -14,6 +14,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from torf import Torrent
+
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check, extend_doctor_check
@@ -1025,7 +1027,18 @@ def _torrent_file_evidence(torrent_file: str | Path) -> dict[str, Any]:
                 "sha1": hashlib.sha1(data).hexdigest(),
             }
         )
+        infohash = _torrent_file_infohash(path)
+        if infohash:
+            payload["torrent_hash"] = infohash
+            payload["infohash"] = infohash
     return payload
+
+
+def _torrent_file_infohash(torrent_file: Path) -> str | None:
+    try:
+        return str(Torrent.read(str(torrent_file), validate=False).infohash)
+    except Exception:
+        return None
 
 
 def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:

@@ -4551,6 +4551,23 @@ async def test_target_upload_inject_requires_download_flag(tmp_path) -> None:
     assert any("requires --download-uploaded-torrent" in blocker for blocker in result["blockers"])
 
 
+def test_torrent_file_evidence_includes_infohash(tmp_path) -> None:
+    content = tmp_path / "source.mkv"
+    content.write_bytes(b"content")
+    torrent_path = tmp_path / "source.torrent"
+    torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+    torrent.generate()
+    torrent.write(str(torrent_path), overwrite=True)
+
+    evidence = ptcli_cli._torrent_file_evidence(torrent_path)
+
+    assert evidence["exists"] is True
+    assert evidence["size_bytes"] > 0
+    assert len(evidence["sha1"]) == 40
+    assert evidence["torrent_hash"] == torrent.infohash
+    assert evidence["infohash"] == torrent.infohash
+
+
 @pytest.mark.asyncio
 async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None:
     fake_client = FakeQbitClient()
