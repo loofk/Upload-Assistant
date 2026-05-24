@@ -27,6 +27,7 @@ from src.ptcli.target import (
     build_mteam_upload_preflight,
     create_mteam_upload_torrent_candidate,
     extract_mteam_uploaded_torrent_id,
+    load_mteam_prepare_package,
     search_mteam_duplicates,
     upload_mteam_from_package,
     write_mteam_prepare_package,
@@ -4421,10 +4422,19 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     assert package["files"]["description_draft"].endswith("mteam-description-draft.txt")
     assert package["files"]["rule_review"].endswith("mteam-rule-review.json")
     assert package["files"]["upload_gate"].endswith("mteam-upload-gate.json")
+    assert package["files"]["manifest"].endswith("mteam-package-manifest.json")
+    assert package["package_manifest"]["schema_version"] == 1
+    assert package["package_manifest"]["kind"] == "ptcli.mteam.prepare_package"
+    assert package["package_manifest"]["files"]["preview"]["sha1"]
+    assert package["package_manifest"]["rule_obligations"]["count"] == 2
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-prepare-preview.json").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-description-draft.txt").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-rule-review.json").exists()
+    assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-package-manifest.json").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-field-mapping.json").read_text(encoding="utf-8").strip().startswith("{")
+    loaded = load_mteam_prepare_package(package["package_dir"])
+    assert loaded["files"]["manifest"].endswith("mteam-package-manifest.json")
+    assert loaded["package_manifest"]["ready"] is package["package_manifest"]["ready"]
 
 
 def test_create_mteam_upload_torrent_candidate_sanitizes_export(tmp_path) -> None:
@@ -4469,6 +4479,8 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     assert preflight["upload_gate"]["ready"] is True
     assert preflight["rule_review"]["rule_check_ready"] is True
     assert preflight["rule_obligation_review"]["ready"] is True
+    assert preflight["package_manifest"]["kind"] == "ptcli.mteam.prepare_package"
+    assert preflight["package_manifest"]["files"]["description_draft"]["size_bytes"] > 0
     assert preflight["upload_payload"]["form_fields"]["name"] == source_info["name"]
     assert preflight["upload_payload"]["torrent_file"]["sha1"]
     assert preflight["next_actions"] == ["Review the package manually, then rerun with --execute --confirm-upload and the reviewed target torrent file when ready."]

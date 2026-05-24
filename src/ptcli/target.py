@@ -23,6 +23,7 @@ REQUIRED_MTEAM_PACKAGE_FILES = {
     "upload_gate": "mteam-upload-gate.json",
 }
 
+MTEAM_PACKAGE_MANIFEST_FILENAME = "mteam-package-manifest.json"
 MTEAM_UPLOAD_ANNOUNCE = "https://fake.tracker"
 MTEAM_SOURCE_FLAG = "MTEAM"
 
@@ -70,9 +71,19 @@ def write_mteam_prepare_package(
     description_path = package_dir / "mteam-description-draft.txt"
     rule_review_path = package_dir / "mteam-rule-review.json"
     upload_gate_path = package_dir / "mteam-upload-gate.json"
+    manifest_path = package_dir / MTEAM_PACKAGE_MANIFEST_FILENAME
     rule_review = build_mteam_rule_review(stages, accept_rules=accept_rules)
     upload_gate = build_mteam_upload_gate(preview, stages, accept_rules=accept_rules)
     package_blockers = _mteam_prepare_package_blockers(preview, rule_review, upload_gate)
+    files = {
+        "preview": str(preview_path),
+        "meta_draft": str(meta_draft_path),
+        "field_mapping": str(field_mapping_path),
+        "description_draft": str(description_path),
+        "rule_review": str(rule_review_path),
+        "upload_gate": str(upload_gate_path),
+        "manifest": str(manifest_path),
+    }
 
     _write_json(preview_path, preview)
     _write_json(meta_draft_path, preview["meta_draft"])
@@ -80,21 +91,17 @@ def write_mteam_prepare_package(
     description_path.write_text(build_mteam_description_draft(preview["meta_draft"], source_info), encoding="utf-8")
     _write_json(rule_review_path, rule_review)
     _write_json(upload_gate_path, upload_gate)
+    package_manifest = build_mteam_package_manifest(preview, rule_review, upload_gate, package_dir, files, package_blockers)
+    _write_json(manifest_path, package_manifest)
 
     return {
         **preview,
         "blockers": package_blockers,
         "rule_review": rule_review,
         "upload_gate": upload_gate,
+        "package_manifest": package_manifest,
         "package_dir": str(package_dir),
-        "files": {
-            "preview": str(preview_path),
-            "meta_draft": str(meta_draft_path),
-            "field_mapping": str(field_mapping_path),
-            "description_draft": str(description_path),
-            "rule_review": str(rule_review_path),
-            "upload_gate": str(upload_gate_path),
-        },
+        "files": files,
     }
 
 
@@ -136,6 +143,7 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
         "files": files,
         "upload_gate": gate,
         "rule_review": rule_review if isinstance(rule_review, dict) else {},
+        "package_manifest": package.get("package_manifest"),
         "rule_obligation_review": obligation_review,
         "upload_payload": payload_summary,
         "blockers": blockers,
@@ -233,6 +241,70 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
     }
 
 
+def build_mteam_package_manifest(
+    preview: dict[str, Any],
+    rule_review: dict[str, Any],
+    upload_gate: dict[str, Any],
+    package_dir: Path,
+    files: dict[str, str],
+    blockers: list[str],
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "kind": "ptcli.mteam.prepare_package",
+        "target_tracker": "MTEAM",
+        "package_dir": str(package_dir),
+        "content_path": preview.get("content_path"),
+        "source": preview.get("metadata", {}),
+        "ready": not blockers,
+        "blockers": blockers,
+        "manual_review": rule_review.get("manual_review") if isinstance(rule_review, dict) else None,
+        "rule_obligations": _manifest_rule_obligations(rule_review),
+        "upload_gate": {
+            "ready": bool(upload_gate.get("ready")) if isinstance(upload_gate, dict) else False,
+            "dupe_count": upload_gate.get("dupe_count") if isinstance(upload_gate, dict) else None,
+            "blockers": upload_gate.get("blockers", []) if isinstance(upload_gate, dict) else [],
+        },
+        "files": {key: _file_artifact(Path(path)) for key, path in files.items() if key != "manifest"},
+        "manifest_file": files.get("manifest"),
+        "next_actions": _package_manifest_next_actions(blockers),
+    }
+
+
+def _manifest_rule_obligations(rule_review: dict[str, Any]) -> dict[str, Any]:
+    obligations = rule_review.get("rule_obligations") if isinstance(rule_review, dict) else []
+    acknowledged = [obligation for obligation in obligations if isinstance(obligation, dict) and obligation.get("acknowledged") is True]
+    return {
+        "count": len([obligation for obligation in obligations if isinstance(obligation, dict)]),
+        "acknowledged_count": len(acknowledged),
+        "ready": bool(obligations) and len(acknowledged) == len([obligation for obligation in obligations if isinstance(obligation, dict)]),
+        "items": obligations if isinstance(obligations, list) else [],
+    }
+
+
+def _file_artifact(path: Path) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "path": str(path),
+        "exists": path.exists(),
+        "is_file": path.is_file(),
+    }
+    if path.is_file():
+        data = path.read_bytes()
+        payload.update(
+            {
+                "size_bytes": len(data),
+                "sha1": hashlib.sha1(data).hexdigest(),
+            }
+        )
+    return payload
+
+
+def _package_manifest_next_actions(blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Fix package blockers, regenerate the MTEAM package, then rerun target-upload preflight."]
+    return ["Review mteam-package-manifest.json, then run target-upload with the sanitized MTEAM torrent candidate."]
+
+
 def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
     root = Path(package_dir).expanduser()
     if not root.exists() or not root.is_dir():
@@ -248,6 +320,8 @@ def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
     field_mapping = _read_json(paths["field_mapping"])
     rule_review = _read_json(paths["rule_review"])
     upload_gate = _read_json(paths["upload_gate"])
+    manifest_path = root / MTEAM_PACKAGE_MANIFEST_FILENAME
+    package_manifest = _read_json(manifest_path) if manifest_path.exists() else None
     description = paths["description_draft"].read_text(encoding="utf-8")
 
     blockers: list[str] = []
@@ -265,13 +339,14 @@ def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
     return {
         "target_tracker": "MTEAM",
         "package_dir": str(root),
-        "files": {key: str(path) for key, path in paths.items()},
+        "files": {**{key: str(path) for key, path in paths.items()}, **({"manifest": str(manifest_path)} if manifest_path.exists() else {})},
         "preview": preview,
         "meta_draft": meta_draft,
         "field_mapping": field_mapping,
         "description_length": len(description),
         "rule_review": rule_review,
         "upload_gate": upload_gate,
+        "package_manifest": package_manifest,
         "blockers": blockers,
     }
 
