@@ -2693,6 +2693,74 @@ async def test_pipeline_exports_matched_torrent_for_target_upload(monkeypatch, t
 
 
 @pytest.mark.asyncio
+async def test_pipeline_reuses_existing_target_package_for_upload(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path / "target"), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "resume-upload")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, source_info["name"], "a" * 40, "desc"), {})
+
+    async def fake_upload_mteam_from_package(_config, package_dir, target_torrent_file, **kwargs):
+        assert package_dir == package["package_dir"]
+        assert target_torrent_file == str(torrent_file)
+        assert kwargs["execute"] is False
+        return {"status": "ready", "package_dir": package_dir, "torrent_file": target_torrent_file}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--package-dir",
+            package["package_dir"],
+            "--upload-target",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    prepare_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
+    upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
+    assert prepare_stage["ok"] is True
+    assert prepare_stage["result"]["reused"] is True
+    assert upload_stage["ok"] is True
+    assert upload_stage["result"]["status"] == "ready"
+
+
+@pytest.mark.asyncio
 async def test_pipeline_target_execute_requires_uploaded_torrent_followup(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},

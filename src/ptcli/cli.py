@@ -24,6 +24,7 @@ from src.ptcli.source import download_source_torrent, extract_torrent_id, fetch_
 from src.ptcli.target import (
     build_mteam_upload_preflight,
     create_mteam_upload_torrent_candidate,
+    load_mteam_prepare_package,
     search_mteam_duplicates,
     upload_mteam_from_package,
     write_mteam_prepare_package,
@@ -155,6 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait with --wait-complete.")
     pipeline.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds for --wait-complete.")
     pipeline.add_argument("--prepare-target", action="store_true", help="Build a dry-run target preparation preview after prior stages.")
+    pipeline.add_argument("--package-dir", help="Reuse an existing MTEAM package created by pipeline --prepare-target.")
     pipeline.add_argument("--target-output-dir", default="./tmp/target", help="Directory for --prepare-target review package files.")
     pipeline.add_argument("--check-dupes", action="store_true", help="Run target duplicate search after source metadata is available.")
     pipeline.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
@@ -461,6 +463,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         wait_timeout=args.wait_timeout,
         wait_interval=args.wait_interval,
         prepare_target=True,
+        package_dir=None,
         target_output_dir=args.target_output_dir,
         check_dupes=True,
         accept_rules=args.accept_rules,
@@ -760,6 +763,9 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             accept_rules=args.accept_rules,
         )
         stages.append({"stage": "target-prepare", "ok": not target_prepare["blockers"], "result": target_prepare})
+    elif args.package_dir:
+        target_prepare = _load_existing_target_prepare_package(args.package_dir)
+        stages.append({"stage": "target-prepare", "ok": not target_prepare["blockers"], "result": target_prepare})
     else:
         stages.append({"stage": "target-prepare", "ok": True, "skipped": True, "message": "--prepare-target not provided; target preparation skipped."})
 
@@ -884,6 +890,36 @@ def _rule_check_ready(stages: list[dict[str, Any]]) -> bool:
         return False
     result = stage.get("result")
     return isinstance(result, dict) and bool(result.get("ready"))
+
+
+def _load_existing_target_prepare_package(package_dir: str) -> dict[str, Any]:
+    try:
+        package = load_mteam_prepare_package(package_dir)
+    except Exception as exc:
+        return {
+            "target_tracker": "MTEAM",
+            "package_dir": package_dir,
+            "blockers": [str(exc)],
+        }
+    blockers = _existing_target_prepare_blockers(package)
+    return {
+        **package,
+        "blockers": blockers,
+        "reused": True,
+    }
+
+
+def _existing_target_prepare_blockers(package: dict[str, Any]) -> list[str]:
+    blockers = _string_list(package.get("blockers"))
+    rule_review = package.get("rule_review")
+    if isinstance(rule_review, dict):
+        _extend_unique_string(blockers, _string_list(rule_review.get("blockers")))
+    upload_gate = package.get("upload_gate")
+    if isinstance(upload_gate, dict):
+        _extend_unique_string(blockers, _string_list(upload_gate.get("blockers")))
+        if upload_gate.get("ready") is False:
+            _append_unique_string(blockers, "MTEAM upload gate is not ready.")
+    return blockers
 
 
 def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:
