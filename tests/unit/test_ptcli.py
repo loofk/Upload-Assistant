@@ -3760,6 +3760,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_path == Path(target_stage["result"]["package_dir"]) / "ptcli-run-summary.json"
     summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
     assert summary_payload["closure"] == payload["closure"]
+    assert summary_payload["complete"] is False
     assert summary_payload["requested_source_id"] == source_url
     assert summary_payload["input_source_id"] == source_url
     assert summary_payload["source_torrent_id"] == "60635"
@@ -3883,6 +3884,7 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
     assert upload_stage["result"]["injected_torrent"]["save_path"] == "/downloads/Name"
     assert upload_stage["result"]["injected_torrent"]["category"] == "MTEAM"
     assert payload["closure"]["complete"] is True
+    assert payload["complete"] is True
     assert payload["closure"]["blockers"] == []
     assert payload["closure"]["source"]["ready"] is True
     assert payload["closure"]["source"]["matched"] is True
@@ -4017,6 +4019,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert wait_calls[-1]["torrent_hash"] == uploaded_hash
     assert wait_calls[-1]["content_path"] == "/downloads"
     summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
+    assert summary_payload["complete"] is True
     assert summary_payload["client"] == "default"
     assert summary_payload["qbit_options"] == {
         "source": {"category": "SOURCE", "tags": "source-tag", "paused": True},
