@@ -631,6 +631,10 @@ def _torrent_file_summary(torrent_file: str | None) -> tuple[dict[str, Any] | No
         "sha1": hashlib.sha1(data).hexdigest(),
     }
     summary.update(_torrent_metadata_summary(path))
+    if not summary.get("metadata_readable"):
+        blockers.append("MTEAM upload torrent metadata is not readable.")
+    elif not summary.get("mteam_safe"):
+        blockers.append("MTEAM upload torrent is not a cleaned MTEAM upload candidate; run pipeline with --sanitize-target-torrent or use retorrent default sanitizing.")
     return summary, blockers
 
 
