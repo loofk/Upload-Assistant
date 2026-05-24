@@ -604,6 +604,7 @@ def _manual_rule_review_summary(rule_result: dict[str, Any], rule_obligations: A
         "target_trackers": rule_result.get("target_trackers") if isinstance(rule_result.get("target_trackers"), list) else [],
         "obligation_count": len([obligation for obligation in obligations if isinstance(obligation, dict)]),
         "rules_urls": sorted({str(obligation.get("rules_url")) for obligation in obligations if isinstance(obligation, dict) and obligation.get("rules_url")}),
+        "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in obligations if isinstance(obligation, dict) and isinstance(obligation.get("acknowledgement_evidence"), dict)],
         "site_specific_rules_encoded": False,
         "message": "Manual source/target rule review has been acknowledged." if accept_rules else "Manual source/target rule review is required before live upload.",
     }

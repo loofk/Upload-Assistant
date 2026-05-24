@@ -164,6 +164,7 @@ def _rule_obligation(tracker: str, profile: RuleProfile, *, role: str, action: s
         "action": action,
         "rules_url": profile.rules_url,
         "acknowledged": accept_rules,
+        "acknowledgement_evidence": _acknowledgement_evidence(tracker, role, action, profile.rules_url, accept_rules),
         "message": f"{tracker} {role} {action} rules have been acknowledged." if accept_rules else f"Review and acknowledge {tracker} {role} {action} rules before automation.",
     }
 
@@ -178,8 +179,22 @@ def _manual_review_summary(source_tracker: str, target_trackers: list[str], obli
         "obligation_count": len(obligations),
         "acknowledged_count": len([obligation for obligation in obligations if obligation.get("acknowledged") is True]),
         "rules_urls": rules_urls,
+        "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in obligations if isinstance(obligation.get("acknowledgement_evidence"), dict)],
         "site_specific_rules_encoded": False,
         "message": "Manual source/target rule review has been acknowledged." if accept_rules else "Manual source/target rule review is required before automation.",
+    }
+
+
+def _acknowledgement_evidence(tracker: str, role: str, action: str, rules_url: str, accept_rules: bool) -> dict[str, Any]:
+    return {
+        "mode": "--accept-rules",
+        "acknowledged": accept_rules,
+        "tracker": tracker,
+        "role": role,
+        "action": action,
+        "rules_url": rules_url,
+        "site_specific_rules_encoded": False,
+        "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
     }
 
 

@@ -802,6 +802,16 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
             "action": "download_and_retorrent",
             "rules_url": "https://ptchdbits.co/rules.php",
             "acknowledged": True,
+            "acknowledgement_evidence": {
+                "mode": "--accept-rules",
+                "acknowledged": True,
+                "tracker": "CHD",
+                "role": "source",
+                "action": "download_and_retorrent",
+                "rules_url": "https://ptchdbits.co/rules.php",
+                "site_specific_rules_encoded": False,
+                "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
+            },
             "message": "CHD source download_and_retorrent rules have been acknowledged.",
         },
         {
@@ -810,6 +820,16 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
             "action": "upload_and_seed",
             "rules_url": "https://kp.m-team.cc/rules",
             "acknowledged": True,
+            "acknowledgement_evidence": {
+                "mode": "--accept-rules",
+                "acknowledged": True,
+                "tracker": "MTEAM",
+                "role": "target",
+                "action": "upload_and_seed",
+                "rules_url": "https://kp.m-team.cc/rules",
+                "site_specific_rules_encoded": False,
+                "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
+            },
             "message": "MTEAM target upload_and_seed rules have been acknowledged.",
         },
     ]
@@ -821,6 +841,7 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
         "obligation_count": 2,
         "acknowledged_count": 2,
         "rules_urls": ["https://kp.m-team.cc/rules", "https://ptchdbits.co/rules.php"],
+        "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in payload["rule_obligations"]],
         "site_specific_rules_encoded": False,
         "message": "Manual source/target rule review has been acknowledged.",
     }
@@ -5155,6 +5176,7 @@ def test_mteam_rule_review_records_site_rule_obligations() -> None:
         "target_trackers": ["MTEAM"],
         "obligation_count": 2,
         "rules_urls": ["https://kp.m-team.cc/rules", "https://u2.dmhy.org/rules.php"],
+        "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in review["rule_obligations"]],
         "site_specific_rules_encoded": False,
         "message": "Manual source/target rule review has been acknowledged.",
     }
@@ -5165,6 +5187,16 @@ def test_mteam_rule_review_records_site_rule_obligations() -> None:
             "action": "download_and_retorrent",
             "rules_url": "https://u2.dmhy.org/rules.php",
             "acknowledged": True,
+            "acknowledgement_evidence": {
+                "mode": "--accept-rules",
+                "acknowledged": True,
+                "tracker": "U2",
+                "role": "source",
+                "action": "download_and_retorrent",
+                "rules_url": "https://u2.dmhy.org/rules.php",
+                "site_specific_rules_encoded": False,
+                "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
+            },
             "message": "U2 source download_and_retorrent rules have been acknowledged.",
         },
         {
@@ -5173,6 +5205,16 @@ def test_mteam_rule_review_records_site_rule_obligations() -> None:
             "action": "upload_and_seed",
             "rules_url": "https://kp.m-team.cc/rules",
             "acknowledged": True,
+            "acknowledgement_evidence": {
+                "mode": "--accept-rules",
+                "acknowledged": True,
+                "tracker": "MTEAM",
+                "role": "target",
+                "action": "upload_and_seed",
+                "rules_url": "https://kp.m-team.cc/rules",
+                "site_specific_rules_encoded": False,
+                "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
+            },
             "message": "MTEAM target upload_and_seed rules have been acknowledged.",
         },
     ]
