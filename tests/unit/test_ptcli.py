@@ -536,11 +536,21 @@ def test_target_upload_result_requires_requested_uploaded_torrent_injection() ->
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
 
 
+def test_target_upload_result_requires_uploaded_torrent_client_verification() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": False},
+    }
+
+    assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
+
+
 def test_target_upload_result_accepts_completed_uploaded_torrent_injection() -> None:
     payload = {
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-        "injected_torrent": {"hash": "a" * 40},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
     }
 
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is True
@@ -604,6 +614,31 @@ def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
     assert closure["blockers"] == []
     assert closure["source"]["ready"] is True
     assert closure["source"]["matched"] is True
+
+
+def test_pipeline_closure_requires_target_injection_client_verification() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {"stage": "target-prepare", "ok": True, "result": {}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": False},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+
+    assert closure["complete"] is False
+    assert closure["blockers"] == ["target.injected"]
+    assert closure["target"]["injected"] is False
 
 
 def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:

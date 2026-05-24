@@ -795,7 +795,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "prepared": _stage_completed(target_prepare),
         "uploaded": isinstance(target_upload_result, dict) and target_upload_result.get("status") == "uploaded",
         "downloaded": isinstance(downloaded_torrent, dict),
-        "injected": isinstance(injected_torrent, dict) and not injected_torrent.get("blockers"),
+        "injected": _injected_torrent_verified(injected_torrent),
         "torrent_file": target_torrent_file,
         "uploaded_torrent_hash": target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None,
         "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
@@ -839,6 +839,14 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "uploaded_torrent_path": target.get("uploaded_torrent_path"),
         },
     }
+
+
+def _injected_torrent_verified(injected_torrent: Any) -> bool:
+    if not isinstance(injected_torrent, dict) or injected_torrent.get("blockers"):
+        return False
+    if "verified_in_client" in injected_torrent:
+        return bool(injected_torrent.get("verified_in_client"))
+    return True
 
 
 def _stage_completed(stage: dict[str, Any] | None) -> bool:
@@ -1358,7 +1366,7 @@ def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, downl
         return False
     if inject_uploaded:
         injected_torrent = payload.get("injected_torrent")
-        return isinstance(injected_torrent, dict) and not injected_torrent.get("blockers")
+        return _injected_torrent_verified(injected_torrent)
     return True
 
 
