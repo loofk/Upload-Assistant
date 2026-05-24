@@ -77,6 +77,12 @@ class IncompleteQbitClient(FakeQbitClient):
         return [{"name": "One", "hash": "a" * 40, "content_path": "/downloads/One", "progress": 0.5}]
 
 
+class SeedingStateQbitClient(FakeQbitClient):
+    def torrents_info(self, **kwargs):
+        torrent_hash = kwargs.get("torrent_hashes") or "a" * 40
+        return [{"name": "One", "hash": torrent_hash, "content_path": "/downloads/One", "progress": 1.0, "state": "uploading"}]
+
+
 class EmptyQbitClient(FakeQbitClient):
     def torrents_info(self, **kwargs):
         _ = kwargs
@@ -5489,7 +5495,22 @@ async def test_qbit_service_waits_for_completed_match() -> None:
     assert result["query"]["mode"] == "content_path"
     assert result["query"]["content_path"] == "/downloads/One"
     assert result["matched_count"] == 1
+    assert result["completion_verification"]["matched_count"] == 1
+    assert result["completion_verification"]["complete_count"] == 1
+    assert result["completion_verification"]["all_matches_complete"] is True
     assert result["matches"][0]["hash"] == "a" * 40
+
+
+@pytest.mark.asyncio
+async def test_qbit_service_wait_reports_seeding_state_summary() -> None:
+    service = QbitReadOnlyService({}, qbit_client=SeedingStateQbitClient())
+
+    result = await service.wait_for_completion(torrent_hash="b" * 40, timeout=0, interval=0.1)
+
+    assert result["complete"] is True
+    assert result["completion_verification"]["seeding_state_count"] == 1
+    assert result["completion_verification"]["observed_states"] == ["uploading"]
+    assert result["completion_verification"]["observed_progress"] == [1.0]
 
 
 @pytest.mark.asyncio
@@ -5513,6 +5534,8 @@ async def test_qbit_service_wait_reports_incomplete_blockers() -> None:
 
     assert result["complete"] is False
     assert result["matched_count"] == 1
+    assert result["completion_verification"]["complete_count"] == 0
+    assert result["completion_verification"]["any_complete"] is False
     assert result["blockers"] == ["qBittorrent matched the torrent but did not report it as complete before timeout."]
 
 

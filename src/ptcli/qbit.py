@@ -233,6 +233,7 @@ class QbitReadOnlyService:
                     "complete": True,
                     "query": query,
                     "matched_count": len(matches),
+                    "completion_verification": _completion_verification(matches, completed),
                     "matches": summaries_to_dicts(completed),
                 }
 
@@ -241,6 +242,7 @@ class QbitReadOnlyService:
                     "complete": False,
                     "query": query,
                     "matched_count": len(last_matches),
+                    "completion_verification": _completion_verification(last_matches, []),
                     "matches": summaries_to_dicts(last_matches),
                     "blockers": _wait_blockers(last_matches, torrent_hash=torrent_hash, content_path=content_path),
                 }
@@ -308,6 +310,22 @@ def _tag_set(tags: str | None) -> set[str]:
     if not tags:
         return set()
     return {tag.strip() for tag in re.split(r"[,;]", tags) if tag.strip()}
+
+
+def _completion_verification(matches: list[QbitTorrentSummary], completed: list[QbitTorrentSummary]) -> dict[str, Any]:
+    return {
+        "matched_count": len(matches),
+        "complete_count": len(completed),
+        "seeding_state_count": len([torrent for torrent in completed if _is_seeding_state(torrent)]),
+        "all_matches_complete": bool(matches) and len(matches) == len(completed),
+        "any_complete": bool(completed),
+        "observed_states": sorted({str(torrent.state) for torrent in matches if torrent.state}),
+        "observed_progress": [torrent.progress for torrent in matches if torrent.progress is not None],
+    }
+
+
+def _is_seeding_state(torrent: QbitTorrentSummary) -> bool:
+    return (torrent.state or "").lower() in {"uploading", "stalled_up", "forcedup", "queuedup"}
 
 
 def _optional_int(value: Any) -> int | None:
