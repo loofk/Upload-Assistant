@@ -864,6 +864,7 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
             "matched": False,
             "torrent_hash": "a" * 40,
             "content_path": "/downloads/Name",
+            "source_torrent": {"path": "/tmp/U2-60635.torrent", "exists": True, "size_bytes": 8, "sha1": "c" * 40},
         },
         "target": {
             "prepared": True,
@@ -875,6 +876,7 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
             "torrent_file": "/tmp/mteam.torrent",
             "uploaded_torrent_hash": "b" * 40,
             "injected_torrent_hash": "b" * 40,
+            "uploaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "exists": True, "size_bytes": 8, "sha1": "d" * 40},
             "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
         },
     }
@@ -884,10 +886,12 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
     assert evidence["complete"] is True
     assert evidence["source"]["mode"] == "downloaded"
     assert evidence["source"]["torrent_hash"] == "a" * 40
+    assert evidence["source"]["source_torrent"]["sha1"] == "c" * 40
     assert evidence["target"]["ready"] is True
     assert evidence["target"]["uploaded_torrent_hash"] == "b" * 40
     assert evidence["target"]["injection_verified"] is True
     assert evidence["target"]["injected_torrent_hash"] == "b" * 40
+    assert evidence["target"]["uploaded_torrent"]["sha1"] == "d" * 40
 
 
 def test_pipeline_stage_blockers_include_target_upload_followup_details() -> None:
@@ -1022,6 +1026,36 @@ def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
     assert closure["blockers"] == []
     assert closure["source"]["ready"] is True
     assert closure["source"]["matched"] is True
+
+
+def test_pipeline_closure_preserves_torrent_file_evidence() -> None:
+    source_torrent = {"path": "/tmp/U2-60635.torrent", "exists": True, "size_bytes": 8, "sha1": "c" * 40}
+    uploaded_torrent = {"path": "/tmp/MTEAM-999.torrent", "exists": True, "size_bytes": 9, "sha1": "d" * 40}
+    stages = [
+        {"stage": "source-download", "ok": True, "result": source_torrent},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
+        {"stage": "match", "ok": True, "result": {"matches": []}},
+        {"stage": "target-prepare", "ok": True, "result": {}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "uploaded_torrent_hash": "b" * 40,
+                "downloaded_torrent": uploaded_torrent,
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    assert closure["source"]["source_torrent"] == source_torrent
+    assert closure["target"]["uploaded_torrent"] == uploaded_torrent
+    assert evidence["source"]["source_torrent"] == source_torrent
+    assert evidence["target"]["uploaded_torrent"] == uploaded_torrent
 
 
 def test_pipeline_closure_requires_target_injection_client_verification() -> None:
