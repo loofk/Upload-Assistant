@@ -152,6 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--target-torrent-file", help="MTEAM .torrent file used by --upload-target.")
     pipeline.add_argument("--export-target-torrent", action="store_true", help="Export the matched qBittorrent .torrent as a target upload candidate when --target-torrent-file is not provided.")
     pipeline.add_argument("--target-torrent-output-dir", default="./tmp/exported", help="Directory for --export-target-torrent output.")
+    pipeline.add_argument("--sanitize-target-torrent", action="store_true", help="Create a cleaned MTEAM upload candidate from --target-torrent-file before upload.")
     pipeline.add_argument("--target-execute", action="store_true", help="Submit the target upload when every gate passes.")
     pipeline.add_argument("--confirm-upload", action="store_true", help="Required with --target-execute to confirm manual rule review and live upload intent.")
     pipeline.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json during target upload preflight.")
@@ -202,6 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--target-torrent-file", help="MTEAM .torrent file used by the live upload stage.")
     retorrent.add_argument("--export-target-torrent", action="store_true", help="Export the matched qBittorrent .torrent as the target upload candidate if --target-torrent-file is omitted.")
     retorrent.add_argument("--target-torrent-output-dir", default="./tmp/exported", help="Directory for --export-target-torrent output.")
+    retorrent.add_argument("--no-sanitize-target-torrent", dest="sanitize_target_torrent", action="store_false", default=True, help="Use the provided --target-torrent-file as-is instead of creating a cleaned MTEAM upload candidate.")
     retorrent.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json during upload preflight.")
     retorrent.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
     retorrent.add_argument("--download-uploaded-torrent", action="store_true", help="After target upload succeeds, download the generated MTEAM torrent file.")
@@ -386,6 +388,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         target_torrent_file=args.target_torrent_file,
         export_target_torrent=args.export_target_torrent,
         target_torrent_output_dir=args.target_torrent_output_dir,
+        sanitize_target_torrent=args.sanitize_target_torrent,
         target_execute=True,
         confirm_upload=args.confirm_upload,
         write_payload=args.write_payload,
@@ -631,6 +634,23 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "target-torrent-export", "ok": True, "skipped": True, "message": "--export-target-torrent not provided; target torrent export skipped."})
 
+    if args.sanitize_target_torrent:
+        if not effective_target_torrent_file:
+            stages.append({"stage": "target-torrent-sanitize", "ok": False, "skipped": True, "message": "No target torrent file is available to sanitize."})
+        elif str(effective_target_torrent_file).endswith(".mteam-upload.torrent"):
+            stages.append({"stage": "target-torrent-sanitize", "ok": True, "skipped": True, "message": "Target torrent file is already a MTEAM upload candidate."})
+        else:
+            sanitize_stage = await _pipeline_stage(
+                "target-torrent-sanitize",
+                lambda: _sanitize_target_torrent_with_config(effective_target_torrent_file, args.target_torrent_output_dir),
+                lambda payload: payload,
+            )
+            stages.append(sanitize_stage)
+            if sanitize_stage.get("ok") and isinstance(sanitize_stage.get("result"), dict):
+                effective_target_torrent_file = str(sanitize_stage["result"].get("path") or effective_target_torrent_file or "")
+    else:
+        stages.append({"stage": "target-torrent-sanitize", "ok": True, "skipped": True, "message": "--sanitize-target-torrent not provided; target torrent sanitizing skipped."})
+
     if args.upload_target:
         target_prepare_stage = _find_stage(stages, "target-prepare")
         if not target_prepare_stage or not target_prepare_stage.get("ok") or target_prepare_stage.get("skipped"):
@@ -744,6 +764,10 @@ async def _export_hash_with_config(config: dict[str, Any], client_name: str, tor
         "path": candidate["path"],
         "candidate": candidate,
     }
+
+
+async def _sanitize_target_torrent_with_config(torrent_file: str, output_dir: str) -> dict[str, Any]:
+    return await asyncio.to_thread(create_mteam_upload_torrent_candidate, torrent_file, output_dir)
 
 
 async def _inject_source_with_config(

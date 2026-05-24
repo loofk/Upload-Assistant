@@ -167,6 +167,46 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.inject_uploaded_torrent is True
     assert pipeline_args.save_path == "/downloads"
     assert pipeline_args.target_torrent_file == str(torrent_file)
+    assert pipeline_args.sanitize_target_torrent is True
+
+
+@pytest.mark.asyncio
+async def test_retorrent_execute_can_disable_target_torrent_sanitizing(monkeypatch, tmp_path) -> None:
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+    captured_args = {}
+
+    async def fake_pipeline_payload(args):
+        captured_args["args"] = args
+        return {"ready": True, "stages": [{"stage": "target-upload", "ok": True}]}
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--save-path",
+            "/downloads",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--no-sanitize-target-torrent",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    assert payload["ready"] is True
+    assert captured_args["args"].sanitize_target_torrent is False
 
 
 @pytest.mark.asyncio
@@ -1377,6 +1417,88 @@ async def test_pipeline_exports_matched_torrent_for_target_upload(monkeypatch, t
     assert payload["target_torrent_file"] == str(exported_torrent)
     assert upload_stage["ok"] is True
     assert upload_stage["result"]["torrent_file"] == str(exported_torrent)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_sanitizes_manual_target_torrent_for_upload(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    raw_torrent = tmp_path / "raw.torrent"
+    sanitized_torrent = tmp_path / "exported" / "raw.mteam-upload.torrent"
+    raw_torrent.write_bytes(b"d4:infod")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"), {})
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_sanitize_target_torrent_with_config(torrent_file, output_dir):
+        assert torrent_file == str(raw_torrent)
+        assert output_dir == str(tmp_path / "exported")
+        sanitized_torrent.parent.mkdir(parents=True, exist_ok=True)
+        sanitized_torrent.write_bytes(b"d4:infod")
+        return {"source_path": torrent_file, "path": str(sanitized_torrent), "announce": "https://fake.tracker", "source_flag": "MTEAM", "removed_fields": ["announce-list"]}
+
+    async def fake_upload_mteam_from_package(_config, _package_dir, torrent_file, **_kwargs):
+        return {"status": "uploaded", "torrent_file": torrent_file}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "_sanitize_target_torrent_with_config", fake_sanitize_target_torrent_with_config)
+    monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            "/downloads/Name",
+            "--check-dupes",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--accept-rules",
+            "--upload-target",
+            "--target-torrent-file",
+            str(raw_torrent),
+            "--target-torrent-output-dir",
+            str(tmp_path / "exported"),
+            "--sanitize-target-torrent",
+            "--target-execute",
+            "--confirm-upload",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    sanitize_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-torrent-sanitize")
+    upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
+    assert sanitize_stage["ok"] is True
+    assert sanitize_stage["result"]["path"] == str(sanitized_torrent)
+    assert payload["target_torrent_file"] == str(sanitized_torrent)
+    assert upload_stage["ok"] is True
+    assert upload_stage["result"]["torrent_file"] == str(sanitized_torrent)
 
 
 @pytest.mark.asyncio
