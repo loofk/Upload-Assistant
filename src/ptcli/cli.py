@@ -844,6 +844,9 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "wait-complete", "ok": True, "skipped": True, "message": "--wait-complete not provided; qBittorrent wait skipped."})
 
+    if args.package_dir and not effective_content_path:
+        effective_content_path = _content_path_from_existing_target_package(args.package_dir)
+
     if effective_content_path:
         match_result = await _pipeline_stage(
             "match",
@@ -1043,6 +1046,18 @@ def _load_existing_target_prepare_package(package_dir: str) -> dict[str, Any]:
         "blockers": blockers,
         "reused": True,
     }
+
+
+def _content_path_from_existing_target_package(package_dir: str) -> str | None:
+    try:
+        package = load_mteam_prepare_package(package_dir)
+    except Exception:
+        return None
+    preview = package.get("preview")
+    if not isinstance(preview, dict):
+        return None
+    content_path = preview.get("content_path")
+    return str(content_path) if content_path else None
 
 
 def _existing_target_prepare_blockers(package: dict[str, Any]) -> list[str]:

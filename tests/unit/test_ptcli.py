@@ -3553,23 +3553,23 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
             "MTEAM",
             "--base-dir",
             str(tmp_path),
-            "--path",
-            "/downloads/Example",
             "--package-dir",
             package["package_dir"],
             "--upload-target",
             "--uploaded-torrent-file",
             str(uploaded_torrent),
             "--inject-uploaded-torrent",
-            "--uploaded-save-path",
-            "/downloads/Example",
             "--json",
         ]
     )
 
     payload = await ptcli_cli.pipeline_payload(args)
 
+    match_stage = next(stage for stage in payload["stages"] if stage["stage"] == "match")
     upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
+    assert payload["path"] == "/downloads/Example"
+    assert match_stage["ok"] is True
+    assert match_stage.get("skipped") is not True
     assert upload_stage["ok"] is True
     assert upload_stage["result"]["downloaded_torrent"]["reused"] is True
     assert upload_stage["result"]["downloaded_torrent"]["path"] == str(uploaded_torrent)
