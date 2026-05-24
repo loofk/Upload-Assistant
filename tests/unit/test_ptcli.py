@@ -14,6 +14,7 @@ from src.ptcli.target import (
     build_mteam_prepare_preview,
     build_mteam_upload_gate,
     build_mteam_upload_preflight,
+    extract_mteam_uploaded_torrent_id,
     search_mteam_duplicates,
     upload_mteam_from_package,
     write_mteam_prepare_package,
@@ -954,6 +955,98 @@ async def test_mteam_live_upload_uses_injected_uploader(tmp_path) -> None:
 
     assert result["status"] == "uploaded"
     assert result["upload_result"]["response"]["id"] == "999"
+
+
+@pytest.mark.asyncio
+async def test_mteam_live_upload_can_download_uploaded_torrent(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    async def fake_uploader(_config, _package_dir, _torrent_file_path):
+        return {"submitted": True, "response": {"torrentId": "999"}}
+
+    async def fake_downloader(_config, torrent_id, output_dir):
+        path = tmp_path / output_dir / f"MTEAM-{torrent_id}.torrent"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"d4:infod")
+        return str(path)
+
+    result = await upload_mteam_from_package(
+        {"TRACKERS": {"MTEAM": {"api_key": "fake"}}},
+        package["package_dir"],
+        str(torrent_file),
+        execute=True,
+        confirm_upload=True,
+        download_uploaded=True,
+        uploaded_output_dir="uploaded",
+        uploader=fake_uploader,
+        downloader=fake_downloader,
+    )
+
+    assert result["status"] == "uploaded"
+    assert result["downloaded_torrent"]["torrent_id"] == "999"
+    assert result["downloaded_torrent"]["path"].endswith("MTEAM-999.torrent")
+
+
+@pytest.mark.asyncio
+async def test_mteam_live_upload_reports_missing_uploaded_torrent_id(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    async def fake_uploader(_config, _package_dir, _torrent_file_path):
+        return {"submitted": True, "response": {"message": "ok"}}
+
+    result = await upload_mteam_from_package(
+        {"TRACKERS": {"MTEAM": {"api_key": "fake"}}},
+        package["package_dir"],
+        str(torrent_file),
+        execute=True,
+        confirm_upload=True,
+        download_uploaded=True,
+        uploader=fake_uploader,
+    )
+
+    assert result["status"] == "uploaded-needs-review"
+    assert "torrent id" in result["blockers"][0]
+
+
+def test_extract_mteam_uploaded_torrent_id_accepts_known_keys() -> None:
+    assert extract_mteam_uploaded_torrent_id({"response": {"id": 1}}) == "1"
+    assert extract_mteam_uploaded_torrent_id({"response": {"torrentId": "2"}}) == "2"
+    assert extract_mteam_uploaded_torrent_id({"response": {"torrent_id": "3"}}) == "3"
+    assert extract_mteam_uploaded_torrent_id({"response": {"message": "ok"}}) is None
 
 
 def test_mteam_upload_payload_summary_blocks_missing_torrent(tmp_path) -> None:

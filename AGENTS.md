@@ -25,7 +25,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-sour
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path "/downloads" --wait-complete --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downloads/content" --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --json
 python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --torrent-file ./tmp/exported/mteam.torrent --write-payload --json
-python3 ptcli.py target-upload --config data/config.py --package-dir ./tmp/target/U2-60635-to-MTEAM --torrent-file ./tmp/exported/mteam.torrent --execute --confirm-upload --json
+python3 ptcli.py target-upload --config data/config.py --package-dir ./tmp/target/U2-60635-to-MTEAM --torrent-file ./tmp/exported/mteam.torrent --execute --confirm-upload --download-uploaded-torrent --uploaded-output-dir ./tmp/uploaded --json
 python3 ptcli.py inspect --client default --limit 20 --json
 python3 ptcli.py match --path "/downloads/content" --json
 python3 ptcli.py export --hash "<infohash>" --output-dir ./tmp/exported --json

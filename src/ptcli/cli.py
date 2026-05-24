@@ -129,6 +129,8 @@ def build_parser() -> argparse.ArgumentParser:
     target_upload.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json into the package directory.")
     target_upload.add_argument("--execute", action="store_true", help="Submit the prepared payload to MTEAM after every gate passes.")
     target_upload.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
+    target_upload.add_argument("--download-uploaded-torrent", action="store_true", help="After live upload succeeds, download the generated MTEAM torrent file.")
+    target_upload.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
     target_upload.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     retorrent = subparsers.add_parser("retorrent", help="Plan a retorrent workflow between supported trackers.")
@@ -286,6 +288,8 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         execute=args.execute,
         confirm_upload=args.confirm_upload,
         write_payload=args.write_payload,
+        download_uploaded=args.download_uploaded_torrent,
+        uploaded_output_dir=args.uploaded_output_dir,
     )
 
 

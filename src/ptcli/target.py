@@ -59,6 +59,7 @@ def write_mteam_prepare_package(
 
 
 MTeamUploadCallable = Callable[[dict[str, Any], str, str], Awaitable[dict[str, Any]]]
+MTeamDownloadCallable = Callable[[dict[str, Any], str, str], Awaitable[str]]
 
 
 def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torrent_file: str | None = None, write_payload: bool = False) -> dict[str, Any]:
@@ -97,7 +98,10 @@ async def upload_mteam_from_package(
     execute: bool = False,
     confirm_upload: bool = False,
     write_payload: bool = False,
+    download_uploaded: bool = False,
+    uploaded_output_dir: str | None = None,
     uploader: MTeamUploadCallable | None = None,
+    downloader: MTeamDownloadCallable | None = None,
 ) -> dict[str, Any]:
     preflight = build_mteam_upload_preflight(package_dir, execute=execute, torrent_file=torrent_file, write_payload=write_payload)
     blockers = list(preflight["blockers"])
@@ -110,12 +114,42 @@ async def upload_mteam_from_package(
 
     upload_func = uploader or _submit_mteam_upload
     upload_result = await upload_func(config, package_dir, torrent_file)
-    return {
+    result = {
         **preflight,
         "status": "uploaded",
         "dry_run": False,
         "upload_result": upload_result,
     }
+    if download_uploaded:
+        torrent_id = extract_mteam_uploaded_torrent_id(upload_result)
+        if not torrent_id:
+            return {
+                **result,
+                "status": "uploaded-needs-review",
+                "blockers": ["MTEAM upload response did not include a torrent id for target torrent download."],
+            }
+        download_func = downloader or _download_mteam_uploaded_torrent
+        default_output_dir = await asyncio.to_thread(_expand_path_string, package_dir)
+        downloaded_path = await download_func(config, torrent_id, uploaded_output_dir or default_output_dir)
+        return {
+            **result,
+            "downloaded_torrent": {
+                "torrent_id": torrent_id,
+                "path": downloaded_path,
+            },
+        }
+    return result
+
+
+def extract_mteam_uploaded_torrent_id(upload_result: dict[str, Any]) -> str | None:
+    response = upload_result.get("response") if isinstance(upload_result, dict) else None
+    if not isinstance(response, dict):
+        return None
+    for key in ("id", "torrentId", "torrent_id"):
+        value = response.get(key)
+        if value:
+            return str(value)
+    return None
 
 
 def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: str | None = None) -> dict[str, Any]:
@@ -491,6 +525,17 @@ async def _submit_mteam_upload(config: dict[str, Any], package_dir: str, torrent
     }
 
 
+async def _download_mteam_uploaded_torrent(config: dict[str, Any], torrent_id: str, output_dir: str) -> str:
+    destination = await asyncio.to_thread(_uploaded_torrent_destination, output_dir, torrent_id)
+    tracker = MTEAM(config=config)
+    try:
+        await tracker.download_new_torrent(torrent_id, str(destination))
+    finally:
+        await tracker.session.aclose()
+    await asyncio.to_thread(_assert_torrent_file, destination)
+    return str(destination)
+
+
 def _mteam_upload_form_fields(field_mapping: dict[str, Any], description_length: int) -> dict[str, Any]:
     form_fields: dict[str, Any] = {
         "name": field_mapping.get("name"),
@@ -515,6 +560,24 @@ def _read_mteam_upload_files(package: dict[str, Any], torrent_file: str) -> tupl
     torrent_bytes = torrent_path.read_bytes()
     description = Path(package["files"]["description_draft"]).read_text(encoding="utf-8")
     return torrent_path, torrent_bytes, description
+
+
+def _uploaded_torrent_destination(output_dir: str, torrent_id: str) -> Path:
+    destination_dir = Path(output_dir).expanduser()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    return destination_dir / f"MTEAM-{torrent_id}.torrent"
+
+
+def _expand_path_string(path: str) -> str:
+    return str(Path(path).expanduser())
+
+
+def _assert_torrent_file(path: Path) -> None:
+    if not path.exists():
+        raise ValueError(f"MTEAM uploaded torrent download did not create file: {path}")
+    data = path.read_bytes()
+    if not data.startswith(b"d"):
+        raise ValueError("MTEAM uploaded torrent download does not look like a .torrent file.")
 
 
 def _torrent_file_summary(torrent_file: str | None) -> tuple[dict[str, Any] | None, list[str]]:
