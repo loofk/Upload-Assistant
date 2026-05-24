@@ -2039,6 +2039,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
     if isinstance(target_upload, dict):
         upload_result = target_upload.get("result")
         if isinstance(upload_result, dict):
+            artifacts["uploaded_torrent_id"] = _uploaded_torrent_id_from_result(upload_result)
             downloaded_torrent = upload_result.get("downloaded_torrent")
             if isinstance(downloaded_torrent, dict):
                 artifacts["uploaded_torrent_file"] = downloaded_torrent.get("path")
@@ -2092,6 +2093,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
 
     target_package_dir = artifacts.get("target_package_dir")
     target_torrent_file = artifacts.get("target_torrent_file")
+    uploaded_torrent_id = artifacts.get("uploaded_torrent_id")
     if target_package_dir and target_torrent_file:
         commands.append(
             {
@@ -2129,6 +2131,30 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
         )
 
     uploaded_torrent_file = artifacts.get("uploaded_torrent_file")
+    if target_package_dir and uploaded_torrent_id and not uploaded_torrent_file:
+        commands.append(
+            {
+                "stage": "resume-uploaded-torrent-download",
+                "command": _ptcli_command(
+                    [
+                        "target-upload",
+                        "--package-dir",
+                        str(target_package_dir),
+                        "--client",
+                        client,
+                        "--uploaded-torrent-id",
+                        str(uploaded_torrent_id),
+                        "--download-uploaded-torrent",
+                        "--inject-uploaded-torrent",
+                        *uploaded_save_path_args,
+                        *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
+                        "--wait-uploaded-complete",
+                        "--write-summary",
+                        "--json",
+                    ]
+                ),
+            }
+        )
     if target_package_dir and uploaded_torrent_file:
         commands.append(
             {

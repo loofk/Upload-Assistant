@@ -3844,6 +3844,91 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_missing(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"), {})
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_upload_mteam_from_package(*_args, **_kwargs):
+        return {"status": "uploaded", "uploaded_torrent_id": "999"}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            "/downloads/Name",
+            "--check-dupes",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--accept-rules",
+            "--upload-target",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--target-execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-qbit-category",
+            "MTEAM",
+            "--uploaded-qbit-tags",
+            "retorrent",
+            "--uploaded-paused",
+            "--write-summary",
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    assert payload["status"] == "blocked"
+    summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
+    assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
+    assert "uploaded_torrent_file" not in summary_payload["artifacts"]
+    resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
+    assert "--uploaded-torrent-id 999" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--download-uploaded-torrent" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--inject-uploaded-torrent" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-save-path /downloads/Name" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-qbit-category MTEAM" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-qbit-tags retorrent" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-paused" in resume_commands["resume-uploaded-torrent-download"]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
