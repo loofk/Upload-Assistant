@@ -1231,6 +1231,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "target_torrent_file": payload.get("target_torrent_file"),
         "ready": payload.get("ready"),
         "blockers": payload.get("blockers", []),
+        "closure": payload.get("closure"),
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),
         "next_actions": payload.get("next_actions", []),

@@ -2733,6 +2733,9 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     summary_path = Path(payload["summary_file"])
     assert summary_path == Path(target_stage["result"]["package_dir"]) / "ptcli-run-summary.json"
     summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
+    assert summary_payload["closure"] == payload["closure"]
+    assert summary_payload["closure"]["complete"] is False
+    assert summary_payload["closure"]["blockers"] == ["target.uploaded", "target.downloaded", "target.injected"]
     assert summary_payload["summary"]["ready"] is True
     assert summary_payload["summary"]["target"]["ready"] is False
     assert summary_payload["summary"]["gates"]["rule_check"]["rules_acknowledged"] is True
