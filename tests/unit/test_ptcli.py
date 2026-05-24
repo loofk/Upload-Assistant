@@ -3631,6 +3631,114 @@ async def test_pipeline_sanitizes_manual_target_torrent_for_upload(monkeypatch, 
 
 
 @pytest.mark.asyncio
+async def test_pipeline_target_execute_auto_exports_and_sanitizes_target_torrent(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    exported_torrent = tmp_path / "exported" / "matched.torrent"
+    sanitized_torrent = tmp_path / "exported" / "matched.mteam-upload.torrent"
+    uploaded_torrent = tmp_path / "uploaded" / "MTEAM-999.torrent"
+    uploaded_hash = "b" * 40
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"), {})
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_export_hash_with_config(_config, client_name, torrent_hash, output_dir):
+        assert client_name == "default"
+        assert torrent_hash == "a" * 40
+        assert output_dir == str(tmp_path / "exported")
+        exported_torrent.parent.mkdir(parents=True, exist_ok=True)
+        exported_torrent.write_bytes(b"d4:infod")
+        return {"client": client_name, "hash": torrent_hash, "path": str(exported_torrent)}
+
+    async def fake_sanitize_target_torrent_with_config(torrent_file, output_dir):
+        assert torrent_file == str(exported_torrent)
+        assert output_dir == str(tmp_path / "exported")
+        sanitized_torrent.write_bytes(b"d4:infod")
+        return {"source_path": torrent_file, "path": str(sanitized_torrent), "announce": "https://fake.tracker", "source_flag": "MTEAM", "removed_fields": ["announce-list"]}
+
+    async def fake_upload_mteam_from_package(_config, _package_dir, torrent_file, **_kwargs):
+        assert torrent_file == str(sanitized_torrent)
+        uploaded_torrent.parent.mkdir(parents=True, exist_ok=True)
+        uploaded_torrent.write_bytes(b"d4:infod")
+        return {"status": "uploaded", "torrent_file": torrent_file, "uploaded_torrent_hash": uploaded_hash, "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_torrent)}}
+
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+        _ = (torrent_path, category, tags, paused)
+        return {"hash": uploaded_hash, "save_path": save_path, "verified_in_client": True}
+
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {"client": client_name, "complete": True, "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval}, "matches": [{"hash": torrent_hash, "content_path": content_path}]}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "_export_hash_with_config", fake_export_hash_with_config)
+    monkeypatch.setattr(ptcli_cli, "_sanitize_target_torrent_with_config", fake_sanitize_target_torrent_with_config)
+    monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            "/downloads/Name",
+            "--check-dupes",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--target-torrent-output-dir",
+            str(tmp_path / "exported"),
+            "--accept-rules",
+            "--upload-target",
+            "--target-execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--wait-uploaded-complete",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    export_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-torrent-export")
+    sanitize_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-torrent-sanitize")
+    upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
+    assert export_stage["ok"] is True
+    assert export_stage["result"]["path"] == str(exported_torrent)
+    assert sanitize_stage["ok"] is True
+    assert sanitize_stage["result"]["path"] == str(sanitized_torrent)
+    assert upload_stage["ok"] is True
+    assert upload_stage["result"]["torrent_file"] == str(sanitized_torrent)
+    assert payload["target_torrent_file"] == str(sanitized_torrent)
+    assert payload["closure"]["complete"] is True
+    assert payload["closure"]["target"]["seeding"] is True
+
+
+@pytest.mark.asyncio
 async def test_pipeline_upload_target_requires_prepare_target(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},

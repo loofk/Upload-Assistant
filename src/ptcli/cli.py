@@ -834,7 +834,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "target-prepare", "ok": True, "skipped": True, "message": "--prepare-target not provided; target preparation skipped."})
 
-    if args.export_target_torrent:
+    export_target_torrent = args.export_target_torrent or bool(args.upload_target and not effective_target_torrent_file and not args.uploaded_torrent_file)
+    if export_target_torrent:
         match_stage = _find_stage(stages, "match")
         torrent_hash = _torrent_hash_from_stage(match_stage) if match_stage else None
         if effective_target_torrent_file:
@@ -853,7 +854,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "target-torrent-export", "ok": True, "skipped": True, "message": "--export-target-torrent not provided; target torrent export skipped."})
 
-    if args.sanitize_target_torrent:
+    sanitize_target_torrent = args.sanitize_target_torrent or bool(args.upload_target and args.target_execute and effective_target_torrent_file and not args.uploaded_torrent_file)
+    if sanitize_target_torrent:
         if not effective_target_torrent_file:
             stages.append({"stage": "target-torrent-sanitize", "ok": False, "skipped": True, "message": "No target torrent file is available to sanitize."})
         elif str(effective_target_torrent_file).endswith(".mteam-upload.torrent"):
