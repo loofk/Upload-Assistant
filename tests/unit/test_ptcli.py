@@ -904,6 +904,7 @@ def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
     assert summary["gates"]["rule_check"]["rules_acknowledged"] is True
     assert summary["gates"]["duplicate_check"]["ok"] is True
     assert summary["gates"]["upload_gate"]["ready"] is True
+    assert summary["resume"]["used"] is False
     assert summary["source"]["mode"] == "matched"
 
 
@@ -1052,6 +1053,37 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
     assert evidence["source"]["injected_torrent_hash"] == "a" * 40
     assert evidence["target"]["injection_verified"] is True
     assert evidence["target"]["injected_torrent_hash"] == "b" * 40
+
+
+def test_pipeline_evidence_reports_resume_sources() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent", "reused": True}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
+        {"stage": "match", "ok": True, "result": {"matches": []}},
+        {"stage": "target-prepare", "ok": True, "result": {"package_dir": "/tmp/package", "reused": True}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "reused": True},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, None)
+    evidence = ptcli_cli._pipeline_evidence(closure)
+    summary = ptcli_cli._pipeline_run_summary(stages, True, [], closure, evidence)
+
+    assert closure["complete"] is True
+    assert evidence["resume"] == {"used": True, "source_torrent_file": True, "target_package": True, "uploaded_torrent_file": True}
+    assert evidence["source"]["mode"] == "resumed_torrent"
+    assert evidence["source"]["source_torrent_reused"] is True
+    assert evidence["target"]["package_reused"] is True
+    assert evidence["target"]["uploaded_torrent_reused"] is True
+    assert summary["resume"]["used"] is True
 
 
 def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:
@@ -3006,6 +3038,9 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
     assert upload_stage["result"]["uploaded_torrent_hash"] == uploaded_hash
     assert payload["closure"]["target"]["uploaded"] is True
     assert payload["closure"]["target"]["injected"] is True
+    assert payload["evidence"]["resume"]["target_package"] is True
+    assert payload["evidence"]["resume"]["uploaded_torrent_file"] is True
+    assert payload["summary"]["resume"]["used"] is True
 
 
 @pytest.mark.asyncio

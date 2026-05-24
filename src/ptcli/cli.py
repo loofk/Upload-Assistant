@@ -1067,6 +1067,7 @@ def _pipeline_run_summary(stages: list[dict[str, Any]], ready: bool, blockers: l
         "completed_stages": [stage["stage"] for stage in stage_statuses if stage["ok"] and not stage["skipped"]],
         "skipped_stages": [stage["stage"] for stage in stage_statuses if stage["skipped"]],
         "gates": _pipeline_gate_summary(stages),
+        "resume": evidence.get("resume", {}),
         "source": evidence.get("source", {}),
         "target": evidence.get("target", {}),
     }
@@ -1244,6 +1245,8 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     downloaded_torrent = target_upload_result.get("downloaded_torrent") if isinstance(target_upload_result, dict) else None
     injected_torrent = target_upload_result.get("injected_torrent") if isinstance(target_upload_result, dict) else None
     uploaded_wait = target_upload_result.get("uploaded_wait") if isinstance(target_upload_result, dict) else None
+    source_download_result = source_download.get("result") if source_download and isinstance(source_download.get("result"), dict) else {}
+    target_prepare_result = target_prepare.get("result") if target_prepare and isinstance(target_prepare.get("result"), dict) else {}
     source_downloaded = _stage_completed(source_download)
     source_injected = _source_injection_verified(inject_source)
     source_complete = _stage_completed(wait_complete)
@@ -1262,6 +1265,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "matched": source_matched,
         "torrent_hash": source_torrent_hash,
         "content_path": content_path,
+        "source_torrent_reused": bool(source_download_result.get("reused")) if isinstance(source_download_result, dict) else False,
     }
     target = {
         "prepared": _stage_completed(target_prepare),
@@ -1275,6 +1279,8 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "uploaded_torrent_hash": uploaded_target_hash or injected_target_hash,
         "injected_torrent_hash": injected_target_hash,
         "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
+        "package_reused": bool(target_prepare_result.get("reused")) if isinstance(target_prepare_result, dict) else False,
+        "uploaded_torrent_reused": bool(downloaded_torrent.get("reused")) if isinstance(downloaded_torrent, dict) else False,
     }
     blockers = _closure_blockers(source, target)
     return {
@@ -1305,13 +1311,20 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
     return {
         "complete": bool(closure.get("complete")),
         "blockers": closure.get("blockers") if isinstance(closure.get("blockers"), list) else [],
+        "resume": {
+            "used": bool(source.get("source_torrent_reused") or target.get("package_reused") or target.get("uploaded_torrent_reused")),
+            "source_torrent_file": bool(source.get("source_torrent_reused")),
+            "target_package": bool(target.get("package_reused")),
+            "uploaded_torrent_file": bool(target.get("uploaded_torrent_reused")),
+        },
         "source": {
             "ready": bool(source.get("ready")),
-            "mode": "downloaded" if source.get("downloaded") and source.get("injected") and source.get("complete") else "matched" if source.get("matched") else "missing",
+            "mode": "resumed_torrent" if source.get("source_torrent_reused") and source.get("injected") and source.get("complete") else "downloaded" if source.get("downloaded") and source.get("injected") and source.get("complete") else "matched" if source.get("matched") else "missing",
             "torrent_hash": source.get("torrent_hash"),
             "injected_torrent_hash": source.get("injected_torrent_hash"),
             "injection_verified": bool(source.get("injection_verified")),
             "content_path": source.get("content_path"),
+            "source_torrent_reused": bool(source.get("source_torrent_reused")),
         },
         "target": {
             "ready": bool(target.get("prepared") and target.get("uploaded") and target.get("downloaded") and target.get("injected") and target.get("seeding")),
@@ -1322,6 +1335,8 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "seeding_verified": bool(target.get("seeding")),
             "uploaded_wait": target.get("uploaded_wait"),
             "uploaded_torrent_path": target.get("uploaded_torrent_path"),
+            "package_reused": bool(target.get("package_reused")),
+            "uploaded_torrent_reused": bool(target.get("uploaded_torrent_reused")),
         },
     }
 
