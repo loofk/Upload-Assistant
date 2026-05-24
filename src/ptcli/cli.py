@@ -687,6 +687,11 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     source_download_requested = bool(args.download_source or (live_target_upload and not args.content_path and not args.source_torrent_file))
     source_injection_requested = bool(args.inject_source or (live_target_upload and not args.content_path))
     source_wait_requested = bool(args.wait_complete or (live_target_upload and (source_injection_requested or args.content_path)))
+    if live_target_upload:
+        if not args.uploaded_torrent_file:
+            args.download_uploaded_torrent = True
+        args.inject_uploaded_torrent = True
+        args.wait_uploaded_complete = True
 
     stages: list[dict[str, Any]] = []
     flow_check_result = build_flow_check(config, source_tracker, source_torrent_id, ",".join(target_trackers), args.client, base_dir=args.base_dir)
