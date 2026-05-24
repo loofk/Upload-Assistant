@@ -1951,6 +1951,17 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     out = capsys.readouterr().out
     assert '"ready": true' in out
     assert '"live_safe_to_attempt": true' in out
+    summary_payload = json.loads((tmp_path / "summary" / "ptcli-doctor-summary.json").read_text(encoding="utf-8"))
+    commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    assert summary_payload["schema_version"] == 1
+    assert summary_payload["kind"] == "ptcli.doctor.live_readiness"
+    assert summary_payload["artifacts"]["content_path"]["exists"] is True
+    assert summary_payload["artifacts"]["package_dir"]["is_dir"] is True
+    assert summary_payload["artifacts"]["target_torrent_file"]["is_file"] is True
+    assert summary_payload["failed_check_names"] == []
+    assert "--target-execute --confirm-upload" in commands["pipeline-live"]
+    assert str(content_path) in commands["pipeline-live"]
+    assert str(target_torrent) in commands["pipeline-live"]
 
 
 def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> None:
@@ -1988,8 +1999,13 @@ def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> No
     assert '"summary_file"' in out
     summary_path = summary_dir / "ptcli-doctor-summary.json"
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 1
+    assert payload["kind"] == "ptcli.doctor.live_readiness"
+    assert payload["summary_file"] == str(summary_path)
     assert payload["flow_check"]["ready"] is True
     assert payload["live_safe_to_attempt"] is False
+    assert "target_package" in payload["failed_check_names"]
+    assert payload["recommended_commands"][0]["stage"] == "doctor-retry"
     assert isinstance(payload["checks"], list)
 
 

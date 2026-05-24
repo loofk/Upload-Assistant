@@ -567,7 +567,7 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
     if live_checks:
         payload = extend_doctor_check(payload, live_checks, target_execute=args.target_execute)
     if getattr(args, "write_summary", False):
-        summary_file = _write_doctor_summary(payload, args.summary_output_dir or args.package_dir)
+        summary_file = _write_doctor_summary(payload, args, args.summary_output_dir or args.package_dir)
         payload = {**payload, "summary_file": summary_file}
     return payload
 
@@ -674,12 +674,172 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
     return str(destination)
 
 
-def _write_doctor_summary(payload: dict[str, Any], output_dir: str | None) -> str:
+def _write_doctor_summary(payload: dict[str, Any], args: argparse.Namespace, output_dir: str | None) -> str:
     destination_dir = Path(output_dir).expanduser() if output_dir else Path("./tmp/retorrent-runs").expanduser()
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / "ptcli-doctor-summary.json"
-    destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    summary_payload = _doctor_summary_payload(payload, args, str(destination))
+    destination.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return str(destination)
+
+
+def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, summary_file: str) -> dict[str, Any]:
+    checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
+    failed_checks = [check for check in checks if isinstance(check, dict) and not check.get("ok")]
+    artifacts = _doctor_summary_artifacts(args)
+    return {
+        "schema_version": 1,
+        "kind": "ptcli.doctor.live_readiness",
+        "summary_file": summary_file,
+        "status": payload.get("status"),
+        "ready": payload.get("ready"),
+        "live_safe_to_attempt": payload.get("live_safe_to_attempt"),
+        "source_tracker": normalize_tracker(args.source_tracker),
+        "source_torrent_id": extract_torrent_id(args.source_id),
+        "target_trackers": parse_tracker_list(args.target_trackers),
+        "client": args.client,
+        "inputs": _doctor_summary_inputs(args),
+        "artifacts": artifacts,
+        "failed_checks": failed_checks,
+        "failed_check_names": [str(check.get("name")) for check in failed_checks if isinstance(check, dict)],
+        "effective_uploaded_save_path": payload.get("effective_uploaded_save_path"),
+        "next_actions": payload.get("next_actions", []),
+        "recommended_commands": _doctor_recommended_commands(payload, args, artifacts),
+        "checks": checks,
+        "flow_check": payload.get("flow_check"),
+        "rule_check": payload.get("rule_check"),
+        "package_preflight": payload.get("package_preflight"),
+    }
+
+
+def _doctor_summary_inputs(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "content_path": args.content_path,
+        "source_torrent_file": args.source_torrent_file,
+        "package_dir": args.package_dir,
+        "target_torrent_file": args.target_torrent_file,
+        "uploaded_torrent_file": args.uploaded_torrent_file,
+        "accept_rules": bool(args.accept_rules),
+        "target_execute": bool(args.target_execute),
+        "confirm_upload": bool(args.confirm_upload),
+        "download_uploaded_torrent": bool(args.download_uploaded_torrent),
+        "inject_uploaded_torrent": bool(args.inject_uploaded_torrent),
+        "uploaded_save_path": args.uploaded_save_path,
+        "wait_uploaded_complete": bool(args.wait_uploaded_complete),
+        "connect_qbit": bool(args.connect_qbit),
+        "probe_source": bool(args.probe_source),
+        "probe_target": bool(args.probe_target),
+    }
+
+
+def _doctor_summary_artifacts(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "content_path": _path_artifact(args.content_path),
+        "source_torrent_file": _path_artifact(args.source_torrent_file),
+        "package_dir": _path_artifact(args.package_dir),
+        "target_torrent_file": _path_artifact(args.target_torrent_file),
+        "uploaded_torrent_file": _path_artifact(args.uploaded_torrent_file),
+    }
+
+
+def _path_artifact(path: str | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    resolved = Path(path).expanduser()
+    return {
+        "path": str(resolved),
+        "exists": resolved.exists(),
+        "is_file": resolved.is_file(),
+        "is_dir": resolved.is_dir(),
+    }
+
+
+def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespace, artifacts: dict[str, Any]) -> list[dict[str, str]]:
+    commands = [
+        {
+            "stage": "doctor-retry",
+            "command": _doctor_retry_command(args),
+        }
+    ]
+    if not payload.get("live_safe_to_attempt"):
+        return commands
+
+    source_tracker = normalize_tracker(args.source_tracker)
+    source_torrent_id = extract_torrent_id(args.source_id)
+    target_trackers_arg = ",".join(parse_tracker_list(args.target_trackers))
+    pipeline_args = [
+        "pipeline",
+        "--from",
+        source_tracker,
+        "--source-id",
+        source_torrent_id,
+        "--to",
+        target_trackers_arg,
+        "--accept-rules",
+        "--upload-target",
+        "--target-execute",
+        "--confirm-upload",
+        "--download-uploaded-torrent",
+        "--inject-uploaded-torrent",
+        "--wait-uploaded-complete",
+        "--write-summary",
+        "--json",
+    ]
+    _extend_command_path(pipeline_args, "--path", artifacts.get("content_path"))
+    _extend_command_path(pipeline_args, "--source-torrent-file", artifacts.get("source_torrent_file"))
+    _extend_command_path(pipeline_args, "--package-dir", artifacts.get("package_dir"))
+    _extend_command_path(pipeline_args, "--target-torrent-file", artifacts.get("target_torrent_file"))
+    if args.uploaded_save_path:
+        pipeline_args.extend(["--uploaded-save-path", args.uploaded_save_path])
+    commands.append({"stage": "pipeline-live", "command": _ptcli_command(pipeline_args)})
+    return commands
+
+
+def _doctor_retry_command(args: argparse.Namespace) -> str:
+    retry_args = [
+        "doctor",
+        "--from",
+        normalize_tracker(args.source_tracker),
+        "--source-id",
+        extract_torrent_id(args.source_id),
+        "--to",
+        ",".join(parse_tracker_list(args.target_trackers)),
+        "--client",
+        args.client,
+        "--write-summary",
+        "--json",
+    ]
+    if args.base_dir:
+        retry_args.extend(["--base-dir", args.base_dir])
+    for option, value in (
+        ("--path", args.content_path),
+        ("--source-torrent-file", args.source_torrent_file),
+        ("--package-dir", args.package_dir),
+        ("--target-torrent-file", args.target_torrent_file),
+        ("--uploaded-torrent-file", args.uploaded_torrent_file),
+        ("--uploaded-save-path", args.uploaded_save_path),
+    ):
+        if value:
+            retry_args.extend([option, value])
+    for option, enabled in (
+        ("--accept-rules", args.accept_rules),
+        ("--target-execute", args.target_execute),
+        ("--confirm-upload", args.confirm_upload),
+        ("--download-uploaded-torrent", args.download_uploaded_torrent),
+        ("--inject-uploaded-torrent", args.inject_uploaded_torrent),
+        ("--wait-uploaded-complete", args.wait_uploaded_complete),
+        ("--connect-qbit", args.connect_qbit),
+        ("--probe-source", args.probe_source),
+        ("--probe-target", args.probe_target),
+    ):
+        if enabled:
+            retry_args.append(option)
+    return _ptcli_command(retry_args)
+
+
+def _extend_command_path(command: list[str], option: str, artifact: Any) -> None:
+    if isinstance(artifact, dict) and artifact.get("path"):
+        command.extend([option, str(artifact["path"])])
 
 
 def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
