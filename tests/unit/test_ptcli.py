@@ -1234,6 +1234,41 @@ async def test_pipeline_download_source_skips_when_source_info_fails(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_pipeline_download_source_requires_rule_check_ready(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+
+    async def fake_download_source_torrent(*_args, **_kwargs):
+        raise AssertionError("source torrent download must not run before executable rule check is ready")
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+    parser = build_parser()
+    args = parser.parse_args(
+        ["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--base-dir", str(tmp_path), "--download-source", "--json"]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    download_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-download")
+    assert download_stage["ok"] is False
+    assert download_stage["skipped"] is True
+    assert "executable rule-check" in download_stage["message"]
+    assert payload["blockers"] == [f"source-download: {download_stage['message']}"]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_download_source_runs_after_prereqs(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -1268,6 +1303,7 @@ async def test_pipeline_download_source_runs_after_prereqs(monkeypatch, tmp_path
             "--base-dir",
             str(tmp_path),
             "--download-source",
+            "--accept-rules",
             "--output-dir",
             "source-out",
             "--json",
@@ -1376,6 +1412,7 @@ async def test_pipeline_inject_source_runs_after_download(monkeypatch, tmp_path)
             "--qbit-tags",
             "U2",
             "--paused",
+            "--accept-rules",
             "--json",
         ]
     )
@@ -1448,6 +1485,7 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
             "1",
             "--wait-interval",
             "0.1",
+            "--accept-rules",
             "--json",
         ]
     )
@@ -1516,6 +1554,7 @@ async def test_pipeline_wait_complete_prefers_injected_hash(monkeypatch, tmp_pat
             "--save-path",
             "/downloads",
             "--wait-complete",
+            "--accept-rules",
             "--json",
         ]
     )
@@ -1586,6 +1625,7 @@ async def test_pipeline_wait_complete_uses_hash_from_real_injected_torrent(monke
             "--save-path",
             "/downloads",
             "--wait-complete",
+            "--accept-rules",
             "--json",
         ]
     )

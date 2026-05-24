@@ -542,7 +542,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     stages.append({"stage": "rule-check", "ok": True, "result": rule_check_result})
 
     if args.download_source:
-        if _required_stages_ok(stages, {"flow-check", "source-info"}):
+        if _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages):
             source_download_result = await _pipeline_stage(
                 "source-download",
                 lambda: download_source_torrent(config, source_tracker, source_torrent_id, args.output_dir, base_dir=args.base_dir),
@@ -555,7 +555,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                     "stage": "source-download",
                     "ok": False,
                     "skipped": True,
-                    "message": "Skipped because flow-check or source-info did not pass.",
+                    "message": "Skipped because flow-check, source-info, or executable rule-check did not pass.",
                 }
             )
     else:
@@ -748,6 +748,14 @@ async def _pipeline_stage(stage: str, operation: Any, serialize: Any, validate: 
 def _required_stages_ok(stages: list[dict[str, Any]], required_stage_names: set[str]) -> bool:
     stage_status = {str(stage.get("stage")): bool(stage.get("ok")) for stage in stages}
     return all(stage_status.get(stage_name, False) for stage_name in required_stage_names)
+
+
+def _rule_check_ready(stages: list[dict[str, Any]]) -> bool:
+    stage = _find_stage(stages, "rule-check")
+    if not stage or not stage.get("ok"):
+        return False
+    result = stage.get("result")
+    return isinstance(result, dict) and bool(result.get("ready"))
 
 
 def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:
