@@ -127,6 +127,9 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert '"target_kind": "mteam_api"' in out
     assert '"stage": "source-info"' in out
     assert "source-download" in out
+    assert '"stage": "doctor-live"' in out
+    assert "--target-execute --confirm-upload" in out
+    assert "--download-uploaded-torrent --inject-uploaded-torrent" in out
     assert '"stage": "retorrent-execute"' in out
     assert "--execute --accept-rules --confirm-upload" in out
     assert "--uploaded-qbit-category MTEAM" in out

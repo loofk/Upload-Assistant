@@ -1156,6 +1156,7 @@ async def _target_connection_check(config: dict[str, Any], target_trackers_raw: 
 def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trackers: list[str], content_path: str | None) -> list[dict[str, str]]:
     target_trackers_arg = ",".join(target_trackers)
     retorrent_path_arg = f"--path {json.dumps(content_path, ensure_ascii=False)}" if content_path else '--save-path "/downloads"'
+    doctor_path_arg = f"--path {json.dumps(content_path, ensure_ascii=False)}" if content_path else '--uploaded-save-path "/downloads"'
     commands = [
         {
             "stage": "source-info",
@@ -1168,6 +1169,10 @@ def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trac
         {
             "stage": "rules",
             "command": f"python3 ptcli.py rules --trackers {source_tracker},{target_trackers_arg} --json",
+        },
+        {
+            "stage": "doctor-live",
+            "command": f"python3 ptcli.py doctor --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} {doctor_path_arg} --accept-rules --target-execute --confirm-upload --download-uploaded-torrent --inject-uploaded-torrent --json",
         },
         {
             "stage": "retorrent-execute",
