@@ -118,6 +118,14 @@ def build_rule_check(source_tracker: str, target_trackers: list[str], *, accept_
         "ready": all(check["ok"] for check in checks),
         "source_tracker": source_tracker,
         "target_trackers": target_trackers,
+        "manual_review": _manual_review_summary(source_tracker, target_trackers, obligations, accept_rules),
+        "automation_scope": {
+            "site_specific_rules_encoded": False,
+            "concrete_policy_checks": "tracker_adapters",
+            "reference_flow_enabled": reference_flow_enabled,
+            "source_adapter_enabled": source_adapter_enabled,
+            "target_adapter_enabled": target_adapter_enabled,
+        },
         "rule_profiles": rule_profiles_to_dicts(profiles),
         "rule_obligations": obligations,
         "checks": checks,
@@ -157,6 +165,21 @@ def _rule_obligation(tracker: str, profile: RuleProfile, *, role: str, action: s
         "rules_url": profile.rules_url,
         "acknowledged": accept_rules,
         "message": f"{tracker} {role} {action} rules have been acknowledged." if accept_rules else f"Review and acknowledge {tracker} {role} {action} rules before automation.",
+    }
+
+
+def _manual_review_summary(source_tracker: str, target_trackers: list[str], obligations: list[dict[str, Any]], accept_rules: bool) -> dict[str, Any]:
+    rules_urls = sorted({str(obligation.get("rules_url")) for obligation in obligations if obligation.get("rules_url")})
+    return {
+        "required": True,
+        "acknowledged": accept_rules,
+        "source_tracker": source_tracker,
+        "target_trackers": target_trackers,
+        "obligation_count": len(obligations),
+        "acknowledged_count": len([obligation for obligation in obligations if obligation.get("acknowledged") is True]),
+        "rules_urls": rules_urls,
+        "site_specific_rules_encoded": False,
+        "message": "Manual source/target rule review has been acknowledged." if accept_rules else "Manual source/target rule review is required before automation.",
     }
 
 

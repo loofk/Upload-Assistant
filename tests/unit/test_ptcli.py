@@ -664,6 +664,12 @@ def test_rule_check_command_requires_ack_for_ready(capsys) -> None:
     assert '"action": "download_and_retorrent"' in out
     assert '"action": "upload_and_seed"' in out
     assert '"site_rule_obligations_acknowledged"' in out
+    assert '"site_specific_rules_encoded": false' in out
+    payload = json.loads(out)
+    assert payload["manual_review"]["required"] is True
+    assert payload["manual_review"]["acknowledged"] is False
+    assert payload["manual_review"]["obligation_count"] == 2
+    assert payload["manual_review"]["rules_urls"] == ["https://kp.m-team.cc/rules", "https://u2.dmhy.org/rules.php"]
 
 
 def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
@@ -693,6 +699,24 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
             "message": "MTEAM target upload_and_seed rules have been acknowledged.",
         },
     ]
+    assert payload["manual_review"] == {
+        "required": True,
+        "acknowledged": True,
+        "source_tracker": "CHD",
+        "target_trackers": ["MTEAM"],
+        "obligation_count": 2,
+        "acknowledged_count": 2,
+        "rules_urls": ["https://kp.m-team.cc/rules", "https://ptchdbits.co/rules.php"],
+        "site_specific_rules_encoded": False,
+        "message": "Manual source/target rule review has been acknowledged.",
+    }
+    assert payload["automation_scope"] == {
+        "site_specific_rules_encoded": False,
+        "concrete_policy_checks": "tracker_adapters",
+        "reference_flow_enabled": True,
+        "source_adapter_enabled": True,
+        "target_adapter_enabled": True,
+    }
 
 
 def test_source_download_requires_target_rule_context(monkeypatch, capsys) -> None:
