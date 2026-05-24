@@ -1212,12 +1212,12 @@ def _pipeline_stage_blocker_next_action(blocker: str) -> str:
 
 def _pipeline_closure_next_action(blocker: str) -> str:
     mapping = {
-        "source.ready": "Complete the source side: use --path for existing qBittorrent content, or use --download-source --inject-source --save-path and --wait-complete.",
-        "target.prepared": "Prepare the target package with --check-dupes --prepare-target --target-output-dir after source content is verified.",
-        "target.uploaded": "Run the target upload with --upload-target --target-execute --confirm-upload after the package and torrent candidate are ready.",
-        "target.downloaded": "Download the generated target torrent with --download-uploaded-torrent after live upload succeeds.",
-        "target.injected": "Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path.",
-        "target.seeding": "Wait for the injected target torrent to become complete in qBittorrent with --wait-uploaded-complete.",
+        "source.ready": "Complete the source side: use --path for existing qBittorrent content, run with --download-source --inject-source --save-path and --wait-complete, or resume with --source-torrent-file.",
+        "target.prepared": "Prepare the target package with --check-dupes --prepare-target --target-output-dir, or resume with --package-dir after source content is verified.",
+        "target.uploaded": "Run the target upload with --upload-target --target-execute --confirm-upload after the package and torrent candidate are ready, or resume seeding with --uploaded-torrent-file if the MTEAM torrent was already downloaded.",
+        "target.downloaded": "Download the generated target torrent with --download-uploaded-torrent after live upload succeeds, or provide it with --uploaded-torrent-file.",
+        "target.injected": "Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path, or resume from --uploaded-torrent-file.",
+        "target.seeding": "Wait for the injected target torrent to become complete in qBittorrent with --wait-uploaded-complete; if the torrent file is already local, resume with --uploaded-torrent-file.",
     }
     return mapping.get(blocker, f"Resolve closure blocker: {blocker}")
 
@@ -1624,8 +1624,20 @@ def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trac
             "command": f"python3 ptcli.py source-download --tracker {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} --output-dir ./tmp/source --accept-rules --json",
         },
         {
+            "stage": "resume-source-torrent",
+            "command": f"python3 ptcli.py pipeline --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} --source-torrent-file ./tmp/source/{source_tracker}-{source_torrent_id}.torrent --inject-source --save-path \"/downloads\" --wait-complete --accept-rules --json",
+        },
+        {
             "stage": "rules",
             "command": f"python3 ptcli.py rules --trackers {source_tracker},{target_trackers_arg} --json",
+        },
+        {
+            "stage": "resume-target-package",
+            "command": f"python3 ptcli.py pipeline --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} --package-dir ./tmp/target/{source_tracker}-{source_torrent_id}-to-{target_trackers_arg} --upload-target --target-torrent-file ./tmp/exported/mteam.torrent --accept-rules --json",
+        },
+        {
+            "stage": "resume-uploaded-torrent",
+            "command": f"python3 ptcli.py target-upload --package-dir ./tmp/target/{source_tracker}-{source_torrent_id}-to-{target_trackers_arg} --uploaded-torrent-file ./tmp/uploaded/MTEAM-<id>.torrent --inject-uploaded-torrent --uploaded-save-path \"/downloads\" --json",
         },
         {
             "stage": "doctor-live",

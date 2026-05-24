@@ -132,6 +132,12 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert '"target_kind": "mteam_api"' in out
     assert '"stage": "source-info"' in out
     assert "source-download" in out
+    assert '"stage": "resume-source-torrent"' in out
+    assert "--source-torrent-file" in out
+    assert '"stage": "resume-target-package"' in out
+    assert "--package-dir" in out
+    assert '"stage": "resume-uploaded-torrent"' in out
+    assert "--uploaded-torrent-file" in out
     assert '"stage": "doctor-live"' in out
     assert "--target-execute --confirm-upload" in out
     assert "--download-uploaded-torrent --inject-uploaded-torrent" in out
@@ -704,10 +710,12 @@ def test_pipeline_next_actions_explain_target_upload_followup_blockers() -> None
 def test_pipeline_next_actions_reports_closure_blockers() -> None:
     parser = build_parser()
     args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--prepare-target", "--json"])
-    actions = ptcli_cli._pipeline_next_actions(args, [], {"complete": False, "blockers": ["source.ready", "target.uploaded"]})
+    actions = ptcli_cli._pipeline_next_actions(args, [], {"complete": False, "blockers": ["source.ready", "target.prepared", "target.uploaded", "target.downloaded"]})
 
-    assert any("--download-source --inject-source --save-path" in action for action in actions)
+    assert any("--source-torrent-file" in action for action in actions)
+    assert any("--package-dir" in action for action in actions)
     assert any("--upload-target --target-execute --confirm-upload" in action for action in actions)
+    assert any("--uploaded-torrent-file" in action for action in actions)
 
 
 def test_pipeline_next_actions_reports_completed_closure() -> None:
