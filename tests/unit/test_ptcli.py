@@ -1170,6 +1170,62 @@ def test_doctor_requires_uploaded_torrent_injection_for_live_closure(tmp_path) -
     assert any(check["name"] == "wait_uploaded_complete" and check["ok"] is False for check in payload["checks"])
 
 
+def test_doctor_surfaces_duplicate_package_blocker(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    content_path = tmp_path / "downloads" / "Name"
+    content_path.mkdir(parents=True)
+    target_torrent = make_mteam_safe_torrent(tmp_path, "target")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "rule-check", "ok": True, "result": {"ready": True}},
+        {"stage": "match", "ok": True, "result": {"count": 1, "matches": [{"content_path": str(content_path), "hash": "a" * 40}]}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 1, "dupes": [{"name": "Existing"}]}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, str(content_path), str(tmp_path / "target"), accept_rules=True)
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        content_path=str(content_path),
+        package_dir=package["package_dir"],
+        target_torrent_file=target_torrent,
+        accept_rules=True,
+        target_execute=True,
+        confirm_upload=True,
+        download_uploaded_torrent=True,
+        inject_uploaded_torrent=True,
+        uploaded_save_path=str(content_path),
+        wait_uploaded_complete=True,
+    )
+
+    target_package = next(check for check in payload["checks"] if check["name"] == "target_package")
+    assert payload["ready"] is False
+    assert target_package["ok"] is False
+    assert "duplicate_check" in target_package["message"]
+    assert "found 1" in target_package["message"]
+
+
 def test_doctor_reports_blockers_for_missing_package(tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)

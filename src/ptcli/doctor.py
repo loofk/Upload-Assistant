@@ -132,10 +132,19 @@ def _package_preflight(package_dir: str | None, target_execute: bool, target_tor
         "check": _check(
             "target_package",
             preflight.get("status") == "ready",
-            "Target package upload preflight is ready." if preflight.get("status") == "ready" else "Target package upload preflight has blockers.",
+            _package_preflight_message(preflight),
         ),
         "preflight": preflight,
     }
+
+
+def _package_preflight_message(preflight: dict[str, Any]) -> str:
+    if preflight.get("status") == "ready":
+        return "Target package upload preflight is ready."
+    blockers = preflight.get("blockers")
+    if isinstance(blockers, list) and blockers:
+        return f"Target package upload preflight has blockers: {'; '.join(str(blocker) for blocker in blockers)}"
+    return "Target package upload preflight has blockers."
 
 
 def _upload_followup_checks(
