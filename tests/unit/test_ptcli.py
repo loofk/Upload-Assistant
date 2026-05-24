@@ -109,6 +109,94 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert "source-download" in out
 
 
+@pytest.mark.asyncio
+async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) -> None:
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+    captured_args = {}
+
+    async def fake_pipeline_payload(args):
+        captured_args["args"] = args
+        return {"ready": True, "stages": [{"stage": "target-upload", "ok": True}]}
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--config",
+            "data/config.py",
+            "--base-dir",
+            str(tmp_path),
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--save-path",
+            "/downloads",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--inject-uploaded-torrent",
+            "--uploaded-qbit-category",
+            "MTEAM",
+            "--uploaded-qbit-tags",
+            "retorrent",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    pipeline_args = captured_args["args"]
+    assert payload["ready"] is True
+    assert pipeline_args.download_source is True
+    assert pipeline_args.inject_source is True
+    assert pipeline_args.wait_complete is True
+    assert pipeline_args.check_dupes is True
+    assert pipeline_args.prepare_target is True
+    assert pipeline_args.upload_target is True
+    assert pipeline_args.target_execute is True
+    assert pipeline_args.download_uploaded_torrent is True
+    assert pipeline_args.inject_uploaded_torrent is True
+    assert pipeline_args.save_path == "/downloads"
+    assert pipeline_args.target_torrent_file == str(torrent_file)
+
+
+@pytest.mark.asyncio
+async def test_retorrent_execute_blocks_without_live_confirmation(tmp_path) -> None:
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--save-path",
+            "/downloads",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    assert payload["status"] == "blocked"
+    assert any("--confirm-upload" in blocker for blocker in payload["blockers"])
+
+
 def test_rules_command_outputs_profile_json(capsys) -> None:
     code = main(["rules", "--trackers", "MTEAM,TJUPT", "--json"])
 
@@ -117,6 +205,7 @@ def test_rules_command_outputs_profile_json(capsys) -> None:
     assert '"tracker": "MTEAM"' in out
     assert '"tracker": "TJUPT"' in out
     assert '"review_required": true' in out
+    assert '"automation_status": "enabled"' in out
 
 
 def test_json_capture_moves_stdout_to_logs() -> None:

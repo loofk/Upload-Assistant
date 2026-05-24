@@ -170,13 +170,34 @@ def build_parser() -> argparse.ArgumentParser:
     target_upload.add_argument("--client", default="default", help="Configured qBittorrent client name for --inject-uploaded-torrent.")
     target_upload.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
-    retorrent = subparsers.add_parser("retorrent", help="Plan a retorrent workflow between supported trackers.")
+    retorrent = subparsers.add_parser("retorrent", help="Plan or execute a retorrent workflow between supported trackers.")
+    retorrent.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
     retorrent.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code, for example MTEAM.")
     retorrent.add_argument("--source-id", required=True, help="Source tracker torrent id or details URL.")
     retorrent.add_argument("--to", dest="target_trackers", required=True, help="Target tracker codes, comma-separated.")
     retorrent.add_argument("--path", dest="content_path", help="Existing local content path on the seedbox.")
     retorrent.add_argument("--client", default="default", help="Configured torrent client name, defaults to config default.")
+    retorrent.add_argument("--base-dir", help="Project/base directory used for cookies, defaults to current directory.")
+    retorrent.add_argument("--execute", action="store_true", help="Run the full reference pipeline after every gate passes.")
     retorrent.add_argument("--dry-run", action="store_true", help="Plan only; do not download, upload, or inject torrents.")
+    retorrent.add_argument("--output-dir", default="./tmp/source", help="Directory for downloaded source .torrent files.")
+    retorrent.add_argument("--save-path", help="qBittorrent save path for source injection. Required for --execute without --path.")
+    retorrent.add_argument("--qbit-category", help="Optional qBittorrent category for source injection.")
+    retorrent.add_argument("--qbit-tags", help="Optional qBittorrent tags for source injection.")
+    retorrent.add_argument("--paused", action="store_true", help="Add injected source torrent paused.")
+    retorrent.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait for qBittorrent completion during --execute.")
+    retorrent.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds during --execute.")
+    retorrent.add_argument("--target-output-dir", default="./tmp/target", help="Directory for MTEAM target preparation package.")
+    retorrent.add_argument("--target-torrent-file", help="MTEAM .torrent file used by the live upload stage.")
+    retorrent.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json during upload preflight.")
+    retorrent.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
+    retorrent.add_argument("--download-uploaded-torrent", action="store_true", help="After target upload succeeds, download the generated MTEAM torrent file.")
+    retorrent.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
+    retorrent.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded MTEAM torrent to qBittorrent after upload.")
+    retorrent.add_argument("--uploaded-save-path", help="qBittorrent save path for uploaded target torrent injection.")
+    retorrent.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for uploaded target torrent injection.")
+    retorrent.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for uploaded target torrent injection.")
+    retorrent.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent paused.")
     retorrent.add_argument(
         "--accept-rules",
         action="store_true",
@@ -261,7 +282,7 @@ def build_plan(args: argparse.Namespace) -> RetorrentPlan:
 
     rule_profiles = get_rule_profiles([source_tracker, *target_trackers])
     blockers: list[str] = []
-    if any(profile.review_required for profile in rule_profiles) and not args.accept_rules:
+    if not args.dry_run and any(profile.review_required for profile in rule_profiles) and not args.accept_rules:
         blockers.append("Rule review acknowledgement is required before any non-dry-run action.")
     if any(profile.automation_status != "enabled" for profile in rule_profiles):
         blockers.append("Tracker rule profiles are in planning mode; upload/download automation is not enabled yet.")
@@ -294,6 +315,73 @@ def build_plan(args: argparse.Namespace) -> RetorrentPlan:
         blockers=blockers,
         commands=commands,
         steps=steps,
+    )
+
+
+async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
+    plan = build_plan(args)
+    plan_payload = asdict(plan)
+    if not args.execute:
+        return {"status": "ok", "plan": plan_payload}
+    if args.dry_run:
+        return {"status": "blocked", "plan": plan_payload, "blockers": ["--execute cannot be combined with --dry-run."]}
+    if plan.blockers:
+        return {"status": "blocked", "plan": plan_payload, "blockers": plan.blockers}
+    if not args.confirm_upload:
+        return {"status": "blocked", "plan": plan_payload, "blockers": ["--confirm-upload is required with retorrent --execute."]}
+    if not args.target_torrent_file:
+        return {"status": "blocked", "plan": plan_payload, "blockers": ["--target-torrent-file is required with retorrent --execute."]}
+    if not args.content_path and not args.save_path:
+        return {"status": "blocked", "plan": plan_payload, "blockers": ["--path or --save-path is required with retorrent --execute."]}
+
+    pipeline_args = _pipeline_args_from_retorrent(args)
+    pipeline_result = await pipeline_payload(pipeline_args)
+    return {
+        "status": "ok",
+        "plan": plan_payload,
+        "pipeline": pipeline_result,
+        "ready": bool(pipeline_result.get("ready")),
+    }
+
+
+def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespace:
+    needs_source_download = not bool(args.content_path)
+    return argparse.Namespace(
+        command="pipeline",
+        config=args.config,
+        source_tracker=args.source_tracker,
+        source_id=args.source_id,
+        target_trackers=args.target_trackers,
+        content_path=args.content_path,
+        client=args.client,
+        base_dir=args.base_dir,
+        download_source=needs_source_download,
+        output_dir=args.output_dir,
+        inject_source=needs_source_download,
+        save_path=args.save_path,
+        qbit_category=args.qbit_category,
+        qbit_tags=args.qbit_tags,
+        paused=args.paused,
+        wait_complete=needs_source_download or bool(args.content_path),
+        wait_timeout=args.wait_timeout,
+        wait_interval=args.wait_interval,
+        prepare_target=True,
+        target_output_dir=args.target_output_dir,
+        check_dupes=True,
+        accept_rules=args.accept_rules,
+        upload_target=True,
+        target_torrent_file=args.target_torrent_file,
+        target_execute=True,
+        confirm_upload=args.confirm_upload,
+        write_payload=args.write_payload,
+        download_uploaded_torrent=args.download_uploaded_torrent or args.inject_uploaded_torrent,
+        uploaded_output_dir=args.uploaded_output_dir,
+        inject_uploaded_torrent=args.inject_uploaded_torrent,
+        uploaded_save_path=args.uploaded_save_path,
+        uploaded_qbit_category=args.uploaded_qbit_category,
+        uploaded_qbit_tags=args.uploaded_qbit_tags,
+        uploaded_paused=args.uploaded_paused,
+        json=getattr(args, "json", False),
     )
 
 
@@ -816,8 +904,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "retorrent":
-            plan = build_plan(args)
-            _print_payload({"status": "ok", "plan": asdict(plan)}, json_output)
+            payload = _with_captured_stdout(lambda: asyncio.run(retorrent_payload(args)), json_output)
+            _print_payload(payload, json_output)
             return 0
 
         if args.command == "inspect":

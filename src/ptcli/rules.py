@@ -47,6 +47,8 @@ _DEFAULT_NOTES: Final[tuple[str, ...]] = (
     "Let the tracker adapter perform concrete field/category/description validation before upload.",
 )
 
+_ENABLED_AUTOMATION_TRACKERS: Final[set[str]] = {"CHD", "MTEAM", "U2"}
+
 
 def get_rule_profile(tracker: str) -> RuleProfile:
     if tracker not in CHINESE_PT_TRACKERS:
@@ -56,7 +58,7 @@ def get_rule_profile(tracker: str) -> RuleProfile:
         tracker=tracker,
         rules_url=_RULE_URLS.get(tracker, ""),
         review_required=True,
-        automation_status="planning",
+        automation_status="enabled" if tracker in _ENABLED_AUTOMATION_TRACKERS else "planning",
         notes=_DEFAULT_NOTES,
     )
 
@@ -67,4 +69,3 @@ def get_rule_profiles(trackers: list[str]) -> list[RuleProfile]:
 
 def rule_profiles_to_dicts(profiles: list[RuleProfile]) -> list[dict[str, Any]]:
     return [profile.to_dict() for profile in profiles]
-

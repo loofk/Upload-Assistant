@@ -31,6 +31,7 @@ python3 ptcli.py inspect --client default --limit 20 --json
 python3 ptcli.py match --path /downloads/movie --json
 python3 ptcli.py export --hash "<infohash>" --output-dir ./tmp/exported --json
 python3 ptcli.py retorrent --from MTEAM --source-id 12345 --to TJUPT,CHD --path /downloads/movie --dry-run --json
+python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --target-torrent-file ./tmp/exported/mteam.torrent --download-uploaded-torrent --inject-uploaded-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
 ```
 
 后续子命令建议：
@@ -73,7 +74,7 @@ python3 ptcli.py retorrent --from MTEAM --source-id 12345 --to TJUPT,CHD --path 
 - `target-prepare`: 目前生成 MTEAM dry-run preview、meta draft、field mapping、description draft 和 upload gate 文件，不调用上传接口。
 - `target-dupe-check`: 可选调用 MTEAM API 按 IMDb 查重；没有 IMDb ID 时明确阻断。
 - `target-upload`: 读取 MTEAM 准备包并执行上传预检，输出/写入 MTEAM multipart payload 摘要；只有 `--execute --confirm-upload` 且 upload gate/payload 全部 ready 时才调用 MTEAM API，并可下载上传后生成的目标站 `.torrent`、显式注入 qBittorrent 做种。
-- `retorrent`: 生成可审计转种计划，并输出可逐步执行的 JSON command plan。
+- `retorrent`: 默认生成可审计转种计划；`--execute` 会在 `--accept-rules --confirm-upload` 和 reference flow 通过后编排完整 pipeline：源种下载/注入/等待、查重、MTEAM prepare/upload、下载并注入目标站种子。
 - `inspect`: 只读列出 qBittorrent 任务。
 - `match`: 按盒子路径匹配 qBittorrent 任务。
 - `export`: 从 qBittorrent 只读导出已有 `.torrent` 到指定目录。
