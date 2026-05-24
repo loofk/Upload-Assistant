@@ -150,6 +150,27 @@ def test_parse_tracker_list_deduplicates() -> None:
     assert parse_tracker_list("mteam, M-TEAM, tjupt") == ["MTEAM", "TJUPT"]
 
 
+def test_sites_json_exposes_capability_matrix(capsys) -> None:
+    code = main(["sites", "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ok"
+    assert "MTEAM" in payload["sites"]
+    assert payload["capabilities"]["U2"]["source_info"] is True
+    assert payload["capabilities"]["U2"]["source_download"] is True
+    assert payload["capabilities"]["U2"]["full_live_closure_to_mteam"] is True
+    assert payload["capabilities"]["HDS"]["source_info"] is True
+    assert payload["capabilities"]["HDS"]["source_download"] is False
+    assert payload["capabilities"]["HDS"]["full_live_closure_to_mteam"] is False
+    assert payload["capabilities"]["MTEAM"]["target_upload"] is True
+    assert "U2" in payload["full_live_closure_sources"]
+    assert "HDS" not in payload["full_live_closure_sources"]
+    u2_flow = next(flow for flow in payload["flows"] if flow["source_tracker"] == "U2")
+    assert u2_flow["target_tracker"] == "MTEAM"
+    assert u2_flow["full_live_closure"] is True
+
+
 def test_help_surfaces_short_live_closure_commands() -> None:
     help_text = build_parser().format_help()
 

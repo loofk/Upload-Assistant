@@ -20,11 +20,20 @@ from torf import Torrent
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check, extend_doctor_check
-from src.ptcli.flows import flow_profiles_to_dicts, get_flow_profiles
+from src.ptcli.flows import NEXUSPHP_MTEAM_SOURCE_TRACKERS, flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import build_rule_check, get_rule_profiles, rule_profiles_to_dicts
-from src.ptcli.source import download_source_torrent, extract_torrent_id, fetch_source_info, source_info_has_signal
+from src.ptcli.source import (
+    DIRECT_DOWNLOAD_TRACKER_CLASSES,
+    GENERIC_DETAILS_BASE_URLS,
+    NEXUS_DOWNLOAD_BASE_URLS,
+    SOURCE_TRACKER_CLASSES,
+    download_source_torrent,
+    extract_torrent_id,
+    fetch_source_info,
+    source_info_has_signal,
+)
 from src.ptcli.target import (
     build_mteam_upload_preflight,
     create_mteam_upload_torrent_candidate,
@@ -592,6 +601,45 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         summary_output_dir=args.summary_output_dir,
         json=getattr(args, "json", False),
     )
+
+
+def build_sites_payload() -> dict[str, Any]:
+    sites = sorted(CHINESE_PT_TRACKERS)
+    source_info_trackers = sorted((set(SOURCE_TRACKER_CLASSES) | set(GENERIC_DETAILS_BASE_URLS)) & set(CHINESE_PT_TRACKERS))
+    source_download_trackers = sorted((set(NEXUS_DOWNLOAD_BASE_URLS) | set(DIRECT_DOWNLOAD_TRACKER_CLASSES)) & set(CHINESE_PT_TRACKERS))
+    mteam_flow_sources = sorted(NEXUSPHP_MTEAM_SOURCE_TRACKERS & set(CHINESE_PT_TRACKERS))
+    full_live_sources = sorted(set(source_download_trackers) & set(mteam_flow_sources))
+    target_upload_trackers = ["MTEAM"] if "MTEAM" in CHINESE_PT_TRACKERS else []
+    capabilities = {
+        tracker: {
+            "source_info": tracker in source_info_trackers,
+            "source_download": tracker in source_download_trackers,
+            "mteam_source_flow": tracker in mteam_flow_sources,
+            "full_live_closure_to_mteam": tracker in full_live_sources,
+            "target_upload": tracker in target_upload_trackers,
+        }
+        for tracker in sites
+    }
+    flows = [
+        {
+            "source_tracker": source_tracker,
+            "target_tracker": "MTEAM",
+            "full_live_closure": source_tracker in full_live_sources,
+            "requires": ["source-info", "source-download", "qBittorrent inject/wait", "MTEAM duplicate check", "MTEAM upload", "uploaded torrent inject/wait"],
+        }
+        for source_tracker in mteam_flow_sources
+    ]
+    return {
+        "status": "ok",
+        "sites": sites,
+        "capabilities": capabilities,
+        "source_info_trackers": source_info_trackers,
+        "source_download_trackers": source_download_trackers,
+        "target_upload_trackers": target_upload_trackers,
+        "mteam_flow_sources": mteam_flow_sources,
+        "full_live_closure_sources": full_live_sources,
+        "flows": flows,
+    }
 
 
 def flow_check_payload(args: argparse.Namespace) -> dict[str, Any]:
@@ -3120,7 +3168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "sites":
-            _print_payload({"status": "ok", "sites": sorted(CHINESE_PT_TRACKERS)}, json_output)
+            _print_payload(build_sites_payload(), json_output)
             return 0
 
         if args.command == "rules":
