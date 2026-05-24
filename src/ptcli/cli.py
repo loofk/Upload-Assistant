@@ -500,6 +500,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     target_trackers = parse_tracker_list(args.target_trackers)
     effective_content_path = args.content_path
     effective_target_torrent_file = args.target_torrent_file
+    effective_source_torrent_hash: str | None = None
 
     stages: list[dict[str, Any]] = []
     flow_check_result = build_flow_check(config, source_tracker, source_torrent_id, ",".join(target_trackers), args.client, base_dir=args.base_dir)
@@ -513,6 +514,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         invalid_message="Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
     )
     stages.append(source_info_result)
+    effective_source_torrent_hash = _source_torrent_hash_from_stage(source_info_result)
     rule_check_result = build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
     stages.append({"stage": "rule-check", "ok": True, "result": rule_check_result})
 
@@ -550,6 +552,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 lambda payload: payload,
             )
             stages.append(inject_result)
+            effective_source_torrent_hash = _torrent_hash_from_result(inject_result.get("result")) or effective_source_torrent_hash
     else:
         stages.append({"stage": "inject-source", "ok": True, "skipped": True, "message": "--inject-source not provided; qBittorrent injection skipped."})
 
@@ -559,23 +562,25 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             wait_path = args.content_path or args.save_path
             wait_result = await _pipeline_stage(
                 "wait-complete",
-                lambda: _wait_complete_with_config(config, args.client, content_path=wait_path, torrent_hash=None, timeout=args.wait_timeout, interval=args.wait_interval),
+                lambda: _wait_complete_with_config(config, args.client, content_path=wait_path, torrent_hash=effective_source_torrent_hash, timeout=args.wait_timeout, interval=args.wait_interval),
                 lambda payload: payload,
                 validate=lambda payload: bool(payload.get("complete")),
                 invalid_message="qBittorrent task did not complete before timeout.",
             )
             stages.append(wait_result)
             effective_content_path = effective_content_path or _content_path_from_stage(wait_result)
+            effective_source_torrent_hash = _torrent_hash_from_stage(wait_result) or effective_source_torrent_hash
         elif args.content_path:
             wait_result = await _pipeline_stage(
                 "wait-complete",
-                lambda: _wait_complete_with_config(config, args.client, content_path=args.content_path, torrent_hash=None, timeout=args.wait_timeout, interval=args.wait_interval),
+                lambda: _wait_complete_with_config(config, args.client, content_path=args.content_path, torrent_hash=effective_source_torrent_hash, timeout=args.wait_timeout, interval=args.wait_interval),
                 lambda payload: payload,
                 validate=lambda payload: bool(payload.get("complete")),
                 invalid_message="qBittorrent task did not complete before timeout.",
             )
             stages.append(wait_result)
             effective_content_path = effective_content_path or _content_path_from_stage(wait_result)
+            effective_source_torrent_hash = _torrent_hash_from_stage(wait_result) or effective_source_torrent_hash
         else:
             stages.append({"stage": "wait-complete", "ok": False, "skipped": True, "message": "--wait-complete requires successful injection or --path."})
     else:
@@ -686,6 +691,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "status": "ok",
         "source_tracker": source_tracker,
         "source_torrent_id": source_torrent_id,
+        "source_torrent_hash": effective_source_torrent_hash,
         "target_trackers": target_trackers,
         "path": effective_content_path,
         "requested_path": args.content_path,
@@ -732,19 +738,50 @@ def _content_path_from_stage(stage: dict[str, Any]) -> str | None:
     return None
 
 
+def _source_torrent_hash_from_stage(stage: dict[str, Any] | None) -> str | None:
+    if not stage or not stage.get("ok"):
+        return None
+    result = stage.get("result")
+    if not isinstance(result, dict):
+        return None
+    return _normalize_torrent_hash(result.get("torrenthash") or result.get("torrent_hash") or result.get("hash"))
+
+
 def _torrent_hash_from_stage(stage: dict[str, Any] | None) -> str | None:
     if not stage or not stage.get("ok"):
         return None
     result = stage.get("result")
     if not isinstance(result, dict):
         return None
+    direct_hash = _normalize_torrent_hash(result.get("torrenthash") or result.get("torrent_hash") or result.get("hash"))
+    if direct_hash:
+        return direct_hash
     matches = result.get("matches")
     if not isinstance(matches, list):
         return None
     for match in matches:
-        if isinstance(match, dict) and match.get("hash"):
-            return str(match["hash"])
+        if isinstance(match, dict):
+            torrent_hash = _normalize_torrent_hash(match.get("hash") or match.get("torrent_hash") or match.get("torrenthash"))
+            if torrent_hash:
+                return torrent_hash
     return None
+
+
+def _torrent_hash_from_result(result: Any) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    return _normalize_torrent_hash(result.get("hash") or result.get("torrent_hash") or result.get("torrenthash"))
+
+
+def _normalize_torrent_hash(value: Any) -> str | None:
+    if value is None:
+        return None
+    torrent_hash = str(value).strip().lower()
+    if len(torrent_hash) not in {32, 40}:
+        return None
+    if any(char not in "0123456789abcdef" for char in torrent_hash):
+        return None
+    return torrent_hash
 
 
 async def _match_with_config(config: dict[str, Any], client_name: str, content_path: str) -> dict[str, Any]:

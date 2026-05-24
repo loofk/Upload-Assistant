@@ -77,7 +77,7 @@ docker compose up  # 使用 docker-compose.yml
 
 ### 入口文件
 - **`upload.py`** — 主入口（约 100KB）。编排整个上传流程：元数据收集 → 截图 → 种子创建 → Tracker 上传。核心处理函数为 `do_the_thing()`。同时处理 Web UI 服务启动和优雅关闭。
-- **`ptcli.py`** — 聚焦版 PT 转种 CLI 入口。默认仅面向 allowlist 内的中文/PT 站点，支持可审计计划、`rule-check` 可执行规则门禁、`retorrent --execute` 一键编排、live 前 doctor 检查（可选真实 qBittorrent/源站/MTEAM API 连通性探针）、源站信息/种子下载、qBittorrent 检查/注入/等待、从 QB 完成结果推导内容路径、从匹配 QB 任务导出或手动传入目标种子并清理为 MTEAM 上传候选种子、MTEAM 目标站准备包与查重、上传种子安全状态预检；MTEAM live upload 仅在 `target-upload --execute --confirm-upload` 或 `retorrent --execute --confirm-upload` 且 gate/payload ready、目标种子通过 MTEAM-safe 元数据门禁时启用，并可显式下载/注入目标站种子。
+- **`ptcli.py`** — 聚焦版 PT 转种 CLI 入口。默认仅面向 allowlist 内的中文/PT 站点，支持可审计计划、`rule-check` 可执行规则门禁、`retorrent --execute` 一键编排、live 前 doctor 检查（可选真实 qBittorrent/源站/MTEAM API 连通性探针）、源站信息/种子下载、qBittorrent 检查/注入/等待（优先沿用源站或注入结果的 torrent hash）、从 QB 完成结果推导内容路径、从匹配 QB 任务导出或手动传入目标种子并清理为 MTEAM 上传候选种子、MTEAM 目标站准备包与查重、上传种子安全状态预检；MTEAM live upload 仅在 `target-upload --execute --confirm-upload` 或 `retorrent --execute --confirm-upload` 且 gate/payload ready、目标种子通过 MTEAM-safe 元数据门禁时启用，并可显式下载/注入目标站种子。
 - **`discordbot.py`** — 基于 discord.py 的 Discord 机器人接口，调用相同的上传流程。
 - **`web_ui/server.py`** — 基于 Flask 的 Web UI，包含认证（argon2 + TOTP）、会话管理和文件浏览。
 - **`config-generator.py`** — 交互式配置文件生成/更新工具。

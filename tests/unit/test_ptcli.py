@@ -911,10 +911,11 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    source_hash = "b" * 40
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
         _ = (tracker, source_id, base_dir)
@@ -928,8 +929,9 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
         return {"client": "qbittorrent", "save_path": save_path}
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
-        _ = (config, client_name, torrent_hash, timeout, interval)
-        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": content_path}]}
+        _ = (config, client_name, timeout, interval)
+        assert torrent_hash == source_hash
+        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": content_path, "hash": torrent_hash}]}
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
@@ -966,6 +968,73 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
     assert wait_stage["ok"] is True
     assert wait_stage["result"]["complete"] is True
     assert wait_stage["result"]["matches"][0]["content_path"] == "/downloads"
+    assert payload["source_torrent_hash"] == source_hash
+
+
+@pytest.mark.asyncio
+async def test_pipeline_wait_complete_prefers_injected_hash(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    metadata_hash = "a" * 40
+    injected_hash = "c" * 40
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", metadata_hash, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (tracker, source_id, base_dir)
+        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path.parent.mkdir(parents=True, exist_ok=True)
+        torrent_path.write_bytes(b"d4:infod")
+        return torrent_path
+
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+        _ = (config, client_name, torrent_path, category, tags, paused)
+        return {"client": "qbittorrent", "save_path": save_path, "hash": injected_hash}
+
+    async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
+        _ = (config, client_name, content_path, timeout, interval)
+        assert torrent_hash == injected_hash
+        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": torrent_hash}]}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--download-source",
+            "--inject-source",
+            "--save-path",
+            "/downloads",
+            "--wait-complete",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    wait_stage = next(stage for stage in payload["stages"] if stage["stage"] == "wait-complete")
+    assert wait_stage["ok"] is True
+    assert payload["source_torrent_hash"] == injected_hash
 
 
 @pytest.mark.asyncio
