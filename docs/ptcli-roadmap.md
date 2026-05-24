@@ -34,9 +34,11 @@ python3 ptcli.py inspect --client default --limit 20 --json
 python3 ptcli.py match --path /downloads/movie --json
 python3 ptcli.py export --hash "<infohash>" --output-dir ./tmp/exported --json
 python3 ptcli.py retorrent --from MTEAM --source-id 12345 --to TJUPT,CHD --path /downloads/movie --dry-run --json
-python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --target-torrent-file ./tmp/exported/mteam.torrent --download-uploaded-torrent --inject-uploaded-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
-python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --export-target-torrent --download-uploaded-torrent --inject-uploaded-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
+python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --target-torrent-file ./tmp/exported/mteam.torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
+python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --export-target-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
 ```
+
+`retorrent --execute` 是高层闭环命令，会默认执行上传后目标站种子下载和 qBittorrent 注入；`pipeline` / `target-upload` 保留显式参数，便于拆分排障和人工复核。
 
 后续子命令建议：
 

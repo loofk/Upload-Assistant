@@ -195,6 +195,52 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_retorrent_execute_enables_uploaded_torrent_followup_by_default(monkeypatch, tmp_path) -> None:
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+    captured_args = {}
+
+    async def fake_pipeline_payload(args):
+        captured_args["args"] = args
+        return {
+            "ready": True,
+            "closure": {"complete": True, "blockers": [], "target": {"downloaded": True, "injected": True}},
+            "stages": [{"stage": "target-upload", "ok": True}],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--path",
+            "/downloads/Name",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    pipeline_args = captured_args["args"]
+    assert payload["ready"] is True
+    assert pipeline_args.download_uploaded_torrent is True
+    assert pipeline_args.inject_uploaded_torrent is True
+    assert pipeline_args.uploaded_save_path is None
+    assert pipeline_args.content_path == "/downloads/Name"
+
+
+@pytest.mark.asyncio
 async def test_retorrent_execute_can_disable_target_torrent_sanitizing(monkeypatch, tmp_path) -> None:
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")

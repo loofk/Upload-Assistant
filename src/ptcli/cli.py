@@ -212,9 +212,9 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--no-sanitize-target-torrent", dest="sanitize_target_torrent", action="store_false", default=True, help="Use the provided --target-torrent-file as-is instead of creating a cleaned MTEAM upload candidate.")
     retorrent.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json during upload preflight.")
     retorrent.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
-    retorrent.add_argument("--download-uploaded-torrent", action="store_true", help="After target upload succeeds, download the generated MTEAM torrent file.")
+    retorrent.add_argument("--download-uploaded-torrent", action="store_true", help="After target upload succeeds, download the generated MTEAM torrent file. Enabled automatically by --execute.")
     retorrent.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
-    retorrent.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded MTEAM torrent to qBittorrent after upload.")
+    retorrent.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded MTEAM torrent to qBittorrent after upload. Enabled automatically by --execute.")
     retorrent.add_argument("--uploaded-save-path", help="qBittorrent save path for uploaded target torrent injection.")
     retorrent.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for uploaded target torrent injection.")
     retorrent.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for uploaded target torrent injection.")
@@ -399,9 +399,9 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         target_execute=True,
         confirm_upload=args.confirm_upload,
         write_payload=args.write_payload,
-        download_uploaded_torrent=args.download_uploaded_torrent or args.inject_uploaded_torrent,
+        download_uploaded_torrent=True,
         uploaded_output_dir=args.uploaded_output_dir,
-        inject_uploaded_torrent=args.inject_uploaded_torrent,
+        inject_uploaded_torrent=True,
         uploaded_save_path=args.uploaded_save_path,
         uploaded_qbit_category=args.uploaded_qbit_category,
         uploaded_qbit_tags=args.uploaded_qbit_tags,
