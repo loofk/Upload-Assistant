@@ -719,6 +719,10 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because target-prepare did not complete successfully."})
         elif not effective_target_torrent_file:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--target-torrent-file or --export-target-torrent is required when --upload-target is used."})
+        elif args.target_execute and not args.download_uploaded_torrent:
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "pipeline --target-execute requires --download-uploaded-torrent so the generated target torrent can be seeded."})
+        elif args.target_execute and not args.inject_uploaded_torrent:
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "pipeline --target-execute requires --inject-uploaded-torrent for full live retorrent closure."})
         elif args.inject_uploaded_torrent and not args.download_uploaded_torrent:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--inject-uploaded-torrent requires --download-uploaded-torrent."})
         elif args.inject_uploaded_torrent and not (args.uploaded_save_path or effective_content_path):
