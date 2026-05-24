@@ -32,6 +32,11 @@ def build_doctor_check(
     uploaded_save_path: str | None = None,
     wait_uploaded_complete: bool = False,
 ) -> dict[str, Any]:
+    if target_execute:
+        if not uploaded_torrent_file:
+            download_uploaded_torrent = True
+        inject_uploaded_torrent = True
+        wait_uploaded_complete = True
     flow_check = build_flow_check(config, source_tracker, source_id, target_trackers, client, base_dir=base_dir)
     checks: list[dict[str, Any]] = []
     checks.append(_check("flow_check", bool(flow_check.get("ready")), "Reference flow config is ready." if flow_check.get("ready") else "Reference flow config has blockers."))

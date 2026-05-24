@@ -1478,7 +1478,7 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
     assert any(check["name"] == "rule_obligations" and check["ok"] is True for check in payload["checks"])
 
 
-def test_doctor_requires_uploaded_torrent_injection_for_live_closure(tmp_path) -> None:
+def test_doctor_auto_enables_uploaded_torrent_followup_for_live_closure(tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
@@ -1518,11 +1518,11 @@ def test_doctor_requires_uploaded_torrent_injection_for_live_closure(tmp_path) -
         confirm_upload=True,
     )
 
-    assert payload["ready"] is False
-    assert payload["live_safe_to_attempt"] is False
-    assert any(check["name"] == "download_uploaded_torrent" and check["ok"] is False for check in payload["checks"])
-    assert any(check["name"] == "inject_uploaded_torrent" and check["ok"] is False for check in payload["checks"])
-    assert any(check["name"] == "wait_uploaded_complete" and check["ok"] is False for check in payload["checks"])
+    assert payload["ready"] is True
+    assert payload["live_safe_to_attempt"] is True
+    assert any(check["name"] == "download_uploaded_torrent" and check["ok"] is True for check in payload["checks"])
+    assert any(check["name"] == "inject_uploaded_torrent" and check["ok"] is True for check in payload["checks"])
+    assert any(check["name"] == "wait_uploaded_complete" and check["ok"] is True for check in payload["checks"])
 
 
 def test_doctor_blocks_live_upload_without_rule_obligations(tmp_path) -> None:
