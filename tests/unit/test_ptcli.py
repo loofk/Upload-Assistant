@@ -1149,6 +1149,123 @@ def test_target_upload_execute_requires_confirmation_before_config_load(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
+
+    async def fake_upload_mteam_from_package(*_args, **_kwargs):
+        return {
+            "status": "uploaded",
+            "downloaded_torrent": {"torrent_id": "999", "path": str(tmp_path / "MTEAM-999.torrent")},
+        }
+
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+        return {
+            "client": client_name,
+            "torrent_path": torrent_path,
+            "save_path": save_path,
+            "category": category,
+            "tags": tags,
+            "paused": paused,
+        }
+
+    monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--config",
+            "config.py",
+            "--package-dir",
+            package["package_dir"],
+            "--torrent-file",
+            str(torrent_file),
+            "--execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--uploaded-qbit-category",
+            "MTEAM",
+            "--uploaded-qbit-tags",
+            "retorrent",
+            "--client",
+            "default",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["status"] == "uploaded"
+    assert result["injected_torrent"]["save_path"] == "/downloads/Example"
+    assert result["injected_torrent"]["category"] == "MTEAM"
+    assert result["injected_torrent"]["tags"] == "retorrent"
+
+
+@pytest.mark.asyncio
+async def test_target_upload_inject_requires_download_flag(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = [
+        {"stage": "match", "ok": True, "result": {"count": 1}},
+        {"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}},
+    ]
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = tmp_path / "upload.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            package["package_dir"],
+            "--torrent-file",
+            str(torrent_file),
+            "--execute",
+            "--confirm-upload",
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["status"] == "blocked"
+    assert "requires --download-uploaded-torrent" in result["blockers"][0]
+
+
+@pytest.mark.asyncio
 async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None:
     fake_client = FakeQbitClient()
     torrent_path = tmp_path / "source.torrent"

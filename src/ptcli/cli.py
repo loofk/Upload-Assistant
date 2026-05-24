@@ -131,6 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
     target_upload.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
     target_upload.add_argument("--download-uploaded-torrent", action="store_true", help="After live upload succeeds, download the generated MTEAM torrent file.")
     target_upload.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
+    target_upload.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded target torrent to qBittorrent after upload.")
+    target_upload.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
+    target_upload.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for --inject-uploaded-torrent.")
+    target_upload.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for --inject-uploaded-torrent.")
+    target_upload.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent to qBittorrent paused.")
+    target_upload.add_argument("--client", default="default", help="Configured qBittorrent client name for --inject-uploaded-torrent.")
     target_upload.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     retorrent = subparsers.add_parser("retorrent", help="Plan a retorrent workflow between supported trackers.")
@@ -280,8 +286,12 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
             confirm_upload=args.confirm_upload,
             write_payload=args.write_payload,
         )
+    if args.inject_uploaded_torrent and not args.download_uploaded_torrent:
+        return {**preflight, "status": "blocked", "blockers": ["--inject-uploaded-torrent requires --download-uploaded-torrent."]}
+    if args.inject_uploaded_torrent and not args.uploaded_save_path:
+        return {**preflight, "status": "blocked", "blockers": ["--uploaded-save-path is required with --inject-uploaded-torrent."]}
     config = load_config(args.config)
-    return await upload_mteam_from_package(
+    result = await upload_mteam_from_package(
         config,
         args.package_dir,
         args.torrent_file,
@@ -291,6 +301,19 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         download_uploaded=args.download_uploaded_torrent,
         uploaded_output_dir=args.uploaded_output_dir,
     )
+    if args.inject_uploaded_torrent and result.get("status") == "uploaded" and isinstance(result.get("downloaded_torrent"), dict):
+        downloaded_path = str(result["downloaded_torrent"]["path"])
+        inject_result = await _inject_source_with_config(
+            config,
+            args.client,
+            downloaded_path,
+            args.uploaded_save_path,
+            args.uploaded_qbit_category,
+            args.uploaded_qbit_tags,
+            args.uploaded_paused,
+        )
+        return {**result, "injected_torrent": inject_result}
+    return result
 
 
 async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
