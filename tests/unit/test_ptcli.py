@@ -318,6 +318,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             },
             "summary": {"ready": True, "complete": True, "status": "complete"},
             "summary_file": str(tmp_path / "summary" / "ptcli-run-summary.json"),
+            "artifacts": {"uploaded_torrent_id": "999"},
+            "resume_commands": [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}],
             "next_actions": ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."],
             "stages": [{"stage": "target-upload", "ok": True}],
         }
@@ -370,6 +372,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["evidence"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert payload["summary"]["status"] == "complete"
     assert payload["summary_file"].endswith("ptcli-run-summary.json")
+    assert payload["artifacts"] == {"uploaded_torrent_id": "999"}
+    assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True
@@ -3915,6 +3919,9 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     payload = await ptcli_cli.pipeline_payload(args)
 
     assert payload["status"] == "blocked"
+    assert payload["artifacts"]["uploaded_torrent_id"] == "999"
+    payload_resume_commands = {command["stage"]: command["command"] for command in payload["resume_commands"]}
+    assert "--uploaded-torrent-id 999" in payload_resume_commands["resume-uploaded-torrent-download"]
     summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     assert "uploaded_torrent_file" not in summary_payload["artifacts"]

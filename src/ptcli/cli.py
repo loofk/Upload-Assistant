@@ -492,6 +492,8 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "evidence": evidence,
         "summary": summary,
         "summary_file": pipeline_result.get("summary_file"),
+        "artifacts": pipeline_result.get("artifacts"),
+        "resume_commands": pipeline_result.get("resume_commands", []),
         "ready": ready,
         "complete": not blockers,
         "blockers": blockers,
@@ -1417,6 +1419,9 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         summary_file = _write_run_summary(payload, args.summary_output_dir)
         payload["summary_file"] = summary_file
         summary["summary_file"] = summary_file
+    artifacts = _run_summary_artifacts(payload, str(payload.get("summary_file") or ""))
+    payload["artifacts"] = artifacts
+    payload["resume_commands"] = _run_summary_resume_commands(payload, artifacts)
     return payload
 
 
