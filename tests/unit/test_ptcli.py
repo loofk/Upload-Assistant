@@ -50,6 +50,19 @@ class FakeQbitClient:
         self.added_kwargs = kwargs
 
 
+class IncompleteQbitClient(FakeQbitClient):
+    def torrents_info(self, **kwargs):
+        if kwargs.get("torrent_hashes"):
+            return [{"name": "One", "hash": kwargs["torrent_hashes"], "content_path": "/downloads/One", "progress": 0.5}]
+        return [{"name": "One", "hash": "a" * 40, "content_path": "/downloads/One", "progress": 0.5}]
+
+
+class EmptyQbitClient(FakeQbitClient):
+    def torrents_info(self, **kwargs):
+        _ = kwargs
+        return []
+
+
 def make_mteam_safe_torrent(tmp_path, name: str = "upload") -> str:
     content = tmp_path / f"{name}.mkv"
     content.write_bytes(b"content")
@@ -4584,6 +4597,28 @@ async def test_qbit_service_wait_reports_hash_query() -> None:
     assert result["query"]["torrent_hash"] == "b" * 40
     assert result["matched_count"] == 1
     assert result["matches"][0]["hash"] == "b" * 40
+
+
+@pytest.mark.asyncio
+async def test_qbit_service_wait_reports_incomplete_blockers() -> None:
+    service = QbitReadOnlyService({}, qbit_client=IncompleteQbitClient())
+
+    result = await service.wait_for_completion(content_path="/downloads/One", timeout=0, interval=0.1)
+
+    assert result["complete"] is False
+    assert result["matched_count"] == 1
+    assert result["blockers"] == ["qBittorrent matched the torrent but did not report it as complete before timeout."]
+
+
+@pytest.mark.asyncio
+async def test_qbit_service_wait_reports_missing_match_blockers() -> None:
+    service = QbitReadOnlyService({}, qbit_client=EmptyQbitClient())
+
+    result = await service.wait_for_completion(torrent_hash="b" * 40, timeout=0, interval=0.1)
+
+    assert result["complete"] is False
+    assert result["matched_count"] == 0
+    assert result["blockers"] == [f"No qBittorrent torrent matched hash {'b' * 40}."]
 
 
 @pytest.mark.asyncio

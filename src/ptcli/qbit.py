@@ -212,6 +212,7 @@ class QbitReadOnlyService:
                     "query": query,
                     "matched_count": len(last_matches),
                     "matches": summaries_to_dicts(last_matches),
+                    "blockers": _wait_blockers(last_matches, torrent_hash=torrent_hash, content_path=content_path),
                 }
 
             await asyncio.sleep(interval)
@@ -270,3 +271,11 @@ def _is_complete(torrent: QbitTorrentSummary) -> bool:
     if torrent.progress is not None and torrent.progress >= 1.0:
         return True
     return (torrent.state or "").lower() in {"uploading", "stalled_up", "forcedup", "queuedup", "checkingup"}
+
+
+def _wait_blockers(matches: list[QbitTorrentSummary], *, torrent_hash: str | None, content_path: str | None) -> list[str]:
+    if not matches:
+        if torrent_hash:
+            return [f"No qBittorrent torrent matched hash {torrent_hash}."]
+        return [f"No qBittorrent torrent matched path {content_path}."]
+    return ["qBittorrent matched the torrent but did not report it as complete before timeout."]
