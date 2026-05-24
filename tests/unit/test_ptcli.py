@@ -174,6 +174,25 @@ def test_retorrent_plan_marks_rule_check_ready_with_ack() -> None:
     assert all(obligation["acknowledged"] is True for obligation in plan.rule_check["rule_obligations"])
 
 
+def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
+    commands = {command["stage"]: command["command"] for command in ptcli_cli.build_plan_commands("U2", "60635", ["MTEAM"], "/downloads/Example")}
+
+    resume_target = commands["resume-target-package"]
+    assert "--target-execute --confirm-upload" in resume_target
+    assert "--download-uploaded-torrent" in resume_target
+    assert "--inject-uploaded-torrent --uploaded-save-path \"/downloads/Example\"" in resume_target
+    assert "--wait-uploaded-complete" in resume_target
+    assert "--uploaded-qbit-category MTEAM" in resume_target
+    assert "--uploaded-qbit-tags retorrent" in resume_target
+
+    resume_uploaded = commands["resume-uploaded-torrent"]
+    assert "--uploaded-torrent-file ./tmp/uploaded/MTEAM-<id>.torrent" in resume_uploaded
+    assert "--inject-uploaded-torrent --uploaded-save-path \"/downloads/Example\"" in resume_uploaded
+    assert "--wait-uploaded-complete" in resume_uploaded
+    assert "--uploaded-qbit-category MTEAM" in resume_uploaded
+    assert "--uploaded-qbit-tags retorrent" in resume_uploaded
+
+
 def test_retorrent_execute_blocked_returns_nonzero(capsys, tmp_path) -> None:
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
