@@ -745,12 +745,38 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
 def test_source_download_requires_target_rule_context(monkeypatch, capsys) -> None:
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
 
-    code = main(["source-download", "--tracker", "U2", "--source-id", "60635", "--output-dir", "./tmp/source", "--accept-rules", "--json"])
+    source_url = "https://u2.dmhy.org/details.php?id=60635&hit=1"
+    code = main(["source-download", "--tracker", "U2", "--source-id", source_url, "--output-dir", "./tmp/source", "--accept-rules", "--json"])
 
     assert code == 1
     out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["requested_source_id"] == source_url
+    assert payload["input_source_id"] == source_url
+    assert payload["source_torrent_id"] == "60635"
     assert '"status": "blocked"' in out
     assert "--to is required" in out
+
+
+def test_source_info_exposes_normalized_source_id(monkeypatch, capsys) -> None:
+    source_url = "https://u2.dmhy.org/details.php?id=60635&hit=1"
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (_config, base_dir)
+        return source_info_from_tuple(tracker, extract_torrent_id(source_id), (1, 2, "Name", "a" * 40, "desc"), {})
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+
+    code = main(["source-info", "--tracker", "U2", "--source-id", source_url, "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tracker"] == "U2"
+    assert payload["requested_source_id"] == source_url
+    assert payload["input_source_id"] == source_url
+    assert payload["source_torrent_id"] == "60635"
+    assert payload["source"]["torrent_id"] == "60635"
 
 
 def test_source_download_requires_rule_ack(monkeypatch, capsys) -> None:
@@ -769,12 +795,15 @@ def test_source_download_requires_rule_ack(monkeypatch, capsys) -> None:
 
 
 def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> None:
+    source_url = "https://u2.dmhy.org/details.php?id=60635&hit=1"
+
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = (_config, base_dir)
-        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, extract_torrent_id(source_id), (1, 2, "Name", "a" * 40, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
+        _ = (tracker, base_dir)
+        assert source_id == source_url
         torrent_path = tmp_path / output_dir / "U2-60635.torrent"
         torrent_path.parent.mkdir(parents=True, exist_ok=True)
         torrent_path.write_bytes(b"d4:infod")
@@ -790,7 +819,7 @@ def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> 
             "--tracker",
             "U2",
             "--source-id",
-            "60635",
+            source_url,
             "--to",
             "MTEAM",
             "--output-dir",
@@ -804,6 +833,10 @@ def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> 
     out = capsys.readouterr().out
     payload = json.loads(out)
     assert payload["status"] == "ok"
+    assert payload["requested_source_id"] == source_url
+    assert payload["input_source_id"] == source_url
+    assert payload["source_torrent_id"] == "60635"
+    assert payload["source"]["torrent_id"] == "60635"
     assert payload["rule_check"]["ready"] is True
     assert payload["path"] == payload["source_torrent"]["path"]
     assert payload["source_torrent"]["path"].endswith("source-out/U2-60635.torrent")

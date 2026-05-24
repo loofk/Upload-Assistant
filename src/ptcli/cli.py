@@ -322,19 +322,33 @@ async def export_qbit(args: argparse.Namespace) -> dict[str, Any]:
 async def source_info(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config(args.config)
     info = await fetch_source_info(config, args.tracker, args.source_id, base_dir=args.base_dir)
+    source = info.to_dict()
+    source_id_context = {
+        "requested_source_id": args.source_id,
+        "input_source_id": args.source_id,
+        "source_torrent_id": source["torrent_id"],
+    }
     return {
         "status": "ok",
-        "source": info.to_dict(),
+        "tracker": source["tracker"],
+        **source_id_context,
+        "source": source,
     }
 
 
 async def source_download(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config(args.config)
     source_tracker = normalize_tracker(args.tracker)
+    source_id_context = {
+        "requested_source_id": args.source_id,
+        "input_source_id": args.source_id,
+        "source_torrent_id": extract_torrent_id(args.source_id),
+    }
     if not args.target_trackers:
         return {
             "status": "blocked",
             "tracker": source_tracker,
+            **source_id_context,
             "blockers": ["--to is required so source-download can run source/target rule gates before downloading."],
         }
     target_trackers = parse_tracker_list(args.target_trackers)
@@ -343,6 +357,7 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
         return {
             "status": "blocked",
             "tracker": source_tracker,
+            **source_id_context,
             "target_trackers": target_trackers,
             "rule_check": rule_check,
             "blockers": _rule_check_blockers(rule_check),
@@ -353,6 +368,7 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
         return {
             "status": "blocked",
             "tracker": source_tracker,
+            **source_id_context,
             "target_trackers": target_trackers,
             "rule_check": rule_check,
             "source": source,
@@ -368,6 +384,7 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
         return {
             "status": "blocked",
             "tracker": source_tracker,
+            **source_id_context,
             "target_trackers": target_trackers,
             "rule_check": rule_check,
             "source": source,
@@ -379,6 +396,7 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "status": "ok",
         "tracker": source_tracker,
+        **source_id_context,
         "target_trackers": target_trackers,
         "rule_check": rule_check,
         "source": source,
