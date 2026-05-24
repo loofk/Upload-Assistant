@@ -330,7 +330,18 @@ async def export_qbit(args: argparse.Namespace) -> dict[str, Any]:
 
 async def source_info(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config(args.config)
-    info = await fetch_source_info(config, args.tracker, args.source_id, base_dir=args.base_dir)
+    tracker = normalize_tracker(args.tracker)
+    invalid = unsupported_trackers([tracker])
+    if invalid:
+        return {
+            "status": "blocked",
+            "tracker": tracker,
+            "requested_source_id": args.source_id,
+            "input_source_id": args.source_id,
+            "source_torrent_id": extract_torrent_id(args.source_id),
+            "blockers": [f"Unsupported tracker(s) for focused CLI scope: {', '.join(invalid)}"],
+        }
+    info = await fetch_source_info(config, tracker, args.source_id, base_dir=args.base_dir)
     source = info.to_dict()
     source_id_context = {
         "requested_source_id": args.source_id,
@@ -3023,7 +3034,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "source-info":
             payload = _with_captured_stdout(lambda: asyncio.run(source_info(args)), json_output)
             _print_payload(payload, json_output)
-            return 0
+            return _source_info_exit_code(payload)
 
         if args.command == "source-download":
             payload = _with_captured_stdout(lambda: asyncio.run(source_download(args)), json_output)
@@ -3068,6 +3079,10 @@ def _source_download_exit_code(payload: dict[str, Any]) -> int:
     if payload.get("status") == "ok" and not payload.get("blockers"):
         return 0
     return 1
+
+
+def _source_info_exit_code(payload: dict[str, Any]) -> int:
+    return 0 if payload.get("status") == "ok" and not payload.get("blockers") else 1
 
 
 def _doctor_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:

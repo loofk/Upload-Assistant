@@ -900,6 +900,22 @@ def test_source_info_exposes_normalized_source_id(monkeypatch, capsys) -> None:
     assert payload["source"]["torrent_id"] == "60635"
 
 
+def test_source_info_blocks_unsupported_tracker_before_fetch(monkeypatch, capsys) -> None:
+    async def fake_fetch_source_info(*_args, **_kwargs):
+        raise AssertionError("unsupported tracker must not reach source fetch")
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+
+    code = main(["source-info", "--tracker", "PTP", "--source-id", "123", "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["tracker"] == "PTP"
+    assert payload["blockers"] == ["Unsupported tracker(s) for focused CLI scope: PTP"]
+
+
 def test_source_download_requires_rule_ack(monkeypatch, capsys) -> None:
     async def fake_download_source_torrent(*_args, **_kwargs):
         raise AssertionError("download must not run without rule acknowledgement")
