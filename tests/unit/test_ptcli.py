@@ -428,6 +428,7 @@ async def test_retorrent_execute_enables_uploaded_torrent_followup_by_default(mo
     assert pipeline_args.wait_uploaded_complete is True
     assert pipeline_args.uploaded_save_path is None
     assert pipeline_args.content_path == "/downloads/Name"
+    assert pipeline_args.write_summary is True
 
 
 @pytest.mark.asyncio

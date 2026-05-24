@@ -266,7 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent paused.")
     retorrent.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait for the uploaded target torrent to become complete during --execute; uploaded completion wait is enabled automatically.")
     retorrent.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for uploaded target torrent completion during --execute; uploaded completion wait is enabled automatically.")
-    retorrent.add_argument("--write-summary", action="store_true", help="Write ptcli-run-summary.json during --execute for audit and automation handoff.")
+    retorrent.add_argument("--write-summary", action="store_true", help="Write ptcli-run-summary.json during --execute for audit and automation handoff. Enabled by default for --execute.")
     retorrent.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to target package or ./tmp/retorrent-runs.")
     retorrent.add_argument(
         "--accept-rules",
@@ -550,7 +550,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         wait_uploaded_complete=True,
         uploaded_wait_timeout=args.uploaded_wait_timeout,
         uploaded_wait_interval=args.uploaded_wait_interval,
-        write_summary=args.write_summary,
+        write_summary=True,
         summary_output_dir=args.summary_output_dir,
         json=getattr(args, "json", False),
     )
