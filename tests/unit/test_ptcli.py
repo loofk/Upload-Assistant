@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 
@@ -186,6 +187,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                 "target": {"ready": True, "uploaded_torrent_hash": "b" * 40},
             },
             "summary": {"ready": True, "complete": True, "status": "complete"},
+            "summary_file": str(tmp_path / "summary" / "ptcli-run-summary.json"),
             "next_actions": ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."],
             "stages": [{"stage": "target-upload", "ok": True}],
         }
@@ -217,6 +219,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "MTEAM",
             "--uploaded-qbit-tags",
             "retorrent",
+            "--write-summary",
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
             "--json",
         ]
     )
@@ -234,6 +239,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["evidence"]["source"]["mode"] == "downloaded"
     assert payload["evidence"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert payload["summary"]["status"] == "complete"
+    assert payload["summary_file"].endswith("ptcli-run-summary.json")
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True
@@ -244,6 +250,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.download_uploaded_torrent is True
     assert pipeline_args.inject_uploaded_torrent is True
     assert pipeline_args.wait_uploaded_complete is True
+    assert pipeline_args.write_summary is True
+    assert pipeline_args.summary_output_dir == str(tmp_path / "summary")
     assert pipeline_args.save_path == "/downloads"
     assert pipeline_args.target_torrent_file == str(torrent_file)
     assert pipeline_args.sanitize_target_torrent is True
@@ -2036,6 +2044,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
             "--target-output-dir",
             str(tmp_path / "target"),
             "--accept-rules",
+            "--write-summary",
             "--json",
         ]
     )
@@ -2045,6 +2054,12 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
     assert target_stage["result"]["upload_gate"]["ready"] is True
     assert target_stage["result"]["upload_gate"]["dupe_count"] == 0
+    summary_path = Path(payload["summary_file"])
+    assert summary_path == Path(target_stage["result"]["package_dir"]) / "ptcli-run-summary.json"
+    summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
+    assert summary_payload["summary"]["ready"] is True
+    assert summary_payload["summary"]["target"]["ready"] is False
+    assert summary_payload["next_actions"]
 
 
 @pytest.mark.asyncio

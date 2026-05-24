@@ -10,6 +10,7 @@ import json
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 from src.ptcli.config import load_config, resolve_client_config
@@ -175,6 +176,8 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--wait-uploaded-complete", action="store_true", help="Wait for the injected target torrent to become complete in qBittorrent.")
     pipeline.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait with --wait-uploaded-complete.")
     pipeline.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for --wait-uploaded-complete.")
+    pipeline.add_argument("--write-summary", action="store_true", help="Write ptcli-run-summary.json for audit and automation handoff.")
+    pipeline.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to target package or ./tmp/retorrent-runs.")
     pipeline.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     target_upload = subparsers.add_parser("target-upload", help="Preflight a prepared target package before live upload.")
@@ -230,6 +233,8 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent paused.")
     retorrent.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait for the uploaded target torrent to become complete during --execute.")
     retorrent.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for uploaded target torrent completion during --execute.")
+    retorrent.add_argument("--write-summary", action="store_true", help="Write ptcli-run-summary.json during --execute for audit and automation handoff.")
+    retorrent.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to target package or ./tmp/retorrent-runs.")
     retorrent.add_argument(
         "--accept-rules",
         action="store_true",
@@ -398,6 +403,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "closure": closure,
         "evidence": evidence,
         "summary": summary,
+        "summary_file": pipeline_result.get("summary_file"),
         "ready": ready,
         "complete": not blockers,
         "blockers": blockers,
@@ -474,6 +480,8 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         wait_uploaded_complete=True,
         uploaded_wait_timeout=args.uploaded_wait_timeout,
         uploaded_wait_interval=args.uploaded_wait_interval,
+        write_summary=args.write_summary,
+        summary_output_dir=args.summary_output_dir,
         json=getattr(args, "json", False),
     )
 
@@ -783,7 +791,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     blockers = _pipeline_stage_blockers(stages) if _pipeline_has_action(args) and not ready else []
     closure = _pipeline_closure(stages, effective_content_path, effective_source_torrent_hash, effective_target_torrent_file)
     evidence = _pipeline_evidence(closure)
-    return {
+    summary = _pipeline_run_summary(stages, ready, blockers, closure, evidence)
+    payload = {
         "status": "blocked" if blockers else "ok",
         "source_tracker": source_tracker,
         "source_torrent_id": source_torrent_id,
@@ -796,10 +805,15 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "blockers": blockers,
         "closure": closure,
         "evidence": evidence,
-        "summary": _pipeline_run_summary(stages, ready, blockers, closure, evidence),
+        "summary": summary,
         "next_actions": _pipeline_next_actions(args, blockers, closure),
         "stages": stages,
     }
+    if getattr(args, "write_summary", False):
+        summary_file = _write_run_summary(payload, args.summary_output_dir)
+        payload["summary_file"] = summary_file
+        summary["summary_file"] = summary_file
+    return payload
 
 
 async def _pipeline_stage(stage: str, operation: Any, serialize: Any, validate: Any | None = None, invalid_message: str | None = None) -> dict[str, Any]:
@@ -859,6 +873,46 @@ def _pipeline_stage_status(stage: dict[str, Any]) -> dict[str, Any]:
         "skipped": bool(stage.get("skipped")),
         "message": stage.get("error") or stage.get("message"),
     }
+
+
+def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
+    destination_dir = _run_summary_dir(payload, output_dir)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / "ptcli-run-summary.json"
+    summary_payload = {
+        "status": payload.get("status"),
+        "source_tracker": payload.get("source_tracker"),
+        "source_torrent_id": payload.get("source_torrent_id"),
+        "target_trackers": payload.get("target_trackers"),
+        "path": payload.get("path"),
+        "target_torrent_file": payload.get("target_torrent_file"),
+        "ready": payload.get("ready"),
+        "blockers": payload.get("blockers", []),
+        "summary": payload.get("summary"),
+        "evidence": payload.get("evidence"),
+        "next_actions": payload.get("next_actions", []),
+    }
+    destination.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return str(destination)
+
+
+def _run_summary_dir(payload: dict[str, Any], output_dir: str | None) -> Path:
+    if output_dir:
+        return Path(output_dir).expanduser()
+    package_dir = _target_package_dir_from_stages(payload.get("stages"))
+    if package_dir:
+        return Path(package_dir).expanduser()
+    return Path("./tmp/retorrent-runs").expanduser()
+
+
+def _target_package_dir_from_stages(stages: Any) -> str | None:
+    if not isinstance(stages, list):
+        return None
+    target_prepare = _find_stage(stages, "target-prepare")
+    result = target_prepare.get("result") if isinstance(target_prepare, dict) else None
+    if isinstance(result, dict) and result.get("package_dir"):
+        return str(result["package_dir"])
+    return None
 
 
 def _pipeline_next_actions(args: argparse.Namespace, blockers: list[str], closure: dict[str, Any]) -> list[str]:
