@@ -1284,7 +1284,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "target-upload":
             payload = _with_captured_stdout(lambda: asyncio.run(target_upload_payload(args)), json_output)
             _print_payload(payload, json_output)
-            return 0
+            return _target_upload_exit_code(args, payload)
 
         parser.error(f"Unknown command: {args.command}")
         return 2
@@ -1297,6 +1297,14 @@ def _retorrent_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> i
     if not getattr(args, "execute", False):
         return 0
     if payload.get("status") in {"complete", "ok"}:
+        return 0
+    return 1
+
+
+def _target_upload_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:
+    if not getattr(args, "execute", False):
+        return 0
+    if payload.get("status") == "uploaded":
         return 0
     return 1
 

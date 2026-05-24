@@ -2572,7 +2572,7 @@ def test_target_upload_execute_requires_confirmation_before_config_load(tmp_path
 
     code = main(["target-upload", "--config", "/missing/config.py", "--package-dir", package["package_dir"], "--torrent-file", str(torrent_file), "--execute", "--json"])
 
-    assert code == 0
+    assert code == 1
     out = capsys.readouterr().out
     assert "confirm-upload" in out
     assert "Config file not found" not in out
