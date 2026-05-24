@@ -40,7 +40,7 @@ def build_doctor_check(
         checks.append(package_preflight["check"])
     else:
         checks.append(_check("target_package", False, "Target package directory was not provided."))
-    checks.extend(_upload_followup_checks(download_uploaded_torrent, inject_uploaded_torrent, uploaded_save_path))
+    checks.extend(_upload_followup_checks(download_uploaded_torrent, inject_uploaded_torrent, uploaded_save_path, content_path))
 
     return {
         "status": "ok",
@@ -120,7 +120,7 @@ def _package_preflight(package_dir: str | None, target_execute: bool, target_tor
     }
 
 
-def _upload_followup_checks(download_uploaded_torrent: bool, inject_uploaded_torrent: bool, uploaded_save_path: str | None) -> list[dict[str, Any]]:
+def _upload_followup_checks(download_uploaded_torrent: bool, inject_uploaded_torrent: bool, uploaded_save_path: str | None, content_path: str | None) -> list[dict[str, Any]]:
     checks = [
         _check(
             "download_uploaded_torrent",
@@ -130,11 +130,12 @@ def _upload_followup_checks(download_uploaded_torrent: bool, inject_uploaded_tor
     ]
     if inject_uploaded_torrent and not download_uploaded_torrent:
         checks.append(_check("inject_uploaded_torrent", False, "--inject-uploaded-torrent requires --download-uploaded-torrent."))
-    elif inject_uploaded_torrent and not uploaded_save_path:
-        checks.append(_check("inject_uploaded_torrent", False, "--uploaded-save-path is required with --inject-uploaded-torrent."))
+    elif inject_uploaded_torrent and not (uploaded_save_path or content_path):
+        checks.append(_check("inject_uploaded_torrent", False, "--uploaded-save-path or --path is required with --inject-uploaded-torrent."))
     elif inject_uploaded_torrent:
+        save_path = uploaded_save_path or content_path
         checks.append(_check("inject_uploaded_torrent", True, "Uploaded target torrent will be injected into qBittorrent."))
-        checks.append(_path_check("uploaded_save_path", uploaded_save_path, required=True))
+        checks.append(_path_check("uploaded_save_path", save_path, required=True))
     else:
         checks.append(_check("inject_uploaded_torrent", True, "Uploaded target torrent injection is not requested."))
     return checks

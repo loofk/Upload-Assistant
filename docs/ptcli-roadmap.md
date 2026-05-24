@@ -22,6 +22,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path /downloa
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --output-dir ./tmp/source --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path /downloads --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path /downloads --wait-complete --json
+python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path /downloads --wait-complete --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --upload-target --target-torrent-file ./tmp/exported/mteam.torrent --target-execute --confirm-upload --download-uploaded-torrent --uploaded-output-dir ./tmp/uploaded --inject-uploaded-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path /downloads/movie --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path /downloads/movie --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --upload-target --target-torrent-file ./tmp/exported/mteam.torrent --target-execute --confirm-upload --download-uploaded-torrent --uploaded-output-dir ./tmp/uploaded --inject-uploaded-torrent --uploaded-save-path /downloads/movie --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
 python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --torrent-file ./tmp/exported/mteam.torrent --write-payload --json
@@ -68,7 +69,7 @@ python3 ptcli.py retorrent --from MTEAM --source-id 12345 --to TJUPT,CHD --path 
 - `source-download`: 首批支持 `U2` / `CHD` / `MTEAM` 的源种下载。
 - `flow-check`: 本地检查 U2/CHD → MTEAM 参考流所需配置、cookie 和 qBittorrent client。
 - `doctor`: live 前 checklist，检查 flow/config/cookie/qBittorrent、路径、目标站准备包、MTEAM upload gate、确认参数和后续下载/注入条件。
-- `pipeline`: 串联 `flow-check`、`source-info`、可选 `source-download`、可选 `inject-source`、可选 `wait-complete`、可选 `match`、可选 `target-dupe-check`、可选 `target-prepare` 和可选 `target-upload`；默认不下载、不注入、不等待、不上传。
+- `pipeline`: 串联 `flow-check`、`source-info`、可选 `source-download`、可选 `inject-source`、可选 `wait-complete`、可选 `match`、可选 `target-dupe-check`、可选 `target-prepare` 和可选 `target-upload`；默认不下载、不注入、不等待、不上传；当未显式传 `--path` 时，可从完成的 QB match 结果推导后续内容路径。
 - `target-prepare`: 目前生成 MTEAM dry-run preview、meta draft、field mapping、description draft 和 upload gate 文件，不调用上传接口。
 - `target-dupe-check`: 可选调用 MTEAM API 按 IMDb 查重；没有 IMDb ID 时明确阻断。
 - `target-upload`: 读取 MTEAM 准备包并执行上传预检，输出/写入 MTEAM multipart payload 摘要；只有 `--execute --confirm-upload` 且 upload gate/payload 全部 ready 时才调用 MTEAM API，并可下载上传后生成的目标站 `.torrent`、显式注入 qBittorrent 做种。

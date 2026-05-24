@@ -373,6 +373,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     source_tracker = normalize_tracker(args.source_tracker)
     source_torrent_id = extract_torrent_id(args.source_id)
     target_trackers = parse_tracker_list(args.target_trackers)
+    effective_content_path = args.content_path
 
     stages: list[dict[str, Any]] = []
     flow_check_result = build_flow_check(config, source_tracker, source_torrent_id, ",".join(target_trackers), args.client, base_dir=args.base_dir)
@@ -436,6 +437,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 invalid_message="qBittorrent task did not complete before timeout.",
             )
             stages.append(wait_result)
+            effective_content_path = effective_content_path or _content_path_from_stage(wait_result)
         elif args.content_path:
             wait_result = await _pipeline_stage(
                 "wait-complete",
@@ -445,15 +447,16 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 invalid_message="qBittorrent task did not complete before timeout.",
             )
             stages.append(wait_result)
+            effective_content_path = effective_content_path or _content_path_from_stage(wait_result)
         else:
             stages.append({"stage": "wait-complete", "ok": False, "skipped": True, "message": "--wait-complete requires successful injection or --path."})
     else:
         stages.append({"stage": "wait-complete", "ok": True, "skipped": True, "message": "--wait-complete not provided; qBittorrent wait skipped."})
 
-    if args.content_path:
+    if effective_content_path:
         match_result = await _pipeline_stage(
             "match",
-            lambda: _match_with_config(config, args.client, args.content_path),
+            lambda: _match_with_config(config, args.client, str(effective_content_path)),
             lambda payload: payload,
         )
         stages.append(match_result)
@@ -484,7 +487,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             source_result if isinstance(source_result, dict) else None,
             target_trackers,
             stages,
-            args.content_path,
+            effective_content_path,
             args.target_output_dir,
             accept_rules=args.accept_rules,
         )
@@ -500,13 +503,13 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--target-torrent-file is required when --upload-target is used."})
         elif args.inject_uploaded_torrent and not args.download_uploaded_torrent:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--inject-uploaded-torrent requires --download-uploaded-torrent."})
-        elif args.inject_uploaded_torrent and not args.uploaded_save_path:
-            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--uploaded-save-path is required with --inject-uploaded-torrent."})
+        elif args.inject_uploaded_torrent and not (args.uploaded_save_path or effective_content_path):
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--uploaded-save-path or an inferred completed content path is required with --inject-uploaded-torrent."})
         else:
             package_dir = str(target_prepare_stage.get("result", {}).get("package_dir", ""))
             upload_stage = await _pipeline_stage(
                 "target-upload",
-                lambda: _target_upload_with_config(config, args, package_dir),
+                lambda: _target_upload_with_config(config, args, package_dir, effective_content_path),
                 lambda payload: payload,
                 validate=lambda payload: payload.get("status") in {"ready", "uploaded"},
                 invalid_message="Target upload stage did not reach ready or uploaded status.",
@@ -520,7 +523,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "source_tracker": source_tracker,
         "source_torrent_id": source_torrent_id,
         "target_trackers": target_trackers,
-        "path": args.content_path,
+        "path": effective_content_path,
+        "requested_path": args.content_path,
         "ready": all(stage.get("ok", False) for stage in stages),
         "stages": stages,
     }
@@ -545,6 +549,21 @@ def _find_stage(stages: list[dict[str, Any]], stage_name: str) -> dict[str, Any]
     for stage in stages:
         if stage.get("stage") == stage_name:
             return stage
+    return None
+
+
+def _content_path_from_stage(stage: dict[str, Any]) -> str | None:
+    if not stage.get("ok"):
+        return None
+    result = stage.get("result")
+    if not isinstance(result, dict):
+        return None
+    matches = result.get("matches")
+    if not isinstance(matches, list):
+        return None
+    for match in matches:
+        if isinstance(match, dict) and match.get("content_path"):
+            return str(match["content_path"])
     return None
 
 
@@ -586,7 +605,7 @@ async def _inject_source_with_config(
     }
 
 
-async def _target_upload_with_config(config: dict[str, Any], args: argparse.Namespace, package_dir: str) -> dict[str, Any]:
+async def _target_upload_with_config(config: dict[str, Any], args: argparse.Namespace, package_dir: str, inferred_content_path: str | None = None) -> dict[str, Any]:
     result = await upload_mteam_from_package(
         config,
         package_dir,
@@ -599,11 +618,14 @@ async def _target_upload_with_config(config: dict[str, Any], args: argparse.Name
     )
     if args.inject_uploaded_torrent and result.get("status") == "uploaded" and isinstance(result.get("downloaded_torrent"), dict):
         downloaded_path = str(result["downloaded_torrent"]["path"])
+        uploaded_save_path = args.uploaded_save_path or inferred_content_path
+        if not uploaded_save_path:
+            return {**result, "injected_torrent": {"status": "blocked", "blockers": ["uploaded save path could not be inferred."]}}
         inject_result = await _inject_source_with_config(
             config,
             args.client,
             downloaded_path,
-            args.uploaded_save_path,
+            uploaded_save_path,
             args.uploaded_qbit_category,
             args.uploaded_qbit_tags,
             args.uploaded_paused,
