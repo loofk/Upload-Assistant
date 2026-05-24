@@ -119,6 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--prepare-target", action="store_true", help="Build a dry-run target preparation preview after prior stages.")
     pipeline.add_argument("--target-output-dir", default="./tmp/target", help="Directory for --prepare-target review package files.")
     pipeline.add_argument("--check-dupes", action="store_true", help="Run target duplicate search after source metadata is available.")
+    pipeline.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
     pipeline.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     retorrent = subparsers.add_parser("retorrent", help="Plan a retorrent workflow between supported trackers.")
@@ -345,20 +346,6 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "match", "ok": True, "skipped": True, "message": "--path not provided; qBittorrent match skipped."})
 
-    if args.prepare_target:
-        source_stage = _find_stage(stages, "source-info")
-        source_result = source_stage.get("result") if source_stage and source_stage.get("ok") else None
-        target_prepare = write_mteam_prepare_package(
-            source_result if isinstance(source_result, dict) else None,
-            target_trackers,
-            stages,
-            args.content_path,
-            args.target_output_dir,
-        )
-        stages.append({"stage": "target-prepare", "ok": not target_prepare["blockers"], "result": target_prepare})
-    else:
-        stages.append({"stage": "target-prepare", "ok": True, "skipped": True, "message": "--prepare-target not provided; target preparation skipped."})
-
     if args.check_dupes:
         source_stage = _find_stage(stages, "source-info")
         source_result = source_stage.get("result") if source_stage and source_stage.get("ok") else None
@@ -375,6 +362,21 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append(dupe_result)
     else:
         stages.append({"stage": "target-dupe-check", "ok": True, "skipped": True, "message": "--check-dupes not provided; target duplicate search skipped."})
+
+    if args.prepare_target:
+        source_stage = _find_stage(stages, "source-info")
+        source_result = source_stage.get("result") if source_stage and source_stage.get("ok") else None
+        target_prepare = write_mteam_prepare_package(
+            source_result if isinstance(source_result, dict) else None,
+            target_trackers,
+            stages,
+            args.content_path,
+            args.target_output_dir,
+            accept_rules=args.accept_rules,
+        )
+        stages.append({"stage": "target-prepare", "ok": not target_prepare["blockers"], "result": target_prepare})
+    else:
+        stages.append({"stage": "target-prepare", "ok": True, "skipped": True, "message": "--prepare-target not provided; target preparation skipped."})
 
     return {
         "status": "ok",

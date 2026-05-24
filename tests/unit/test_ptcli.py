@@ -7,7 +7,15 @@ from src.ptcli.credentials import build_flow_check
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summarize_torrent
 from src.ptcli.source import create_source_meta, extract_torrent_id, source_info_from_tuple
-from src.ptcli.target import build_mteam_field_mapping, build_mteam_meta_draft, build_mteam_prepare_preview, search_mteam_duplicates, write_mteam_prepare_package
+from src.ptcli.target import (
+    build_mteam_description_draft,
+    build_mteam_field_mapping,
+    build_mteam_meta_draft,
+    build_mteam_prepare_preview,
+    build_mteam_upload_gate,
+    search_mteam_duplicates,
+    write_mteam_prepare_package,
+)
 
 
 class FakeQbitClient:
@@ -660,6 +668,61 @@ async def test_pipeline_check_dupes_runs_after_source_info(monkeypatch, tmp_path
     assert dupe_stage["result"]["count"] == 1
 
 
+@pytest.mark.asyncio
+async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"), {})
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path}]}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            "/downloads/Name",
+            "--check-dupes",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
+    assert target_stage["result"]["upload_gate"]["ready"] is True
+    assert target_stage["result"]["upload_gate"]["dupe_count"] == 0
+
+
 def test_mteam_prepare_preview_blocks_missing_source() -> None:
     preview = build_mteam_prepare_preview(None, ["MTEAM"], [], None)
 
@@ -697,6 +760,30 @@ def test_mteam_meta_draft_and_field_mapping_from_name() -> None:
     assert mapping["standard"] == 1
     assert mapping["imdb"] == "https://www.imdb.com/title/tt1234567"
     assert mapping["douban"] == "https://movie.douban.com/subject/1291546/"
+
+
+def test_mteam_description_draft_and_upload_gate() -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "torrenthash": "a" * 40,
+    }
+    meta_draft = build_mteam_meta_draft(source_info, "/downloads/Example")
+    description = build_mteam_description_draft(meta_draft, source_info)
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], [{"stage": "match", "ok": True, "result": {"count": 1}}], "/downloads/Example")
+    gate = build_mteam_upload_gate(
+        preview,
+        [{"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}}],
+        accept_rules=True,
+    )
+
+    assert "Retorrent review draft" in description
+    assert "Source tracker: U2" in description
+    assert gate["ready"] is True
 
 
 def test_mteam_prepare_preview_contains_package_fields() -> None:
@@ -739,7 +826,10 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     assert package["files"]["preview"].endswith("mteam-prepare-preview.json")
     assert package["files"]["meta_draft"].endswith("mteam-meta-draft.json")
     assert package["files"]["field_mapping"].endswith("mteam-field-mapping.json")
+    assert package["files"]["description_draft"].endswith("mteam-description-draft.txt")
+    assert package["files"]["upload_gate"].endswith("mteam-upload-gate.json")
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-prepare-preview.json").exists()
+    assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-description-draft.txt").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-field-mapping.json").read_text(encoding="utf-8").strip().startswith("{")
 
 

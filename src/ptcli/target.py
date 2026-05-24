@@ -16,24 +16,33 @@ def write_mteam_prepare_package(
     stages: list[dict[str, Any]],
     content_path: str | None,
     output_dir: str,
+    accept_rules: bool = False,
 ) -> dict[str, Any]:
     preview = build_mteam_prepare_preview(source_info, target_trackers, stages, content_path)
     package_dir = _prepare_package_dir(output_dir, source_info)
     preview_path = package_dir / "mteam-prepare-preview.json"
     meta_draft_path = package_dir / "mteam-meta-draft.json"
     field_mapping_path = package_dir / "mteam-field-mapping.json"
+    description_path = package_dir / "mteam-description-draft.txt"
+    upload_gate_path = package_dir / "mteam-upload-gate.json"
+    upload_gate = build_mteam_upload_gate(preview, stages, accept_rules=accept_rules)
 
     _write_json(preview_path, preview)
     _write_json(meta_draft_path, preview["meta_draft"])
     _write_json(field_mapping_path, preview["field_mapping"])
+    description_path.write_text(build_mteam_description_draft(preview["meta_draft"], source_info), encoding="utf-8")
+    _write_json(upload_gate_path, upload_gate)
 
     return {
         **preview,
+        "upload_gate": upload_gate,
         "package_dir": str(package_dir),
         "files": {
             "preview": str(preview_path),
             "meta_draft": str(meta_draft_path),
             "field_mapping": str(field_mapping_path),
+            "description_draft": str(description_path),
+            "upload_gate": str(upload_gate_path),
         },
     }
 
@@ -118,6 +127,66 @@ def build_mteam_prepare_preview(source_info: dict[str, Any] | None, target_track
     }
 
 
+def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[str, Any] | None) -> str:
+    lines = [
+        "[b]Retorrent review draft[/b]",
+        "",
+        f"[b]Title[/b]: {meta_draft.get('title') or ''}",
+        f"[b]Release name[/b]: {meta_draft.get('name') or ''}",
+        f"[b]Category[/b]: {meta_draft.get('category') or ''}",
+        f"[b]Type[/b]: {meta_draft.get('type') or ''}",
+        f"[b]Resolution[/b]: {meta_draft.get('resolution') or ''}",
+        f"[b]IMDb[/b]: {meta_draft.get('imdb') or ''}",
+        f"[b]TMDb[/b]: {meta_draft.get('tmdb_id') or ''}",
+        f"[b]Douban[/b]: {meta_draft.get('douban_url') or meta_draft.get('douban_id') or ''}",
+        "",
+        "[b]Source evidence[/b]",
+        f"Source tracker: {source_info.get('tracker') if source_info else ''}",
+        f"Source torrent id: {source_info.get('torrent_id') if source_info else ''}",
+        f"Source torrent hash: {source_info.get('torrenthash') if source_info else ''}",
+        f"Local content path: {meta_draft.get('content_path') or ''}",
+        "",
+        "[b]Manual review required[/b]",
+        "Confirm source-site and MTEAM rules, transfer permissions, description requirements, screenshots, subtitles, naming, and duplicate status before upload.",
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def build_mteam_upload_gate(preview: dict[str, Any], stages: list[dict[str, Any]], accept_rules: bool) -> dict[str, Any]:
+    dupe_stage = _find_stage(stages, "target-dupe-check")
+    dupe_result = dupe_stage.get("result", {}) if dupe_stage else {}
+    dupe_count = int(dupe_result.get("count", 0) or 0) if isinstance(dupe_result, dict) else 0
+    dupe_searched = bool(dupe_result.get("searched")) if isinstance(dupe_result, dict) else False
+    checks = [
+        {
+            "name": "rules_acknowledged",
+            "ok": accept_rules,
+            "message": "Rules have been acknowledged." if accept_rules else "Rules must be manually reviewed and acknowledged.",
+        },
+        {
+            "name": "verified_content",
+            "ok": bool(preview.get("verified_content")),
+            "message": "qBittorrent has verified matching or complete content evidence.",
+        },
+        {
+            "name": "target_fields",
+            "ok": not preview.get("blockers") and not preview.get("missing_fields"),
+            "message": "MTEAM required fields are present.",
+        },
+        {
+            "name": "duplicate_check",
+            "ok": dupe_searched and dupe_count == 0,
+            "message": _dupe_gate_message(dupe_stage, dupe_searched, dupe_count),
+        },
+    ]
+    return {
+        "target_tracker": "MTEAM",
+        "ready": all(check["ok"] for check in checks),
+        "checks": checks,
+        "dupe_count": dupe_count,
+    }
+
+
 def build_mteam_meta_draft(source_info: dict[str, Any] | None, content_path: str | None) -> dict[str, Any]:
     name = str(source_info.get("name") or "").strip() if source_info else ""
     resolution = _infer_resolution(name)
@@ -169,6 +238,23 @@ def _has_verified_content(stages: list[dict[str, Any]]) -> bool:
         if stage_name == "match" and stage.get("ok") and isinstance(result, dict) and int(result.get("count", 0) or 0) > 0:
             return True
     return False
+
+
+def _find_stage(stages: list[dict[str, Any]], stage_name: str) -> dict[str, Any] | None:
+    for stage in stages:
+        if stage.get("stage") == stage_name:
+            return stage
+    return None
+
+
+def _dupe_gate_message(dupe_stage: dict[str, Any] | None, searched: bool, count: int) -> str:
+    if not dupe_stage or dupe_stage.get("skipped"):
+        return "MTEAM duplicate search has not been run."
+    if not dupe_stage.get("ok") or not searched:
+        return "MTEAM duplicate search did not complete successfully."
+    if count > 0:
+        return f"MTEAM duplicate search found {count} possible existing torrent(s)."
+    return "MTEAM duplicate search found no existing torrents."
 
 
 def _infer_resolution(name: str) -> str | None:

@@ -23,8 +23,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downlo
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --output-dir ./tmp/source --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path "/downloads" --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path "/downloads" --wait-complete --json
-python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downloads/content" --prepare-target --target-output-dir ./tmp/target --json
-python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --check-dupes --json
+python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downloads/content" --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --json
 python3 ptcli.py inspect --client default --limit 20 --json
 python3 ptcli.py match --path "/downloads/content" --json
 python3 ptcli.py export --hash "<infohash>" --output-dir ./tmp/exported --json

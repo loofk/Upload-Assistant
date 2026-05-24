@@ -21,8 +21,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path /downloa
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --output-dir ./tmp/source --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path /downloads --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path /downloads --wait-complete --json
-python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path /downloads/movie --prepare-target --target-output-dir ./tmp/target --json
-python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --check-dupes --json
+python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path /downloads/movie --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --json
 python3 ptcli.py inspect --client default --limit 20 --json
 python3 ptcli.py match --path /downloads/movie --json
 python3 ptcli.py export --hash "<infohash>" --output-dir ./tmp/exported --json
@@ -64,8 +63,8 @@ python3 ptcli.py retorrent --from MTEAM --source-id 12345 --to TJUPT,CHD --path 
 - `source-info`: 首批支持 `U2` / `CHD` / `MTEAM` 的源站详情读取。
 - `source-download`: 首批支持 `U2` / `CHD` / `MTEAM` 的源种下载。
 - `flow-check`: 本地检查 U2/CHD → MTEAM 参考流所需配置、cookie 和 qBittorrent client。
-- `pipeline`: 串联 `flow-check`、`source-info`、可选 `source-download`、可选 `inject-source`、可选 `wait-complete`、可选 `match` 和可选 `target-prepare`；默认不下载、不注入、不等待、不上传。
-- `target-prepare`: 目前生成 MTEAM dry-run preview、meta draft 和 field mapping JSON 文件，不调用上传接口。
+- `pipeline`: 串联 `flow-check`、`source-info`、可选 `source-download`、可选 `inject-source`、可选 `wait-complete`、可选 `match`、可选 `target-dupe-check` 和可选 `target-prepare`；默认不下载、不注入、不等待、不上传。
+- `target-prepare`: 目前生成 MTEAM dry-run preview、meta draft、field mapping、description draft 和 upload gate 文件，不调用上传接口。
 - `target-dupe-check`: 可选调用 MTEAM API 按 IMDb 查重；没有 IMDb ID 时明确阻断。
 - `retorrent`: 生成可审计转种计划，并输出可逐步执行的 JSON command plan。
 - `inspect`: 只读列出 qBittorrent 任务。
