@@ -25,6 +25,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downlo
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --output-dir ./tmp/source --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path "/downloads" --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path "/downloads" --wait-complete --json
+python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downloads/content" --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --upload-target --export-target-torrent --target-torrent-output-dir ./tmp/exported --target-execute --confirm-upload --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --download-source --inject-source --save-path "/downloads" --wait-complete --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --upload-target --target-torrent-file ./tmp/exported/mteam.torrent --target-execute --confirm-upload --download-uploaded-torrent --uploaded-output-dir ./tmp/uploaded --inject-uploaded-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downloads/content" --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --json
 python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downloads/content" --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --upload-target --target-torrent-file ./tmp/exported/mteam.torrent --target-execute --confirm-upload --download-uploaded-torrent --uploaded-output-dir ./tmp/uploaded --inject-uploaded-torrent --uploaded-save-path "/downloads/content" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
@@ -35,6 +36,7 @@ python3 ptcli.py match --path "/downloads/content" --json
 python3 ptcli.py export --hash "<infohash>" --output-dir ./tmp/exported --json
 python3 ptcli.py retorrent --from MTEAM --source-id 12345 --to TJUPT,CHD --path "/downloads/content" --dry-run
 python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --target-torrent-file ./tmp/exported/mteam.torrent --download-uploaded-torrent --inject-uploaded-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
+python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --export-target-torrent --download-uploaded-torrent --inject-uploaded-torrent --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
 
 # Web UI 模式
 python3 upload.py --webui 0.0.0.0:5000
@@ -73,7 +75,7 @@ docker compose up  # 使用 docker-compose.yml
 
 ### 入口文件
 - **`upload.py`** — 主入口（约 100KB）。编排整个上传流程：元数据收集 → 截图 → 种子创建 → Tracker 上传。核心处理函数为 `do_the_thing()`。同时处理 Web UI 服务启动和优雅关闭。
-- **`ptcli.py`** — 聚焦版 PT 转种 CLI 入口。默认仅面向 allowlist 内的中文/PT 站点，支持可审计计划、`retorrent --execute` 一键编排、live 前 doctor 检查（可选真实 qBittorrent 连通性探针）、源站信息/种子下载、qBittorrent 检查/注入/等待、从 QB 完成结果推导内容路径、MTEAM 目标站准备包与查重；MTEAM live upload 仅在 `target-upload --execute --confirm-upload` 或 `retorrent --execute --confirm-upload` 且 gate/payload ready 时启用，并可显式下载/注入目标站种子。
+- **`ptcli.py`** — 聚焦版 PT 转种 CLI 入口。默认仅面向 allowlist 内的中文/PT 站点，支持可审计计划、`retorrent --execute` 一键编排、live 前 doctor 检查（可选真实 qBittorrent 连通性探针）、源站信息/种子下载、qBittorrent 检查/注入/等待、从 QB 完成结果推导内容路径、从匹配 QB 任务导出目标上传种子候选、MTEAM 目标站准备包与查重；MTEAM live upload 仅在 `target-upload --execute --confirm-upload` 或 `retorrent --execute --confirm-upload` 且 gate/payload ready 时启用，并可显式下载/注入目标站种子。
 - **`discordbot.py`** — 基于 discord.py 的 Discord 机器人接口，调用相同的上传流程。
 - **`web_ui/server.py`** — 基于 Flask 的 Web UI，包含认证（argon2 + TOTP）、会话管理和文件浏览。
 - **`config-generator.py`** — 交互式配置文件生成/更新工具。

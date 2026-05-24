@@ -142,6 +142,8 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
     pipeline.add_argument("--upload-target", action="store_true", help="Run the target upload stage after --prepare-target succeeds.")
     pipeline.add_argument("--target-torrent-file", help="MTEAM .torrent file used by --upload-target.")
+    pipeline.add_argument("--export-target-torrent", action="store_true", help="Export the matched qBittorrent .torrent as a target upload candidate when --target-torrent-file is not provided.")
+    pipeline.add_argument("--target-torrent-output-dir", default="./tmp/exported", help="Directory for --export-target-torrent output.")
     pipeline.add_argument("--target-execute", action="store_true", help="Submit the target upload when every gate passes.")
     pipeline.add_argument("--confirm-upload", action="store_true", help="Required with --target-execute to confirm manual rule review and live upload intent.")
     pipeline.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json during target upload preflight.")
@@ -190,6 +192,8 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds during --execute.")
     retorrent.add_argument("--target-output-dir", default="./tmp/target", help="Directory for MTEAM target preparation package.")
     retorrent.add_argument("--target-torrent-file", help="MTEAM .torrent file used by the live upload stage.")
+    retorrent.add_argument("--export-target-torrent", action="store_true", help="Export the matched qBittorrent .torrent as the target upload candidate if --target-torrent-file is omitted.")
+    retorrent.add_argument("--target-torrent-output-dir", default="./tmp/exported", help="Directory for --export-target-torrent output.")
     retorrent.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json during upload preflight.")
     retorrent.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
     retorrent.add_argument("--download-uploaded-torrent", action="store_true", help="After target upload succeeds, download the generated MTEAM torrent file.")
@@ -330,8 +334,8 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         return {"status": "blocked", "plan": plan_payload, "blockers": plan.blockers}
     if not args.confirm_upload:
         return {"status": "blocked", "plan": plan_payload, "blockers": ["--confirm-upload is required with retorrent --execute."]}
-    if not args.target_torrent_file:
-        return {"status": "blocked", "plan": plan_payload, "blockers": ["--target-torrent-file is required with retorrent --execute."]}
+    if not args.target_torrent_file and not args.export_target_torrent:
+        return {"status": "blocked", "plan": plan_payload, "blockers": ["--target-torrent-file or --export-target-torrent is required with retorrent --execute."]}
     if not args.content_path and not args.save_path:
         return {"status": "blocked", "plan": plan_payload, "blockers": ["--path or --save-path is required with retorrent --execute."]}
 
@@ -372,6 +376,8 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         accept_rules=args.accept_rules,
         upload_target=True,
         target_torrent_file=args.target_torrent_file,
+        export_target_torrent=args.export_target_torrent,
+        target_torrent_output_dir=args.target_torrent_output_dir,
         target_execute=True,
         confirm_upload=args.confirm_upload,
         write_payload=args.write_payload,
@@ -466,6 +472,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     source_torrent_id = extract_torrent_id(args.source_id)
     target_trackers = parse_tracker_list(args.target_trackers)
     effective_content_path = args.content_path
+    effective_target_torrent_file = args.target_torrent_file
 
     stages: list[dict[str, Any]] = []
     flow_check_result = build_flow_check(config, source_tracker, source_torrent_id, ",".join(target_trackers), args.client, base_dir=args.base_dir)
@@ -587,12 +594,31 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "target-prepare", "ok": True, "skipped": True, "message": "--prepare-target not provided; target preparation skipped."})
 
+    if args.export_target_torrent:
+        match_stage = _find_stage(stages, "match")
+        torrent_hash = _torrent_hash_from_stage(match_stage) if match_stage else None
+        if effective_target_torrent_file:
+            stages.append({"stage": "target-torrent-export", "ok": True, "skipped": True, "message": "--target-torrent-file provided; qBittorrent export skipped."})
+        elif not torrent_hash:
+            stages.append({"stage": "target-torrent-export", "ok": False, "skipped": True, "message": "No matched qBittorrent hash is available for export."})
+        else:
+            export_stage = await _pipeline_stage(
+                "target-torrent-export",
+                lambda: _export_hash_with_config(config, args.client, torrent_hash, args.target_torrent_output_dir),
+                lambda payload: payload,
+            )
+            stages.append(export_stage)
+            if export_stage.get("ok") and isinstance(export_stage.get("result"), dict):
+                effective_target_torrent_file = str(export_stage["result"].get("path") or effective_target_torrent_file or "")
+    else:
+        stages.append({"stage": "target-torrent-export", "ok": True, "skipped": True, "message": "--export-target-torrent not provided; target torrent export skipped."})
+
     if args.upload_target:
         target_prepare_stage = _find_stage(stages, "target-prepare")
         if not target_prepare_stage or not target_prepare_stage.get("ok") or target_prepare_stage.get("skipped"):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because target-prepare did not complete successfully."})
-        elif not args.target_torrent_file:
-            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--target-torrent-file is required when --upload-target is used."})
+        elif not effective_target_torrent_file:
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--target-torrent-file or --export-target-torrent is required when --upload-target is used."})
         elif args.inject_uploaded_torrent and not args.download_uploaded_torrent:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--inject-uploaded-torrent requires --download-uploaded-torrent."})
         elif args.inject_uploaded_torrent and not (args.uploaded_save_path or effective_content_path):
@@ -601,7 +627,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             package_dir = str(target_prepare_stage.get("result", {}).get("package_dir", ""))
             upload_stage = await _pipeline_stage(
                 "target-upload",
-                lambda: _target_upload_with_config(config, args, package_dir, effective_content_path),
+                lambda: _target_upload_with_config(config, args, package_dir, effective_content_path, effective_target_torrent_file),
                 lambda payload: payload,
                 validate=lambda payload: payload.get("status") in {"ready", "uploaded"},
                 invalid_message="Target upload stage did not reach ready or uploaded status.",
@@ -617,6 +643,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "target_trackers": target_trackers,
         "path": effective_content_path,
         "requested_path": args.content_path,
+        "target_torrent_file": effective_target_torrent_file,
         "ready": all(stage.get("ok", False) for stage in stages),
         "stages": stages,
     }
@@ -659,6 +686,21 @@ def _content_path_from_stage(stage: dict[str, Any]) -> str | None:
     return None
 
 
+def _torrent_hash_from_stage(stage: dict[str, Any] | None) -> str | None:
+    if not stage or not stage.get("ok"):
+        return None
+    result = stage.get("result")
+    if not isinstance(result, dict):
+        return None
+    matches = result.get("matches")
+    if not isinstance(matches, list):
+        return None
+    for match in matches:
+        if isinstance(match, dict) and match.get("hash"):
+            return str(match["hash"])
+    return None
+
+
 async def _match_with_config(config: dict[str, Any], client_name: str, content_path: str) -> dict[str, Any]:
     resolved_client_name, client_config = resolve_client_config(config, client_name)
     service = QbitReadOnlyService(client_config)
@@ -669,6 +711,17 @@ async def _match_with_config(config: dict[str, Any], client_name: str, content_p
         "path": content_path,
         "count": len(matches),
         "matches": summaries_to_dicts(matches),
+    }
+
+
+async def _export_hash_with_config(config: dict[str, Any], client_name: str, torrent_hash: str, output_dir: str) -> dict[str, Any]:
+    resolved_client_name, client_config = resolve_client_config(config, client_name)
+    service = QbitReadOnlyService(client_config)
+    output_path = await service.export_torrent(torrent_hash, output_dir)
+    return {
+        "client": resolved_client_name,
+        "hash": torrent_hash.strip().lower(),
+        "path": str(output_path),
     }
 
 
@@ -697,11 +750,17 @@ async def _inject_source_with_config(
     }
 
 
-async def _target_upload_with_config(config: dict[str, Any], args: argparse.Namespace, package_dir: str, inferred_content_path: str | None = None) -> dict[str, Any]:
+async def _target_upload_with_config(
+    config: dict[str, Any],
+    args: argparse.Namespace,
+    package_dir: str,
+    inferred_content_path: str | None = None,
+    target_torrent_file: str | None = None,
+) -> dict[str, Any]:
     result = await upload_mteam_from_package(
         config,
         package_dir,
-        args.target_torrent_file,
+        target_torrent_file or args.target_torrent_file,
         execute=args.target_execute,
         confirm_upload=args.confirm_upload,
         write_payload=args.write_payload,
