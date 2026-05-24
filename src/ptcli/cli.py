@@ -710,8 +710,10 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "target-upload", "ok": True, "skipped": True, "message": "--upload-target not provided; target upload skipped."})
 
+    ready = all(stage.get("ok", False) for stage in stages)
+    blockers = _pipeline_stage_blockers(stages) if _pipeline_has_action(args) and not ready else []
     return {
-        "status": "ok",
+        "status": "blocked" if blockers else "ok",
         "source_tracker": source_tracker,
         "source_torrent_id": source_torrent_id,
         "source_torrent_hash": effective_source_torrent_hash,
@@ -719,7 +721,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "path": effective_content_path,
         "requested_path": args.content_path,
         "target_torrent_file": effective_target_torrent_file,
-        "ready": all(stage.get("ok", False) for stage in stages),
+        "ready": ready,
+        "blockers": blockers,
         "closure": _pipeline_closure(stages, effective_content_path, effective_source_torrent_hash, effective_target_torrent_file),
         "stages": stages,
     }
@@ -738,6 +741,17 @@ async def _pipeline_stage(stage: str, operation: Any, serialize: Any, validate: 
 def _required_stages_ok(stages: list[dict[str, Any]], required_stage_names: set[str]) -> bool:
     stage_status = {str(stage.get("stage")): bool(stage.get("ok")) for stage in stages}
     return all(stage_status.get(stage_name, False) for stage_name in required_stage_names)
+
+
+def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:
+    blockers: list[str] = []
+    for stage in stages:
+        if stage.get("ok"):
+            continue
+        stage_name = str(stage.get("stage") or "unknown")
+        reason = stage.get("error") or stage.get("message") or "stage did not complete."
+        blockers.append(f"{stage_name}: {reason}")
+    return blockers
 
 
 def _find_stage(stages: list[dict[str, Any]], stage_name: str) -> dict[str, Any] | None:
@@ -1180,8 +1194,12 @@ def _print_payload(payload: dict[str, Any], json_output: bool) -> None:
             print(f"  [{marker}] {check['name']}: {check['message']}")
         return
 
-    if payload["status"] == "ok" and "stages" in payload:
+    if payload["status"] in {"ok", "blocked"} and "stages" in payload:
         print(f"Ready: {payload['ready']}")
+        if payload.get("blockers"):
+            print("Blockers:")
+            for blocker in payload["blockers"]:
+                print(f"  - {blocker}")
         for stage in payload["stages"]:
             marker = "ok" if stage.get("ok") else "error"
             suffix = " (skipped)" if stage.get("skipped") else ""

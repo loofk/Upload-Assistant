@@ -952,10 +952,39 @@ async def test_pipeline_keeps_source_info_error(monkeypatch, tmp_path) -> None:
 
     payload = await ptcli_cli.pipeline_payload(args)
 
+    assert payload["status"] == "ok"
     assert payload["ready"] is False
+    assert payload["blockers"] == []
     assert payload["stages"][1]["stage"] == "source-info"
     assert payload["stages"][1]["ok"] is False
     assert payload["stages"][1]["error"] == "source unavailable"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_action_failure_reports_top_level_blockers(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--base-dir", str(tmp_path), "--inject-source", "--json"])
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    assert payload["status"] == "blocked"
+    assert payload["ready"] is False
+    assert payload["blockers"] == ["inject-source: --save-path is required when --inject-source is used."]
 
 
 @pytest.mark.asyncio
