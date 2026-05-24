@@ -171,7 +171,14 @@ class QbitReadOnlyService:
             add_kwargs["tags"] = tags
 
         await asyncio.to_thread(client.torrents_add, **add_kwargs)
-        client_matches, verification_attempts = await self._wait_for_added_torrent(torrent_hash, verify_timeout, verify_interval)
+        client_matches, verification_attempts = await self._wait_for_added_torrent(
+            torrent_hash,
+            save_path=save_path,
+            category=category,
+            tags=tags,
+            timeout=verify_timeout,
+            interval=verify_interval,
+        )
         client_verification = _added_torrent_client_verification(client_matches, save_path=save_path, category=category, tags=tags)
         return {
             "torrent_path": str(resolved_torrent_path),
@@ -187,13 +194,23 @@ class QbitReadOnlyService:
             "client_matches": summaries_to_dicts(client_matches),
         }
 
-    async def _wait_for_added_torrent(self, torrent_hash: str, timeout: float, interval: float) -> tuple[list[QbitTorrentSummary], int]:
+    async def _wait_for_added_torrent(
+        self,
+        torrent_hash: str,
+        *,
+        save_path: str,
+        category: str | None,
+        tags: str | None,
+        timeout: float,
+        interval: float,
+    ) -> tuple[list[QbitTorrentSummary], int]:
         deadline = asyncio.get_running_loop().time() + timeout
         attempts = 0
         while True:
             attempts += 1
             matches = await self.list_torrents(torrent_hash=torrent_hash)
-            if matches or asyncio.get_running_loop().time() >= deadline:
+            verification = _added_torrent_client_verification(matches, save_path=save_path, category=category, tags=tags)
+            if _added_torrent_verification_ready(verification) or asyncio.get_running_loop().time() >= deadline:
                 return matches, attempts
             await asyncio.sleep(interval)
 
@@ -292,6 +309,13 @@ def _added_torrent_client_verification(
         },
         "observed": summaries_to_dicts(matches),
     }
+
+
+def _added_torrent_verification_ready(client_verification: dict[str, Any]) -> bool:
+    return all(
+        bool(client_verification.get(key))
+        for key in ("visible", "save_path_matched", "category_matched", "tags_matched")
+    )
 
 
 def _torrent_matches_save_path(torrent: QbitTorrentSummary, save_path: str) -> bool:

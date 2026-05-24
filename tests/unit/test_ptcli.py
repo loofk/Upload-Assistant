@@ -102,6 +102,27 @@ class DelayedQbitClient(FakeQbitClient):
         return []
 
 
+class DelayedTaggedQbitClient(FakeQbitClient):
+    def __init__(self, metadata_after: int = 3) -> None:
+        super().__init__()
+        self.metadata_after = metadata_after
+        self.info_calls = 0
+
+    def torrents_info(self, **kwargs):
+        self.info_calls += 1
+        torrent_hash = kwargs.get("torrent_hashes") or "a" * 40
+        payload = {
+            "name": "One",
+            "hash": torrent_hash,
+            "save_path": "/downloads",
+            "content_path": "/downloads/One",
+            "progress": 1.0,
+        }
+        if self.info_calls >= self.metadata_after:
+            payload.update({"category": "MTEAM", "tags": "retorrent,uploaded"})
+        return [payload]
+
+
 def make_mteam_safe_torrent(tmp_path, name: str = "upload") -> str:
     content = tmp_path / f"{name}.mkv"
     content.write_bytes(b"content")
@@ -6292,6 +6313,7 @@ async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None
         category="pt",
         tags="U2",
         paused=True,
+        verify_timeout=0,
     )
 
     assert result["save_path"] == "/downloads"
@@ -6352,6 +6374,34 @@ async def test_qbit_service_reports_client_verification_for_requested_metadata(t
         tags="retorrent",
     )
 
+    assert result["client_verification"]["visible"] is True
+    assert result["client_verification"]["save_path_matched"] is True
+    assert result["client_verification"]["category_matched"] is True
+    assert result["client_verification"]["tags_matched"] is True
+
+
+@pytest.mark.asyncio
+async def test_qbit_service_waits_for_requested_metadata_verification(tmp_path) -> None:
+    fake_client = DelayedTaggedQbitClient(metadata_after=3)
+    content = tmp_path / "source.mkv"
+    content.write_bytes(b"content")
+    torrent_path = tmp_path / "source.torrent"
+    torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+    torrent.generate()
+    torrent.write(str(torrent_path), overwrite=True)
+    service = QbitReadOnlyService({}, qbit_client=fake_client)
+
+    result = await service.add_torrent_file(
+        torrent_path=str(torrent_path),
+        save_path="/downloads",
+        category="MTEAM",
+        tags="retorrent",
+        verify_timeout=1.0,
+        verify_interval=0.001,
+    )
+
+    assert result["verified_in_client"] is True
+    assert result["verification_attempts"] == 3
     assert result["client_verification"]["visible"] is True
     assert result["client_verification"]["save_path_matched"] is True
     assert result["client_verification"]["category_matched"] is True
