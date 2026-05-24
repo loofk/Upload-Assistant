@@ -764,7 +764,10 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 lambda payload: payload,
             )
             stages.append(source_download_result)
-            effective_source_torrent_hash = _torrent_hash_from_stage(source_download_result) or effective_source_torrent_hash
+            source_verify_stage = _source_torrent_verify_stage(source_download_result, effective_source_torrent_hash)
+            stages.append(source_verify_stage)
+            if source_verify_stage.get("ok"):
+                effective_source_torrent_hash = _torrent_hash_from_stage(source_download_result) or effective_source_torrent_hash
         else:
             stages.append(
                 {
@@ -782,7 +785,10 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 lambda path: _torrent_file_evidence(path),
             )
             stages.append(source_download_result)
-            effective_source_torrent_hash = _torrent_hash_from_stage(source_download_result) or effective_source_torrent_hash
+            source_verify_stage = _source_torrent_verify_stage(source_download_result, effective_source_torrent_hash)
+            stages.append(source_verify_stage)
+            if source_verify_stage.get("ok"):
+                effective_source_torrent_hash = _torrent_hash_from_stage(source_download_result) or effective_source_torrent_hash
         else:
             stages.append(
                 {
@@ -797,10 +803,13 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
 
     if source_injection_requested:
         source_download_stage = _find_stage(stages, "source-download")
+        source_verify_stage = _find_stage(stages, "source-torrent-verify")
         if not args.save_path:
             stages.append({"stage": "inject-source", "ok": False, "skipped": True, "message": "--save-path is required when --inject-source is used."})
         elif not source_download_stage or not source_download_stage.get("ok") or source_download_stage.get("skipped"):
             stages.append({"stage": "inject-source", "ok": False, "skipped": True, "message": "Skipped because source-download did not complete successfully."})
+        elif source_verify_stage and not source_verify_stage.get("ok"):
+            stages.append({"stage": "inject-source", "ok": False, "skipped": True, "message": "Skipped because source torrent hash verification failed."})
         else:
             torrent_path = str(source_download_stage.get("result", {}).get("path", ""))
             inject_result = await _pipeline_stage(
@@ -1128,6 +1137,34 @@ def _torrent_file_infohash(torrent_file: Path) -> str | None:
         return str(Torrent.read(str(torrent_file), validate=False).infohash)
     except Exception:
         return None
+
+
+def _source_torrent_verify_stage(source_download_stage: dict[str, Any], expected_hash: str | None) -> dict[str, Any]:
+    result = source_download_stage.get("result") if isinstance(source_download_stage, dict) else None
+    actual_hash = _torrent_hash_from_result(result)
+    expected = _normalize_torrent_hash(expected_hash)
+    if expected and actual_hash and expected != actual_hash:
+        return {
+            "stage": "source-torrent-verify",
+            "ok": False,
+            "message": "Downloaded source torrent infohash does not match source tracker metadata.",
+            "result": {
+                "verified": False,
+                "expected_hash": expected,
+                "actual_hash": actual_hash,
+                "blockers": [f"source torrent hash mismatch: expected {expected}, got {actual_hash}"],
+            },
+        }
+    return {
+        "stage": "source-torrent-verify",
+        "ok": True,
+        "result": {
+            "verified": bool(expected and actual_hash),
+            "expected_hash": expected,
+            "actual_hash": actual_hash,
+            "message": "Source torrent hash matched source metadata." if expected and actual_hash else "Source torrent hash verification skipped because one side did not expose an infohash.",
+        },
+    }
 
 
 def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:

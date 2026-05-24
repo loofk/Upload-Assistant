@@ -2821,11 +2821,85 @@ async def test_pipeline_wait_complete_uses_hash_from_downloaded_source_torrent(m
     payload = await ptcli_cli.pipeline_payload(args)
 
     source_download_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-download")
+    verify_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-torrent-verify")
     wait_stage = next(stage for stage in payload["stages"] if stage["stage"] == "wait-complete")
     assert source_download_stage["result"]["torrent_hash"] == expected_hash
+    assert verify_stage["ok"] is True
+    assert verify_stage["result"]["actual_hash"] == expected_hash
     assert payload["source_torrent_hash"] == expected_hash
     assert wait_stage["ok"] is True
     assert wait_stage["result"]["matches"][0]["hash"] == expected_hash
+
+
+@pytest.mark.asyncio
+async def test_pipeline_blocks_source_injection_when_downloaded_torrent_hash_mismatches_metadata(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (tracker, source_id, base_dir)
+        content = tmp_path / "source-content.mkv"
+        content.write_bytes(b"content")
+        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path.parent.mkdir(parents=True, exist_ok=True)
+        torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+        torrent.generate()
+        torrent.write(str(torrent_path), overwrite=True)
+        assert str(torrent.infohash) != "a" * 40
+        return torrent_path
+
+    async def fake_inject_source_with_config(*_args, **_kwargs):
+        raise AssertionError("source injection must not run when source torrent hash verification fails")
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--download-source",
+            "--inject-source",
+            "--save-path",
+            "/downloads",
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    verify_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-torrent-verify")
+    inject_stage = next(stage for stage in payload["stages"] if stage["stage"] == "inject-source")
+    assert verify_stage["ok"] is False
+    assert verify_stage["result"]["expected_hash"] == "a" * 40
+    assert "source torrent hash mismatch" in verify_stage["result"]["blockers"][0]
+    assert inject_stage["ok"] is False
+    assert inject_stage["skipped"] is True
+    assert payload["blockers"] == [
+        "source-torrent-verify: Downloaded source torrent infohash does not match source tracker metadata.",
+        f"source-torrent-verify: {verify_stage['result']['blockers'][0]}",
+        "inject-source: Skipped because source torrent hash verification failed.",
+    ]
 
 
 @pytest.mark.asyncio
