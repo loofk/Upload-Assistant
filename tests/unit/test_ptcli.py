@@ -9706,6 +9706,8 @@ async def test_qbit_service_wait_rejects_wrong_hash_match() -> None:
     result = await service.wait_for_completion(torrent_hash="b" * 40, timeout=0, interval=0.1)
 
     assert result["complete"] is False
+    assert result["completion_verification"]["complete_count"] == 1
+    assert result["completion_verification"]["any_complete"] is True
     assert result["completion_verification"]["requested_hash_matched"] is False
     assert result["blockers"] == [f"qBittorrent matched torrents, but none matched requested hash {'b' * 40}."]
 
@@ -9717,6 +9719,8 @@ async def test_qbit_service_wait_rejects_wrong_path_match() -> None:
     result = await service.wait_for_completion(content_path="/downloads/One", timeout=0, interval=0.1)
 
     assert result["complete"] is False
+    assert result["completion_verification"]["complete_count"] == 1
+    assert result["completion_verification"]["any_complete"] is True
     assert result["completion_verification"]["requested_content_path_matched"] is False
     assert result["blockers"] == ["qBittorrent matched torrents, but none matched requested path /downloads/One."]
 
