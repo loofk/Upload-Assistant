@@ -4715,7 +4715,7 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
-        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}, "seedbox": {"torrent_client": "qbit"}},
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -4740,12 +4740,16 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     code = main(
         [
             "doctor",
+            "--config",
+            str(tmp_path / "custom-config.py"),
             "--from",
             "U2",
             "--source-id",
             "60635",
             "--to",
             "MTEAM",
+            "--client",
+            "seedbox",
             "--base-dir",
             str(tmp_path),
             "--path",
@@ -4799,6 +4803,10 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert command_argv["doctor-retry"][:3] == ["python3", "ptcli.py", "doctor"]
     assert command_argv["doctor-live-probes"][:3] == ["python3", "ptcli.py", "doctor"]
     assert command_argv["pipeline-live"][:3] == ["python3", "ptcli.py", "pipeline"]
+    assert str(tmp_path / "custom-config.py") in command_argv["pipeline-live"]
+    assert "seedbox" in command_argv["pipeline-live"]
+    assert str(tmp_path) in command_argv["pipeline-live"]
+    assert str(tmp_path / "summary") in command_argv["pipeline-live"]
     assert str(content_path) in command_argv["pipeline-live"]
     assert str(target_torrent) in command_argv["pipeline-live"]
     assert summary_payload["resume_state"]["ready"] is True
@@ -4845,6 +4853,8 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     code = main(
         [
             "doctor",
+            "--config",
+            str(tmp_path / "custom-config.py"),
             "--from",
             "U2",
             "--source-id",
@@ -4901,6 +4911,8 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent-download"]
     assert summary_payload["resume_state"]["next_command_argv"] == command_argv["resume-uploaded-torrent-download"]
     assert command_argv["resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert str(tmp_path / "custom-config.py") in command_argv["resume-uploaded-torrent-download"]
+    assert str(tmp_path / "summary") in command_argv["resume-uploaded-torrent-download"]
     assert "999" in summary_payload["resume_state"]["next_command_argv"]
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
 

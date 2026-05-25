@@ -1870,6 +1870,10 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
             "--write-summary",
             "--json",
         ]
+        if args.config:
+            uploaded_resume_args.extend(["--config", args.config])
+        if args.summary_output_dir:
+            uploaded_resume_args.extend(["--summary-output-dir", args.summary_output_dir])
         if args.uploaded_save_path:
             uploaded_resume_args.extend(["--uploaded-save-path", args.uploaded_save_path])
         if args.uploaded_qbit_category:
@@ -1892,6 +1896,8 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
         source_torrent_id,
         "--to",
         target_trackers_arg,
+        "--client",
+        args.client,
         "--accept-rules",
         "--upload-target",
         "--target-execute",
@@ -1902,6 +1908,12 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
         "--write-summary",
         "--json",
     ]
+    if args.config:
+        pipeline_args.extend(["--config", args.config])
+    if args.base_dir:
+        pipeline_args.extend(["--base-dir", args.base_dir])
+    if args.summary_output_dir:
+        pipeline_args.extend(["--summary-output-dir", args.summary_output_dir])
     _extend_command_path(pipeline_args, "--path", artifacts.get("content_path"))
     _extend_command_path(pipeline_args, "--source-torrent-file", artifacts.get("source_torrent_file"))
     _extend_command_path(pipeline_args, "--package-dir", artifacts.get("package_dir"))
