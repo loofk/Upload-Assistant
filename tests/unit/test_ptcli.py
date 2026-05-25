@@ -5052,6 +5052,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "uploaded": {"category": "MTEAM", "tags": "retorrent", "paused": True},
     }
     assert summary_payload["artifacts"]["source_torrent_file"].endswith("U2-60635.torrent")
+    assert summary_payload["artifacts"]["source_torrent_hash"] == "a" * 40
     assert summary_payload["artifacts"]["target_torrent_file"] == str(torrent_file)
     assert summary_payload["artifacts"]["target_package_dir"]
     assert summary_payload["artifacts"]["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
@@ -5065,6 +5066,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["resume_state"]["next_command"] is None
     assert summary_payload["resume_state"]["artifacts"] == {
         "source_torrent_file": True,
+        "source_torrent_hash": True,
         "target_package_dir": True,
         "target_torrent_file": True,
         "uploaded_torrent_id": True,

@@ -2556,6 +2556,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
 
     artifacts: dict[str, Any] = {
         "summary_file": summary_file,
+        "source_torrent_hash": payload.get("source_torrent_hash"),
         "target_torrent_file": payload.get("target_torrent_file"),
     }
     if isinstance(source_download, dict):
@@ -2737,6 +2738,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
         "available_stages": [str(command.get("stage")) for command in resume_commands if isinstance(command, dict)],
         "artifacts": {
             "source_torrent_file": bool(artifacts.get("source_torrent_file")),
+            "source_torrent_hash": bool(artifacts.get("source_torrent_hash")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
