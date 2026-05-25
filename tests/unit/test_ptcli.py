@@ -150,6 +150,15 @@ def mteam_ready_stages() -> list[dict]:
     ]
 
 
+def mteam_clean_rule_review() -> dict:
+    rule_check = build_rule_check("U2", ["MTEAM"], accept_rules=True)
+    return {
+        "rule_check_ready": True,
+        "blockers": [],
+        "rule_obligations": rule_check["rule_obligations"],
+    }
+
+
 def test_normalize_tracker_aliases() -> None:
     assert normalize_tracker("m-team") == "MTEAM"
     assert normalize_tracker("pterclub") == "PTER"
@@ -1648,7 +1657,19 @@ def test_pipeline_next_actions_reports_closure_blockers() -> None:
     actions = ptcli_cli._pipeline_next_actions(
         args,
         [],
-        {"complete": False, "blockers": ["source.ready", "source.hash_consistent", "target.prepared", "target.uploaded", "target.downloaded", "target.hash_consistent", "target.duplicate_clean"]},
+        {
+            "complete": False,
+            "blockers": [
+                "source.ready",
+                "source.hash_consistent",
+                "target.prepared",
+                "target.uploaded",
+                "target.downloaded",
+                "target.hash_consistent",
+                "target.duplicate_clean",
+                "target.rule_obligations",
+            ],
+        },
     )
 
     assert any("--source-torrent-file" in action for action in actions)
@@ -1658,6 +1679,7 @@ def test_pipeline_next_actions_reports_closure_blockers() -> None:
     assert any("--uploaded-torrent-file" in action for action in actions)
     assert any("different uploaded hash" in action for action in actions)
     assert any("fresh MTEAM duplicate check" in action for action in actions)
+    assert any("source download/retorrent" in action for action in actions)
 
 
 def test_pipeline_next_actions_reports_completed_closure() -> None:
@@ -2051,7 +2073,7 @@ def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
         {"stage": "inject-source", "ok": True, "skipped": True},
         {"stage": "wait-complete", "ok": True, "skipped": True},
         {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2086,7 +2108,7 @@ def test_pipeline_closure_rejects_unverified_existing_qbit_match() -> None:
             "message": "Matched qBittorrent content does not include the source tracker torrent hash.",
             "result": {"verified": False, "expected_hash": "a" * 40, "matched_hashes": ["b" * 40]},
         },
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2121,7 +2143,7 @@ def test_pipeline_closure_preserves_torrent_file_evidence() -> None:
         {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2150,7 +2172,7 @@ def test_pipeline_closure_requires_target_injection_client_verification() -> Non
         {"stage": "inject-source", "ok": True, "skipped": True},
         {"stage": "wait-complete", "ok": True, "skipped": True},
         {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2179,7 +2201,7 @@ def test_pipeline_closure_requires_uploaded_torrent_completion_when_waited() -> 
         {"stage": "inject-source", "ok": True, "skipped": True},
         {"stage": "wait-complete", "ok": True, "skipped": True},
         {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2208,7 +2230,7 @@ def test_pipeline_closure_requires_uploaded_torrent_hash_consistency() -> None:
         {"stage": "inject-source", "ok": True, "skipped": True},
         {"stage": "wait-complete", "ok": True, "skipped": True},
         {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2239,7 +2261,7 @@ def test_pipeline_closure_requires_clean_target_duplicate_check() -> None:
         {"stage": "inject-source", "ok": True, "skipped": True},
         {"stage": "wait-complete", "ok": True, "skipped": True},
         {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2264,13 +2286,47 @@ def test_pipeline_closure_requires_clean_target_duplicate_check() -> None:
     assert evidence["target"]["fresh_duplicate_check"]["count"] == 1
 
 
+def test_pipeline_closure_requires_target_rule_obligations() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {
+            "stage": "target-prepare",
+            "ok": True,
+            "result": {"rule_review": {"rule_check_ready": True, "blockers": [], "rule_obligations": []}},
+        },
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                "uploaded_torrent_hash": "b" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "b" * 40},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "query": {"torrent_hash": "b" * 40}, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    assert closure["complete"] is False
+    assert closure["blockers"] == ["target.rule_obligations"]
+    assert closure["target"]["rule_obligations"]["ready"] is False
+    assert evidence["target"]["rule_obligations"]["missing"] == ["source_download_and_retorrent", "mteam_upload_and_seed"]
+
+
 def test_pipeline_closure_requires_source_injection_client_verification() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"torrent_path": "/tmp/U2-60635.torrent"}},
         {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": False}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2301,7 +2357,7 @@ def test_pipeline_closure_reports_source_hash_inconsistency() -> None:
         {"stage": "wait-complete", "ok": True, "result": {"complete": True, "query": {"torrent_hash": "a" * 40}, "matches": [{"hash": "b" * 40}]}},
         {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
         {"stage": "source-content-verify", "ok": True, "result": {"verified": True, "matched_hashes": ["a" * 40]}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2331,7 +2387,7 @@ def test_pipeline_closure_requires_source_wait_completion() -> None:
         {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": False, "matches": []}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2437,7 +2493,7 @@ def test_pipeline_evidence_reports_resume_sources() -> None:
         {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
-        {"stage": "target-prepare", "ok": True, "result": {"package_dir": "/tmp/package", "reused": True}},
+        {"stage": "target-prepare", "ok": True, "result": {"package_dir": "/tmp/package", "reused": True, "rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2470,7 +2526,7 @@ def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:
         {"stage": "inject-source", "ok": True, "skipped": True},
         {"stage": "wait-complete", "ok": True, "skipped": True},
         {"stage": "match", "ok": True, "result": {"matches": []}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,
@@ -2498,7 +2554,7 @@ def test_pipeline_closure_rejects_empty_qbit_match_evidence() -> None:
         {"stage": "inject-source", "ok": True, "skipped": True},
         {"stage": "wait-complete", "ok": True, "skipped": True},
         {"stage": "match", "ok": True, "result": {"matches": [{}]}},
-        {"stage": "target-prepare", "ok": True, "result": {}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
             "stage": "target-upload",
             "ok": True,

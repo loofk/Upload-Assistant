@@ -2929,6 +2929,7 @@ def _pipeline_closure_next_action(blocker: str) -> str:
         "source.hash_consistent": "Re-verify the source torrent evidence: use the original --source-torrent-file, re-run source injection/wait, and stop if qBittorrent reports a different source hash.",
         "target.hash_consistent": "Re-verify the uploaded MTEAM torrent evidence: download or provide the generated target torrent again, inject that exact file, and stop if qBittorrent reports a different uploaded hash.",
         "target.duplicate_clean": "Re-run a fresh MTEAM duplicate check immediately before upload, and stop if MTEAM reports an existing torrent.",
+        "target.rule_obligations": "Rebuild the MTEAM package after acknowledging both source download/retorrent and MTEAM upload/seed rule obligations; do not live upload until both obligations are ready.",
     }
     return mapping.get(blocker, f"Resolve closure blocker: {blocker}")
 
@@ -2958,6 +2959,8 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_download_result = source_download.get("result") if source_download and isinstance(source_download.get("result"), dict) else {}
     wait_complete_result = wait_complete.get("result") if wait_complete and isinstance(wait_complete.get("result"), dict) else {}
     target_prepare_result = target_prepare.get("result") if target_prepare and isinstance(target_prepare.get("result"), dict) else {}
+    rule_review = target_prepare_result.get("rule_review") if isinstance(target_prepare_result, dict) else None
+    rule_obligations = _rule_obligation_summary(rule_review)
     source_downloaded = _stage_completed(source_download)
     source_injected = _source_injection_verified(inject_source)
     source_complete = _source_wait_completed(wait_complete)
@@ -3013,6 +3016,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
         "fresh_duplicate_check": fresh_duplicate_check,
         "duplicate_clean": _fresh_duplicate_check_clean(fresh_duplicate_check),
+        "rule_obligations": rule_obligations,
         "package_reused": bool(target_prepare_result.get("reused")) if isinstance(target_prepare_result, dict) else False,
         "uploaded_torrent_reused": bool(downloaded_torrent.get("reused")) if isinstance(downloaded_torrent, dict) else False,
     }
@@ -3042,6 +3046,9 @@ def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[st
         blockers.append("target.hash_consistent")
     if target.get("uploaded") and not target.get("duplicate_clean"):
         blockers.append("target.duplicate_clean")
+    rule_obligations = target.get("rule_obligations")
+    if target.get("uploaded") and (not isinstance(rule_obligations, dict) or not rule_obligations.get("ready")):
+        blockers.append("target.rule_obligations")
     return blockers
 
 
@@ -3121,6 +3128,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "seeding": target_seeding,
             "hash_consistent": bool(target.get("hash_consistent")),
             "duplicate_clean": bool(target.get("duplicate_clean")),
+            "rule_obligations": target.get("rule_obligations"),
             "torrent_file": target.get("torrent_file"),
             "uploaded_torrent_id": target.get("uploaded_torrent_id"),
             "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
