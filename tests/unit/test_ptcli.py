@@ -1464,8 +1464,13 @@ def test_target_upload_summary_surfaces_client_metadata_mismatch() -> None:
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
         "injected_torrent": {
+            "client": "qbittorrent",
             "hash": "a" * 40,
+            "save_path": "/downloads/Name",
+            "category": "MTEAM",
+            "tags": "retorrent",
             "verified_in_client": True,
+            "verification_attempts": 3,
             "client_verification": {
                 "visible": True,
                 "save_path_matched": False,
@@ -1478,6 +1483,14 @@ def test_target_upload_summary_surfaces_client_metadata_mismatch() -> None:
     summary = ptcli_cli._target_upload_summary(payload, {"status": "ready", "blockers": [], "rule_obligation_review": {"ready": True, "blockers": []}})
 
     assert summary["ready"] is False
+    assert summary["qbit_closure"]["injection"]["client"] == "qbittorrent"
+    assert summary["qbit_closure"]["injection"]["hash"] == "a" * 40
+    assert summary["qbit_closure"]["injection"]["save_path"] == "/downloads/Name"
+    assert summary["qbit_closure"]["injection"]["category"] == "MTEAM"
+    assert summary["qbit_closure"]["injection"]["tags"] == "retorrent"
+    assert summary["qbit_closure"]["injection"]["verified_in_client"] is True
+    assert summary["qbit_closure"]["injection"]["verification_attempts"] == 3
+    assert summary["qbit_closure"]["injection"]["client_verification"]["save_path_matched"] is False
     assert "injected_torrent: qBittorrent did not report the requested save path for the injected torrent." in summary["blockers"]
     assert "injected_torrent: qBittorrent did not report the requested tags for the injected torrent." in summary["blockers"]
 
@@ -1880,11 +1893,19 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
             "downloaded": True,
             "injected": True,
             "injection_verified": True,
+            "injected_torrent": {
+                "client": "qbittorrent",
+                "hash": "a" * 40,
+                "save_path": "/downloads",
+                "verified_in_client": True,
+                "verification_attempts": 2,
+            },
             "injected_torrent_hash": "a" * 40,
             "complete": True,
             "matched": False,
             "torrent_hash": "a" * 40,
             "content_path": "/downloads/Name",
+            "source_wait": {"client": "qbittorrent", "complete": True, "query": {"torrent_hash": "a" * 40}, "matches": [{"hash": "a" * 40}]},
         },
         "target": {
             "prepared": True,
@@ -1892,9 +1913,19 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
             "downloaded": True,
             "injected": True,
             "injection_verified": True,
+            "injected_torrent": {
+                "client": "qbittorrent",
+                "hash": "b" * 40,
+                "save_path": "/downloads/Name",
+                "category": "MTEAM",
+                "tags": "retorrent",
+                "verified_in_client": True,
+                "verification_attempts": 3,
+            },
             "torrent_file": "/tmp/mteam.torrent",
             "uploaded_torrent_hash": "b" * 40,
             "injected_torrent_hash": "b" * 40,
+            "uploaded_wait": {"client": "qbittorrent", "complete": True, "query": {"torrent_hash": "b" * 40}, "matches": [{"hash": "b" * 40}]},
             "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
         },
     }
@@ -1905,8 +1936,18 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
     assert evidence["source"]["injected_torrent_hash"] == "a" * 40
     assert "source_torrent_path" in evidence["source"]
     assert "source_wait" in evidence["source"]
+    assert evidence["source"]["qbit_closure"]["injection"]["hash"] == "a" * 40
+    assert evidence["source"]["qbit_closure"]["injection"]["save_path"] == "/downloads"
+    assert evidence["source"]["qbit_closure"]["injection"]["verification_attempts"] == 2
+    assert evidence["source"]["qbit_closure"]["wait"]["complete"] is True
+    assert evidence["source"]["qbit_closure"]["wait"]["query"]["torrent_hash"] == "a" * 40
     assert evidence["target"]["injection_verified"] is True
     assert evidence["target"]["injected_torrent_hash"] == "b" * 40
+    assert evidence["target"]["qbit_closure"]["injection"]["hash"] == "b" * 40
+    assert evidence["target"]["qbit_closure"]["injection"]["category"] == "MTEAM"
+    assert evidence["target"]["qbit_closure"]["injection"]["tags"] == "retorrent"
+    assert evidence["target"]["qbit_closure"]["wait"]["complete"] is True
+    assert evidence["target"]["qbit_closure"]["wait"]["query"]["torrent_hash"] == "b" * 40
 
 
 def test_pipeline_evidence_reports_resume_sources() -> None:
@@ -6763,6 +6804,11 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["summary"]["uploaded_torrent"]["size_bytes"] == len(b"d4:infod")
     assert len(summary_payload["summary"]["uploaded_torrent"]["sha1"]) == 40
     assert summary_payload["summary"]["uploaded_wait"]["complete"] is True
+    assert summary_payload["summary"]["qbit_closure"]["injection"]["save_path"] == "/downloads/Example"
+    assert summary_payload["summary"]["qbit_closure"]["injection"]["category"] == "MTEAM"
+    assert summary_payload["summary"]["qbit_closure"]["injection"]["tags"] == "retorrent"
+    assert summary_payload["summary"]["qbit_closure"]["wait"]["complete"] is True
+    assert summary_payload["summary"]["qbit_closure"]["wait"]["query"]["torrent_hash"] == uploaded_hash
     assert summary_payload["summary"]["rule_obligations"]["ready"] is True
     assert summary_payload["artifacts"]["package_dir"]["is_dir"] is True
     assert summary_payload["artifacts"]["target_torrent_file"]["is_file"] is True

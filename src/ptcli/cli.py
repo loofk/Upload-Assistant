@@ -1294,6 +1294,10 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
     uploaded_wait = result.get("uploaded_wait")
     blockers = _target_upload_result_blockers(result)
     uploaded_torrent_hash = _uploaded_torrent_hash_from_result(result)
+    qbit_closure = {
+        "injection": _qbit_injection_evidence(injected_torrent),
+        "wait": _qbit_wait_evidence(uploaded_wait),
+    }
     return {
         "status": result.get("status"),
         "ready": result.get("status") in {"ready", "uploaded"} and not blockers,
@@ -1309,11 +1313,49 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "seeding_verified": isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete")),
         "uploaded_torrent_hash": uploaded_torrent_hash,
         "uploaded_wait": uploaded_wait if isinstance(uploaded_wait, dict) else None,
+        "qbit_closure": qbit_closure,
         "blockers": blockers,
         "preflight_status": preflight.get("status"),
         "preflight_blockers": preflight.get("blockers", []),
         "rule_obligations": preflight.get("rule_obligation_review", {}),
     }
+
+
+def _qbit_injection_evidence(injected_torrent: Any) -> dict[str, Any] | None:
+    if not isinstance(injected_torrent, dict):
+        return None
+    keys = (
+        "client",
+        "hash",
+        "torrent_hash",
+        "torrent_path",
+        "save_path",
+        "category",
+        "tags",
+        "paused",
+        "skip_checking",
+        "verified_in_client",
+        "verification_attempts",
+        "client_verification",
+        "client_matches",
+        "blockers",
+    )
+    return {key: injected_torrent[key] for key in keys if key in injected_torrent}
+
+
+def _qbit_wait_evidence(wait_result: Any) -> dict[str, Any] | None:
+    if not isinstance(wait_result, dict):
+        return None
+    keys = (
+        "client",
+        "complete",
+        "query",
+        "matches",
+        "attempts",
+        "elapsed_seconds",
+        "blockers",
+    )
+    return {key: wait_result[key] for key in keys if key in wait_result}
 
 
 def _uploaded_save_path_from_result(result: dict[str, Any]) -> str | None:
@@ -2587,6 +2629,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "downloaded": source_downloaded,
         "injected": source_injected,
         "injection_verified": source_injected,
+        "injected_torrent": inject_source.get("result") if inject_source and isinstance(inject_source.get("result"), dict) else None,
         "injected_torrent_hash": _torrent_hash_from_stage(inject_source),
         "complete": source_complete,
         "matched": source_matched,
@@ -2605,6 +2648,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "downloaded": isinstance(downloaded_torrent, dict),
         "injected": target_injected,
         "injection_verified": target_injected,
+        "injected_torrent": injected_torrent if isinstance(injected_torrent, dict) else None,
         "seeding": target_seeding,
         "uploaded_wait": uploaded_wait if isinstance(uploaded_wait, dict) else None,
         "torrent_file": target_torrent_file,
@@ -2664,6 +2708,10 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "source_torrent": source.get("source_torrent"),
             "source_torrent_path": source.get("source_torrent_path"),
             "source_wait": source.get("source_wait"),
+            "qbit_closure": {
+                "injection": _qbit_injection_evidence(source.get("injected_torrent")),
+                "wait": _qbit_wait_evidence(source.get("source_wait")),
+            },
             "source_torrent_reused": bool(source.get("source_torrent_reused")),
         },
         "target": {
@@ -2677,6 +2725,10 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "uploaded_wait": target.get("uploaded_wait"),
             "uploaded_torrent": target.get("uploaded_torrent"),
             "uploaded_torrent_path": target.get("uploaded_torrent_path"),
+            "qbit_closure": {
+                "injection": _qbit_injection_evidence(target.get("injected_torrent")),
+                "wait": _qbit_wait_evidence(target.get("uploaded_wait")),
+            },
             "fresh_duplicate_check": target.get("fresh_duplicate_check"),
             "package_reused": bool(target.get("package_reused")),
             "uploaded_torrent_reused": bool(target.get("uploaded_torrent_reused")),
