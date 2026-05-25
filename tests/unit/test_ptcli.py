@@ -4775,6 +4775,7 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert '"live_safe_to_attempt": true' in out
     summary_payload = json.loads((tmp_path / "summary" / "ptcli-doctor-summary.json").read_text(encoding="utf-8"))
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["schema_version"] == 1
     assert summary_payload["kind"] == "ptcli.doctor.live_readiness"
     assert summary_payload["artifacts"]["content_path"]["exists"] is True
@@ -4795,11 +4796,17 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert "--target-execute --confirm-upload" in commands["pipeline-live"]
     assert str(content_path) in commands["pipeline-live"]
     assert str(target_torrent) in commands["pipeline-live"]
+    assert command_argv["doctor-retry"][:3] == ["python3", "ptcli.py", "doctor"]
+    assert command_argv["doctor-live-probes"][:3] == ["python3", "ptcli.py", "doctor"]
+    assert command_argv["pipeline-live"][:3] == ["python3", "ptcli.py", "pipeline"]
+    assert str(content_path) in command_argv["pipeline-live"]
+    assert str(target_torrent) in command_argv["pipeline-live"]
     assert summary_payload["resume_state"]["ready"] is True
     assert summary_payload["resume_state"]["live_safe_to_attempt"] is True
     assert summary_payload["resume_state"]["resume_available"] is True
     assert summary_payload["resume_state"]["next_stage"] == "pipeline-live"
     assert summary_payload["resume_state"]["next_command"] == commands["pipeline-live"]
+    assert summary_payload["resume_state"]["next_command_argv"] == command_argv["pipeline-live"]
     assert summary_payload["resume_state"]["artifacts"]["content_path"] is True
     assert summary_payload["resume_state"]["artifacts"]["package_dir"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_torrent_file"] is True
@@ -4877,6 +4884,7 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     assert '"live_safe_to_attempt": true' in out
     summary_payload = json.loads((tmp_path / "summary" / "ptcli-doctor-summary.json").read_text(encoding="utf-8"))
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["inputs"]["uploaded_torrent_id"] == "999"
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     assert "--connect-qbit" in commands["doctor-live-probes"]
@@ -4891,7 +4899,8 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     assert summary_payload["resume_state"]["live_safe_to_attempt"] is True
     assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
     assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent-download"]
-    assert summary_payload["resume_state"]["next_command_argv"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert summary_payload["resume_state"]["next_command_argv"] == command_argv["resume-uploaded-torrent-download"]
+    assert command_argv["resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "target-upload"]
     assert "999" in summary_payload["resume_state"]["next_command_argv"]
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
 

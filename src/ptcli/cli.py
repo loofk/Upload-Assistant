@@ -1846,22 +1846,14 @@ def _path_artifact(path: str | None) -> dict[str, Any] | None:
     }
 
 
-def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespace, artifacts: dict[str, Any]) -> list[dict[str, str]]:
+def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespace, artifacts: dict[str, Any]) -> list[dict[str, Any]]:
     commands = [
-        {
-            "stage": "doctor-retry",
-            "command": _doctor_retry_command(args),
-        }
+        _ptcli_command_entry("doctor-retry", _doctor_retry_args(args)),
     ]
     if not payload.get("live_safe_to_attempt"):
         return commands
 
-    commands.append(
-        {
-            "stage": "doctor-live-probes",
-            "command": _doctor_retry_command(args, force_probes=True),
-        }
-    )
+    commands.append(_ptcli_command_entry("doctor-live-probes", _doctor_retry_args(args, force_probes=True)))
 
     if args.uploaded_torrent_id and args.package_dir:
         uploaded_resume_args = [
@@ -1886,7 +1878,7 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
             uploaded_resume_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
         if args.uploaded_paused:
             uploaded_resume_args.append("--uploaded-paused")
-        commands.append({"stage": "resume-uploaded-torrent-download", "command": _ptcli_command(uploaded_resume_args)})
+        commands.append(_ptcli_command_entry("resume-uploaded-torrent-download", uploaded_resume_args))
         return commands
 
     source_tracker = normalize_tracker(args.source_tracker)
@@ -1916,11 +1908,15 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
     _extend_command_path(pipeline_args, "--target-torrent-file", artifacts.get("target_torrent_file"))
     if args.uploaded_save_path:
         pipeline_args.extend(["--uploaded-save-path", args.uploaded_save_path])
-    commands.append({"stage": "pipeline-live", "command": _ptcli_command(pipeline_args)})
+    commands.append(_ptcli_command_entry("pipeline-live", pipeline_args))
     return commands
 
 
 def _doctor_retry_command(args: argparse.Namespace, *, force_probes: bool = False) -> str:
+    return _ptcli_command(_doctor_retry_args(args, force_probes=force_probes))
+
+
+def _doctor_retry_args(args: argparse.Namespace, *, force_probes: bool = False) -> list[str]:
     retry_args = [
         "doctor",
         "--from",
@@ -1964,7 +1960,7 @@ def _doctor_retry_command(args: argparse.Namespace, *, force_probes: bool = Fals
     ):
         if enabled:
             retry_args.append(option)
-    return _ptcli_command(retry_args)
+    return retry_args
 
 
 def _extend_command_path(command: list[str], option: str, artifact: Any) -> None:
