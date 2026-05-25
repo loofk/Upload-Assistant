@@ -5529,6 +5529,87 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
 
 
 @pytest.mark.asyncio
+async def test_pipeline_wait_complete_requires_matched_source_evidence(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    source_hash = "b" * 40
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", source_hash, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (tracker, source_id, base_dir)
+        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path.parent.mkdir(parents=True, exist_ok=True)
+        torrent_path.write_bytes(b"d4:infod")
+        return torrent_path
+
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+        _ = (config, client_name, torrent_path, category, tags, paused)
+        return {"client": "qbittorrent", "save_path": save_path, "hash": source_hash, "verified_in_client": True}
+
+    async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
+        _ = (config, client_name, timeout, interval)
+        assert torrent_hash == source_hash
+        return {
+            "client": "qbittorrent",
+            "complete": True,
+            "matches": [{"content_path": "/downloads/Other", "hash": source_hash}],
+            "completion_verification": {
+                "matched_count": 1,
+                "complete_count": 1,
+                "any_complete": True,
+                "requested_hash_matched": True,
+                "requested_content_path_matched": False,
+            },
+            "query": {"torrent_hash": torrent_hash, "content_path": content_path},
+        }
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--download-source",
+            "--inject-source",
+            "--save-path",
+            "/downloads",
+            "--wait-complete",
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    wait_stage = next(stage for stage in payload["stages"] if stage["stage"] == "wait-complete")
+    assert wait_stage["ok"] is False
+    assert wait_stage["error"] == "qBittorrent task did not complete with matched source torrent evidence."
+    assert payload["closure"]["source"]["complete"] is False
+    assert payload["evidence"]["source"]["source_wait_evidence"] is False
+    assert "wait-complete: qBittorrent task did not complete with matched source torrent evidence." in payload["blockers"]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_wait_complete_prefers_injected_hash(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},

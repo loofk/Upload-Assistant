@@ -2150,8 +2150,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 "wait-complete",
                 lambda: _wait_complete_with_config(config, args.client, content_path=wait_path, torrent_hash=effective_source_torrent_hash, timeout=args.wait_timeout, interval=args.wait_interval),
                 lambda payload: payload,
-                validate=lambda payload: bool(payload.get("complete")),
-                invalid_message="qBittorrent task did not complete before timeout.",
+                validate=_wait_result_completed,
+                invalid_message="qBittorrent task did not complete with matched source torrent evidence.",
             )
             stages.append(wait_result)
             effective_content_path = effective_content_path or _content_path_from_stage(wait_result)
@@ -2161,8 +2161,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 "wait-complete",
                 lambda: _wait_complete_with_config(config, args.client, content_path=args.content_path, torrent_hash=effective_source_torrent_hash, timeout=args.wait_timeout, interval=args.wait_interval),
                 lambda payload: payload,
-                validate=lambda payload: bool(payload.get("complete")),
-                invalid_message="qBittorrent task did not complete before timeout.",
+                validate=_wait_result_completed,
+                invalid_message="qBittorrent task did not complete with matched source torrent evidence.",
             )
             stages.append(wait_result)
             effective_content_path = effective_content_path or _content_path_from_stage(wait_result)
