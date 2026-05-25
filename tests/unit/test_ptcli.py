@@ -1006,10 +1006,11 @@ def test_source_info_uses_enabled_chinese_source_adapter(monkeypatch, capsys) ->
 
 
 def test_source_module_registers_enabled_chinese_source_adapters() -> None:
-    for tracker in ["AUDIENCES", "CHD", "HDSKY", "HHAN", "PTER", "TJUPT", "U2"]:
+    for tracker in ["AUDIENCES", "HDSKY", "HHAN", "PTER", "TJUPT"]:
         assert tracker in ptcli_source.SOURCE_TRACKER_CLASSES
+    for tracker in ["AUDIENCES", "CHD", "HDSKY", "HHAN", "PTER", "TJUPT", "U2"]:
         assert tracker in ptcli_source.NEXUS_DOWNLOAD_BASE_URLS
-    for tracker in ["HDS", "OB", "TTG"]:
+    for tracker in ["CHD", "HDS", "OB", "TTG", "U2"]:
         assert tracker in ptcli_source.GENERIC_DETAILS_BASE_URLS
     for tracker in ["MTEAM", "OB", "TTG"]:
         assert tracker in ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES
@@ -1066,6 +1067,66 @@ async def test_generic_source_info_parses_hds_details(monkeypatch, tmp_path) -> 
     assert info.douban_id == "1291546"
     assert info.douban_url == "https://movie.douban.com/subject/1291546/"
     assert info.description_length > 0
+
+
+@pytest.mark.asyncio
+async def test_reference_source_info_uses_ptcli_generic_details(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    html = """
+    <html>
+      <head><title>Ignored Title</title></head>
+      <body>
+        <h1>U2.Reference.2024.1080p.BluRay-GROUP</h1>
+        <a href="https://www.imdb.com/title/tt7654321/">IMDb</a>
+        <a href="https://www.themoviedb.org/tv/98765">TMDb</a>
+        <a href="https://movie.douban.com/subject/3541415/">Douban</a>
+        <td class="embedded">Torrent hash: 1234567890ABCDEF1234567890ABCDEF12345678</td>
+      </body>
+    </html>
+    """
+
+    class ExplodingTracker:
+        def __init__(self, config):
+            self.config = config
+
+        async def get_info_from_torrent_id(self, torrent_id, meta=None):
+            _ = (torrent_id, meta)
+            raise AssertionError("U2 reference metadata should use ptcli generic details parsing")
+
+    class FakeResponse:
+        text = html
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url):
+            assert url == "https://u2.dmhy.org/details.php?id=60635"
+            return FakeResponse()
+
+    monkeypatch.setitem(ptcli_source.SOURCE_TRACKER_CLASSES, "U2", ExplodingTracker)
+    monkeypatch.setattr(ptcli_source.httpx, "AsyncClient", FakeClient)
+
+    info = await ptcli_source.fetch_source_info({}, "U2", "60635", base_dir=str(tmp_path))
+
+    assert info.tracker == "U2"
+    assert info.torrent_id == "60635"
+    assert info.imdb_id == 7654321
+    assert info.tmdb_id == 98765
+    assert info.name == "U2.Reference.2024.1080p.BluRay-GROUP"
+    assert info.torrenthash == "1234567890abcdef1234567890abcdef12345678"
+    assert info.douban_id == "3541415"
 
 
 @pytest.mark.asyncio
@@ -2178,9 +2239,9 @@ async def test_fetch_source_info_closes_tracker_session(monkeypatch) -> None:
             _ = meta
             return (1234567, 2, f"Name-{torrent_id}", "a" * 40, "desc")
 
-    monkeypatch.setitem(ptcli_source.SOURCE_TRACKER_CLASSES, "U2", FakeTracker)
+    monkeypatch.setitem(ptcli_source.SOURCE_TRACKER_CLASSES, "MTEAM", FakeTracker)
 
-    info = await ptcli_source.fetch_source_info({}, "U2", "60635")
+    info = await ptcli_source.fetch_source_info({"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, "MTEAM", "60635")
 
     assert info.name == "Name-60635"
     assert closed["value"] is True
@@ -2203,10 +2264,10 @@ async def test_fetch_source_info_closes_tracker_session_on_error(monkeypatch) ->
             _ = (torrent_id, meta)
             raise RuntimeError("metadata failed")
 
-    monkeypatch.setitem(ptcli_source.SOURCE_TRACKER_CLASSES, "U2", FakeTracker)
+    monkeypatch.setitem(ptcli_source.SOURCE_TRACKER_CLASSES, "MTEAM", FakeTracker)
 
     with pytest.raises(RuntimeError, match="metadata failed"):
-        await ptcli_source.fetch_source_info({}, "U2", "60635")
+        await ptcli_source.fetch_source_info({"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, "MTEAM", "60635")
 
     assert closed["value"] is True
 

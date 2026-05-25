@@ -15,7 +15,6 @@ from bs4 import BeautifulSoup
 
 from src.ptcli.mainland import normalize_tracker
 from src.trackers.AUDIENCES import AUDIENCES
-from src.trackers.CHD import CHD
 from src.trackers.COMMON import COMMON
 from src.trackers.HDSKY import HDSKY
 from src.trackers.HHAN import HHAN
@@ -24,7 +23,6 @@ from src.trackers.OB import OB
 from src.trackers.PTER import PTER
 from src.trackers.TJUPT import TJUPT
 from src.trackers.TTG import TTG
-from src.trackers.U2 import U2
 
 
 class SourceTrackerProtocol(Protocol):
@@ -36,13 +34,11 @@ class SourceTrackerProtocol(Protocol):
 
 SOURCE_TRACKER_CLASSES: dict[str, type[Any]] = {
     "AUDIENCES": AUDIENCES,
-    "CHD": CHD,
     "HDSKY": HDSKY,
     "HHAN": HHAN,
     "MTEAM": MTEAM,
     "PTER": PTER,
     "TJUPT": TJUPT,
-    "U2": U2,
 }
 
 NEXUS_DOWNLOAD_BASE_URLS: dict[str, str] = {
@@ -63,9 +59,11 @@ DIRECT_DOWNLOAD_TRACKER_CLASSES: dict[str, type[Any]] = {
 }
 
 GENERIC_DETAILS_BASE_URLS: dict[str, str] = {
+    "CHD": "https://ptchdbits.co",
     "HDS": "https://hd-space.org",
     "OB": "https://ourbits.club",
     "TTG": "https://totheglory.im",
+    "U2": "https://u2.dmhy.org",
 }
 
 
@@ -147,11 +145,12 @@ def source_info_has_signal(info: SourceTorrentInfo) -> bool:
 async def fetch_source_info(config: dict[str, Any], tracker: str, source_id: str, base_dir: str | None = None) -> SourceTorrentInfo:
     source_tracker = normalize_tracker(tracker)
     torrent_id = extract_torrent_id(source_id)
-    tracker_class = SOURCE_TRACKER_CLASSES.get(source_tracker)
     meta = create_source_meta(base_dir)
+    if source_tracker in GENERIC_DETAILS_BASE_URLS:
+        return await _fetch_generic_source_info(config, source_tracker, torrent_id, meta)
+
+    tracker_class = SOURCE_TRACKER_CLASSES.get(source_tracker)
     if tracker_class is None:
-        if source_tracker in GENERIC_DETAILS_BASE_URLS:
-            return await _fetch_generic_source_info(config, source_tracker, torrent_id, meta)
         raise ValueError(f"Source metadata is not enabled for tracker: {source_tracker}")
 
     tracker_instance = tracker_class(config=config)
