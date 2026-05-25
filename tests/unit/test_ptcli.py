@@ -829,12 +829,19 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
             "ready": False,
             "closure": {"complete": False, "blockers": ["target.injected"]},
             "next_actions": ["Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path."],
-            "resume_commands": [{"stage": "resume-uploaded-torrent", "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"}],
+            "resume_commands": [
+                {
+                    "stage": "resume-uploaded-torrent",
+                    "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent",
+                    "argv": ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"],
+                }
+            ],
             "resume_state": {
                 "complete": False,
                 "resume_available": True,
                 "next_stage": "resume-uploaded-torrent",
                 "next_command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent",
+                "next_command_argv": ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"],
                 "available_stages": ["resume-uploaded-torrent"],
             },
             "stages": [{"stage": "target-upload", "ok": False}],
@@ -874,6 +881,7 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
     assert payload["resume_state"]["pipeline_complete"] is False
     assert payload["resume_state"]["next_stage"] == "resume-uploaded-torrent"
     assert payload["resume_state"]["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
+    assert payload["resume_state"]["next_command_argv"] == ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"]
     assert payload["resume_state"]["blockers"] == ["target.injected", "pipeline did not report ready."]
 
 

@@ -636,16 +636,21 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
     commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in commands if isinstance(command, dict)}
     next_stage = None if complete else pipeline_resume.get("next_stage")
     next_command = None if complete else pipeline_resume.get("next_command")
+    next_command_argv = None if complete else _argv_list(pipeline_resume.get("next_command_argv"))
     if not complete and not next_command:
         fallback = _resume_next_command(blockers, commands_by_stage)
         next_stage = fallback.get("stage")
         next_command = fallback.get("command")
+        next_command_argv = _resume_state_next_command_argv(fallback, commands)
+    elif not complete and next_command_argv is None:
+        next_command_argv = _resume_state_next_command_argv({"stage": next_stage, "command": next_command}, commands)
     return {
         "complete": complete,
         "pipeline_complete": bool(pipeline_resume.get("complete")),
         "resume_available": bool(pipeline_resume.get("resume_available") or commands),
         "next_stage": next_stage,
         "next_command": next_command,
+        "next_command_argv": next_command_argv,
         "available_stages": pipeline_resume.get("available_stages") or [str(command.get("stage")) for command in commands if isinstance(command, dict)],
         "artifacts": {
             "source_torrent_file": bool(artifacts.get("source_torrent_file")),
