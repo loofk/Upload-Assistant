@@ -9608,6 +9608,8 @@ async def test_qbit_service_waits_for_completed_match() -> None:
     assert result["completion_verification"]["matched_count"] == 1
     assert result["completion_verification"]["complete_count"] == 1
     assert result["completion_verification"]["all_matches_complete"] is True
+    assert result["completion_verification"]["observed_hashes"] == ["a" * 40]
+    assert result["completion_verification"]["observed_content_paths"] == ["/downloads/One"]
     assert result["matches"][0]["hash"] == "a" * 40
 
 
@@ -9619,6 +9621,8 @@ async def test_qbit_service_wait_reports_seeding_state_summary() -> None:
 
     assert result["complete"] is True
     assert result["completion_verification"]["seeding_state_count"] == 1
+    assert result["completion_verification"]["observed_hashes"] == ["b" * 40]
+    assert result["completion_verification"]["observed_content_paths"] == ["/downloads/One"]
     assert result["completion_verification"]["observed_states"] == ["uploading"]
     assert result["completion_verification"]["observed_progress"] == [1.0]
 
@@ -9646,6 +9650,8 @@ async def test_qbit_service_wait_reports_incomplete_blockers() -> None:
     assert result["matched_count"] == 1
     assert result["completion_verification"]["complete_count"] == 0
     assert result["completion_verification"]["any_complete"] is False
+    assert result["completion_verification"]["observed_hashes"] == ["a" * 40]
+    assert result["completion_verification"]["observed_content_paths"] == ["/downloads/One"]
     assert result["blockers"] == ["qBittorrent matched the torrent but did not report it as complete before timeout."]
 
 

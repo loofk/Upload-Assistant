@@ -351,9 +351,16 @@ def _completion_verification(matches: list[QbitTorrentSummary], completed: list[
         "seeding_state_count": len([torrent for torrent in completed if _is_seeding_state(torrent)]),
         "all_matches_complete": bool(matches) and len(matches) == len(completed),
         "any_complete": bool(completed),
+        "observed_hashes": _observed_values(matches, "hash"),
+        "observed_content_paths": _observed_values(matches, "content_path"),
+        "observed_save_paths": _observed_values(matches, "save_path"),
         "observed_states": sorted({str(torrent.state) for torrent in matches if torrent.state}),
         "observed_progress": [torrent.progress for torrent in matches if torrent.progress is not None],
     }
+
+
+def _observed_values(matches: list[QbitTorrentSummary], field: str) -> list[str]:
+    return sorted({str(value) for torrent in matches if (value := getattr(torrent, field))})
 
 
 def _is_seeding_state(torrent: QbitTorrentSummary) -> bool:
