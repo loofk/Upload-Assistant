@@ -1083,6 +1083,72 @@ def test_retorrent_execute_blockers_require_uploaded_injection_artifacts() -> No
     assert blockers == ["target.uploaded_torrent_hash", "target.injected_torrent_hash", "target.injection_verified"]
 
 
+def test_retorrent_execute_blockers_require_closure_audit_ready() -> None:
+    pipeline_result = {
+        "status": "ok",
+        "ready": True,
+        "summary": {"blockers": []},
+        "closure_audit": {"ready": False, "missing": ["target.uploaded_wait_evidence"]},
+    }
+    closure = {"complete": True, "blockers": []}
+
+    blockers = ptcli_cli._retorrent_execute_blockers(
+        pipeline_result,
+        closure,
+        True,
+        {"source_wait_evidence": True, "uploaded_wait_evidence": True, "uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_verified": True},
+    )
+
+    assert blockers == ["target.uploaded_wait_evidence"]
+
+
+@pytest.mark.asyncio
+async def test_retorrent_execute_blocks_when_pipeline_closure_audit_is_incomplete(monkeypatch, tmp_path) -> None:
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    async def fake_pipeline_payload(_args):
+        return {
+            "status": "ok",
+            "ready": True,
+            "closure": {"complete": True, "blockers": []},
+            "closure_audit": {"ready": False, "missing": ["target.uploaded_wait_evidence"]},
+            "evidence": {
+                "source": {"source_wait_evidence": True},
+                "target": {"uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_verified": True, "uploaded_wait_evidence": True},
+            },
+            "stages": [{"stage": "target-upload", "ok": True}],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--path",
+            "/downloads/Name",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    assert payload["status"] == "blocked"
+    assert payload["complete"] is False
+    assert payload["blockers"] == ["target.uploaded_wait_evidence"]
+
+
 def test_retorrent_execute_blockers_require_source_injection_artifacts_for_downloaded_mode() -> None:
     pipeline_result = {"status": "ok", "ready": True, "summary": {"blockers": []}, "evidence": {"source": {"mode": "downloaded"}}}
     closure = {"complete": True, "blockers": []}
