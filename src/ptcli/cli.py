@@ -2611,6 +2611,9 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
 
 def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
     stages = payload.get("stages")
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    evidence_source = evidence.get("source") if isinstance(evidence.get("source"), dict) else {}
+    evidence_target = evidence.get("target") if isinstance(evidence.get("target"), dict) else {}
     source_download = _find_stage(stages, "source-download") if isinstance(stages, list) else None
     inject_source = _find_stage(stages, "inject-source") if isinstance(stages, list) else None
     target_prepare = _find_stage(stages, "target-prepare") if isinstance(stages, list) else None
@@ -2621,6 +2624,14 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         "source_torrent_hash": payload.get("source_torrent_hash"),
         "target_torrent_file": payload.get("target_torrent_file"),
     }
+    if _artifact_value_present(evidence_source.get("hash_consistent")):
+        artifacts["source_hash_consistent"] = evidence_source.get("hash_consistent")
+    if _artifact_value_present(evidence_target.get("hash_consistent")):
+        artifacts["target_hash_consistent"] = evidence_target.get("hash_consistent")
+    if _artifact_value_present(evidence_target.get("duplicate_clean")):
+        artifacts["target_duplicate_clean"] = evidence_target.get("duplicate_clean")
+    if _artifact_value_present(evidence_target.get("rule_obligations")):
+        artifacts["target_rule_obligations"] = evidence_target.get("rule_obligations")
     if isinstance(source_download, dict):
         source_result = source_download.get("result")
         if isinstance(source_result, dict):
@@ -2817,6 +2828,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "source_qbit_category": bool(artifacts.get("source_qbit_category")),
             "source_qbit_tags": bool(artifacts.get("source_qbit_tags")),
             "source_paused": "source_paused" in artifacts,
+            "source_hash_consistent": bool(artifacts.get("source_hash_consistent")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
@@ -2824,6 +2836,9 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "uploaded_qbit_category": bool(artifacts.get("uploaded_qbit_category")),
             "uploaded_qbit_tags": bool(artifacts.get("uploaded_qbit_tags")),
             "uploaded_paused": "uploaded_paused" in artifacts,
+            "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
+            "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
+            "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
         },
         "blockers": blockers,
     }

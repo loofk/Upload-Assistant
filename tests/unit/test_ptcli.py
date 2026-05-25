@@ -5271,6 +5271,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["source_qbit_category"] == "SOURCE"
     assert summary_payload["artifacts"]["source_qbit_tags"] == "source-tag"
     assert summary_payload["artifacts"]["source_paused"] is True
+    assert summary_payload["artifacts"]["source_hash_consistent"] is True
     assert summary_payload["artifacts"]["target_torrent_file"] == str(torrent_file)
     assert summary_payload["artifacts"]["target_package_dir"]
     assert summary_payload["artifacts"]["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
@@ -5280,6 +5281,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["uploaded_qbit_tags"] == "retorrent"
     assert summary_payload["artifacts"]["uploaded_paused"] is True
     assert summary_payload["artifacts"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
+    assert summary_payload["artifacts"]["target_hash_consistent"] is True
+    assert summary_payload["artifacts"]["target_duplicate_clean"] is True
+    assert summary_payload["artifacts"]["target_rule_obligations"]["ready"] is True
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
     assert summary_payload["resume_state"]["complete"] is True
     assert summary_payload["resume_state"]["resume_available"] is True
@@ -5292,6 +5296,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "source_qbit_category": True,
         "source_qbit_tags": True,
         "source_paused": True,
+        "source_hash_consistent": True,
         "target_package_dir": True,
         "target_torrent_file": True,
         "uploaded_torrent_id": True,
@@ -5299,6 +5304,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "uploaded_qbit_category": True,
         "uploaded_qbit_tags": True,
         "uploaded_paused": True,
+        "target_hash_consistent": True,
+        "target_duplicate_clean": True,
+        "target_rule_obligations": True,
     }
     assert summary_payload["artifacts"]["source_torrent_file"] in resume_commands["resume-source-torrent"]
     assert "--client default" in resume_commands["resume-source-torrent"]
