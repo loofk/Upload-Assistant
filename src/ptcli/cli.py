@@ -3096,6 +3096,8 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     uploaded_qbit_options = qbit_options.get("uploaded") if isinstance(qbit_options.get("uploaded"), dict) else {}
     uploaded_output_dir = output_options.get("uploaded_output_dir")
     uploaded_output_dir_args = ["--uploaded-output-dir", str(uploaded_output_dir)] if uploaded_output_dir else []
+    summary_output_dir = output_options.get("summary_output_dir")
+    summary_output_dir_args = ["--summary-output-dir", str(summary_output_dir)] if summary_output_dir else []
     content_path = payload.get("path")
     path_args = ["--path", str(content_path)] if content_path else []
     source_save_path = artifacts.get("source_save_path") or content_path or "/downloads"
@@ -3128,6 +3130,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         "--wait-complete",
                         "--accept-rules",
                         "--write-summary",
+                        *summary_output_dir_args,
                         "--json",
                     ]
                 ),
@@ -3168,6 +3171,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
                         "--wait-uploaded-complete",
                         "--write-summary",
+                        *summary_output_dir_args,
                         "--json",
                     ]
                 ),
@@ -3195,6 +3199,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
                         "--wait-uploaded-complete",
                         "--write-summary",
+                        *summary_output_dir_args,
                         "--json",
                     ]
                 ),
@@ -3218,6 +3223,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
                         "--wait-uploaded-complete",
                         "--write-summary",
+                        *summary_output_dir_args,
                         "--json",
                     ]
                 ),

@@ -6335,6 +6335,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["target_duplicate_clean"] is True
     assert summary_payload["artifacts"]["target_rule_obligations"]["ready"] is True
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
+    summary_output_dir = str(tmp_path / "summary")
+    summary_output_arg = f"--summary-output-dir {shlex.quote(summary_output_dir)}"
     assert summary_payload["resume_state"]["complete"] is True
     assert summary_payload["resume_state"]["resume_available"] is True
     assert summary_payload["resume_state"]["next_stage"] is None
@@ -6366,6 +6368,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "--qbit-category SOURCE" in resume_commands["resume-source-torrent"]
     assert "--qbit-tags source-tag" in resume_commands["resume-source-torrent"]
     assert "--paused" in resume_commands["resume-source-torrent"]
+    assert summary_output_arg in resume_commands["resume-source-torrent"]
     assert str(torrent_file) in resume_commands["resume-target-upload"]
     assert str(tmp_path / "MTEAM-999.torrent") in resume_commands["resume-uploaded-torrent"]
     assert shlex.quote(summary_payload["artifacts"]["target_package_dir"]) in resume_commands["resume-target-upload"]
@@ -6374,11 +6377,13 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "--uploaded-qbit-category MTEAM" in resume_commands["resume-target-upload"]
     assert "--uploaded-qbit-tags retorrent" in resume_commands["resume-target-upload"]
     assert "--uploaded-paused" in resume_commands["resume-target-upload"]
+    assert summary_output_arg in resume_commands["resume-target-upload"]
     assert "--client default" in resume_commands["resume-uploaded-torrent"]
     assert "--uploaded-save-path /downloads" in resume_commands["resume-uploaded-torrent"]
     assert "--uploaded-qbit-category MTEAM" in resume_commands["resume-uploaded-torrent"]
     assert "--uploaded-qbit-tags retorrent" in resume_commands["resume-uploaded-torrent"]
     assert "--uploaded-paused" in resume_commands["resume-uploaded-torrent"]
+    assert summary_output_arg in resume_commands["resume-uploaded-torrent"]
     assert any(stage["stage"] == "target-upload" and stage["ok"] is True for stage in summary_payload["stages"])
 
 
@@ -6483,6 +6488,7 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     assert "--uploaded-qbit-category MTEAM" in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-tags retorrent" in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-paused" in resume_commands["resume-uploaded-torrent-download"]
+    assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in resume_commands["resume-uploaded-torrent-download"]
 
 
 @pytest.mark.asyncio
