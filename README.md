@@ -57,7 +57,8 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - 源站 cookie 放在 `data/cookies/<TRACKER>.txt` 或对应适配器要求的位置。
 - MTEAM 需要 `TRACKERS.MTEAM.api_key`。
 - `Dockerfile.ptcli` 是 focused CLI 镜像，只安装 `requirements-ptcli.txt` 和 ptcli 需要的系统依赖；旧 `Dockerfile` 保留给 legacy/full UA 入口。
-- 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；旧 `upload.py` 需要显式覆盖 entrypoint 或使用 legacy Dockerfile 才会运行。
+- 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；release 工作流会额外发布 `*-legacy-webui` 标签给旧 Web UI 镜像。
+- 旧 `upload.py` 需要显式覆盖 entrypoint、使用 legacy Dockerfile，或拉取 `*-legacy-webui` 标签才会运行。
 - `docker-compose.yml` 默认提供 `ptcli` 一次性 CLI 服务，可用 `docker compose run --rm ptcli retorrent ...` 在盒子上执行；legacy Web UI 需要显式 `--profile legacy-webui`。
 - live 验证需要在真实盒子环境中提供有效 cookie、MTEAM API key、qBittorrent 连接和实际内容路径。
 

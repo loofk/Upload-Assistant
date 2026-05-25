@@ -52,13 +52,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # WebUI variant - amd64
+          # Focused PT CLI variant - amd64
+          - variant: ptcli
+            dockerfile: ./Dockerfile.ptcli
+            arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          # Focused PT CLI variant - arm64
+          - variant: ptcli
+            dockerfile: ./Dockerfile.ptcli
+            arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+          # Legacy WebUI variant - amd64
           - variant: webui
             dockerfile: ./Dockerfile
             arch: amd64
             platform: linux/amd64
             runner: ubuntu-24.04
-          # WebUI variant - arm64
+          # Legacy WebUI variant - arm64
           - variant: webui
             dockerfile: ./Dockerfile
             arch: arm64
@@ -135,8 +147,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create manifest list and push
-        working-directory: /tmp/digests/webui
+      - name: Create focused PT CLI manifest list and push
+        working-directory: /tmp/digests/ptcli
         run: |
           docker buildx imagetools create \
             $(echo "$TAGS" | xargs -I {} echo -t {}) \
@@ -144,11 +156,22 @@ jobs:
         env:
           TAGS: ${{ needs.prepare.outputs.tags }}
 
+      - name: Create legacy WebUI manifest list and push
+        working-directory: /tmp/digests/webui
+        run: |
+          docker buildx imagetools create \
+            $(echo "$TAGS" | sed 's/$/-legacy-webui/' | xargs -I {} echo -t {}) \
+            $(printf '${{ env.REGISTRY }}/${{ needs.prepare.outputs.image_name }}@sha256:%s ' *)
+        env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
+
       - name: Output build information
         run: |
           echo "✅ Docker images built and pushed successfully!"
-          echo "🐋 Images:"
+          echo "🐋 Focused PT CLI images:"
           echo '${{ needs.prepare.outputs.tags }}' | sed 's/^/  - /'
+          echo "🐋 Legacy WebUI images:"
+          echo '${{ needs.prepare.outputs.tags }}' | sed 's/$/-legacy-webui/' | sed 's/^/  - /'
           echo "📝 Event: ${{ github.event_name }}"
           if [ "${{ github.event_name }}" == "release" ]; then
             echo "📝 Triggered by release: ${{ github.event.release.tag_name }}"
