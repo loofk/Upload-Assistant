@@ -132,6 +132,12 @@ class WrongHashQbitClient(FakeQbitClient):
         return []
 
 
+class WrongPathQbitClient(FakeQbitClient):
+    def torrents_info(self, **kwargs):
+        _ = kwargs
+        return [{"name": "One.2024", "hash": "a" * 40, "save_path": "/other", "content_path": "/other/One.2024", "progress": 1.0}]
+
+
 def make_mteam_safe_torrent(tmp_path, name: str = "upload") -> str:
     content = tmp_path / f"{name}.mkv"
     content.write_bytes(b"content")
@@ -9660,6 +9666,28 @@ async def test_qbit_service_wait_reports_hash_query() -> None:
     assert result["matched_count"] == 1
     assert result["matches"][0]["hash"] == "b" * 40
     assert result["completion_verification"]["requested_hash_matched"] is True
+
+
+@pytest.mark.asyncio
+async def test_qbit_service_wait_rejects_wrong_hash_match() -> None:
+    service = QbitReadOnlyService({}, qbit_client=WrongHashQbitClient())
+
+    result = await service.wait_for_completion(torrent_hash="b" * 40, timeout=0, interval=0.1)
+
+    assert result["complete"] is False
+    assert result["completion_verification"]["requested_hash_matched"] is False
+    assert result["blockers"] == [f"qBittorrent matched torrents, but none matched requested hash {'b' * 40}."]
+
+
+@pytest.mark.asyncio
+async def test_qbit_service_wait_rejects_wrong_path_match() -> None:
+    service = QbitReadOnlyService({}, qbit_client=WrongPathQbitClient())
+
+    result = await service.wait_for_completion(content_path="/downloads/One", timeout=0, interval=0.1)
+
+    assert result["complete"] is False
+    assert result["completion_verification"]["requested_content_path_matched"] is False
+    assert result["blockers"] == ["qBittorrent matched torrents, but none matched requested path /downloads/One."]
 
 
 @pytest.mark.asyncio

@@ -246,14 +246,17 @@ class QbitReadOnlyService:
             last_matches = matches
             completed = [torrent for torrent in matches if _is_complete(torrent)]
             if completed:
-                return {
-                    "complete": True,
-                    "query": query,
-                    "matched_count": len(matches),
-                    "completion_verification": _completion_verification(matches, completed, torrent_hash=torrent_hash, content_path=content_path),
-                    "matches": summaries_to_dicts(completed),
-                }
-
+                verification = _completion_verification(matches, completed, torrent_hash=torrent_hash, content_path=content_path)
+                if not _wait_request_matches(verification):
+                    completed = []
+                else:
+                    return {
+                        "complete": True,
+                        "query": query,
+                        "matched_count": len(matches),
+                        "completion_verification": verification,
+                        "matches": summaries_to_dicts(completed),
+                    }
             if asyncio.get_running_loop().time() >= deadline:
                 return {
                     "complete": False,
@@ -378,6 +381,10 @@ def _requested_content_path_matched(matches: list[QbitTorrentSummary], content_p
     return any(_torrent_matches_save_path(match, content_path) for match in matches)
 
 
+def _wait_request_matches(verification: dict[str, Any]) -> bool:
+    return verification.get("requested_hash_matched") is not False and verification.get("requested_content_path_matched") is not False
+
+
 def _is_seeding_state(torrent: QbitTorrentSummary) -> bool:
     return (torrent.state or "").lower() in {"uploading", "stalled_up", "forcedup", "queuedup"}
 
@@ -420,4 +427,9 @@ def _wait_blockers(matches: list[QbitTorrentSummary], *, torrent_hash: str | Non
         if torrent_hash:
             return [f"No qBittorrent torrent matched hash {torrent_hash}."]
         return [f"No qBittorrent torrent matched path {content_path}."]
+    verification = _completion_verification(matches, [torrent for torrent in matches if _is_complete(torrent)], torrent_hash=torrent_hash, content_path=content_path)
+    if verification.get("requested_hash_matched") is False:
+        return [f"qBittorrent matched torrents, but none matched requested hash {torrent_hash}."]
+    if verification.get("requested_content_path_matched") is False:
+        return [f"qBittorrent matched torrents, but none matched requested path {content_path}."]
     return ["qBittorrent matched the torrent but did not report it as complete before timeout."]
