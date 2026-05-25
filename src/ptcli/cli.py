@@ -2961,6 +2961,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_content_verified = _source_content_verified(source_content_verify)
     target_injected = _injected_torrent_verified(injected_torrent)
     target_seeding = target_injected and isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete"))
+    target_hash_consistent = not _uploaded_torrent_hash_consistency_blockers(target_upload_result)
     injected_target_hash = _torrent_hash_from_result(injected_torrent)
     uploaded_target_hash = target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None
     source = {
@@ -2991,6 +2992,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "downloaded": isinstance(downloaded_torrent, dict),
         "injected": target_injected,
         "injection_verified": target_injected,
+        "hash_consistent": target_hash_consistent,
         "injected_torrent": injected_torrent if isinstance(injected_torrent, dict) else None,
         "seeding": target_seeding,
         "uploaded_wait": uploaded_wait if isinstance(uploaded_wait, dict) else None,
@@ -3027,6 +3029,8 @@ def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[st
     blockers = [name for name, ok in checks if not ok]
     if target.get("injected") and not target.get("seeding"):
         blockers.append("target.seeding")
+    if target.get("uploaded") and target.get("downloaded") and target.get("injected") and not target.get("hash_consistent"):
+        blockers.append("target.hash_consistent")
     return blockers
 
 
@@ -3077,6 +3081,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "downloaded": bool(target.get("downloaded")),
             "injected": bool(target.get("injected")),
             "seeding": target_seeding,
+            "hash_consistent": bool(target.get("hash_consistent")),
             "torrent_file": target.get("torrent_file"),
             "uploaded_torrent_id": target.get("uploaded_torrent_id"),
             "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
