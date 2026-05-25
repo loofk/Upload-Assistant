@@ -337,7 +337,9 @@ def test_retorrent_plan_marks_rule_check_ready_with_ack() -> None:
 
 
 def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
-    commands = {command["stage"]: command["command"] for command in ptcli_cli.build_plan_commands("U2", "60635", ["MTEAM"], "/downloads/Example")}
+    plan_commands = ptcli_cli.build_plan_commands("U2", "60635", ["MTEAM"], "/downloads/Example")
+    commands = {command["stage"]: command["command"] for command in plan_commands}
+    command_argv = {command["stage"]: command["argv"] for command in plan_commands}
 
     resume_target = commands["resume-target-package"]
     assert "--target-execute --confirm-upload" in resume_target
@@ -348,6 +350,8 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
     assert "--write-summary" in resume_target
     assert "--uploaded-qbit-category MTEAM" in resume_target
     assert "--uploaded-qbit-tags retorrent" in resume_target
+    assert command_argv["resume-target-package"][:3] == ["python3", "ptcli.py", "pipeline"]
+    assert "/downloads/Example" in command_argv["resume-target-package"]
 
     doctor_live = commands["doctor-live"]
     assert "--download-uploaded-torrent" in doctor_live
@@ -356,6 +360,7 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
     assert "--connect-qbit" in doctor_live
     assert "--probe-source" in doctor_live
     assert "--probe-target" in doctor_live
+    assert command_argv["doctor-live"][:3] == ["python3", "ptcli.py", "doctor"]
 
     resume_uploaded = commands["resume-uploaded-torrent"]
     assert "--uploaded-torrent-file ./tmp/uploaded/MTEAM-<id>.torrent" in resume_uploaded
@@ -363,6 +368,8 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
     assert "--uploaded-save-path" not in resume_uploaded
     assert "--wait-uploaded-complete" in resume_uploaded
     assert "--uploaded-qbit-category MTEAM" in resume_uploaded
+    assert command_argv["resume-uploaded-torrent"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert "./tmp/uploaded/MTEAM-<id>.torrent" in command_argv["resume-uploaded-torrent"]
     assert "--uploaded-qbit-tags retorrent" in resume_uploaded
 
     resume_uploaded_download = commands["resume-uploaded-torrent-download"]
