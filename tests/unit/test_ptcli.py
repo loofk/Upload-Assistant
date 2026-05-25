@@ -417,6 +417,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "uploaded_torrent_hash": "b" * 40,
                     "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
                     "uploaded_save_path": "/downloads/Name",
+                    "uploaded_qbit_category": "MTEAM",
+                    "uploaded_qbit_tags": "retorrent",
+                    "uploaded_paused": True,
                     "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 },
             },
@@ -495,6 +498,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
         "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
         "uploaded_save_path": "/downloads/Name",
+        "uploaded_qbit_category": "MTEAM",
+        "uploaded_qbit_tags": "retorrent",
+        "uploaded_paused": True,
         "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
     }
     assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
@@ -512,6 +518,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_hash"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_save_path"] is True
+    assert payload["resume_state"]["artifacts"]["uploaded_qbit_category"] is True
+    assert payload["resume_state"]["artifacts"]["uploaded_qbit_tags"] is True
+    assert payload["resume_state"]["artifacts"]["uploaded_paused"] is True
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True
@@ -5083,6 +5092,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     assert summary_payload["artifacts"]["uploaded_torrent_hash"] == uploaded_hash
+    assert summary_payload["artifacts"]["uploaded_qbit_category"] == "MTEAM"
+    assert summary_payload["artifacts"]["uploaded_qbit_tags"] == "retorrent"
+    assert summary_payload["artifacts"]["uploaded_paused"] is True
     assert summary_payload["artifacts"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
     assert summary_payload["resume_state"]["complete"] is True
@@ -5100,6 +5112,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "target_torrent_file": True,
         "uploaded_torrent_id": True,
         "uploaded_torrent_file": True,
+        "uploaded_qbit_category": True,
+        "uploaded_qbit_tags": True,
+        "uploaded_paused": True,
     }
     assert summary_payload["artifacts"]["source_torrent_file"] in resume_commands["resume-source-torrent"]
     assert "--client default" in resume_commands["resume-source-torrent"]
