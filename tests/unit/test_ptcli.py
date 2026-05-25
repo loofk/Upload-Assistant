@@ -405,6 +405,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
 
     async def fake_pipeline_payload(args):
         captured_args["args"] = args
+        rule_obligations = {"ready": True, "count": 2, "missing": []}
         return {
             "ready": True,
             "closure": {"complete": True, "blockers": [], "source": {"complete": True}, "target": {"uploaded": True, "injected": True}},
@@ -418,6 +419,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "source_qbit_category": "SOURCE",
                     "source_qbit_tags": "source-tag",
                     "source_paused": True,
+                    "hash_consistent": True,
                     "content_path": "/downloads/Name",
                 },
                 "target": {
@@ -430,6 +432,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "uploaded_qbit_tags": "retorrent",
                     "uploaded_paused": True,
                     "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                    "hash_consistent": True,
+                    "duplicate_clean": True,
+                    "rule_obligations": rule_obligations,
                 },
             },
             "summary": {"ready": True, "complete": True, "status": "complete"},
@@ -502,6 +507,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "source_qbit_category": "SOURCE",
         "source_qbit_tags": "source-tag",
         "source_paused": True,
+        "source_hash_consistent": True,
         "uploaded_torrent_id": "999",
         "uploaded_torrent_hash": "b" * 40,
         "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
@@ -511,6 +517,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "uploaded_qbit_tags": "retorrent",
         "uploaded_paused": True,
         "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+        "target_hash_consistent": True,
+        "target_duplicate_clean": True,
+        "target_rule_obligations": {"ready": True, "count": 2, "missing": []},
     }
     assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
     assert payload["resume_state"]["complete"] is True
@@ -523,6 +532,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["source_qbit_category"] is True
     assert payload["resume_state"]["artifacts"]["source_qbit_tags"] is True
     assert payload["resume_state"]["artifacts"]["source_paused"] is True
+    assert payload["resume_state"]["artifacts"]["source_hash_consistent"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_hash"] is True
@@ -530,6 +540,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["uploaded_qbit_category"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_qbit_tags"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_paused"] is True
+    assert payload["resume_state"]["artifacts"]["target_hash_consistent"] is True
+    assert payload["resume_state"]["artifacts"]["target_duplicate_clean"] is True
+    assert payload["resume_state"]["artifacts"]["target_rule_obligations"] is True
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True
