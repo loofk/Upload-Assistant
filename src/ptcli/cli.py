@@ -560,10 +560,20 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
 def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict[str, Any] | None, closure: dict[str, Any] | None) -> dict[str, Any]:
     artifacts = pipeline_result.get("artifacts")
     merged = dict(artifacts) if isinstance(artifacts, dict) else {}
+    evidence_source = evidence.get("source") if isinstance(evidence, dict) and isinstance(evidence.get("source"), dict) else {}
+    closure_source = closure.get("source") if isinstance(closure, dict) and isinstance(closure.get("source"), dict) else {}
     evidence_target = evidence.get("target") if isinstance(evidence, dict) and isinstance(evidence.get("target"), dict) else {}
     closure_target = closure.get("target") if isinstance(closure, dict) and isinstance(closure.get("target"), dict) else {}
     summary = pipeline_result.get("summary") if isinstance(pipeline_result.get("summary"), dict) else {}
+    summary_source = summary.get("source") if isinstance(summary.get("source"), dict) else {}
     summary_target = summary.get("target") if isinstance(summary.get("target"), dict) else {}
+    for key in ("source_torrent_hash", "source_torrent_file"):
+        if merged.get(key):
+            continue
+        source_key = "torrent_hash" if key == "source_torrent_hash" else "source_torrent_path"
+        value = evidence_source.get(source_key) or closure_source.get(source_key) or summary_source.get(source_key)
+        if value:
+            merged[key] = value
     for key in ("uploaded_torrent_id", "uploaded_torrent_hash", "uploaded_torrent_path", "uploaded_save_path", "fresh_duplicate_check"):
         if merged.get(key):
             continue
@@ -595,6 +605,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
         "available_stages": pipeline_resume.get("available_stages") or [str(command.get("stage")) for command in commands if isinstance(command, dict)],
         "artifacts": {
             "source_torrent_file": bool(artifacts.get("source_torrent_file")),
+            "source_torrent_hash": bool(artifacts.get("source_torrent_hash")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),

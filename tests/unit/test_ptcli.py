@@ -401,7 +401,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "closure": {"complete": True, "blockers": [], "source": {"complete": True}, "target": {"uploaded": True, "injected": True}},
             "evidence": {
                 "complete": True,
-                "source": {"mode": "downloaded", "torrent_hash": "a" * 40, "content_path": "/downloads/Name"},
+                "source": {"mode": "downloaded", "torrent_hash": "a" * 40, "source_torrent_path": "/tmp/U2-60635.torrent", "content_path": "/downloads/Name"},
                 "target": {
                     "ready": True,
                     "uploaded_torrent_id": "999",
@@ -475,6 +475,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["summary"]["status"] == "complete"
     assert payload["summary_file"].endswith("ptcli-run-summary.json")
     assert payload["artifacts"] == {
+        "source_torrent_hash": "a" * 40,
+        "source_torrent_file": "/tmp/U2-60635.torrent",
         "uploaded_torrent_id": "999",
         "uploaded_torrent_hash": "b" * 40,
         "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
@@ -487,6 +489,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["pipeline_complete"] is True
     assert payload["resume_state"]["next_stage"] is None
     assert payload["resume_state"]["next_command"] is None
+    assert payload["resume_state"]["artifacts"]["source_torrent_file"] is True
+    assert payload["resume_state"]["artifacts"]["source_torrent_hash"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_hash"] is True
