@@ -26,7 +26,6 @@ COPY src/ptcli/ src/ptcli/
 COPY src/trackers/__init__.py src/trackers/__init__.py
 COPY src/trackers/COMMON.py src/trackers/COMMON.py
 COPY src/trackers/MTEAM.py src/trackers/MTEAM.py
-COPY src/trackers/TTG.py src/trackers/TTG.py
 COPY src/bbcode.py src/bbcode.py
 COPY src/cleanup.py src/cleanup.py
 COPY src/console.py src/console.py

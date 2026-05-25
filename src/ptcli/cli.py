@@ -29,6 +29,7 @@ from src.ptcli.source import (
     GENERIC_DETAILS_BASE_URLS,
     NEXUS_DOWNLOAD_BASE_URLS,
     SOURCE_TRACKER_CLASSES,
+    TTG_DOWNLOAD_BASE_URLS,
     download_source_torrent,
     extract_torrent_id,
     fetch_source_info,
@@ -685,7 +686,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
 def build_sites_payload() -> dict[str, Any]:
     sites = sorted(CHINESE_PT_TRACKERS)
     source_info_trackers = sorted((set(SOURCE_TRACKER_CLASSES) | set(GENERIC_DETAILS_BASE_URLS)) & set(CHINESE_PT_TRACKERS))
-    source_download_trackers = sorted((set(NEXUS_DOWNLOAD_BASE_URLS) | set(DIRECT_DOWNLOAD_TRACKER_CLASSES)) & set(CHINESE_PT_TRACKERS))
+    source_download_trackers = sorted((set(NEXUS_DOWNLOAD_BASE_URLS) | set(DIRECT_DOWNLOAD_TRACKER_CLASSES) | set(TTG_DOWNLOAD_BASE_URLS)) & set(CHINESE_PT_TRACKERS))
     mteam_flow_sources = sorted(NEXUSPHP_MTEAM_SOURCE_TRACKERS & set(CHINESE_PT_TRACKERS))
     full_live_sources = sorted(set(source_download_trackers) & set(mteam_flow_sources))
     target_upload_trackers = ["MTEAM"] if "MTEAM" in CHINESE_PT_TRACKERS else []

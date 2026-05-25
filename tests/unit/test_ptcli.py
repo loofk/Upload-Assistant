@@ -1011,8 +1011,8 @@ def test_source_module_registers_enabled_chinese_source_adapters() -> None:
         assert tracker in ptcli_source.NEXUS_DOWNLOAD_BASE_URLS
     for tracker in ["AUDIENCES", "CHD", "HDS", "HDSKY", "HHAN", "OB", "PTER", "TJUPT", "TTG", "U2"]:
         assert tracker in ptcli_source.GENERIC_DETAILS_BASE_URLS
-    for tracker in ["MTEAM", "TTG"]:
-        assert tracker in ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES
+    assert set(ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES) == {"MTEAM"}
+    assert set(ptcli_source.TTG_DOWNLOAD_BASE_URLS) == {"TTG"}
 
 
 @pytest.mark.asyncio
@@ -1243,19 +1243,43 @@ async def test_enabled_nexus_source_info_uses_ptcli_generic_details(monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_source_download_uses_direct_chinese_tracker_downloader(monkeypatch, tmp_path) -> None:
-    class FakeTTG:
-        def __init__(self, config):
-            self.config = config
+async def test_ttg_source_download_uses_ptcli_native_downloader(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "TTG.txt").write_text("uid=1;", encoding="utf-8")
 
-        async def download_new_torrent(self, _torrent_id, torrent_path):
-            await asyncio.to_thread(Path(torrent_path).write_bytes, b"d4:infod")
+    class FakeResponse:
+        content = b"d4:infod"
 
-    monkeypatch.setitem(ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES, "TTG", FakeTTG)
+        def raise_for_status(self) -> None:
+            return None
 
-    path = await ptcli_source.download_source_torrent({"TRACKERS": {"TTG": {"announce_url": "https://example/announce/passkey"}}}, "TTG", "789", str(tmp_path))
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            assert kwargs["cookies"] == {"uid": "1"}
 
-    assert path == tmp_path / "TTG-789.torrent"
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url):
+            assert url == "https://totheglory.im/dl/789/ttg-passkey"
+            return FakeResponse()
+
+    assert "TTG" not in ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES
+    monkeypatch.setattr(ptcli_source.httpx, "AsyncClient", FakeClient)
+
+    path = await ptcli_source.download_source_torrent(
+        {"TRACKERS": {"TTG": {"announce_url": "https://totheglory.im/announce/ttg-passkey"}}},
+        "TTG",
+        "789",
+        str(tmp_path / "out"),
+        base_dir=str(tmp_path),
+    )
+
+    assert path == tmp_path / "out" / "TTG-789.torrent"
     assert path.read_bytes() == b"d4:infod"
 
 

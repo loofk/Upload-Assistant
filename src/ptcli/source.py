@@ -15,7 +15,6 @@ from bs4 import BeautifulSoup
 
 from src.ptcli.mainland import normalize_tracker
 from src.trackers.MTEAM import MTEAM
-from src.trackers.TTG import TTG
 
 
 class SourceTrackerProtocol(Protocol):
@@ -42,7 +41,10 @@ NEXUS_DOWNLOAD_BASE_URLS: dict[str, str] = {
 
 DIRECT_DOWNLOAD_TRACKER_CLASSES: dict[str, type[Any]] = {
     "MTEAM": MTEAM,
-    "TTG": TTG,
+}
+
+TTG_DOWNLOAD_BASE_URLS: dict[str, str] = {
+    "TTG": "https://totheglory.im",
 }
 
 GENERIC_DETAILS_BASE_URLS: dict[str, str] = {
@@ -164,6 +166,10 @@ async def download_source_torrent(config: dict[str, Any], tracker: str, source_i
             await tracker_instance.download_new_torrent(torrent_id, str(destination))
         finally:
             await _close_tracker_session(tracker_instance)
+        return _validate_downloaded_torrent(destination)
+
+    if source_tracker in TTG_DOWNLOAD_BASE_URLS:
+        await _download_ttg_torrent(config, source_tracker, torrent_id, destination, base_dir)
         return _validate_downloaded_torrent(destination)
 
     if source_tracker in NEXUS_DOWNLOAD_BASE_URLS:
@@ -289,6 +295,34 @@ async def _download_nexus_torrent(config: dict[str, Any], tracker: str, torrent_
     await asyncio.to_thread(_assert_torrent_bytes, response.content)
     async with aiofiles.open(destination, "wb") as torrent_file:
         await torrent_file.write(response.content)
+
+
+async def _download_ttg_torrent(config: dict[str, Any], tracker: str, torrent_id: str, destination: Path, base_dir: str | None) -> None:
+    passkey = _ttg_passkey(config.get("TRACKERS", {}).get(tracker, {}))
+    if not passkey:
+        raise ValueError("TTG passkey or announce_url is not configured.")
+
+    meta = create_source_meta(base_dir)
+    cookiefile = os.path.join(meta["base_dir"], "data", "cookies", f"{tracker}.txt")
+    cookie_exists = await asyncio.to_thread(os.path.exists, cookiefile)
+    cookies = await _load_cookie_file(cookiefile) if cookie_exists else {}
+    download_url = f"{TTG_DOWNLOAD_BASE_URLS[tracker]}/dl/{torrent_id}/{passkey}"
+
+    async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
+        response = await client.get(download_url)
+    response.raise_for_status()
+    await asyncio.to_thread(_assert_torrent_bytes, response.content)
+    async with aiofiles.open(destination, "wb") as torrent_file:
+        await torrent_file.write(response.content)
+
+
+def _ttg_passkey(tracker_config: Any) -> str:
+    if not isinstance(tracker_config, dict):
+        return ""
+    announce_url = str(tracker_config.get("announce_url", "")).strip()
+    if announce_url:
+        return announce_url.rstrip("/").split("/")[-1]
+    return str(tracker_config.get("passkey", "")).strip()
 
 
 async def _load_cookie_file(cookiefile: str | Path) -> dict[str, str]:
