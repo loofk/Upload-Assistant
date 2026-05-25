@@ -4823,7 +4823,12 @@ def _summary_next_command_argv(command: Any) -> list[str] | None:
     if interpreter not in {"python", "python3"} or script != "ptcli.py":
         return None
     argv[0] = sys.executable
+    argv[1] = str(_ptcli_script_path())
     return argv
+
+
+def _ptcli_script_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "ptcli.py"
 
 
 def _shell_bool(value: Any) -> str:

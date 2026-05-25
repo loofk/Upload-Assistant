@@ -2546,7 +2546,7 @@ def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatc
     code = main(["summary-check", "--summary-file", str(summary_file), "--run-next-command"])
 
     assert code == 7
-    assert calls == [([ptcli_cli.sys.executable, "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"], False)]
+    assert calls == [([ptcli_cli.sys.executable, str(ptcli_cli._ptcli_script_path()), "pipeline", "--upload-target", "--package-dir", "/tmp/with space"], False)]
     assert capsys.readouterr().out == ""
 
 
