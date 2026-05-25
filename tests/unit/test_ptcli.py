@@ -1908,6 +1908,65 @@ def test_summary_check_prefers_uploaded_resume_for_uploaded_wait_artifact(tmp_pa
     assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
 
 
+def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["source.wait_evidence"],
+                "evidence": {
+                    "source": {
+                        "qbit_closure": {
+                            "wait": {
+                                "complete": False,
+                                "matched_count": 1,
+                                "completion_verification": {
+                                    "matched_count": 1,
+                                    "complete_count": 1,
+                                    "any_complete": True,
+                                    "requested_hash_matched": False,
+                                    "requested_content_path_matched": None,
+                                    "observed_hashes": ["f" * 40],
+                                    "observed_content_paths": ["/downloads/Other"],
+                                    "observed_save_paths": ["/downloads"],
+                                },
+                                "blockers": ["qBittorrent matched torrents, but none matched requested hash bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb."],
+                            }
+                        }
+                    }
+                },
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "source_wait_evidence": False,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    diagnostics = payload["qbit_wait_diagnostics"]["source"]
+    assert diagnostics["request_mismatch"] is True
+    assert diagnostics["any_complete"] is True
+    assert diagnostics["complete_count"] == 1
+    assert diagnostics["requested_hash_matched"] is False
+    assert diagnostics["observed_hashes"] == ["f" * 40]
+    assert diagnostics["observed_content_paths"] == ["/downloads/Other"]
+
+
 def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(

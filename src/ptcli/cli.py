@@ -1384,6 +1384,48 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "kind": kind,
         "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
         "kind_supported": kind in SUPPORTED_SUMMARY_KINDS,
+        "qbit_wait_diagnostics": _summary_qbit_wait_diagnostics(payload),
+    }
+
+
+def _summary_qbit_wait_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    evidence_source = evidence.get("source") if isinstance(evidence.get("source"), dict) else {}
+    evidence_target = evidence.get("target") if isinstance(evidence.get("target"), dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    diagnostics: dict[str, Any] = {}
+
+    source_wait = _summary_qbit_wait_from(evidence_source, "source_wait")
+    if source_wait:
+        diagnostics["source"] = source_wait
+
+    uploaded_wait = _summary_qbit_wait_from(evidence_target, "uploaded_wait") or _summary_qbit_wait_from(summary, "uploaded_wait")
+    if uploaded_wait:
+        diagnostics["uploaded"] = uploaded_wait
+
+    return diagnostics
+
+
+def _summary_qbit_wait_from(container: dict[str, Any], fallback_key: str) -> dict[str, Any] | None:
+    qbit_closure = container.get("qbit_closure") if isinstance(container.get("qbit_closure"), dict) else {}
+    wait_result = qbit_closure.get("wait") if isinstance(qbit_closure.get("wait"), dict) else container.get(fallback_key)
+    if not isinstance(wait_result, dict):
+        return None
+    verification = wait_result.get("completion_verification") if isinstance(wait_result.get("completion_verification"), dict) else {}
+    requested_hash_matched = verification.get("requested_hash_matched")
+    requested_content_path_matched = verification.get("requested_content_path_matched")
+    return {
+        "complete": bool(wait_result.get("complete")),
+        "matched_count": verification.get("matched_count", wait_result.get("matched_count")),
+        "complete_count": verification.get("complete_count"),
+        "any_complete": verification.get("any_complete"),
+        "requested_hash_matched": requested_hash_matched,
+        "requested_content_path_matched": requested_content_path_matched,
+        "request_mismatch": requested_hash_matched is False or requested_content_path_matched is False,
+        "observed_hashes": verification.get("observed_hashes", []),
+        "observed_content_paths": verification.get("observed_content_paths", []),
+        "observed_save_paths": verification.get("observed_save_paths", []),
+        "blockers": _string_list(wait_result.get("blockers")),
     }
 
 
