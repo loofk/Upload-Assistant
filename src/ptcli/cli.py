@@ -2824,13 +2824,13 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
         elif blocker.startswith("target-upload:"):
             stage_generic_preferred.append("resume-target-upload")
     preferred_stages.extend(stage_detail_preferred)
-    if "source.ready" in blocker_names:
+    if "source.ready" in blocker_names or "source.hash_consistent" in blocker_names:
         preferred_stages.append("resume-source-torrent")
     if "target.downloaded" in blocker_names:
         preferred_stages.append("resume-uploaded-torrent-download")
     if "target.uploaded" in blocker_names:
         preferred_stages.append("resume-target-upload")
-    if "target.injected" in blocker_names or "target.seeding" in blocker_names:
+    if "target.injected" in blocker_names or "target.seeding" in blocker_names or "target.hash_consistent" in blocker_names:
         preferred_stages.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     preferred_stages.extend(stage_generic_preferred)
     preferred_stages.extend(["resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
@@ -2926,6 +2926,8 @@ def _pipeline_closure_next_action(blocker: str) -> str:
         "target.downloaded": "Download the generated target torrent with --download-uploaded-torrent after live upload succeeds, or provide it with --uploaded-torrent-file.",
         "target.injected": "Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path, or resume from --uploaded-torrent-file.",
         "target.seeding": "Wait for the injected target torrent to become complete in qBittorrent with --wait-uploaded-complete; if the torrent file is already local, resume with --uploaded-torrent-file.",
+        "source.hash_consistent": "Re-verify the source torrent evidence: use the original --source-torrent-file, re-run source injection/wait, and stop if qBittorrent reports a different source hash.",
+        "target.hash_consistent": "Re-verify the uploaded MTEAM torrent evidence: download or provide the generated target torrent again, inject that exact file, and stop if qBittorrent reports a different uploaded hash.",
     }
     return mapping.get(blocker, f"Resolve closure blocker: {blocker}")
 

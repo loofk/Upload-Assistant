@@ -1623,15 +1623,20 @@ def test_pipeline_next_actions_explain_target_upload_followup_blockers() -> None
 
 def test_resume_next_command_uses_stage_blocker_details() -> None:
     commands = {
+        "resume-source-torrent": "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent",
         "resume-target-upload": "python3 ptcli.py pipeline --upload-target",
         "resume-uploaded-torrent": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent",
         "resume-uploaded-torrent-download": "python3 ptcli.py target-upload --uploaded-torrent-id 999",
     }
 
+    source_hash = ptcli_cli._resume_next_command(["source.hash_consistent"], commands)
+    target_hash = ptcli_cli._resume_next_command(["target.hash_consistent"], commands)
     uploaded_wait = ptcli_cli._resume_next_command(["target-upload: uploaded_wait: torrent hash missing"], commands)
     downloaded_missing = ptcli_cli._resume_next_command(["target-upload: downloaded_torrent: target torrent file does not exist on disk."], commands)
     generic_target = ptcli_cli._resume_next_command(["target-upload: MTEAM upload failed."], commands)
 
+    assert source_hash["stage"] == "resume-source-torrent"
+    assert target_hash["stage"] == "resume-uploaded-torrent"
     assert uploaded_wait["stage"] == "resume-uploaded-torrent"
     assert downloaded_missing["stage"] == "resume-uploaded-torrent-download"
     assert generic_target["stage"] == "resume-target-upload"
@@ -1640,12 +1645,18 @@ def test_resume_next_command_uses_stage_blocker_details() -> None:
 def test_pipeline_next_actions_reports_closure_blockers() -> None:
     parser = build_parser()
     args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--prepare-target", "--json"])
-    actions = ptcli_cli._pipeline_next_actions(args, [], {"complete": False, "blockers": ["source.ready", "target.prepared", "target.uploaded", "target.downloaded"]})
+    actions = ptcli_cli._pipeline_next_actions(
+        args,
+        [],
+        {"complete": False, "blockers": ["source.ready", "source.hash_consistent", "target.prepared", "target.uploaded", "target.downloaded", "target.hash_consistent"]},
+    )
 
     assert any("--source-torrent-file" in action for action in actions)
+    assert any("different source hash" in action for action in actions)
     assert any("--package-dir" in action for action in actions)
     assert any("--upload-target --target-execute --confirm-upload" in action for action in actions)
     assert any("--uploaded-torrent-file" in action for action in actions)
+    assert any("different uploaded hash" in action for action in actions)
 
 
 def test_pipeline_next_actions_reports_completed_closure() -> None:
