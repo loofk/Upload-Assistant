@@ -1390,8 +1390,9 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     complete = bool(payload.get("complete"))
     ready = bool(payload.get("ready"))
     artifact_status = _summary_artifact_status(resume_state)
-    required = ("source_hash_consistent", "target_hash_consistent", "target_duplicate_clean", "target_rule_obligations")
-    missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
+    required = ("source_hash_consistent", "source_wait_evidence", "target_hash_consistent", "target_duplicate_clean", "target_rule_obligations", "uploaded_wait_evidence")
+    missing_audit = _missing_required_summary_artifacts(artifact_status, required) if complete and ready else []
+    _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     next_command = _summary_next_command(payload, resume_state, ("resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"))
     return _summary_check_result({
@@ -1415,8 +1416,9 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     blockers = _string_list(summary.get("blockers")) or _string_list(resume_state.get("blockers"))
     ready = bool(summary.get("ready"))
     artifact_status = _summary_artifact_status(resume_state)
-    required = ("target_hash_consistent", "target_duplicate_clean", "target_rule_obligations")
-    missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
+    required = ("target_hash_consistent", "target_duplicate_clean", "target_rule_obligations", "uploaded_wait_evidence")
+    missing_audit = _missing_required_summary_artifacts(artifact_status, required) if ready else []
+    _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     next_command = _summary_next_command(payload, resume_state, ("resume-uploaded-torrent", "resume-uploaded-torrent-download", "target-upload-retry"))
     return _summary_check_result({
@@ -1441,7 +1443,8 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
     live_safe = bool(payload.get("live_safe_to_attempt"))
     artifact_status = _summary_artifact_status(resume_state)
     required = ("flow_check_ready", "rule_check_ready", "rules_acknowledged", "target_rule_obligations", "target_package_preflight_ready")
-    missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
+    missing_audit = _missing_required_summary_artifacts(artifact_status, required) if ready and live_safe else []
+    _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     next_command = _summary_next_command(payload, resume_state, ("resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes", "doctor-retry"))
     return _summary_check_result({
@@ -1484,6 +1487,11 @@ def _summary_artifact_status(resume_state: dict[str, Any]) -> dict[str, Any]:
         "missing_artifacts": [key for key, ready in normalized.items() if not ready],
         "available_stages": resume_state.get("available_stages") if isinstance(resume_state.get("available_stages"), list) else [],
     }
+
+
+def _missing_required_summary_artifacts(artifact_status: dict[str, Any], required: tuple[str, ...]) -> list[str]:
+    artifacts = artifact_status.get("artifacts") if isinstance(artifact_status.get("artifacts"), dict) else {}
+    return [name for name in required if artifacts.get(name) is not True]
 
 
 def _write_doctor_summary(payload: dict[str, Any], args: argparse.Namespace, output_dir: str | None) -> str:

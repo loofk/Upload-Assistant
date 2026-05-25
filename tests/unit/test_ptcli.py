@@ -1719,9 +1719,11 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
                     "available_stages": [],
                     "artifacts": {
                         "source_hash_consistent": True,
+                        "source_wait_evidence": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
                     },
                 },
             }
@@ -1777,8 +1779,12 @@ def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) 
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "blocked"
     assert payload["next_stage"] == "resume-target-upload"
+    assert "source_wait_evidence" in payload["missing_artifacts"]
     assert "target_rule_obligations" in payload["missing_artifacts"]
+    assert "uploaded_wait_evidence" in payload["missing_artifacts"]
+    assert "missing audit artifact: source_wait_evidence" in payload["blockers"]
     assert "missing audit artifact: target_rule_obligations" in payload["blockers"]
+    assert "missing audit artifact: uploaded_wait_evidence" in payload["blockers"]
 
 
 def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -> None:
@@ -1798,9 +1804,11 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
                     "available_stages": ["resume-target-upload"],
                     "artifacts": {
                         "source_hash_consistent": True,
+                        "source_wait_evidence": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
                     },
                 },
             }
@@ -1837,9 +1845,11 @@ def test_summary_check_print_next_command_outputs_only_command(tmp_path, capsys)
                     "next_command": None,
                     "artifacts": {
                         "source_hash_consistent": True,
+                        "source_wait_evidence": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
                     },
                 },
             }
@@ -1866,9 +1876,11 @@ def test_summary_check_print_next_command_is_quiet_when_complete(tmp_path, capsy
                 "resume_state": {
                     "artifacts": {
                         "source_hash_consistent": True,
+                        "source_wait_evidence": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
                     },
                 },
             }
@@ -2033,9 +2045,11 @@ def test_summary_check_run_next_command_is_noop_when_complete(tmp_path, monkeypa
                 "resume_state": {
                     "artifacts": {
                         "source_hash_consistent": True,
+                        "source_wait_evidence": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
                     },
                 },
             }
@@ -2069,6 +2083,7 @@ def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> Non
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
                     },
                 },
             }
