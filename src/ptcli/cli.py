@@ -2958,6 +2958,8 @@ def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[st
 def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
     source = closure.get("source") if isinstance(closure.get("source"), dict) else {}
     target = closure.get("target") if isinstance(closure.get("target"), dict) else {}
+    target_wait = target.get("uploaded_wait") if isinstance(target.get("uploaded_wait"), dict) else {}
+    target_seeding = bool(target.get("seeding") or target_wait.get("complete"))
     return {
         "complete": bool(closure.get("complete")),
         "blockers": closure.get("blockers") if isinstance(closure.get("blockers"), list) else [],
@@ -2969,6 +2971,10 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
         },
         "source": {
             "ready": bool(source.get("ready")),
+            "downloaded": bool(source.get("downloaded")),
+            "injected": bool(source.get("injected")),
+            "complete": bool(source.get("complete")),
+            "matched": bool(source.get("matched")),
             "mode": "resumed_torrent" if source.get("source_torrent_reused") and source.get("injected") and source.get("complete") else "downloaded" if source.get("downloaded") and source.get("injected") and source.get("complete") else "matched" if source.get("matched") else "missing",
             "torrent_hash": source.get("torrent_hash"),
             "injected_torrent_hash": source.get("injected_torrent_hash"),
@@ -2986,7 +2992,12 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "source_torrent_reused": bool(source.get("source_torrent_reused")),
         },
         "target": {
-            "ready": bool(target.get("prepared") and target.get("uploaded") and target.get("downloaded") and target.get("injected") and target.get("seeding")),
+            "ready": bool(target.get("prepared") and target.get("uploaded") and target.get("downloaded") and target.get("injected") and target_seeding),
+            "prepared": bool(target.get("prepared")),
+            "uploaded": bool(target.get("uploaded")),
+            "downloaded": bool(target.get("downloaded")),
+            "injected": bool(target.get("injected")),
+            "seeding": target_seeding,
             "torrent_file": target.get("torrent_file"),
             "uploaded_torrent_id": target.get("uploaded_torrent_id"),
             "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),

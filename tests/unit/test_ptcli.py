@@ -2259,6 +2259,10 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
     evidence = ptcli_cli._pipeline_evidence(closure)
 
     assert evidence["source"]["injection_verified"] is True
+    assert evidence["source"]["downloaded"] is True
+    assert evidence["source"]["injected"] is True
+    assert evidence["source"]["complete"] is True
+    assert evidence["source"]["matched"] is False
     assert evidence["source"]["injected_torrent_hash"] == "a" * 40
     assert "source_torrent_path" in evidence["source"]
     assert "source_wait" in evidence["source"]
@@ -2268,6 +2272,11 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
     assert evidence["source"]["qbit_closure"]["wait"]["complete"] is True
     assert evidence["source"]["qbit_closure"]["wait"]["query"]["torrent_hash"] == "a" * 40
     assert evidence["target"]["injection_verified"] is True
+    assert evidence["target"]["prepared"] is True
+    assert evidence["target"]["uploaded"] is True
+    assert evidence["target"]["downloaded"] is True
+    assert evidence["target"]["injected"] is True
+    assert evidence["target"]["seeding"] is True
     assert evidence["target"]["injected_torrent_hash"] == "b" * 40
     assert evidence["target"]["qbit_closure"]["injection"]["hash"] == "b" * 40
     assert evidence["target"]["qbit_closure"]["injection"]["category"] == "MTEAM"
