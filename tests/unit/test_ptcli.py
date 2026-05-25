@@ -1864,6 +1864,44 @@ def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) 
     assert "missing audit artifact: uploaded_wait_evidence" in payload["blockers"]
 
 
+def test_summary_check_prefers_uploaded_resume_for_uploaded_wait_artifact(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "resume_commands": [
+                    {"stage": "resume-source-torrent", "command": "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent"},
+                    {"stage": "resume-uploaded-torrent", "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"},
+                ],
+                "resume_state": {
+                    "next_stage": None,
+                    "next_command": None,
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "source_wait_evidence": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["next_stage"] == "resume-uploaded-torrent"
+    assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
+
+
 def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
@@ -2175,6 +2213,40 @@ def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> Non
     assert payload["status"] == "ok"
     assert payload["ready"] is True
     assert payload["available_stages"] == ["verify-seeding"]
+
+
+def test_summary_check_prefers_uploaded_resume_for_target_upload_wait_artifact(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-target-upload-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.target_upload.summary",
+                "summary": {"ready": True, "blockers": []},
+                "recommended_commands": [
+                    {"stage": "target-upload-retry", "command": "python3 ptcli.py target-upload --execute"},
+                    {"stage": "resume-uploaded-torrent", "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"},
+                ],
+                "resume_state": {
+                    "next_stage": None,
+                    "next_command": None,
+                    "artifacts": {
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["next_stage"] == "resume-uploaded-torrent"
+    assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
 
 
 def test_summary_check_falls_back_to_target_upload_recommended_command(tmp_path, capsys) -> None:

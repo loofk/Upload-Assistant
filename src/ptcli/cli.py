@@ -1425,7 +1425,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if complete and ready else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
-    next_command = _summary_next_command(payload, resume_state, ("resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"))
+    next_command = _summary_next_command(payload, resume_state, _pipeline_summary_preferred_stages(missing_audit))
     return _summary_check_result({
         "status": "ok" if complete and ready and not blockers else "blocked",
         "kind": payload.get("kind"),
@@ -1451,7 +1451,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if ready else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
-    next_command = _summary_next_command(payload, resume_state, ("resume-uploaded-torrent", "resume-uploaded-torrent-download", "target-upload-retry"))
+    next_command = _summary_next_command(payload, resume_state, _target_upload_summary_preferred_stages(missing_audit))
     return _summary_check_result({
         "status": "ok" if ready and not blockers else "blocked",
         "kind": payload.get("kind"),
@@ -1508,6 +1508,30 @@ def _summary_next_command(payload: dict[str, Any], resume_state: dict[str, Any],
         if commands_by_stage.get(preferred_stage):
             return {"stage": preferred_stage, "command": commands_by_stage[preferred_stage]}
     return {"stage": None, "command": None}
+
+
+def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, ...]:
+    preferred: list[str] = []
+    if "source_wait_evidence" in missing_audit or "source_hash_consistent" in missing_audit:
+        preferred.append("resume-source-torrent")
+    if "uploaded_wait_evidence" in missing_audit:
+        preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
+    if "target_hash_consistent" in missing_audit:
+        preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
+    if "target_duplicate_clean" in missing_audit or "target_rule_obligations" in missing_audit:
+        preferred.append("resume-target-upload")
+    preferred.extend(["resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
+    return tuple(dict.fromkeys(preferred))
+
+
+def _target_upload_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, ...]:
+    preferred: list[str] = []
+    if "uploaded_wait_evidence" in missing_audit or "target_hash_consistent" in missing_audit:
+        preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
+    if "target_duplicate_clean" in missing_audit or "target_rule_obligations" in missing_audit:
+        preferred.append("target-upload-retry")
+    preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download", "target-upload-retry"])
+    return tuple(dict.fromkeys(preferred))
 
 
 def _summary_artifact_status(resume_state: dict[str, Any]) -> dict[str, Any]:
