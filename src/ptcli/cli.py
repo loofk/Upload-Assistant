@@ -46,6 +46,9 @@ from src.ptcli.target import (
     write_mteam_prepare_package,
 )
 
+SUMMARY_SCHEMA_VERSION = 1
+SUPPORTED_SUMMARY_KINDS = ("ptcli.pipeline.run_summary", "ptcli.target_upload.summary", "ptcli.doctor.live_readiness")
+
 
 @dataclass(frozen=True)
 class RetorrentPlan:
@@ -1271,6 +1274,8 @@ def summary_check_payload(args: argparse.Namespace) -> dict[str, Any]:
         return {
             "status": "blocked",
             "summary_file": str(summary_path),
+            "expected_schema_version": SUMMARY_SCHEMA_VERSION,
+            "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
             "blockers": ["Summary file does not exist."],
         }
     try:
@@ -1279,30 +1284,56 @@ def summary_check_payload(args: argparse.Namespace) -> dict[str, Any]:
         return {
             "status": "blocked",
             "summary_file": str(summary_path),
+            "expected_schema_version": SUMMARY_SCHEMA_VERSION,
+            "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
             "blockers": [f"Summary file is not valid JSON: {exc.msg}"],
         }
     if not isinstance(payload, dict):
         return {
             "status": "blocked",
             "summary_file": str(summary_path),
+            "expected_schema_version": SUMMARY_SCHEMA_VERSION,
+            "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
             "blockers": ["Summary file root must be a JSON object."],
         }
     return _summary_check_from_payload(payload, str(summary_path))
 
 
 def _summary_check_from_payload(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
-    kind = str(payload.get("kind") or "unknown")
+    diagnostics = _summary_check_diagnostics(payload)
+    kind = str(diagnostics["kind"])
+    blockers = []
+    if not diagnostics["schema_version_ok"]:
+        blockers.append(f"Unsupported summary schema_version: {diagnostics['schema_version']!r}; expected {SUMMARY_SCHEMA_VERSION}.")
+    if not diagnostics["kind_supported"]:
+        blockers.append(f"Unsupported ptcli summary kind: {kind}")
+    if blockers:
+        return {
+            "status": "blocked",
+            "summary_file": summary_file,
+            "blockers": blockers,
+            **diagnostics,
+        }
     if kind == "ptcli.pipeline.run_summary":
         return _pipeline_summary_check(payload, summary_file)
     if kind == "ptcli.target_upload.summary":
         return _target_upload_summary_check(payload, summary_file)
     if kind == "ptcli.doctor.live_readiness":
         return _doctor_summary_check(payload, summary_file)
+    msg = "summary kind dispatch escaped validation"
+    raise RuntimeError(msg)
+
+
+def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
+    schema_version = payload.get("schema_version")
+    kind = str(payload.get("kind") or "unknown")
     return {
-        "status": "blocked",
+        "schema_version": schema_version,
+        "expected_schema_version": SUMMARY_SCHEMA_VERSION,
+        "schema_version_ok": schema_version == SUMMARY_SCHEMA_VERSION,
         "kind": kind,
-        "summary_file": summary_file,
-        "blockers": [f"Unsupported ptcli summary kind: {kind}"],
+        "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
+        "kind_supported": kind in SUPPORTED_SUMMARY_KINDS,
     }
 
 
@@ -1328,6 +1359,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "blockers": blockers,
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
+        **_summary_check_diagnostics(payload),
         **artifact_status,
     }
 
@@ -1352,6 +1384,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "blockers": blockers,
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
+        **_summary_check_diagnostics(payload),
         **artifact_status,
     }
 
@@ -1376,6 +1409,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
         "blockers": blockers,
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
+        **_summary_check_diagnostics(payload),
         **artifact_status,
     }
 

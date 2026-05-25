@@ -1708,6 +1708,7 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     summary_file.write_text(
         json.dumps(
             {
+                "schema_version": 1,
                 "kind": "ptcli.pipeline.run_summary",
                 "ready": True,
                 "complete": True,
@@ -1733,6 +1734,8 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "ok"
+    assert payload["schema_version_ok"] is True
+    assert payload["kind_supported"] is True
     assert payload["complete"] is True
     assert payload["live_safe_to_attempt"] is True
     assert payload["missing_artifacts"] == []
@@ -1743,6 +1746,7 @@ def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) 
     summary_file.write_text(
         json.dumps(
             {
+                "schema_version": 1,
                 "kind": "ptcli.pipeline.run_summary",
                 "ready": True,
                 "complete": True,
@@ -1778,6 +1782,7 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
     summary_file.write_text(
         json.dumps(
             {
+                "schema_version": 1,
                 "kind": "ptcli.pipeline.run_summary",
                 "ready": False,
                 "complete": False,
@@ -1813,6 +1818,7 @@ def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> Non
     summary_file.write_text(
         json.dumps(
             {
+                "schema_version": 1,
                 "kind": "ptcli.target_upload.summary",
                 "summary": {"ready": True, "blockers": []},
                 "resume_state": {
@@ -1844,6 +1850,7 @@ def test_summary_check_falls_back_to_target_upload_recommended_command(tmp_path,
     summary_file.write_text(
         json.dumps(
             {
+                "schema_version": 1,
                 "kind": "ptcli.target_upload.summary",
                 "summary": {"ready": False, "blockers": ["uploaded_wait: torrent hash missing"]},
                 "recommended_commands": [{"stage": "resume-uploaded-torrent", "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"}],
@@ -1875,6 +1882,7 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
     summary_file.write_text(
         json.dumps(
             {
+                "schema_version": 1,
                 "kind": "ptcli.doctor.live_readiness",
                 "ready": True,
                 "live_safe_to_attempt": True,
@@ -1903,6 +1911,56 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
     assert payload["status"] == "ok"
     assert payload["live_safe_to_attempt"] is True
     assert payload["next_stage"] == "pipeline-live"
+
+
+def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "resume_state": {"artifacts": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["schema_version"] == 2
+    assert payload["expected_schema_version"] == 1
+    assert payload["schema_version_ok"] is False
+    assert payload["kind_supported"] is True
+    assert any("Unsupported summary schema_version" in blocker for blocker in payload["blockers"])
+
+
+def test_summary_check_blocks_unknown_kind_with_supported_kinds(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-unknown-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "not.ptcli",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["schema_version_ok"] is True
+    assert payload["kind_supported"] is False
+    assert "ptcli.pipeline.run_summary" in payload["supported_kinds"]
+    assert "Unsupported ptcli summary kind: not.ptcli" in payload["blockers"]
 
 
 def test_target_upload_result_requires_requested_uploaded_torrent_injection() -> None:
