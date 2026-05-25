@@ -1527,6 +1527,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "blockers": blockers,
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
+        "next_command_argv": next_command.get("argv"),
         **_summary_check_diagnostics(payload),
         **artifact_status,
     })
@@ -1553,6 +1554,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "blockers": blockers,
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
+        "next_command_argv": next_command.get("argv"),
         **_summary_check_diagnostics(payload),
         **artifact_status,
     })
@@ -1579,26 +1581,51 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
         "blockers": blockers,
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
+        "next_command_argv": next_command.get("argv"),
         **_summary_check_diagnostics(payload),
         **artifact_status,
     })
 
 
-def _summary_next_command(payload: dict[str, Any], resume_state: dict[str, Any], preferred_stages: tuple[str, ...]) -> dict[str, str | None]:
+def _summary_next_command(payload: dict[str, Any], resume_state: dict[str, Any], preferred_stages: tuple[str, ...]) -> dict[str, Any]:
     stage = resume_state.get("next_stage")
     command = resume_state.get("next_command")
     if command:
-        return {"stage": str(stage) if stage else None, "command": str(command)}
-    commands = []
+        stage_text = str(stage) if stage else None
+        return {"stage": stage_text, "command": str(command), "argv": _summary_command_argv(payload, stage_text, str(command))}
+    commands = _summary_command_entries(payload)
+    commands_by_stage = {str(command.get("stage")): command for command in commands if command.get("stage") and command.get("command")}
+    for preferred_stage in preferred_stages:
+        command_entry = commands_by_stage.get(preferred_stage)
+        if command_entry:
+            command_text = str(command_entry["command"])
+            return {"stage": preferred_stage, "command": command_text, "argv": _argv_list(command_entry.get("argv"))}
+    return {"stage": None, "command": None, "argv": None}
+
+
+def _summary_command_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    commands: list[dict[str, Any]] = []
     for key in ("resume_commands", "recommended_commands"):
         value = payload.get(key)
         if isinstance(value, list):
             commands.extend(command for command in value if isinstance(command, dict))
-    commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in commands if command.get("stage") and command.get("command")}
-    for preferred_stage in preferred_stages:
-        if commands_by_stage.get(preferred_stage):
-            return {"stage": preferred_stage, "command": commands_by_stage[preferred_stage]}
-    return {"stage": None, "command": None}
+    return commands
+
+
+def _summary_command_argv(payload: dict[str, Any], stage: str | None, command: str) -> list[str] | None:
+    for command_entry in _summary_command_entries(payload):
+        if stage and command_entry.get("stage") != stage:
+            continue
+        if command_entry.get("command") != command:
+            continue
+        return _argv_list(command_entry.get("argv"))
+    return None
+
+
+def _argv_list(value: Any) -> list[str] | None:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return None
+    return list(value)
 
 
 def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, ...]:
@@ -4386,6 +4413,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_AUTOMATION_EXIT_CODE": payload.get("automation_exit_code"),
         "PTCLI_NEXT_STAGE": payload.get("next_stage"),
         "PTCLI_NEXT_COMMAND": payload.get("next_command"),
+        "PTCLI_NEXT_COMMAND_ARGV": json.dumps(payload.get("next_command_argv"), ensure_ascii=False) if payload.get("next_command_argv") else None,
         "PTCLI_SHOULD_EXECUTE_NEXT_COMMAND": _shell_bool(payload.get("should_execute_next_command")),
         "PTCLI_NEXT_COMMAND_READY": _shell_bool(payload.get("next_command_ready")),
         "PTCLI_QBIT_WAIT_MISMATCH": _shell_bool(payload.get("qbit_wait_mismatch")),
@@ -4403,7 +4431,7 @@ def _summary_check_run_next_command(payload: dict[str, Any]) -> int:
     command = payload.get("next_command")
     if not payload.get("should_execute_next_command") or not command:
         return 0 if payload.get("status") == "ok" else 1
-    argv = _summary_next_command_argv(str(command))
+    argv = _summary_next_command_argv(payload.get("next_command_argv")) or _summary_next_command_argv(str(command))
     if argv is None:
         print(f"Refusing to run unsupported summary next_command: {command}", file=sys.stderr)
         return 2
@@ -4411,10 +4439,17 @@ def _summary_check_run_next_command(payload: dict[str, Any]) -> int:
     return int(completed.returncode)
 
 
-def _summary_next_command_argv(command: str) -> list[str] | None:
-    try:
-        argv = shlex.split(command)
-    except ValueError:
+def _summary_next_command_argv(command: Any) -> list[str] | None:
+    if isinstance(command, list):
+        argv = _argv_list(command)
+        if argv is None:
+            return None
+    elif isinstance(command, str):
+        try:
+            argv = shlex.split(command)
+        except ValueError:
+            return None
+    else:
         return None
     if len(argv) < 3:
         return None

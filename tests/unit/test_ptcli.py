@@ -2115,7 +2115,13 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
                 "ready": False,
                 "complete": False,
                 "blockers": ["target.uploaded"],
-                "resume_commands": [{"stage": "resume-target-upload", "command": "python3 ptcli.py pipeline --upload-target"}],
+                "resume_commands": [
+                    {
+                        "stage": "resume-target-upload",
+                        "command": "python3 ptcli.py pipeline --upload-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
+                    }
+                ],
                 "resume_state": {
                     "next_stage": None,
                     "next_command": None,
@@ -2251,7 +2257,13 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                 "ready": False,
                 "complete": False,
                 "blockers": ["target.uploaded"],
-                "resume_commands": [{"stage": "resume-target-upload", "command": "python3 ptcli.py pipeline --upload-target"}],
+                "resume_commands": [
+                    {
+                        "stage": "resume-target-upload",
+                        "command": "python3 ptcli.py pipeline --upload-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
+                    }
+                ],
                 "resume_state": {
                     "artifacts": {
                         "source_hash_consistent": True,
@@ -2328,7 +2340,13 @@ def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatc
                 "ready": False,
                 "complete": False,
                 "blockers": ["target.uploaded"],
-                "resume_commands": [{"stage": "resume-target-upload", "command": "python3 ptcli.py pipeline --upload-target"}],
+                "resume_commands": [
+                    {
+                        "stage": "resume-target-upload",
+                        "command": "python3 ptcli.py pipeline --upload-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
+                    }
+                ],
                 "resume_state": {
                     "artifacts": {
                         "source_hash_consistent": True,
@@ -2352,8 +2370,48 @@ def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatc
     code = main(["summary-check", "--summary-file", str(summary_file), "--run-next-command"])
 
     assert code == 7
-    assert calls == [([ptcli_cli.sys.executable, "ptcli.py", "pipeline", "--upload-target"], False)]
+    assert calls == [([ptcli_cli.sys.executable, "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"], False)]
     assert capsys.readouterr().out == ""
+
+
+def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [
+                    {
+                        "stage": "resume-target-upload",
+                        "command": "python3 ptcli.py pipeline --upload-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
+                    }
+                ],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["automation_action"] == "run_next_command"
+    assert payload["next_stage"] == "resume-target-upload"
+    assert payload["next_command"] == "python3 ptcli.py pipeline --upload-target"
+    assert payload["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]
 
 
 def test_summary_check_run_next_command_rejects_non_ptcli_command(tmp_path, monkeypatch, capsys) -> None:
