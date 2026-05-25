@@ -1929,6 +1929,12 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
     _extend_command_path(pipeline_args, "--target-torrent-file", artifacts.get("target_torrent_file"))
     if args.uploaded_save_path:
         pipeline_args.extend(["--uploaded-save-path", args.uploaded_save_path])
+    if args.uploaded_qbit_category:
+        pipeline_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
+    if args.uploaded_qbit_tags:
+        pipeline_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
+    if args.uploaded_paused:
+        pipeline_args.append("--uploaded-paused")
     commands.append(_ptcli_command_entry("pipeline-live", pipeline_args))
     return commands
 

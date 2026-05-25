@@ -4783,6 +4783,11 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
             "--inject-uploaded-torrent",
             "--uploaded-save-path",
             str(content_path),
+            "--uploaded-qbit-category",
+            "MTEAM",
+            "--uploaded-qbit-tags",
+            "retorrent",
+            "--uploaded-paused",
             "--wait-uploaded-complete",
             "--write-summary",
             "--summary-output-dir",
@@ -4818,6 +4823,9 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert "--target-execute --confirm-upload" in commands["pipeline-live"]
     assert str(content_path) in commands["pipeline-live"]
     assert str(target_torrent) in commands["pipeline-live"]
+    assert "--uploaded-qbit-category MTEAM" in commands["pipeline-live"]
+    assert "--uploaded-qbit-tags retorrent" in commands["pipeline-live"]
+    assert "--uploaded-paused" in commands["pipeline-live"]
     assert command_argv["doctor-retry"][:3] == ["python3", "ptcli.py", "doctor"]
     assert command_argv["doctor-live-probes"][:3] == ["python3", "ptcli.py", "doctor"]
     assert command_argv["pipeline-live"][:3] == ["python3", "ptcli.py", "pipeline"]
@@ -4827,6 +4835,9 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert str(tmp_path / "summary") in command_argv["pipeline-live"]
     assert str(content_path) in command_argv["pipeline-live"]
     assert str(target_torrent) in command_argv["pipeline-live"]
+    assert "MTEAM" in command_argv["pipeline-live"]
+    assert "retorrent" in command_argv["pipeline-live"]
+    assert "--uploaded-paused" in command_argv["pipeline-live"]
     assert summary_payload["resume_state"]["ready"] is True
     assert summary_payload["resume_state"]["live_safe_to_attempt"] is True
     assert summary_payload["resume_state"]["resume_available"] is True
