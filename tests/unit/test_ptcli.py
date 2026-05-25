@@ -1006,13 +1006,12 @@ def test_source_info_uses_enabled_chinese_source_adapter(monkeypatch, capsys) ->
 
 
 def test_source_module_registers_enabled_chinese_source_adapters() -> None:
-    for tracker in ["AUDIENCES", "HDSKY", "HHAN", "PTER", "TJUPT"]:
-        assert tracker in ptcli_source.SOURCE_TRACKER_CLASSES
+    assert set(ptcli_source.SOURCE_TRACKER_CLASSES) == {"MTEAM"}
     for tracker in ["AUDIENCES", "CHD", "HDSKY", "HHAN", "PTER", "TJUPT", "U2"]:
         assert tracker in ptcli_source.NEXUS_DOWNLOAD_BASE_URLS
-    for tracker in ["CHD", "HDS", "OB", "TTG", "U2"]:
+    for tracker in ["AUDIENCES", "CHD", "HDS", "HDSKY", "HHAN", "OB", "PTER", "TJUPT", "TTG", "U2"]:
         assert tracker in ptcli_source.GENERIC_DETAILS_BASE_URLS
-    for tracker in ["MTEAM", "OB", "TTG"]:
+    for tracker in ["MTEAM", "TTG"]:
         assert tracker in ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES
 
 
@@ -1186,6 +1185,61 @@ async def test_reference_source_info_uses_ptcli_generic_details(monkeypatch, tmp
     assert info.name == "U2.Reference.2024.1080p.BluRay-GROUP"
     assert info.torrenthash == "1234567890abcdef1234567890abcdef12345678"
     assert info.douban_id == "3541415"
+
+
+@pytest.mark.asyncio
+async def test_enabled_nexus_source_info_uses_ptcli_generic_details(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "PTER.txt").write_text("uid=1;", encoding="utf-8")
+    html = """
+    <html>
+      <head><title>PTER Reference</title></head>
+      <body>
+        <h1>PTER.Reference.2024.1080p.BluRay-GROUP</h1>
+        <a href="https://www.imdb.com/title/tt1234567/">IMDb</a>
+        <div class="torrent-description">Torrent hash: 1234567890ABCDEF1234567890ABCDEF12345678</div>
+      </body>
+    </html>
+    """
+
+    class ExplodingTracker:
+        def __init__(self, config):
+            self.config = config
+
+        async def get_info_from_torrent_id(self, torrent_id, meta=None):
+            _ = (torrent_id, meta)
+            raise AssertionError("NexusPHP source metadata should use ptcli generic details parsing")
+
+    class FakeResponse:
+        text = html
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url):
+            assert url == "https://pterclub.com/details.php?id=123"
+            return FakeResponse()
+
+    monkeypatch.setitem(ptcli_source.SOURCE_TRACKER_CLASSES, "PTER", ExplodingTracker)
+    monkeypatch.setattr(ptcli_source.httpx, "AsyncClient", FakeClient)
+
+    info = await ptcli_source.fetch_source_info({}, "PTER", "123", base_dir=str(tmp_path))
+
+    assert info.tracker == "PTER"
+    assert info.name == "PTER.Reference.2024.1080p.BluRay-GROUP"
+    assert info.imdb_id == 1234567
+    assert info.torrenthash == "1234567890abcdef1234567890abcdef12345678"
 
 
 @pytest.mark.asyncio

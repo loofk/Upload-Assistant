@@ -24,14 +24,8 @@ COPY ptcli.py .
 COPY src/__init__.py src/__init__.py
 COPY src/ptcli/ src/ptcli/
 COPY src/trackers/__init__.py src/trackers/__init__.py
-COPY src/trackers/AUDIENCES.py src/trackers/AUDIENCES.py
 COPY src/trackers/COMMON.py src/trackers/COMMON.py
-COPY src/trackers/HDSKY.py src/trackers/HDSKY.py
-COPY src/trackers/HHAN.py src/trackers/HHAN.py
 COPY src/trackers/MTEAM.py src/trackers/MTEAM.py
-COPY src/trackers/OB.py src/trackers/OB.py
-COPY src/trackers/PTER.py src/trackers/PTER.py
-COPY src/trackers/TJUPT.py src/trackers/TJUPT.py
 COPY src/trackers/TTG.py src/trackers/TTG.py
 COPY src/bbcode.py src/bbcode.py
 COPY src/cleanup.py src/cleanup.py

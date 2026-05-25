@@ -14,13 +14,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from src.ptcli.mainland import normalize_tracker
-from src.trackers.AUDIENCES import AUDIENCES
-from src.trackers.HDSKY import HDSKY
-from src.trackers.HHAN import HHAN
 from src.trackers.MTEAM import MTEAM
-from src.trackers.OB import OB
-from src.trackers.PTER import PTER
-from src.trackers.TJUPT import TJUPT
 from src.trackers.TTG import TTG
 
 
@@ -32,12 +26,7 @@ class SourceTrackerProtocol(Protocol):
 
 
 SOURCE_TRACKER_CLASSES: dict[str, type[Any]] = {
-    "AUDIENCES": AUDIENCES,
-    "HDSKY": HDSKY,
-    "HHAN": HHAN,
     "MTEAM": MTEAM,
-    "PTER": PTER,
-    "TJUPT": TJUPT,
 }
 
 NEXUS_DOWNLOAD_BASE_URLS: dict[str, str] = {
@@ -53,14 +42,18 @@ NEXUS_DOWNLOAD_BASE_URLS: dict[str, str] = {
 
 DIRECT_DOWNLOAD_TRACKER_CLASSES: dict[str, type[Any]] = {
     "MTEAM": MTEAM,
-    "OB": OB,
     "TTG": TTG,
 }
 
 GENERIC_DETAILS_BASE_URLS: dict[str, str] = {
+    "AUDIENCES": "https://audiences.me",
     "CHD": "https://ptchdbits.co",
     "HDS": "https://hd-space.org",
+    "HDSKY": "https://hdsky.me",
+    "HHAN": "https://hhanclub.net",
     "OB": "https://ourbits.club",
+    "PTER": "https://pterclub.com",
+    "TJUPT": "https://www.tjupt.org",
     "TTG": "https://totheglory.im",
     "U2": "https://u2.dmhy.org",
 }
