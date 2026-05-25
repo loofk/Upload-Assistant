@@ -6413,6 +6413,7 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
     monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
     monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    uploaded_output_dir = str(tmp_path / "uploaded")
     parser = build_parser()
     args = parser.parse_args(
         [
@@ -6438,6 +6439,8 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
             "--target-execute",
             "--confirm-upload",
             "--download-uploaded-torrent",
+            "--uploaded-output-dir",
+            uploaded_output_dir,
             "--inject-uploaded-torrent",
             "--uploaded-qbit-category",
             "MTEAM",
@@ -6455,12 +6458,15 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
 
     assert payload["status"] == "blocked"
     assert payload["artifacts"]["uploaded_torrent_id"] == "999"
+    assert payload["output_options"]["uploaded_output_dir"] == uploaded_output_dir
     payload_resume_commands = {command["stage"]: command["command"] for command in payload["resume_commands"]}
     assert "--uploaded-torrent-id 999" in payload_resume_commands["resume-uploaded-torrent-download"]
+    assert f"--uploaded-output-dir {shlex.quote(uploaded_output_dir)}" in payload_resume_commands["resume-uploaded-torrent-download"]
     assert payload["resume_state"]["complete"] is False
     assert payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
     assert payload["resume_state"]["next_command"] == payload_resume_commands["resume-uploaded-torrent-download"]
     summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
+    assert summary_payload["output_options"]["uploaded_output_dir"] == uploaded_output_dir
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     assert "uploaded_torrent_file" not in summary_payload["artifacts"]
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
@@ -6471,6 +6477,7 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is False
     assert "--uploaded-torrent-id 999" in resume_commands["resume-uploaded-torrent-download"]
     assert "--download-uploaded-torrent" in resume_commands["resume-uploaded-torrent-download"]
+    assert f"--uploaded-output-dir {shlex.quote(uploaded_output_dir)}" in resume_commands["resume-uploaded-torrent-download"]
     assert "--inject-uploaded-torrent" in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-save-path /downloads/Name" in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-category MTEAM" in resume_commands["resume-uploaded-torrent-download"]
