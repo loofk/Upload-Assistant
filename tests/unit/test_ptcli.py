@@ -2103,6 +2103,7 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
                 "ready": True,
                 "complete": True,
                 "blockers": [],
+                "closure_audit": {"ready": True, "missing": [], "items": [{"name": "target.uploaded_wait_evidence", "scope": "target", "ok": True}]},
                 "resume_state": {
                     "next_stage": None,
                     "next_command": None,
@@ -2138,6 +2139,57 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     assert payload["complete"] is True
     assert payload["live_safe_to_attempt"] is True
     assert payload["missing_artifacts"] == []
+    assert payload["missing_closure_audit"] == []
+
+
+def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "closure_audit": {
+                    "ready": False,
+                    "missing": ["target.uploaded_wait_evidence"],
+                    "items": [{"name": "target.uploaded_wait_evidence", "scope": "target", "ok": False}],
+                },
+                "resume_commands": [{"stage": "resume-uploaded-torrent", "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"}],
+                "resume_state": {
+                    "next_stage": None,
+                    "next_command": None,
+                    "available_stages": ["resume-uploaded-torrent"],
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_verified": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["missing_artifacts"] == []
+    assert payload["missing_closure_audit"] == ["target.uploaded_wait_evidence"]
+    assert "closure audit missing: target.uploaded_wait_evidence" in payload["blockers"]
+    assert payload["next_stage"] == "resume-uploaded-torrent"
+    assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
+    assert payload["automation_action"] == "run_next_command"
 
 
 def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) -> None:

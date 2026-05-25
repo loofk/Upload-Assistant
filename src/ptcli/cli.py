@@ -1671,6 +1671,8 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         automation_action = "provide_summary"
     elif payload.get("missing_artifacts"):
         automation_action = "restore_artifacts"
+    elif payload.get("missing_closure_audit"):
+        automation_action = "repair_closure"
     else:
         automation_action = "resolve_blockers"
     return {
@@ -1704,9 +1706,11 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     if _summary_source_injection_audit_required(payload):
         required.extend(["source_torrent_hash", "source_injected_torrent_hash", "source_injection_verified"])
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if complete and ready else []
+    closure_audit_status = _summary_closure_audit_status(payload)
+    missing_closure_audit = closure_audit_status["missing_closure_audit"]
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
-    blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
-    next_command = _summary_next_command(payload, resume_state, _pipeline_summary_preferred_stages(missing_audit))
+    blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit], *[f"closure audit missing: {name}" for name in missing_closure_audit]]
+    next_command = _summary_next_command(payload, resume_state, _pipeline_summary_preferred_stages([*missing_audit, *missing_closure_audit]))
     return _summary_check_result({
         "status": "ok" if complete and ready and not blockers else "blocked",
         "kind": payload.get("kind"),
@@ -1720,6 +1724,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "next_command_argv": next_command.get("argv"),
         **_summary_check_diagnostics(payload),
         **artifact_status,
+        **closure_audit_status,
     })
 
 
@@ -1841,13 +1846,44 @@ def _argv_list(value: Any) -> list[str] | None:
 
 def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, ...]:
     preferred: list[str] = []
-    if any(name in missing_audit for name in ("source_wait_evidence", "source_hash_consistent", "source_torrent_hash", "source_injected_torrent_hash", "source_injection_verified")):
+    if any(
+        name in missing_audit
+        for name in (
+            "source_wait_evidence",
+            "source_hash_consistent",
+            "source_torrent_hash",
+            "source_injected_torrent_hash",
+            "source_injection_verified",
+            "source.ready",
+            "source.hash_consistent",
+            "source.wait_evidence",
+            "source.torrent_hash",
+            "source.injected_torrent_hash",
+            "source.injection_verified",
+        )
+    ):
         preferred.append("resume-source-torrent")
-    if any(name in missing_audit for name in ("uploaded_torrent_hash", "injected_torrent_hash", "injection_verified", "uploaded_wait_evidence")):
+    if any(
+        name in missing_audit
+        for name in (
+            "uploaded_torrent_hash",
+            "injected_torrent_hash",
+            "injection_verified",
+            "uploaded_wait_evidence",
+            "target.downloaded",
+            "target.injected",
+            "target.seeding",
+            "target.hash_consistent",
+            "target.uploaded_torrent_hash",
+            "target.injected_torrent_hash",
+            "target.injection_verified",
+            "target.uploaded_wait_evidence",
+        )
+    ):
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     if "target_hash_consistent" in missing_audit:
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
-    if "target_duplicate_clean" in missing_audit or "target_rule_obligations" in missing_audit:
+    if any(name in missing_audit for name in ("target_duplicate_clean", "target_rule_obligations", "target.prepared", "target.uploaded", "target.duplicate_clean", "target.rule_obligations")):
         preferred.append("resume-target-upload")
     preferred.extend(["resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
     return tuple(dict.fromkeys(preferred))
@@ -1862,6 +1898,25 @@ def _summary_source_injection_audit_required(payload: dict[str, Any]) -> bool:
     closure = payload.get("closure") if isinstance(payload.get("closure"), dict) else {}
     closure_source = closure.get("source") if isinstance(closure.get("source"), dict) else {}
     return bool(closure_source.get("downloaded") or closure_source.get("injected") or closure_source.get("source_torrent_reused"))
+
+
+def _summary_closure_audit_status(payload: dict[str, Any]) -> dict[str, Any]:
+    audit = payload.get("closure_audit")
+    if not isinstance(audit, dict):
+        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        audit = summary.get("closure_audit")
+    if not isinstance(audit, dict):
+        return {"closure_audit": None, "missing_closure_audit": []}
+    missing = audit.get("missing")
+    if isinstance(missing, list):
+        missing_items = [str(item) for item in missing if isinstance(item, str)]
+    else:
+        items = audit.get("items")
+        missing_items = [str(item.get("name")) for item in items if isinstance(item, dict) and item.get("ok") is not True and item.get("name")] if isinstance(items, list) else []
+    return {
+        "closure_audit": audit,
+        "missing_closure_audit": missing_items,
+    }
 
 
 def _target_upload_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, ...]:
