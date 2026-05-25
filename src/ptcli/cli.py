@@ -1084,6 +1084,7 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
     downloaded_torrent = result.get("downloaded_torrent")
     uploaded_torrent_path = downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else args.uploaded_torrent_file
     package_content_path = _mteam_package_content_path(preflight)
+    rule_obligations = preflight.get("rule_obligation_review")
     return {
         "summary_file": summary_file,
         "package_dir": _path_artifact(args.package_dir),
@@ -1092,6 +1093,10 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
         "uploaded_torrent_id": _uploaded_torrent_id_from_result(result) or args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(uploaded_torrent_path),
         "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or package_content_path or args.uploaded_save_path),
+        "fresh_duplicate_check": result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else None,
+        "target_hash_consistent": not _uploaded_torrent_hash_consistency_blockers(result),
+        "target_duplicate_clean": _fresh_duplicate_check_clean(result.get("fresh_duplicate_check")),
+        "target_rule_obligations": rule_obligations if isinstance(rule_obligations, dict) else None,
     }
 
 
@@ -1177,6 +1182,9 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(_path_artifact_exists(artifacts.get("uploaded_torrent_file"))),
             "uploaded_save_path": bool(_path_artifact_exists(artifacts.get("uploaded_save_path"))),
+            "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
+            "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
+            "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
         },
         "blockers": _string_list(summary.get("blockers")),
     }
@@ -1532,6 +1540,9 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "blockers": blockers,
         "preflight_status": preflight.get("status"),
         "preflight_blockers": preflight.get("blockers", []),
+        "fresh_duplicate_check": result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else None,
+        "hash_consistent": not _uploaded_torrent_hash_consistency_blockers(result),
+        "duplicate_clean": _fresh_duplicate_check_clean(result.get("fresh_duplicate_check")),
         "rule_obligations": preflight.get("rule_obligation_review", {}),
     }
 
