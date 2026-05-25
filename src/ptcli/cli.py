@@ -1177,6 +1177,7 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
     uploaded_torrent_path = downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else args.uploaded_torrent_file
     package_content_path = _mteam_package_content_path(preflight)
     rule_obligations = preflight.get("rule_obligation_review")
+    duplicate_check = result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else _duplicate_check_from_target_package(preflight)
     return {
         "summary_file": summary_file,
         "package_dir": _path_artifact(args.package_dir),
@@ -1186,9 +1187,9 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
         "uploaded_torrent_file": _path_artifact(uploaded_torrent_path),
         "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or args.uploaded_save_path or package_content_path),
         "uploaded_wait_evidence": _wait_result_completed(result.get("uploaded_wait")),
-        "fresh_duplicate_check": result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else None,
+        "fresh_duplicate_check": duplicate_check,
         "target_hash_consistent": not _uploaded_torrent_hash_consistency_blockers(result),
-        "target_duplicate_clean": _fresh_duplicate_check_clean(result.get("fresh_duplicate_check")),
+        "target_duplicate_clean": _fresh_duplicate_check_clean(duplicate_check),
         "target_rule_obligations": rule_obligations if isinstance(rule_obligations, dict) else None,
     }
 
@@ -2030,6 +2031,7 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
     uploaded_wait = result.get("uploaded_wait")
     blockers = _target_upload_result_blockers(result)
     uploaded_torrent_hash = _uploaded_torrent_hash_from_result(result)
+    duplicate_check = result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else _duplicate_check_from_target_package(preflight)
     qbit_closure = {
         "injection": _qbit_injection_evidence(injected_torrent),
         "wait": _qbit_wait_evidence(uploaded_wait),
@@ -2053,9 +2055,9 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "blockers": blockers,
         "preflight_status": preflight.get("status"),
         "preflight_blockers": preflight.get("blockers", []),
-        "fresh_duplicate_check": result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else None,
+        "fresh_duplicate_check": duplicate_check,
         "hash_consistent": not _uploaded_torrent_hash_consistency_blockers(result),
-        "duplicate_clean": _fresh_duplicate_check_clean(result.get("fresh_duplicate_check")),
+        "duplicate_clean": _fresh_duplicate_check_clean(duplicate_check),
         "rule_obligations": preflight.get("rule_obligation_review", {}),
     }
 
@@ -3610,6 +3612,8 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_download_result = source_download.get("result") if source_download and isinstance(source_download.get("result"), dict) else {}
     wait_complete_result = wait_complete.get("result") if wait_complete and isinstance(wait_complete.get("result"), dict) else {}
     target_prepare_result = target_prepare.get("result") if target_prepare and isinstance(target_prepare.get("result"), dict) else {}
+    if not isinstance(fresh_duplicate_check, dict) and target_upload_result.get("status") == "uploaded" and isinstance(downloaded_torrent, dict):
+        fresh_duplicate_check = _duplicate_check_from_target_package(target_prepare_result)
     rule_review = target_prepare_result.get("rule_review") if isinstance(target_prepare_result, dict) else None
     rule_obligations = _rule_obligation_summary(rule_review)
     source_downloaded = _stage_completed(source_download) and _torrent_file_present(source_download_result)
@@ -3707,6 +3711,30 @@ def _fresh_duplicate_check_clean(fresh_duplicate_check: Any) -> bool:
     if not isinstance(fresh_duplicate_check, dict):
         return False
     return bool(fresh_duplicate_check.get("searched")) and int(fresh_duplicate_check.get("count", 0) or 0) == 0
+
+
+def _duplicate_check_from_target_package(package: Any) -> dict[str, Any] | None:
+    if not isinstance(package, dict):
+        return None
+    upload_gate = package.get("upload_gate")
+    if not isinstance(upload_gate, dict):
+        return None
+    duplicate_check = None
+    checks = upload_gate.get("checks")
+    if isinstance(checks, list):
+        duplicate_check = next((check for check in checks if isinstance(check, dict) and check.get("name") == "duplicate_check"), None)
+    if duplicate_check is None:
+        return None
+    count = int(upload_gate.get("dupe_count", 0) or 0)
+    check_ok = bool(duplicate_check.get("ok"))
+    return {
+        "searched": bool(check_ok or count > 0),
+        "count": count,
+        "dupes": [],
+        "source": "target_package_upload_gate",
+        "ok": check_ok,
+        "message": duplicate_check.get("message"),
+    }
 
 
 def _source_hash_consistent(

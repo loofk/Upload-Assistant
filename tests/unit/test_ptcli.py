@@ -7363,11 +7363,16 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
     assert upload_stage["result"]["downloaded_torrent"]["path"] == str(uploaded_torrent)
     assert upload_stage["result"]["uploaded_torrent_hash"] == uploaded_hash
     assert upload_stage["result"]["uploaded_wait"]["complete"] is True
+    assert payload["closure"]["complete"] is True
+    assert payload["closure"]["blockers"] == []
     assert payload["closure"]["target"]["uploaded"] is True
     assert payload["closure"]["target"]["injected"] is True
     assert payload["closure"]["target"]["seeding"] is True
+    assert payload["closure"]["target"]["duplicate_clean"] is True
+    assert payload["closure"]["target"]["fresh_duplicate_check"]["source"] == "target_package_upload_gate"
     assert payload["evidence"]["resume"]["target_package"] is True
     assert payload["evidence"]["resume"]["uploaded_torrent_file"] is True
+    assert payload["evidence"]["target"]["duplicate_clean"] is True
     assert payload["summary"]["resume"]["used"] is True
 
 
@@ -10023,6 +10028,8 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
     assert result["summary"]["seeding_verified"] is True
     assert result["summary"]["uploaded_torrent_path"] == str(uploaded_torrent)
     assert result["summary"]["injected_torrent_hash"] == uploaded_hash
+    assert result["summary"]["duplicate_clean"] is True
+    assert result["summary"]["fresh_duplicate_check"]["source"] == "target_package_upload_gate"
 
 
 @pytest.mark.asyncio
