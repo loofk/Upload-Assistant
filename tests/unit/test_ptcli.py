@@ -9112,6 +9112,8 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
             "--confirm-upload",
             "--download-uploaded-torrent",
             "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/mnt/seedbox/Example",
             "--uploaded-qbit-category",
             "MTEAM",
             "--uploaded-qbit-tags",
@@ -9135,9 +9137,11 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent-download"]
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is False
+    assert summary_payload["artifacts"]["uploaded_save_path"]["path"] == "/mnt/seedbox/Example"
     assert "--uploaded-torrent-id 999" in commands["resume-uploaded-torrent-download"]
     assert "--download-uploaded-torrent" in commands["resume-uploaded-torrent-download"]
     assert "--inject-uploaded-torrent" in commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-save-path /mnt/seedbox/Example" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent-download"]

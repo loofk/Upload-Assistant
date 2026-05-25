@@ -1147,7 +1147,7 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
         "target_torrent_file": _path_artifact(args.torrent_file),
         "uploaded_torrent_id": _uploaded_torrent_id_from_result(result) or args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(uploaded_torrent_path),
-        "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or package_content_path or args.uploaded_save_path),
+        "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or args.uploaded_save_path or package_content_path),
         "uploaded_wait_evidence": _wait_result_completed(result.get("uploaded_wait")),
         "fresh_duplicate_check": result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else None,
         "target_hash_consistent": not _uploaded_torrent_hash_consistency_blockers(result),
