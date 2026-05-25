@@ -2163,6 +2163,7 @@ def _client_verification_blockers(client_verification: Any) -> list[str]:
         return []
     checks = {
         "visible": "qBittorrent did not list the injected torrent after add.",
+        "hash_matched": "qBittorrent did not report the expected infohash for the injected torrent.",
         "save_path_matched": "qBittorrent did not report the requested save path for the injected torrent.",
         "category_matched": "qBittorrent did not report the requested category for the injected torrent.",
         "tags_matched": "qBittorrent did not report the requested tags for the injected torrent.",

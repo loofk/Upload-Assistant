@@ -179,7 +179,7 @@ class QbitReadOnlyService:
             timeout=verify_timeout,
             interval=verify_interval,
         )
-        client_verification = _added_torrent_client_verification(client_matches, save_path=save_path, category=category, tags=tags)
+        client_verification = _added_torrent_client_verification(client_matches, torrent_hash=torrent_hash, save_path=save_path, category=category, tags=tags)
         return {
             "torrent_path": str(resolved_torrent_path),
             "hash": torrent_hash,
@@ -209,7 +209,7 @@ class QbitReadOnlyService:
         while True:
             attempts += 1
             matches = await self.list_torrents(torrent_hash=torrent_hash)
-            verification = _added_torrent_client_verification(matches, save_path=save_path, category=category, tags=tags)
+            verification = _added_torrent_client_verification(matches, torrent_hash=torrent_hash, save_path=save_path, category=category, tags=tags)
             if _added_torrent_verification_ready(verification) or asyncio.get_running_loop().time() >= deadline:
                 return matches, attempts
             await asyncio.sleep(interval)
@@ -292,17 +292,21 @@ def _read_torrent_payload(torrent_path: str) -> tuple[Path, bytes, str]:
 def _added_torrent_client_verification(
     matches: list[QbitTorrentSummary],
     *,
+    torrent_hash: str,
     save_path: str,
     category: str | None,
     tags: str | None,
 ) -> dict[str, Any]:
     requested_tags = _tag_set(tags)
+    expected_hash = _normalize_hash(torrent_hash)
     return {
         "visible": bool(matches),
+        "hash_matched": any(_normalize_hash(match.hash) == expected_hash for match in matches),
         "save_path_matched": any(_torrent_matches_save_path(match, save_path) for match in matches),
         "category_matched": category is None or any(match.category == category for match in matches),
         "tags_matched": not requested_tags or any(requested_tags.issubset(_tag_set(match.tags)) for match in matches),
         "requested": {
+            "hash": expected_hash,
             "save_path": save_path,
             "category": category,
             "tags": tags,
@@ -314,8 +318,12 @@ def _added_torrent_client_verification(
 def _added_torrent_verification_ready(client_verification: dict[str, Any]) -> bool:
     return all(
         bool(client_verification.get(key))
-        for key in ("visible", "save_path_matched", "category_matched", "tags_matched")
+        for key in ("visible", "hash_matched", "save_path_matched", "category_matched", "tags_matched")
     )
+
+
+def _normalize_hash(value: Any) -> str:
+    return str(value or "").strip().lower()
 
 
 def _torrent_matches_save_path(torrent: QbitTorrentSummary, save_path: str) -> bool:
