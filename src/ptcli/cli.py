@@ -3434,7 +3434,8 @@ def _injected_torrent_verified(injected_torrent: Any) -> bool:
         return False
     if "verified_in_client" in injected_torrent:
         return bool(injected_torrent.get("verified_in_client"))
-    return True
+    client_verification = injected_torrent.get("client_verification")
+    return isinstance(client_verification, dict) and bool(client_verification.get("visible"))
 
 
 def _source_injection_verified(stage: dict[str, Any] | None) -> bool:

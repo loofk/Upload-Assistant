@@ -2597,7 +2597,7 @@ def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -2766,6 +2766,61 @@ def test_pipeline_closure_requires_target_injection_client_verification() -> Non
     assert closure["target"]["injection_verified"] is False
     assert closure["target"]["injected_torrent_hash"] == "b" * 40
     assert closure["target"]["uploaded_torrent_hash"] == "b" * 40
+
+
+def test_pipeline_closure_rejects_target_injection_without_client_visibility() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+
+    assert closure["complete"] is False
+    assert closure["blockers"] == ["target.injected"]
+    assert closure["target"]["injected"] is False
+    assert closure["target"]["injection_verified"] is False
+
+
+def test_pipeline_closure_accepts_structured_client_visibility() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                "uploaded_torrent_hash": "b" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "b" * 40},
+                "injected_torrent": {"hash": "b" * 40, "client_verification": {"visible": True, "hash_matched": True}},
+                "uploaded_wait": {"complete": True, "query": {"torrent_hash": "b" * 40}, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+
+    assert closure["target"]["injected"] is True
+    assert "target.injected" not in closure["blockers"]
 
 
 def test_pipeline_closure_requires_uploaded_torrent_completion_when_waited() -> None:
@@ -3107,7 +3162,7 @@ def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -3135,7 +3190,7 @@ def test_pipeline_closure_rejects_empty_qbit_match_evidence() -> None:
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4618,6 +4673,7 @@ async def test_pipeline_inject_source_runs_after_download(monkeypatch, tmp_path)
             "category": category,
             "tags": tags,
             "paused": paused,
+            "verified_in_client": True,
         }
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
@@ -4809,7 +4865,7 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
-        return {"client": "qbittorrent", "save_path": save_path}
+        return {"client": "qbittorrent", "save_path": save_path, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, timeout, interval)
@@ -4888,7 +4944,7 @@ async def test_pipeline_wait_complete_prefers_injected_hash(monkeypatch, tmp_pat
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
-        return {"client": "qbittorrent", "save_path": save_path, "hash": injected_hash}
+        return {"client": "qbittorrent", "save_path": save_path, "hash": injected_hash, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, content_path, timeout, interval)
@@ -5246,7 +5302,7 @@ async def test_pipeline_infers_content_path_from_completed_qbit_match(monkeypatc
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
-        return {"client": "qbittorrent", "save_path": save_path}
+        return {"client": "qbittorrent", "save_path": save_path, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, content_path, torrent_hash, timeout, interval)
@@ -5732,7 +5788,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         return torrent_path
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
-        return {"hash": "a" * 40, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused}
+        return {"hash": "a" * 40, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "verified_in_client": True}
 
     wait_calls = []
 
@@ -5753,7 +5809,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         return {"status": "uploaded", "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)}}
 
     async def fake_inject_uploaded_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
-        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused}
+        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "verified_in_client": True}
 
     calls = {"inject": 0}
 
@@ -6029,6 +6085,7 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
             "category": category,
             "tags": tags,
             "paused": paused,
+            "verified_in_client": True,
         }
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
@@ -8412,6 +8469,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
             "category": category,
             "tags": tags,
             "paused": paused,
+            "verified_in_client": True,
         }
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
