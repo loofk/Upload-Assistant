@@ -394,11 +394,17 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "evidence": {
                 "complete": True,
                 "source": {"mode": "downloaded", "torrent_hash": "a" * 40, "content_path": "/downloads/Name"},
-                "target": {"ready": True, "uploaded_torrent_hash": "b" * 40},
+                "target": {
+                    "ready": True,
+                    "uploaded_torrent_id": "999",
+                    "uploaded_torrent_hash": "b" * 40,
+                    "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
+                    "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                },
             },
             "summary": {"ready": True, "complete": True, "status": "complete"},
             "summary_file": str(tmp_path / "summary" / "ptcli-run-summary.json"),
-            "artifacts": {"uploaded_torrent_id": "999"},
+            "artifacts": {},
             "resume_commands": [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}],
             "next_actions": ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."],
             "stages": [{"stage": "target-upload", "ok": True}],
@@ -452,7 +458,13 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["evidence"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert payload["summary"]["status"] == "complete"
     assert payload["summary_file"].endswith("ptcli-run-summary.json")
-    assert payload["artifacts"] == {"uploaded_torrent_id": "999"}
+    assert payload["artifacts"] == {
+        "uploaded_torrent_id": "999",
+        "uploaded_torrent_hash": "b" * 40,
+        "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
+        "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
+        "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+    }
     assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True

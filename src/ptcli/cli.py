@@ -531,6 +531,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     ready = bool(pipeline_result.get("ready"))
     blockers = _retorrent_execute_blockers(pipeline_result, closure, ready)
     next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
+    artifacts = _retorrent_execute_artifacts(pipeline_result, evidence, closure)
     return {
         "status": "complete" if not blockers else "blocked",
         "plan": plan_payload,
@@ -539,13 +540,29 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "evidence": evidence,
         "summary": summary,
         "summary_file": pipeline_result.get("summary_file"),
-        "artifacts": pipeline_result.get("artifacts"),
+        "artifacts": artifacts,
         "resume_commands": pipeline_result.get("resume_commands", []),
         "ready": ready,
         "complete": not blockers,
         "blockers": blockers,
         "next_actions": next_actions,
     }
+
+
+def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict[str, Any] | None, closure: dict[str, Any] | None) -> dict[str, Any]:
+    artifacts = pipeline_result.get("artifacts")
+    merged = dict(artifacts) if isinstance(artifacts, dict) else {}
+    evidence_target = evidence.get("target") if isinstance(evidence, dict) and isinstance(evidence.get("target"), dict) else {}
+    closure_target = closure.get("target") if isinstance(closure, dict) and isinstance(closure.get("target"), dict) else {}
+    for key in ("uploaded_torrent_id", "uploaded_torrent_hash", "uploaded_torrent_path", "fresh_duplicate_check"):
+        if merged.get(key):
+            continue
+        value = evidence_target.get(key) or closure_target.get(key)
+        if value:
+            merged[key] = value
+    if not merged.get("uploaded_torrent_file") and merged.get("uploaded_torrent_path"):
+        merged["uploaded_torrent_file"] = merged["uploaded_torrent_path"]
+    return merged
 
 
 def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[str, Any] | None, ready: bool) -> list[str]:
