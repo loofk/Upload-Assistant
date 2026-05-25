@@ -1821,6 +1821,96 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
     assert payload["automation_exit_code"] == 1
 
 
+def test_summary_check_print_next_command_outputs_only_command(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [{"stage": "resume-target-upload", "command": "python3 ptcli.py pipeline --upload-target"}],
+                "resume_state": {
+                    "next_stage": None,
+                    "next_command": None,
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-next-command"])
+
+    assert code == 0
+    assert capsys.readouterr().out == "python3 ptcli.py pipeline --upload-target\n"
+
+
+def test_summary_check_print_next_command_is_quiet_when_complete(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-next-command"])
+
+    assert code == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_summary_check_print_next_command_fails_without_resumable_command(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": False,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-next-command"])
+
+    assert code == 1
+    assert capsys.readouterr().out == ""
+
+
 def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-target-upload-summary.json"
     summary_file.write_text(
