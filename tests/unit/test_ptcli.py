@@ -1541,10 +1541,12 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
             "injection_verified": True,
             "seeding": True,
             "torrent_file": "/tmp/mteam.torrent",
+            "uploaded_torrent_id": "999",
             "uploaded_torrent_hash": "b" * 40,
             "injected_torrent_hash": "b" * 40,
             "uploaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "exists": True, "size_bytes": 8, "sha1": "d" * 40},
             "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
+            "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
         },
     }
 
@@ -1555,7 +1557,9 @@ def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
     assert evidence["source"]["torrent_hash"] == "a" * 40
     assert evidence["source"]["source_torrent"]["sha1"] == "c" * 40
     assert evidence["target"]["ready"] is True
+    assert evidence["target"]["uploaded_torrent_id"] == "999"
     assert evidence["target"]["uploaded_torrent_hash"] == "b" * 40
+    assert evidence["target"]["fresh_duplicate_check"] == {"searched": True, "count": 0, "dupes": []}
     assert evidence["target"]["injection_verified"] is True
     assert evidence["target"]["injected_torrent_hash"] == "b" * 40
     assert evidence["target"]["uploaded_torrent"]["sha1"] == "d" * 40
@@ -4232,7 +4236,11 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
     assert payload["closure"]["target"]["uploaded"] is True
     assert payload["closure"]["target"]["downloaded"] is True
     assert payload["closure"]["target"]["injected"] is True
+    assert payload["closure"]["target"]["uploaded_torrent_id"] == "999"
     assert payload["closure"]["target"]["uploaded_torrent_hash"] == uploaded_hash
+    assert payload["closure"]["target"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
+    assert payload["evidence"]["target"]["uploaded_torrent_id"] == "999"
+    assert payload["evidence"]["target"]["fresh_duplicate_check"]["searched"] is True
 
 
 @pytest.mark.asyncio

@@ -2533,8 +2533,10 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     match = _find_stage(stages, "match")
     source_content_verify = _find_stage(stages, "source-content-verify")
     target_prepare = _find_stage(stages, "target-prepare")
+    target_dupe_check = _find_stage(stages, "target-dupe-check")
     target_upload = _find_stage(stages, "target-upload")
     target_upload_result = target_upload.get("result") if target_upload and isinstance(target_upload.get("result"), dict) else {}
+    target_dupe_result = target_dupe_check.get("result") if target_dupe_check and isinstance(target_dupe_check.get("result"), dict) else None
     downloaded_torrent = target_upload_result.get("downloaded_torrent") if isinstance(target_upload_result, dict) else None
     injected_torrent = target_upload_result.get("injected_torrent") if isinstance(target_upload_result, dict) else None
     uploaded_wait = target_upload_result.get("uploaded_wait") if isinstance(target_upload_result, dict) else None
@@ -2577,9 +2579,11 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "uploaded_wait": uploaded_wait if isinstance(uploaded_wait, dict) else None,
         "torrent_file": target_torrent_file,
         "uploaded_torrent_hash": uploaded_target_hash or injected_target_hash,
+        "uploaded_torrent_id": _uploaded_torrent_id_from_result(target_upload_result),
         "injected_torrent_hash": injected_target_hash,
         "uploaded_torrent": downloaded_torrent if isinstance(downloaded_torrent, dict) else None,
         "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
+        "fresh_duplicate_check": target_upload_result.get("fresh_duplicate_check") if isinstance(target_upload_result.get("fresh_duplicate_check"), dict) else target_dupe_result,
         "package_reused": bool(target_prepare_result.get("reused")) if isinstance(target_prepare_result, dict) else False,
         "uploaded_torrent_reused": bool(downloaded_torrent.get("reused")) if isinstance(downloaded_torrent, dict) else False,
     }
@@ -2635,6 +2639,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
         "target": {
             "ready": bool(target.get("prepared") and target.get("uploaded") and target.get("downloaded") and target.get("injected") and target.get("seeding")),
             "torrent_file": target.get("torrent_file"),
+            "uploaded_torrent_id": target.get("uploaded_torrent_id"),
             "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
             "injected_torrent_hash": target.get("injected_torrent_hash"),
             "injection_verified": bool(target.get("injection_verified")),
@@ -2642,6 +2647,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "uploaded_wait": target.get("uploaded_wait"),
             "uploaded_torrent": target.get("uploaded_torrent"),
             "uploaded_torrent_path": target.get("uploaded_torrent_path"),
+            "fresh_duplicate_check": target.get("fresh_duplicate_check"),
             "package_reused": bool(target.get("package_reused")),
             "uploaded_torrent_reused": bool(target.get("uploaded_torrent_reused")),
         },
