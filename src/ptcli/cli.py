@@ -1627,8 +1627,10 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 validate=_injected_torrent_verified,
                 invalid_message="qBittorrent source torrent injection was not verified.",
             )
+            inject_result = _source_injection_hash_verify_stage(inject_result, source_download_stage)
             stages.append(inject_result)
-            effective_source_torrent_hash = _torrent_hash_from_result(inject_result.get("result")) or effective_source_torrent_hash
+            if inject_result.get("ok"):
+                effective_source_torrent_hash = _torrent_hash_from_result(inject_result.get("result")) or effective_source_torrent_hash
     else:
         stages.append({"stage": "inject-source", "ok": True, "skipped": True, "message": "--inject-source not provided; qBittorrent injection skipped."})
 
@@ -2022,6 +2024,42 @@ def _source_torrent_verify_stage(source_download_stage: dict[str, Any], expected
             "message": "Source torrent hash matched source metadata." if expected and actual_hash else "Source torrent hash verification skipped because one side did not expose an infohash.",
         },
     }
+
+
+def _source_injection_hash_verify_stage(inject_stage: dict[str, Any], source_download_stage: dict[str, Any]) -> dict[str, Any]:
+    if not inject_stage.get("ok"):
+        return inject_stage
+    expected = _torrent_hash_from_stage(source_download_stage)
+    actual = _torrent_hash_from_stage(inject_stage)
+    result = inject_stage.get("result")
+    if not isinstance(result, dict):
+        result = {}
+    if expected and actual and expected != actual:
+        blockers = _string_list(result.get("blockers"))
+        _append_unique_string(blockers, f"injected source torrent hash mismatch: expected {expected}, got {actual}")
+        return {
+            **inject_stage,
+            "ok": False,
+            "error": "Injected source torrent infohash does not match downloaded source torrent.",
+            "result": {
+                **result,
+                "hash_matched": False,
+                "expected_hash": expected,
+                "actual_hash": actual,
+                "blockers": blockers,
+            },
+        }
+    if expected and actual:
+        return {
+            **inject_stage,
+            "result": {
+                **result,
+                "hash_matched": True,
+                "expected_hash": expected,
+                "actual_hash": actual,
+            },
+        }
+    return inject_stage
 
 
 def _source_content_verify_stage(match_stage: dict[str, Any], expected_hash: str | None) -> dict[str, Any]:

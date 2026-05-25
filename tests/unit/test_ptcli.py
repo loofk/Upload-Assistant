@@ -4264,6 +4264,84 @@ async def test_pipeline_blocks_source_injection_when_downloaded_torrent_hash_mis
 
 
 @pytest.mark.asyncio
+async def test_pipeline_blocks_source_injection_hash_mismatch(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_hash = None
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", None, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        nonlocal source_hash
+        _ = (tracker, source_id, base_dir)
+        content = tmp_path / "source-content.mkv"
+        content.write_bytes(b"content")
+        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
+        torrent_path.parent.mkdir(parents=True, exist_ok=True)
+        torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+        torrent.generate()
+        torrent.write(str(torrent_path), overwrite=True)
+        source_hash = str(torrent.infohash)
+        return torrent_path
+
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+        _ = (torrent_path, category, tags, paused)
+        wrong_hash = "f" * 40 if source_hash != "f" * 40 else "e" * 40
+        return {"client": client_name, "hash": wrong_hash, "save_path": save_path, "verified_in_client": True}
+
+    async def fake_wait_complete_with_config(*_args, **_kwargs):
+        raise AssertionError("source wait must not run when injected source hash mismatches downloaded source torrent")
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--download-source",
+            "--inject-source",
+            "--save-path",
+            "/downloads",
+            "--wait-complete",
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    inject_stage = next(stage for stage in payload["stages"] if stage["stage"] == "inject-source")
+    wait_stage = next(stage for stage in payload["stages"] if stage["stage"] == "wait-complete")
+    assert inject_stage["ok"] is False
+    assert inject_stage["error"] == "Injected source torrent infohash does not match downloaded source torrent."
+    assert inject_stage["result"]["expected_hash"] == source_hash
+    assert inject_stage["result"]["hash_matched"] is False
+    assert "injected source torrent hash mismatch" in inject_stage["result"]["blockers"][0]
+    assert wait_stage["ok"] is False
+    assert wait_stage["skipped"] is True
+    assert "inject-source: Injected source torrent infohash does not match downloaded source torrent." in payload["blockers"]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_infers_content_path_from_completed_qbit_match(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
