@@ -2277,6 +2277,7 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
     assert evidence["target"]["downloaded"] is True
     assert evidence["target"]["injected"] is True
     assert evidence["target"]["seeding"] is True
+    assert evidence["target"]["seeding_verified"] is True
     assert evidence["target"]["injected_torrent_hash"] == "b" * 40
     assert evidence["target"]["qbit_closure"]["injection"]["hash"] == "b" * 40
     assert evidence["target"]["qbit_closure"]["injection"]["category"] == "MTEAM"

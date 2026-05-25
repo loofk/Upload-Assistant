@@ -3003,7 +3003,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
             "injected_torrent_hash": target.get("injected_torrent_hash"),
             "injection_verified": bool(target.get("injection_verified")),
-            "seeding_verified": bool(target.get("seeding")),
+            "seeding_verified": target_seeding,
             "uploaded_wait": target.get("uploaded_wait"),
             "uploaded_torrent": target.get("uploaded_torrent"),
             "uploaded_torrent_path": target.get("uploaded_torrent_path"),
