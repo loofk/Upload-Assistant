@@ -2959,6 +2959,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_complete = _source_wait_completed(wait_complete)
     source_matched = _match_stage_has_match(match)
     source_content_verified = _source_content_verified(source_content_verify)
+    source_hash_consistent = _source_hash_consistent(source_torrent_hash, source_download, inject_source, wait_complete, source_content_verify)
     target_injected = _injected_torrent_verified(injected_torrent)
     target_seeding = target_injected and isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete"))
     target_hash_consistent = not _uploaded_torrent_hash_consistency_blockers(target_upload_result)
@@ -2978,6 +2979,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "complete": source_complete,
         "matched": source_matched,
         "content_verified": source_content_verified,
+        "hash_consistent": source_hash_consistent,
         "content_verification": source_content_verify.get("result") if source_content_verify and isinstance(source_content_verify.get("result"), dict) else None,
         "torrent_hash": source_torrent_hash,
         "content_path": content_path,
@@ -3029,9 +3031,31 @@ def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[st
     blockers = [name for name, ok in checks if not ok]
     if target.get("injected") and not target.get("seeding"):
         blockers.append("target.seeding")
+    if source.get("ready") and not source.get("hash_consistent"):
+        blockers.append("source.hash_consistent")
     if target.get("uploaded") and target.get("downloaded") and target.get("injected") and not target.get("hash_consistent"):
         blockers.append("target.hash_consistent")
     return blockers
+
+
+def _source_hash_consistent(
+    source_torrent_hash: str | None,
+    source_download: dict[str, Any] | None,
+    inject_source: dict[str, Any] | None,
+    wait_complete: dict[str, Any] | None,
+    source_content_verify: dict[str, Any] | None,
+) -> bool:
+    hashes = {_normalize_torrent_hash(source_torrent_hash)}
+    hashes.add(_torrent_hash_from_stage(source_download))
+    hashes.add(_torrent_hash_from_stage(inject_source))
+    hashes.add(_torrent_hash_from_stage(wait_complete))
+    result = source_content_verify.get("result") if isinstance(source_content_verify, dict) else None
+    if isinstance(result, dict):
+        matched_hashes = result.get("matched_hashes")
+        if isinstance(matched_hashes, list):
+            hashes.update(_normalize_torrent_hash(hash_value) for hash_value in matched_hashes)
+    concrete_hashes = {hash_value for hash_value in hashes if hash_value}
+    return len(concrete_hashes) <= 1
 
 
 def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
@@ -3059,6 +3083,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "injected_torrent_hash": source.get("injected_torrent_hash"),
             "injection_verified": bool(source.get("injection_verified")),
             "content_verified": bool(source.get("content_verified")),
+            "hash_consistent": bool(source.get("hash_consistent")),
             "content_verification": source.get("content_verification"),
             "content_path": source.get("content_path"),
             "source_torrent": source.get("source_torrent"),

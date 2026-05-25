@@ -2244,6 +2244,36 @@ def test_pipeline_closure_requires_source_injection_client_verification() -> Non
     assert closure["source"]["injected_torrent_hash"] == "a" * 40
 
 
+def test_pipeline_closure_reports_source_hash_inconsistency() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "result": {"torrent_hash": "a" * 40}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True, "query": {"torrent_hash": "a" * 40}, "matches": [{"hash": "b" * 40}]}},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {"stage": "source-content-verify", "ok": True, "result": {"verified": True, "matched_hashes": ["a" * 40]}},
+        {"stage": "target-prepare", "ok": True, "result": {}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "uploaded_torrent_hash": "c" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "c" * 40},
+                "injected_torrent": {"hash": "c" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "query": {"torrent_hash": "c" * 40}, "matches": [{"hash": "c" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    assert closure["complete"] is False
+    assert closure["blockers"] == ["source.hash_consistent"]
+    assert closure["source"]["hash_consistent"] is False
+    assert evidence["source"]["hash_consistent"] is False
+
+
 def test_pipeline_closure_requires_source_wait_completion() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"torrent_path": "/tmp/U2-60635.torrent"}},
