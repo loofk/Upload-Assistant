@@ -407,6 +407,13 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "summary_file": str(tmp_path / "summary" / "ptcli-run-summary.json"),
             "artifacts": {},
             "resume_commands": [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}],
+            "resume_state": {
+                "complete": True,
+                "resume_available": True,
+                "next_stage": None,
+                "next_command": None,
+                "available_stages": ["resume-uploaded-torrent-download"],
+            },
             "next_actions": ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."],
             "stages": [{"stage": "target-upload", "ok": True}],
         }
@@ -467,6 +474,13 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
     }
     assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
+    assert payload["resume_state"]["complete"] is True
+    assert payload["resume_state"]["pipeline_complete"] is True
+    assert payload["resume_state"]["next_stage"] is None
+    assert payload["resume_state"]["next_command"] is None
+    assert payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
+    assert payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
+    assert payload["resume_state"]["artifacts"]["uploaded_torrent_hash"] is True
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True
@@ -714,6 +728,14 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
             "ready": False,
             "closure": {"complete": False, "blockers": ["target.injected"]},
             "next_actions": ["Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path."],
+            "resume_commands": [{"stage": "resume-uploaded-torrent", "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"}],
+            "resume_state": {
+                "complete": False,
+                "resume_available": True,
+                "next_stage": "resume-uploaded-torrent",
+                "next_command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent",
+                "available_stages": ["resume-uploaded-torrent"],
+            },
             "stages": [{"stage": "target-upload", "ok": False}],
         }
 
@@ -746,6 +768,11 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
     assert payload["ready"] is False
     assert payload["blockers"] == ["target.injected", "pipeline did not report ready."]
     assert payload["next_actions"] == ["Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path."]
+    assert payload["resume_state"]["complete"] is False
+    assert payload["resume_state"]["pipeline_complete"] is False
+    assert payload["resume_state"]["next_stage"] == "resume-uploaded-torrent"
+    assert payload["resume_state"]["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
+    assert payload["resume_state"]["blockers"] == ["target.injected", "pipeline did not report ready."]
 
 
 @pytest.mark.asyncio

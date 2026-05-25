@@ -536,6 +536,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     blockers = _retorrent_execute_blockers(pipeline_result, closure, ready)
     next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
     artifacts = _retorrent_execute_artifacts(pipeline_result, evidence, closure)
+    resume_commands = pipeline_result.get("resume_commands", [])
     return {
         "status": "complete" if not blockers else "blocked",
         "plan": plan_payload,
@@ -545,7 +546,8 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "summary": summary,
         "summary_file": pipeline_result.get("summary_file"),
         "artifacts": artifacts,
-        "resume_commands": pipeline_result.get("resume_commands", []),
+        "resume_commands": resume_commands,
+        "resume_state": _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands),
         "ready": ready,
         "complete": not blockers,
         "blockers": blockers,
@@ -567,6 +569,36 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
     if not merged.get("uploaded_torrent_file") and merged.get("uploaded_torrent_path"):
         merged["uploaded_torrent_file"] = merged["uploaded_torrent_path"]
     return merged
+
+
+def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: dict[str, Any], blockers: list[str], resume_commands: Any) -> dict[str, Any]:
+    pipeline_resume = pipeline_result.get("resume_state") if isinstance(pipeline_result.get("resume_state"), dict) else {}
+    complete = not blockers
+    commands = resume_commands if isinstance(resume_commands, list) else []
+    commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in commands if isinstance(command, dict)}
+    next_stage = None if complete else pipeline_resume.get("next_stage")
+    next_command = None if complete else pipeline_resume.get("next_command")
+    if not complete and not next_command:
+        fallback = _resume_next_command(blockers, commands_by_stage)
+        next_stage = fallback.get("stage")
+        next_command = fallback.get("command")
+    return {
+        "complete": complete,
+        "pipeline_complete": bool(pipeline_resume.get("complete")),
+        "resume_available": bool(pipeline_resume.get("resume_available") or commands),
+        "next_stage": next_stage,
+        "next_command": next_command,
+        "available_stages": pipeline_resume.get("available_stages") or [str(command.get("stage")) for command in commands if isinstance(command, dict)],
+        "artifacts": {
+            "source_torrent_file": bool(artifacts.get("source_torrent_file")),
+            "target_package_dir": bool(artifacts.get("target_package_dir")),
+            "target_torrent_file": bool(artifacts.get("target_torrent_file")),
+            "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
+            "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
+            "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
+        },
+        "blockers": [str(blocker) for blocker in blockers],
+    }
 
 
 def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[str, Any] | None, ready: bool) -> list[str]:
