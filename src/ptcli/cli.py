@@ -1614,6 +1614,10 @@ def _qbit_wait_summary_fields(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _qbit_wait_mismatch_blockers(diagnostics: dict[str, Any]) -> list[str]:
+    return [f"qBittorrent wait mismatch: {name}" for name in _string_list(diagnostics.get("qbit_wait_mismatches"))]
+
+
 def _summary_qbit_wait_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
     evidence_source = evidence.get("source") if isinstance(evidence.get("source"), dict) else {}
@@ -1686,6 +1690,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
+    diagnostics = _summary_check_diagnostics(payload)
     resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
     blockers = _string_list(payload.get("blockers"))
     if not blockers:
@@ -1711,6 +1716,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     missing_closure_audit = closure_audit_status["missing_closure_audit"]
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit], *[f"closure audit missing: {name}" for name in missing_closure_audit]]
+    _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(diagnostics))
     next_command = _summary_next_command(payload, resume_state, _pipeline_summary_preferred_stages([*missing_audit, *missing_closure_audit]))
     return _summary_check_result({
         "status": "ok" if complete and ready and not blockers else "blocked",
@@ -1723,13 +1729,14 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
-        **_summary_check_diagnostics(payload),
+        **diagnostics,
         **artifact_status,
         **closure_audit_status,
     })
 
 
 def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
+    diagnostics = _summary_check_diagnostics(payload)
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
     resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
     blockers = _string_list(summary.get("blockers")) or _string_list(resume_state.get("blockers"))
@@ -1739,6 +1746,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if ready else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
+    _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(diagnostics))
     next_command = _summary_next_command(payload, resume_state, _target_upload_summary_preferred_stages(missing_audit))
     return _summary_check_result({
         "status": "ok" if ready and not blockers else "blocked",
@@ -1751,7 +1759,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
-        **_summary_check_diagnostics(payload),
+        **diagnostics,
         **artifact_status,
     })
 

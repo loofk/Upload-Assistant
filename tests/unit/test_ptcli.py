@@ -2418,6 +2418,121 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
     assert diagnostics["observed_content_paths"] == ["/downloads/Other"]
 
 
+def test_summary_check_blocks_complete_pipeline_qbit_wait_mismatch(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "evidence": {
+                    "target": {
+                        "qbit_closure": {
+                            "wait": {
+                                "complete": True,
+                                "matched_count": 1,
+                                "completion_verification": {
+                                    "matched_count": 1,
+                                    "complete_count": 1,
+                                    "any_complete": True,
+                                    "requested_hash_matched": True,
+                                    "requested_content_path_matched": False,
+                                    "observed_hashes": ["b" * 40],
+                                    "observed_content_paths": ["/downloads/Other"],
+                                    "observed_save_paths": ["/downloads"],
+                                },
+                            }
+                        }
+                    }
+                },
+                "resume_commands": [{"stage": "resume-uploaded-torrent", "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"}],
+                "resume_state": {
+                    "available_stages": ["resume-uploaded-torrent"],
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_verified": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["automation_action"] == "resolve_qbit_wait_mismatch"
+    assert payload["qbit_wait_mismatches"] == ["uploaded.requested_content_path"]
+    assert "qBittorrent wait mismatch: uploaded.requested_content_path" in payload["blockers"]
+    assert payload["next_stage"] == "resume-uploaded-torrent"
+
+
+def test_summary_check_blocks_ready_target_upload_qbit_wait_mismatch(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-target-upload-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.target_upload.summary",
+                "summary": {
+                    "ready": True,
+                    "blockers": [],
+                    "uploaded_wait": {
+                        "complete": True,
+                        "matched_count": 1,
+                        "completion_verification": {
+                            "matched_count": 1,
+                            "complete_count": 1,
+                            "any_complete": True,
+                            "requested_hash_matched": False,
+                            "requested_content_path_matched": True,
+                            "observed_hashes": ["f" * 40],
+                            "observed_content_paths": ["/downloads/Example"],
+                            "observed_save_paths": ["/downloads"],
+                        },
+                    },
+                },
+                "recommended_commands": [{"stage": "resume-uploaded-torrent", "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"}],
+                "resume_state": {
+                    "available_stages": ["resume-uploaded-torrent"],
+                    "artifacts": {
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_verified": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["automation_action"] == "resolve_qbit_wait_mismatch"
+    assert payload["qbit_wait_mismatches"] == ["uploaded.requested_hash"]
+    assert "qBittorrent wait mismatch: uploaded.requested_hash" in payload["blockers"]
+    assert payload["next_stage"] == "resume-uploaded-torrent"
+
+
 def test_run_summary_exposes_qbit_wait_request_mismatch(tmp_path) -> None:
     summary_file = ptcli_cli._write_run_summary(
         {
