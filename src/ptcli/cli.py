@@ -1204,7 +1204,7 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
 
 def _target_upload_next_command(summary: dict[str, Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
     uploaded_wait = summary.get("uploaded_wait")
-    uploaded_wait_complete = isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete"))
+    uploaded_wait_complete = _wait_result_completed(uploaded_wait)
     if summary.get("injected") and (summary.get("seeding_verified") or uploaded_wait_complete):
         return {"stage": None, "command": None}
     blockers = _string_list(summary.get("blockers"))
@@ -1762,7 +1762,7 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "injection_verified": _injected_torrent_verified(injected_torrent),
         "injected_torrent_hash": _torrent_hash_from_result(injected_torrent),
         "uploaded_save_path": _uploaded_save_path_from_result(result),
-        "seeding_verified": isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete")),
+        "seeding_verified": _wait_result_completed(uploaded_wait),
         "uploaded_torrent_hash": uploaded_torrent_hash,
         "uploaded_wait": uploaded_wait if isinstance(uploaded_wait, dict) else None,
         "qbit_closure": qbit_closure,
@@ -1804,6 +1804,7 @@ def _qbit_wait_evidence(wait_result: Any) -> dict[str, Any] | None:
     keys = (
         "client",
         "complete",
+        "completion_verification",
         "query",
         "matches",
         "attempts",
@@ -2474,6 +2475,8 @@ def _wait_complete_result_blockers(result: dict[str, Any]) -> list[str]:
     blockers = _string_list(result.get("blockers"))
     if result.get("complete") is False:
         _append_unique_string(blockers, "qBittorrent did not report the source torrent as complete.")
+    elif result.get("complete") is True and not _wait_result_completed(result):
+        _append_unique_string(blockers, "qBittorrent completion wait did not include matched torrent evidence.")
     return blockers
 
 
@@ -2490,6 +2493,8 @@ def _target_upload_result_blockers(result: dict[str, Any]) -> list[str]:
     uploaded_wait = result.get("uploaded_wait")
     if isinstance(uploaded_wait, dict) and uploaded_wait.get("complete") is False:
         _append_unique_string(blockers, "uploaded_wait: qBittorrent did not report the uploaded target torrent as complete.")
+    elif isinstance(uploaded_wait, dict) and uploaded_wait.get("complete") is True and not _wait_result_completed(uploaded_wait):
+        _append_unique_string(blockers, "uploaded_wait: qBittorrent completion wait did not include matched torrent evidence.")
     return blockers
 
 
@@ -4235,7 +4240,7 @@ def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, downl
             return False
     if wait_uploaded_complete:
         uploaded_wait = payload.get("uploaded_wait")
-        return isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete"))
+        return _wait_result_completed(uploaded_wait)
     return True
 
 

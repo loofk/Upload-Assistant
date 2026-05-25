@@ -2400,6 +2400,46 @@ def test_target_upload_result_accepts_completed_uploaded_torrent_wait() -> None:
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True, wait_uploaded_complete=True) is True
 
 
+def test_target_upload_result_requires_uploaded_wait_match_evidence() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "uploaded_wait": {"complete": True, "matches": []},
+    }
+
+    assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True, wait_uploaded_complete=True) is False
+
+
+def test_target_upload_summary_requires_uploaded_wait_match_evidence() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "uploaded_wait": {"complete": True, "matches": []},
+    }
+
+    summary = ptcli_cli._target_upload_summary(payload, {"status": "ready", "blockers": [], "rule_obligation_review": {"ready": True, "blockers": []}})
+
+    assert summary["ready"] is False
+    assert summary["seeding_verified"] is False
+    assert "uploaded_wait: qBittorrent completion wait did not include matched torrent evidence." in summary["blockers"]
+
+
+def test_target_upload_next_command_requires_uploaded_wait_match_evidence() -> None:
+    next_command = ptcli_cli._target_upload_next_command(
+        {
+            "injected": True,
+            "seeding_verified": False,
+            "uploaded_wait": {"complete": True, "matches": []},
+            "blockers": ["uploaded_wait: qBittorrent completion wait did not include matched torrent evidence."],
+        },
+        {"resume-uploaded-torrent": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"},
+    )
+
+    assert next_command["stage"] == "resume-uploaded-torrent"
+
+
 def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
     closure = {
         "complete": True,
