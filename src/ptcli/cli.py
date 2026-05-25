@@ -2277,6 +2277,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "source_torrent_id": source_torrent_id,
         "source_torrent_hash": effective_source_torrent_hash,
         "target_trackers": target_trackers,
+        "config": args.config,
+        "base_dir": args.base_dir,
         "client": args.client,
         "qbit_options": _pipeline_qbit_options(args),
         "output_options": _pipeline_output_options(args),
@@ -2997,6 +2999,8 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "input_source_id": payload.get("input_source_id"),
         "source_torrent_id": payload.get("source_torrent_id"),
         "target_trackers": payload.get("target_trackers"),
+        "config": payload.get("config"),
+        "base_dir": payload.get("base_dir"),
         "client": payload.get("client"),
         "qbit_options": payload.get("qbit_options"),
         "output_options": payload.get("output_options"),
@@ -3094,6 +3098,8 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     target_trackers = payload.get("target_trackers")
     target_trackers_arg = ",".join(str(tracker) for tracker in target_trackers) if isinstance(target_trackers, list) else str(target_trackers or "")
     client = str(payload.get("client") or "default")
+    config_args = ["--config", str(payload["config"])] if payload.get("config") else []
+    base_dir_args = ["--base-dir", str(payload["base_dir"])] if payload.get("base_dir") else []
     qbit_options = payload.get("qbit_options") if isinstance(payload.get("qbit_options"), dict) else {}
     output_options = payload.get("output_options") if isinstance(payload.get("output_options"), dict) else {}
     source_qbit_options = qbit_options.get("source") if isinstance(qbit_options.get("source"), dict) else {}
@@ -3123,6 +3129,8 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         source_torrent_id,
                         "--to",
                         target_trackers_arg,
+                        *config_args,
+                        *base_dir_args,
                         "--client",
                         client,
                         "--source-torrent-file",
@@ -3157,6 +3165,8 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         source_torrent_id,
                         "--to",
                         target_trackers_arg,
+                        *config_args,
+                        *base_dir_args,
                         "--client",
                         client,
                         *path_args,
@@ -3190,6 +3200,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                 "command": _ptcli_command(
                     [
                         "target-upload",
+                        *config_args,
                         "--package-dir",
                         str(target_package_dir),
                         "--client",
@@ -3216,6 +3227,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                 "command": _ptcli_command(
                     [
                         "target-upload",
+                        *config_args,
                         "--package-dir",
                         str(target_package_dir),
                         "--client",
