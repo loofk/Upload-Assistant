@@ -15,7 +15,10 @@ services:
     command: ["sites", "--json"]
 
   legacy-webui:
-    image: ghcr.io/loofk/upload-assistant:latest
+    image: ghcr.io/loofk/upload-assistant:latest-legacy-webui
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: UA-legacy-webui
     profiles:
       - legacy-webui

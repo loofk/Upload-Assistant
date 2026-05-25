@@ -74,7 +74,7 @@ docker compose build ptcli
 # 盒子上一键闭环示例
 docker compose run --rm ptcli retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json
 
-# 仅在需要旧 Web UI 时启用
+# 仅在需要旧 Web UI 时启用；该服务使用 *-legacy-webui 镜像或旧 Dockerfile
 docker compose --profile legacy-webui up legacy-webui
 ```
 
