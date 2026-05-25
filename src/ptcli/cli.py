@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import io
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -2136,6 +2137,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     effective_source_torrent_hash: str | None = None
     requested_actions = _pipeline_requested_actions(args)
     live_target_upload = bool(args.upload_target and args.target_execute)
+    package_upload_resume = _package_upload_resume_requested(args)
+    package_source_info = _source_info_from_existing_target_package(args.package_dir) if package_upload_resume and args.package_dir else None
     runtime_check_requested = bool(getattr(args, "check_runtime", False) or live_target_upload)
     source_download_requested = bool(args.download_source or (live_target_upload and not args.content_path and not args.source_torrent_file))
     source_injection_requested = bool(args.inject_source or (live_target_upload and not args.content_path))
@@ -2153,16 +2156,33 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         stages.append({"stage": "runtime-check", "ok": True, "skipped": True, "message": "--check-runtime not provided; runtime dependency check skipped."})
 
-    flow_check_result = build_flow_check(config, source_tracker, source_torrent_id, ",".join(target_trackers), args.client, base_dir=args.base_dir)
-    stages.append({"stage": "flow-check", "ok": bool(flow_check_result.get("ready")), "result": flow_check_result})
+    if package_upload_resume:
+        flow_check_result = {
+            "ready": True,
+            "skipped": True,
+            "message": "Skipped source flow prerequisite check because this run resumes from an existing MTEAM package and uploaded torrent.",
+        }
+        stages.append({"stage": "flow-check", "ok": True, "skipped": True, "result": flow_check_result})
+    else:
+        flow_check_result = build_flow_check(config, source_tracker, source_torrent_id, ",".join(target_trackers), args.client, base_dir=args.base_dir)
+        stages.append({"stage": "flow-check", "ok": bool(flow_check_result.get("ready")), "result": flow_check_result})
 
-    source_info_result = await _pipeline_stage(
-        "source-info",
-        lambda: fetch_source_info(config, source_tracker, source_torrent_id, base_dir=args.base_dir),
-        lambda info: info.to_dict(),
-        validate=lambda info: source_info_has_signal(info),
-        invalid_message="Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
-    )
+    if package_source_info:
+        source_info_result = {
+            "stage": "source-info",
+            "ok": True,
+            "skipped": True,
+            "message": "Loaded source metadata from existing MTEAM package for uploaded torrent resume.",
+            "result": package_source_info,
+        }
+    else:
+        source_info_result = await _pipeline_stage(
+            "source-info",
+            lambda: fetch_source_info(config, source_tracker, source_torrent_id, base_dir=args.base_dir),
+            lambda info: info.to_dict(),
+            validate=lambda info: source_info_has_signal(info),
+            invalid_message="Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
+        )
     stages.append(source_info_result)
     effective_source_torrent_hash = _source_torrent_hash_from_stage(source_info_result)
     rule_check_result = build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
@@ -2523,6 +2543,28 @@ def _load_existing_target_prepare_package(package_dir: str) -> dict[str, Any]:
         "blockers": blockers,
         "reused": True,
     }
+
+
+def _package_upload_resume_requested(args: argparse.Namespace) -> bool:
+    return bool(args.package_dir and args.upload_target and (args.uploaded_torrent_file or args.uploaded_torrent_id) and not args.target_execute)
+
+
+def _source_info_from_existing_target_package(package_dir: str) -> dict[str, Any] | None:
+    try:
+        package = load_mteam_prepare_package(package_dir)
+    except Exception:
+        return None
+    source_info = _source_info_from_mteam_preflight(package)
+    if not isinstance(source_info, dict):
+        return None
+    match = re.match(r"(?P<tracker>[A-Za-z0-9]+)-(?P<torrent_id>.+)-to-[A-Za-z0-9,]+$", Path(package_dir).expanduser().name)
+    if match:
+        source_info = {
+            **source_info,
+            "tracker": source_info.get("tracker") or normalize_tracker(match.group("tracker")),
+            "torrent_id": source_info.get("torrent_id") or match.group("torrent_id"),
+        }
+    return source_info
 
 
 def _content_path_from_existing_target_package(package_dir: str) -> str | None:

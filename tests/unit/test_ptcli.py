@@ -7349,12 +7349,9 @@ async def test_pipeline_reuses_existing_target_package_for_upload(monkeypatch, t
 async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
-        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TRACKERS": {"MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
     }
-    cookies_dir = tmp_path / "data" / "cookies"
-    cookies_dir.mkdir(parents=True)
-    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -7372,8 +7369,8 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
-        _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1234567, 2, source_info["name"], "a" * 40, "desc"), {})
+        _ = (_config, tracker, source_id, base_dir)
+        raise AssertionError("uploaded torrent package resume must not fetch source metadata")
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
         raise AssertionError("live upload must not run when --uploaded-torrent-file is provided")
@@ -7422,9 +7419,16 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
 
     payload = await ptcli_cli.pipeline_payload(args)
 
+    flow_stage = next(stage for stage in payload["stages"] if stage["stage"] == "flow-check")
+    source_info_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-info")
     match_stage = next(stage for stage in payload["stages"] if stage["stage"] == "match")
     upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
     assert payload["path"] == "/downloads/Example"
+    assert flow_stage["ok"] is True
+    assert flow_stage.get("skipped") is True
+    assert source_info_stage["ok"] is True
+    assert source_info_stage.get("skipped") is True
+    assert source_info_stage["result"]["torrent_id"] == "60635"
     assert match_stage["ok"] is True
     assert match_stage.get("skipped") is not True
     assert upload_stage["ok"] is True
