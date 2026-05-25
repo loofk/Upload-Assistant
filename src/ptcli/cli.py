@@ -966,6 +966,8 @@ def _uploaded_torrent_reuse_blockers(args: argparse.Namespace, *, inferred_uploa
     blockers: list[str] = []
     if args.wait_uploaded_complete and not args.inject_uploaded_torrent:
         blockers.append("--wait-uploaded-complete requires --inject-uploaded-torrent.")
+    if args.inject_uploaded_torrent and not args.wait_uploaded_complete:
+        blockers.append("--wait-uploaded-complete is required with --inject-uploaded-torrent for full uploaded torrent seeding closure.")
     if args.inject_uploaded_torrent and not inferred_uploaded_save_path:
         blockers.append("--uploaded-save-path is required with --inject-uploaded-torrent when the MTEAM package has no content path.")
     return blockers

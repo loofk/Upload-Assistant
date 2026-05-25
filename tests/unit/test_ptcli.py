@@ -7611,8 +7611,17 @@ async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_p
             "paused": paused,
         }
 
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {
+            "client": client_name,
+            "complete": True,
+            "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval},
+            "matches": [{"hash": torrent_hash, "content_path": content_path}],
+        }
+
     monkeypatch.setattr(ptcli_cli, "download_mteam_uploaded_torrent", fake_download_mteam_uploaded_torrent)
     monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
     parser = build_parser()
     args = parser.parse_args(
         [
@@ -7632,6 +7641,7 @@ async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_p
             "--uploaded-qbit-tags",
             "retorrent",
             "--uploaded-paused",
+            "--wait-uploaded-complete",
             "--write-summary",
             "--client",
             "default",
@@ -7649,6 +7659,7 @@ async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_p
     assert result["injected_torrent"]["category"] == "MTEAM"
     assert result["injected_torrent"]["tags"] == "retorrent"
     assert result["injected_torrent"]["paused"] is True
+    assert result["uploaded_wait"]["complete"] is True
 
 
 @pytest.mark.asyncio
@@ -7734,8 +7745,17 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
             "verified_in_client": True,
         }
 
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {
+            "client": client_name,
+            "complete": True,
+            "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval},
+            "matches": [{"hash": torrent_hash, "content_path": content_path}],
+        }
+
     monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
     monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
     parser = build_parser()
     args = parser.parse_args(
         [
@@ -7751,6 +7771,7 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
             "MTEAM",
             "--uploaded-qbit-tags",
             "retorrent",
+            "--wait-uploaded-complete",
             "--write-summary",
             "--client",
             "default",
@@ -7776,8 +7797,50 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
     assert len(result["summary"]["uploaded_torrent"]["sha1"]) == 40
     assert result["summary"]["injected"] is True
     assert result["summary"]["injection_verified"] is True
+    assert result["summary"]["seeding_verified"] is True
     assert result["summary"]["uploaded_torrent_path"] == str(uploaded_torrent)
     assert result["summary"]["injected_torrent_hash"] == uploaded_hash
+
+
+@pytest.mark.asyncio
+async def test_target_upload_uploaded_torrent_injection_requires_completion_wait(monkeypatch, tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
+
+    async def fake_inject_source_with_config(*_args, **_kwargs):
+        raise AssertionError("uploaded torrent injection must not run without --wait-uploaded-complete")
+
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            package["package_dir"],
+            "--uploaded-torrent-file",
+            str(uploaded_torrent),
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["status"] == "blocked"
+    assert any("--wait-uploaded-complete is required" in blocker for blocker in result["blockers"])
 
 
 @pytest.mark.asyncio
