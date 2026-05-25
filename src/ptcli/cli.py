@@ -1130,11 +1130,12 @@ def _uploaded_torrent_id_reuse_blockers(args: argparse.Namespace, *, inferred_up
 
 
 def _maybe_write_target_upload_summary(args: argparse.Namespace, result: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
-    if not getattr(args, "write_summary", False):
-        return result
-    summary_file = _write_target_upload_summary(result, preflight, args, args.summary_output_dir or args.package_dir)
     summary = _target_upload_summary(result, preflight)
-    return {**result, "summary": summary, "summary_file": summary_file}
+    qbit_wait_fields = _qbit_wait_summary_fields({"summary": summary, "result": result})
+    if not getattr(args, "write_summary", False):
+        return {**result, **qbit_wait_fields}
+    summary_file = _write_target_upload_summary(result, preflight, args, args.summary_output_dir or args.package_dir)
+    return {**result, "summary": summary, "summary_file": summary_file, **qbit_wait_fields}
 
 
 def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, Any], args: argparse.Namespace, output_dir: str) -> str:

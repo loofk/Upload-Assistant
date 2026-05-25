@@ -9334,6 +9334,9 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert result["uploaded_wait"]["complete"] is True
     assert result["uploaded_wait"]["query"]["torrent_hash"] == uploaded_hash
     assert result["uploaded_wait"]["query"]["content_path"] == "/downloads/Example"
+    assert result["qbit_wait_mismatch"] is False
+    assert result["qbit_wait_mismatches"] == []
+    assert result["qbit_wait_diagnostics"]["uploaded"]["complete"] is True
     summary_path = Path(result["summary_file"])
     assert summary_path == tmp_path / "summary" / "ptcli-target-upload-summary.json"
     summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
