@@ -1377,6 +1377,8 @@ def _summary_check_from_payload(payload: dict[str, Any], summary_file: str) -> d
 def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     schema_version = payload.get("schema_version")
     kind = str(payload.get("kind") or "unknown")
+    qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(payload)
+    qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
     return {
         "schema_version": schema_version,
         "expected_schema_version": SUMMARY_SCHEMA_VERSION,
@@ -1384,8 +1386,22 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "kind": kind,
         "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
         "kind_supported": kind in SUPPORTED_SUMMARY_KINDS,
-        "qbit_wait_diagnostics": _summary_qbit_wait_diagnostics(payload),
+        "qbit_wait_diagnostics": qbit_wait_diagnostics,
+        "qbit_wait_mismatch": bool(qbit_wait_mismatches),
+        "qbit_wait_mismatches": qbit_wait_mismatches,
     }
+
+
+def _summary_qbit_wait_mismatches(qbit_wait_diagnostics: dict[str, Any]) -> list[str]:
+    mismatches: list[str] = []
+    for scope, diagnostics in qbit_wait_diagnostics.items():
+        if not isinstance(diagnostics, dict) or diagnostics.get("request_mismatch") is not True:
+            continue
+        if diagnostics.get("requested_hash_matched") is False:
+            mismatches.append(f"{scope}.requested_hash")
+        if diagnostics.get("requested_content_path_matched") is False:
+            mismatches.append(f"{scope}.requested_content_path")
+    return mismatches
 
 
 def _summary_qbit_wait_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1436,6 +1452,8 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     next_command_ready = bool(next_command)
     if status == "ok":
         automation_action = "complete"
+    elif payload.get("qbit_wait_mismatch"):
+        automation_action = "resolve_qbit_wait_mismatch"
     elif next_command_ready:
         automation_action = "run_next_command"
     elif payload.get("schema_version_ok") is False or payload.get("kind_supported") is False:

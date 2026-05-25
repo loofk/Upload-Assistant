@@ -1918,6 +1918,7 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
                 "ready": False,
                 "complete": False,
                 "blockers": ["source.wait_evidence"],
+                "resume_commands": [{"stage": "resume-source-torrent", "command": "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent"}],
                 "evidence": {
                     "source": {
                         "qbit_closure": {
@@ -1958,6 +1959,13 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
 
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
+    assert payload["automation_action"] == "resolve_qbit_wait_mismatch"
+    assert payload["next_stage"] == "resume-source-torrent"
+    assert payload["next_command"] == "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent"
+    assert payload["next_command_ready"] is True
+    assert payload["should_execute_next_command"] is False
+    assert payload["qbit_wait_mismatch"] is True
+    assert payload["qbit_wait_mismatches"] == ["source.requested_hash"]
     diagnostics = payload["qbit_wait_diagnostics"]["source"]
     assert diagnostics["request_mismatch"] is True
     assert diagnostics["any_complete"] is True
