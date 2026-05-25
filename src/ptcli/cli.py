@@ -1776,6 +1776,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--uploaded-save-path or an inferred completed content path is required with --inject-uploaded-torrent."})
         elif args.wait_uploaded_complete and not args.inject_uploaded_torrent:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--wait-uploaded-complete requires --inject-uploaded-torrent."})
+        elif args.inject_uploaded_torrent and not args.wait_uploaded_complete:
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "--wait-uploaded-complete is required with --inject-uploaded-torrent for full uploaded torrent seeding closure."})
         elif args.target_execute and not _source_ready_for_live_target_upload(stages):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because current pipeline run did not verify complete source qBittorrent content before live target upload."})
         elif args.target_execute and not (args.uploaded_torrent_file or args.uploaded_torrent_id) and not _target_duplicate_ready_for_live_upload(stages):
@@ -2831,7 +2833,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_matched = _match_stage_has_match(match)
     source_content_verified = _source_content_verified(source_content_verify)
     target_injected = _injected_torrent_verified(injected_torrent)
-    target_seeding = target_injected and (not isinstance(uploaded_wait, dict) or bool(uploaded_wait.get("complete")))
+    target_seeding = target_injected and isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete"))
     injected_target_hash = _torrent_hash_from_result(injected_torrent)
     uploaded_target_hash = target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None
     source = {

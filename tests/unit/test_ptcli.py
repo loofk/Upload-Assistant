@@ -1959,6 +1959,7 @@ def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
     ]
@@ -1992,6 +1993,7 @@ def test_pipeline_closure_rejects_unverified_existing_qbit_match() -> None:
                 "uploaded_torrent_hash": "c" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "c" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "c" * 40}]},
             },
         },
     ]
@@ -2108,6 +2110,7 @@ def test_pipeline_closure_requires_source_injection_client_verification() -> Non
                 "status": "uploaded",
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
     ]
@@ -2202,6 +2205,7 @@ def test_pipeline_evidence_reports_resume_sources() -> None:
                 "status": "uploaded",
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "reused": True},
                 "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
     ]
@@ -2233,6 +2237,7 @@ def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:
                 "status": "uploaded",
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
     ]
@@ -2259,6 +2264,7 @@ def test_pipeline_closure_rejects_empty_qbit_match_evidence() -> None:
                 "status": "uploaded",
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
     ]
@@ -5291,9 +5297,99 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "verified_in_client": True}
 
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {
+            "client": client_name,
+            "complete": True,
+            "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval},
+            "matches": [{"hash": torrent_hash, "content_path": content_path}],
+        }
+
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
     monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--package-dir",
+            package["package_dir"],
+            "--upload-target",
+            "--uploaded-torrent-file",
+            str(uploaded_torrent),
+            "--inject-uploaded-torrent",
+            "--wait-uploaded-complete",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    match_stage = next(stage for stage in payload["stages"] if stage["stage"] == "match")
+    upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
+    assert payload["path"] == "/downloads/Example"
+    assert match_stage["ok"] is True
+    assert match_stage.get("skipped") is not True
+    assert upload_stage["ok"] is True
+    assert upload_stage["result"]["downloaded_torrent"]["reused"] is True
+    assert upload_stage["result"]["downloaded_torrent"]["path"] == str(uploaded_torrent)
+    assert upload_stage["result"]["uploaded_torrent_hash"] == uploaded_hash
+    assert upload_stage["result"]["uploaded_wait"]["complete"] is True
+    assert payload["closure"]["target"]["uploaded"] is True
+    assert payload["closure"]["target"]["injected"] is True
+    assert payload["closure"]["target"]["seeding"] is True
+    assert payload["evidence"]["resume"]["target_package"] is True
+    assert payload["evidence"]["resume"]["uploaded_torrent_file"] is True
+    assert payload["summary"]["resume"]["used"] is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_uploaded_torrent_injection_requires_completion_wait(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path / "target"), accept_rules=True)
+    uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, source_info["name"], "a" * 40, "desc"), {})
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_inject_source_with_config(*_args, **_kwargs):
+        raise AssertionError("pipeline must not inject uploaded torrent without --wait-uploaded-complete")
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
     monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
     parser = build_parser()
     args = parser.parse_args(
@@ -5319,20 +5415,11 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
 
     payload = await ptcli_cli.pipeline_payload(args)
 
-    match_stage = next(stage for stage in payload["stages"] if stage["stage"] == "match")
     upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
-    assert payload["path"] == "/downloads/Example"
-    assert match_stage["ok"] is True
-    assert match_stage.get("skipped") is not True
-    assert upload_stage["ok"] is True
-    assert upload_stage["result"]["downloaded_torrent"]["reused"] is True
-    assert upload_stage["result"]["downloaded_torrent"]["path"] == str(uploaded_torrent)
-    assert upload_stage["result"]["uploaded_torrent_hash"] == uploaded_hash
-    assert payload["closure"]["target"]["uploaded"] is True
-    assert payload["closure"]["target"]["injected"] is True
-    assert payload["evidence"]["resume"]["target_package"] is True
-    assert payload["evidence"]["resume"]["uploaded_torrent_file"] is True
-    assert payload["summary"]["resume"]["used"] is True
+    assert upload_stage["ok"] is False
+    assert upload_stage["skipped"] is True
+    assert "--wait-uploaded-complete is required" in upload_stage["message"]
+    assert "target-upload: --wait-uploaded-complete is required" in payload["blockers"][0]
 
 
 @pytest.mark.asyncio
@@ -5381,11 +5468,20 @@ async def test_pipeline_reuses_uploaded_torrent_id_for_target_injection(monkeypa
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "verified_in_client": True}
 
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {
+            "client": client_name,
+            "complete": True,
+            "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval},
+            "matches": [{"hash": torrent_hash, "content_path": content_path}],
+        }
+
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
     monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
     monkeypatch.setattr(ptcli_cli, "download_mteam_uploaded_torrent", fake_download_mteam_uploaded_torrent)
     monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
     parser = build_parser()
     args = parser.parse_args(
         [
@@ -5409,6 +5505,7 @@ async def test_pipeline_reuses_uploaded_torrent_id_for_target_injection(monkeypa
             "MTEAM",
             "--uploaded-qbit-tags",
             "retorrent",
+            "--wait-uploaded-complete",
             "--json",
         ]
     )
@@ -5425,9 +5522,11 @@ async def test_pipeline_reuses_uploaded_torrent_id_for_target_injection(monkeypa
     assert upload_stage["result"]["downloaded_torrent"]["path"] == str(uploaded_torrent)
     assert upload_stage["result"]["injected_torrent"]["save_path"] == "/downloads/Example"
     assert upload_stage["result"]["injected_torrent"]["category"] == "MTEAM"
+    assert upload_stage["result"]["uploaded_wait"]["complete"] is True
     assert payload["closure"]["target"]["uploaded"] is True
     assert payload["closure"]["target"]["downloaded"] is True
     assert payload["closure"]["target"]["injected"] is True
+    assert payload["closure"]["target"]["seeding"] is True
     assert payload["artifacts"]["uploaded_torrent_id"] == "999"
 
 
