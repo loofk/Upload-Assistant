@@ -51,8 +51,11 @@ cd /path/to/Upload-Assistant
 python3 -m venv venv
 source venv/bin/activate
 
-# 安装 Python 包
-pip install -r requirements.txt
+# 安装聚焦版 PTCLI 运行依赖
+pip install -r requirements-ptcli.txt
+
+# 如需运行旧 upload.py/Web UI/Discord 等 legacy/full UA 功能，再安装：
+# pip install -r requirements.txt
 ```
 
 ### 6. 验证安装
@@ -299,7 +302,7 @@ chmod 644 data/config.py
 
 - [ ] Python 3.9+ 已安装
 - [ ] ffmpeg 和 mediainfo 已安装
-- [ ] Python 依赖已安装（requirements.txt）
+- [ ] PTCLI Python 依赖已安装（requirements-ptcli.txt）
 - [ ] `data/config.py` 已配置
 - [ ] `tmdb_api` 已填写
 - [ ] `MTEAM.api_key` 已填写（Token）

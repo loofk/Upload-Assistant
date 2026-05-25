@@ -61,12 +61,14 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 ## 开发命令
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-ptcli.txt
 pip install -r requirements-dev.txt
 make smoke-ptcli PYTHON=.venv/bin/python
 make test PYTHON=.venv/bin/python
 python3 -m ruff check --config pyproject.toml src/ptcli tests/unit/test_ptcli.py
 ```
+
+`requirements.txt` 仍保留给 legacy/full UA 入口；默认 Docker 镜像使用 `requirements-ptcli.txt`。
 
 ## 迁移状态
 

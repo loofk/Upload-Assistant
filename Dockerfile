@@ -31,9 +31,11 @@ WORKDIR /Upload-Assistant
 COPY bin/get_dvd_mediainfo_docker.py bin/
 RUN python3 bin/get_dvd_mediainfo_docker.py
 
-# Copy the Python requirements file and install Python dependencies
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Copy the focused PT CLI requirements and install only the default runtime
+# dependencies needed by ptcli. requirements.txt remains for the legacy full UA
+# workflow.
+COPY requirements-ptcli.txt .
+RUN pip install -r requirements-ptcli.txt
 
 # Copy the rest of the application
 COPY . .
