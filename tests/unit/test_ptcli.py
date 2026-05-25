@@ -876,6 +876,8 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
     ]
     assert all(obligation["acknowledged"] is True for obligation in payload["rule_obligations"])
     assert all(obligation["rules_url"] for obligation in payload["rule_obligations"])
+    assert all(len(obligation["review_fingerprint"]) == 64 for obligation in payload["rule_obligations"])
+    assert all(obligation["acknowledgement_evidence"]["review_fingerprint"] == obligation["review_fingerprint"] for obligation in payload["rule_obligations"])
     assert all(obligation["review_scope"]["required_confirmations"] for obligation in payload["rule_obligations"])
     assert all("adapter_preflight_required" in obligation["review_scope"]["encoded_checks"] for obligation in payload["rule_obligations"])
     assert payload["manual_review"]["required"] is True
@@ -891,11 +893,13 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
             "role": obligation["role"],
             "action": obligation["action"],
             "rules_url": obligation["rules_url"],
+            "review_fingerprint": obligation["review_fingerprint"],
             "required_confirmations": obligation["review_scope"]["required_confirmations"],
         }
         for obligation in payload["rule_obligations"]
     ]
     assert payload["manual_review"]["acknowledgement_evidence"] == [obligation["acknowledgement_evidence"] for obligation in payload["rule_obligations"]]
+    assert payload["manual_review"]["review_fingerprints"] == [obligation["review_fingerprint"] for obligation in payload["rule_obligations"]]
     assert payload["manual_review"]["site_specific_rules_encoded"] is False
     assert payload["automation_scope"] == {
         "site_specific_rules_encoded": False,
@@ -5868,11 +5872,13 @@ def test_mteam_rule_review_records_site_rule_obligations() -> None:
                 "role": obligation["role"],
                 "action": obligation["action"],
                 "rules_url": obligation["rules_url"],
+                "review_fingerprint": obligation["review_fingerprint"],
                 "required_confirmations": obligation["review_scope"]["required_confirmations"],
             }
             for obligation in review["rule_obligations"]
         ],
         "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in review["rule_obligations"]],
+        "review_fingerprints": [obligation["review_fingerprint"] for obligation in review["rule_obligations"]],
         "site_specific_rules_encoded": False,
         "message": "Manual source/target rule review has been acknowledged.",
     }
@@ -5881,6 +5887,8 @@ def test_mteam_rule_review_records_site_rule_obligations() -> None:
         ("MTEAM", "target", "upload_and_seed"),
     ]
     assert all(obligation["acknowledged"] is True for obligation in review["rule_obligations"])
+    assert all(len(obligation["review_fingerprint"]) == 64 for obligation in review["rule_obligations"])
+    assert all(obligation["acknowledgement_evidence"]["review_fingerprint"] == obligation["review_fingerprint"] for obligation in review["rule_obligations"])
     assert all(obligation["acknowledgement_evidence"]["site_specific_rules_encoded"] is False for obligation in review["rule_obligations"])
     assert all(obligation["review_scope"]["rules_url"] == obligation["rules_url"] for obligation in review["rule_obligations"])
     assert all(obligation["review_scope"]["required_confirmations"] for obligation in review["rule_obligations"])

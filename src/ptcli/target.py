@@ -623,6 +623,7 @@ def _manual_rule_review_summary(rule_result: dict[str, Any], rule_obligations: A
         "rules_urls": sorted({str(obligation.get("rules_url")) for obligation in obligations if isinstance(obligation, dict) and obligation.get("rules_url")}),
         "required_confirmations": _manual_rule_review_confirmations(obligations),
         "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in obligations if isinstance(obligation, dict) and isinstance(obligation.get("acknowledgement_evidence"), dict)],
+        "review_fingerprints": [str(obligation["review_fingerprint"]) for obligation in obligations if isinstance(obligation, dict) and obligation.get("review_fingerprint")],
         "site_specific_rules_encoded": False,
         "message": "Manual source/target rule review has been acknowledged." if accept_rules else "Manual source/target rule review is required before live upload.",
     }
@@ -643,6 +644,7 @@ def _manual_rule_review_confirmations(obligations: list[Any]) -> list[dict[str, 
                 "role": obligation.get("role"),
                 "action": obligation.get("action"),
                 "rules_url": obligation.get("rules_url"),
+                "review_fingerprint": obligation.get("review_fingerprint"),
                 "required_confirmations": required_confirmations if isinstance(required_confirmations, list) else [],
             }
         )

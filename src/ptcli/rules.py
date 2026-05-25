@@ -7,6 +7,8 @@ Tracker adapters remain responsible for concrete upload/download validation.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import asdict, dataclass
 from typing import Any, Final
 
@@ -181,14 +183,17 @@ def _rule_obligations(source_tracker: str, target_trackers: list[str], profiles:
 
 
 def _rule_obligation(tracker: str, profile: RuleProfile, *, role: str, action: str, accept_rules: bool) -> dict[str, Any]:
+    review_scope = _review_scope(profile, role=role, action=action)
+    fingerprint = _rule_review_fingerprint(tracker=tracker, role=role, action=action, rules_url=profile.rules_url, review_scope=review_scope)
     return {
         "tracker": tracker,
         "role": role,
         "action": action,
         "rules_url": profile.rules_url,
+        "review_fingerprint": fingerprint,
         "acknowledged": accept_rules,
-        "acknowledgement_evidence": _acknowledgement_evidence(tracker, role, action, profile.rules_url, accept_rules),
-        "review_scope": _review_scope(profile, role=role, action=action),
+        "acknowledgement_evidence": _acknowledgement_evidence(tracker, role, action, profile.rules_url, accept_rules, fingerprint),
+        "review_scope": review_scope,
         "message": f"{tracker} {role} {action} rules have been acknowledged." if accept_rules else f"Review and acknowledge {tracker} {role} {action} rules before automation.",
     }
 
@@ -205,12 +210,13 @@ def _manual_review_summary(source_tracker: str, target_trackers: list[str], obli
         "rules_urls": rules_urls,
         "required_confirmations": _manual_review_confirmations(obligations),
         "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in obligations if isinstance(obligation.get("acknowledgement_evidence"), dict)],
+        "review_fingerprints": [str(obligation["review_fingerprint"]) for obligation in obligations if obligation.get("review_fingerprint")],
         "site_specific_rules_encoded": False,
         "message": "Manual source/target rule review has been acknowledged." if accept_rules else "Manual source/target rule review is required before automation.",
     }
 
 
-def _acknowledgement_evidence(tracker: str, role: str, action: str, rules_url: str, accept_rules: bool) -> dict[str, Any]:
+def _acknowledgement_evidence(tracker: str, role: str, action: str, rules_url: str, accept_rules: bool, review_fingerprint: str) -> dict[str, Any]:
     return {
         "mode": "--accept-rules",
         "acknowledged": accept_rules,
@@ -218,6 +224,7 @@ def _acknowledgement_evidence(tracker: str, role: str, action: str, rules_url: s
         "role": role,
         "action": action,
         "rules_url": rules_url,
+        "review_fingerprint": review_fingerprint,
         "site_specific_rules_encoded": False,
         "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
     }
@@ -240,6 +247,19 @@ def _review_scope(profile: RuleProfile, *, role: str, action: str) -> dict[str, 
     }
 
 
+def _rule_review_fingerprint(*, tracker: str, role: str, action: str, rules_url: str, review_scope: dict[str, Any]) -> str:
+    payload = {
+        "tracker": tracker,
+        "role": role,
+        "action": action,
+        "rules_url": rules_url,
+        "required_confirmations": review_scope.get("required_confirmations") if isinstance(review_scope.get("required_confirmations"), list) else [],
+        "encoded_checks": review_scope.get("encoded_checks") if isinstance(review_scope.get("encoded_checks"), list) else [],
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _manual_review_confirmations(obligations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     confirmations = []
     for obligation in obligations:
@@ -252,6 +272,7 @@ def _manual_review_confirmations(obligations: list[dict[str, Any]]) -> list[dict
                 "role": obligation.get("role"),
                 "action": obligation.get("action"),
                 "rules_url": obligation.get("rules_url"),
+                "review_fingerprint": obligation.get("review_fingerprint"),
                 "required_confirmations": review_scope.get("required_confirmations") if isinstance(review_scope.get("required_confirmations"), list) else [],
             }
         )
