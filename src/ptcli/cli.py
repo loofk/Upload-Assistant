@@ -551,6 +551,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     closure = pipeline_result.get("closure") if isinstance(pipeline_result.get("closure"), dict) else None
     evidence = pipeline_result.get("evidence") if isinstance(pipeline_result.get("evidence"), dict) else None
     summary = pipeline_result.get("summary") if isinstance(pipeline_result.get("summary"), dict) else None
+    closure_audit = pipeline_result.get("closure_audit") if isinstance(pipeline_result.get("closure_audit"), dict) else _pipeline_closure_audit(closure, evidence)
     ready = bool(pipeline_result.get("ready"))
     artifacts = _retorrent_execute_artifacts(pipeline_result, evidence, closure)
     blockers = _retorrent_execute_blockers(pipeline_result, closure, ready, artifacts)
@@ -569,6 +570,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "wait_options": pipeline_result.get("wait_options") if isinstance(pipeline_result.get("wait_options"), dict) else _pipeline_wait_options(pipeline_args),
         "pipeline": pipeline_result,
         "closure": closure,
+        "closure_audit": closure_audit,
         "evidence": evidence,
         "summary": summary,
         "summary_file": pipeline_result.get("summary_file"),
@@ -2606,6 +2608,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     blockers = _pipeline_stage_blockers(stages) if _pipeline_has_action(args) and not ready else []
     closure = _pipeline_closure(stages, effective_content_path, effective_source_torrent_hash, effective_target_torrent_file)
     evidence = _pipeline_evidence(closure)
+    closure_audit = _pipeline_closure_audit(closure, evidence)
     summary = _pipeline_run_summary(stages, ready, blockers, closure, evidence)
     summary["requested_actions"] = requested_actions
     summary["effective_actions"] = effective_actions
@@ -2635,6 +2638,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "requested_actions": requested_actions,
         "effective_actions": effective_actions,
         "closure": closure,
+        "closure_audit": closure_audit,
         "evidence": evidence,
         "summary": summary,
         "next_actions": _pipeline_next_actions(args, blockers, closure),
@@ -3137,6 +3141,7 @@ def _pipeline_run_summary(stages: list[dict[str, Any]], ready: bool, blockers: l
         "complete": bool(closure.get("complete")),
         "status": "complete" if ready and closure.get("complete") else "blocked" if blockers or closure.get("blockers") else "incomplete",
         "blockers": blockers or (closure.get("blockers") if isinstance(closure.get("blockers"), list) else []),
+        "closure_audit": _pipeline_closure_audit(closure, evidence),
         "stage_statuses": stage_statuses,
         "failed_stages": [stage["stage"] for stage in stage_statuses if not stage["ok"]],
         "completed_stages": [stage["stage"] for stage in stage_statuses if stage["ok"] and not stage["skipped"]],
@@ -3419,6 +3424,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "requested_actions": payload.get("requested_actions", {}),
         "effective_actions": payload.get("effective_actions", {}),
         "closure": payload.get("closure"),
+        "closure_audit": payload.get("closure_audit"),
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),
         "next_actions": payload.get("next_actions", []),
@@ -4122,6 +4128,57 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "package_reused": bool(target.get("package_reused")),
             "uploaded_torrent_reused": bool(target.get("uploaded_torrent_reused")),
         },
+    }
+
+
+def _pipeline_closure_audit(closure: dict[str, Any] | None, evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+    closure_source = closure.get("source") if isinstance(closure, dict) and isinstance(closure.get("source"), dict) else {}
+    closure_target = closure.get("target") if isinstance(closure, dict) and isinstance(closure.get("target"), dict) else {}
+    evidence_source = evidence.get("source") if isinstance(evidence, dict) and isinstance(evidence.get("source"), dict) else {}
+    evidence_target = evidence.get("target") if isinstance(evidence, dict) and isinstance(evidence.get("target"), dict) else {}
+    source_mode = evidence_source.get("mode")
+    source_injection_required = source_mode in {"downloaded", "resumed_torrent"} or bool(
+        closure_source.get("downloaded") or closure_source.get("injected") or closure_source.get("source_torrent_reused")
+    )
+
+    items: list[dict[str, Any]] = []
+
+    def add(name: str, ok: Any, *, scope: str, evidence_keys: list[str]) -> None:
+        items.append({"name": name, "scope": scope, "ok": bool(ok), "evidence": evidence_keys})
+
+    add("source.ready", closure_source.get("ready") or evidence_source.get("ready"), scope="source", evidence_keys=["closure.source.ready", "evidence.source.ready"])
+    add("source.hash_consistent", closure_source.get("hash_consistent") or evidence_source.get("hash_consistent"), scope="source", evidence_keys=["closure.source.hash_consistent", "evidence.source.hash_consistent"])
+    add("source.wait_evidence", _wait_result_completed(closure_source.get("source_wait")) or bool(evidence_source.get("source_wait_evidence")), scope="source", evidence_keys=["closure.source.source_wait", "evidence.source.source_wait_evidence"])
+    if source_injection_required:
+        add("source.torrent_hash", closure_source.get("torrent_hash") or evidence_source.get("torrent_hash"), scope="source", evidence_keys=["closure.source.torrent_hash", "evidence.source.torrent_hash"])
+        add(
+            "source.injected_torrent_hash",
+            closure_source.get("injected_torrent_hash") or evidence_source.get("injected_torrent_hash"),
+            scope="source",
+            evidence_keys=["closure.source.injected_torrent_hash", "evidence.source.injected_torrent_hash"],
+        )
+        add("source.injection_verified", closure_source.get("injection_verified") or evidence_source.get("injection_verified"), scope="source", evidence_keys=["closure.source.injection_verified", "evidence.source.injection_verified"])
+
+    add("target.prepared", closure_target.get("prepared") or evidence_target.get("prepared"), scope="target", evidence_keys=["closure.target.prepared", "evidence.target.prepared"])
+    add("target.uploaded", closure_target.get("uploaded") or evidence_target.get("uploaded"), scope="target", evidence_keys=["closure.target.uploaded", "evidence.target.uploaded"])
+    add("target.downloaded", closure_target.get("downloaded") or evidence_target.get("downloaded"), scope="target", evidence_keys=["closure.target.downloaded", "evidence.target.downloaded"])
+    add("target.injected", closure_target.get("injected") or evidence_target.get("injected"), scope="target", evidence_keys=["closure.target.injected", "evidence.target.injected"])
+    add("target.seeding", closure_target.get("seeding") or evidence_target.get("seeding"), scope="target", evidence_keys=["closure.target.seeding", "evidence.target.seeding"])
+    add("target.hash_consistent", closure_target.get("hash_consistent") or evidence_target.get("hash_consistent"), scope="target", evidence_keys=["closure.target.hash_consistent", "evidence.target.hash_consistent"])
+    add("target.duplicate_clean", closure_target.get("duplicate_clean") or evidence_target.get("duplicate_clean"), scope="target", evidence_keys=["closure.target.duplicate_clean", "evidence.target.duplicate_clean"])
+    target_rules = closure_target.get("rule_obligations") if isinstance(closure_target.get("rule_obligations"), dict) else evidence_target.get("rule_obligations")
+    add("target.rule_obligations", isinstance(target_rules, dict) and target_rules.get("ready"), scope="target", evidence_keys=["closure.target.rule_obligations", "evidence.target.rule_obligations"])
+    add("target.uploaded_torrent_hash", closure_target.get("uploaded_torrent_hash") or evidence_target.get("uploaded_torrent_hash"), scope="target", evidence_keys=["closure.target.uploaded_torrent_hash", "evidence.target.uploaded_torrent_hash"])
+    add("target.injected_torrent_hash", closure_target.get("injected_torrent_hash") or evidence_target.get("injected_torrent_hash"), scope="target", evidence_keys=["closure.target.injected_torrent_hash", "evidence.target.injected_torrent_hash"])
+    add("target.injection_verified", closure_target.get("injection_verified") or evidence_target.get("injection_verified"), scope="target", evidence_keys=["closure.target.injection_verified", "evidence.target.injection_verified"])
+    add("target.uploaded_wait_evidence", _wait_result_completed(closure_target.get("uploaded_wait")) or bool(evidence_target.get("uploaded_wait_evidence")), scope="target", evidence_keys=["closure.target.uploaded_wait", "evidence.target.uploaded_wait_evidence"])
+
+    missing = [item["name"] for item in items if not item["ok"]]
+    return {
+        "ready": not missing,
+        "missing": missing,
+        "source_injection_audit_required": source_injection_required,
+        "items": items,
     }
 
 

@@ -475,6 +475,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                 },
             },
             "summary": {"ready": True, "complete": True, "status": "complete"},
+            "closure_audit": {"ready": True, "missing": [], "items": [{"name": "source.ready", "ok": True}]},
             "summary_file": str(tmp_path / "summary" / "ptcli-run-summary.json"),
             "output_options": {
                 "source_output_dir": "./tmp/source",
@@ -566,6 +567,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["ready"] is True
     assert payload["closure"]["source"]["complete"] is True
     assert payload["closure"]["target"]["injected"] is True
+    assert payload["closure_audit"]["ready"] is True
+    assert payload["closure_audit"]["missing"] == []
     assert payload["evidence"]["source"]["mode"] == "downloaded"
     assert payload["evidence"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert payload["summary"]["status"] == "complete"
@@ -7001,6 +7004,11 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert payload["closure"]["source"]["downloaded"] is True
     assert payload["closure"]["source"]["injected"] is True
     assert payload["closure"]["source"]["complete"] is True
+    assert payload["closure_audit"]["ready"] is True
+    assert payload["closure_audit"]["missing"] == []
+    audit_items = {item["name"]: item for item in payload["closure_audit"]["items"]}
+    assert audit_items["source.injected_torrent_hash"]["ok"] is True
+    assert audit_items["target.uploaded_wait_evidence"]["ok"] is True
     assert payload["closure"]["target"]["uploaded_torrent_hash"] == uploaded_hash
     assert payload["closure"]["target"]["seeding"] is True
     assert payload["closure"]["target"]["uploaded_wait"]["complete"] is True
@@ -7012,6 +7020,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert wait_calls[-1]["interval"] == 20.0
     summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
     assert summary_payload["complete"] is True
+    assert summary_payload["closure_audit"]["ready"] is True
+    assert summary_payload["closure_audit"]["missing"] == []
+    assert summary_payload["summary"]["closure_audit"]["ready"] is True
     assert summary_payload["config"] == str(tmp_path / "config.py")
     assert summary_payload["base_dir"] == str(tmp_path)
     assert summary_payload["client"] == "default"
