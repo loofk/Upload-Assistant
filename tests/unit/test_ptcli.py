@@ -2799,6 +2799,32 @@ def test_doctor_infers_uploaded_save_path_from_package_content(tmp_path) -> None
     assert any(check["name"] == "uploaded_save_path" and check["ok"] is True and str(content_path) in check["message"] for check in payload["checks"])
 
 
+def test_doctor_summary_artifacts_include_effective_uploaded_save_path(tmp_path) -> None:
+    content_path = tmp_path / "downloads" / "Name"
+    content_path.mkdir(parents=True)
+    args = argparse.Namespace(
+        content_path=None,
+        source_torrent_file=None,
+        package_dir=None,
+        target_torrent_file=None,
+        uploaded_torrent_id=None,
+        uploaded_torrent_file=None,
+    )
+
+    artifacts = ptcli_cli._doctor_summary_artifacts(args, str(content_path))
+    resume_state = ptcli_cli._doctor_resume_state(
+        {"ready": True, "live_safe_to_attempt": True},
+        artifacts,
+        [],
+        [{"stage": "doctor-live-probes", "command": "python3 ptcli.py doctor --connect-qbit"}],
+    )
+
+    assert artifacts["effective_uploaded_save_path"]["path"] == str(content_path)
+    assert artifacts["effective_uploaded_save_path"]["exists"] is True
+    assert artifacts["effective_uploaded_save_path"]["is_dir"] is True
+    assert resume_state["artifacts"]["effective_uploaded_save_path"] is True
+
+
 def test_doctor_blocks_live_upload_without_rule_obligations(tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)

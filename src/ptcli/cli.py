@@ -1201,7 +1201,7 @@ def _write_doctor_summary(payload: dict[str, Any], args: argparse.Namespace, out
 def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, summary_file: str) -> dict[str, Any]:
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
     failed_checks = [check for check in checks if isinstance(check, dict) and not check.get("ok")]
-    artifacts = _doctor_summary_artifacts(args)
+    artifacts = _doctor_summary_artifacts(args, payload.get("effective_uploaded_save_path"))
     recommended_commands = _doctor_recommended_commands(payload, args, artifacts)
     return {
         "schema_version": 1,
@@ -1249,6 +1249,7 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
             "target_torrent_file": bool(_path_artifact_exists(artifacts.get("target_torrent_file"))),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(_path_artifact_exists(artifacts.get("uploaded_torrent_file"))),
+            "effective_uploaded_save_path": bool(_path_artifact_exists(artifacts.get("effective_uploaded_save_path"))),
         },
         "failed_check_names": [str(check.get("name")) for check in failed_checks if isinstance(check, dict)],
     }
@@ -1288,7 +1289,7 @@ def _doctor_summary_inputs(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _doctor_summary_artifacts(args: argparse.Namespace) -> dict[str, Any]:
+def _doctor_summary_artifacts(args: argparse.Namespace, effective_uploaded_save_path: Any = None) -> dict[str, Any]:
     return {
         "content_path": _path_artifact(args.content_path),
         "source_torrent_file": _path_artifact(args.source_torrent_file),
@@ -1296,6 +1297,7 @@ def _doctor_summary_artifacts(args: argparse.Namespace) -> dict[str, Any]:
         "target_torrent_file": _path_artifact(args.target_torrent_file),
         "uploaded_torrent_id": args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(args.uploaded_torrent_file),
+        "effective_uploaded_save_path": _path_artifact(str(effective_uploaded_save_path)) if effective_uploaded_save_path else None,
     }
 
 
