@@ -120,7 +120,7 @@ _LEGACY_RUNTIME_MODULES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _runtime_dependency_check() -> dict[str, Any]:
+def build_runtime_dependency_check() -> dict[str, Any]:
     required = [_module_status(package, module) for package, module in _PTCLI_RUNTIME_MODULES]
     legacy = [_module_status(package, module) for package, module in _LEGACY_RUNTIME_MODULES]
     missing = [item["package"] for item in required if not item["available"]]
@@ -135,6 +135,10 @@ def _runtime_dependency_check() -> dict[str, Any]:
             "message": "Legacy Web UI/Discord/client dependencies are not required for ptcli.",
         },
     }
+
+
+def _runtime_dependency_check() -> dict[str, Any]:
+    return build_runtime_dependency_check()
 
 
 def _module_status(package: str, module: str) -> dict[str, Any]:

@@ -477,6 +477,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.download_uploaded_torrent is True
     assert pipeline_args.inject_uploaded_torrent is True
     assert pipeline_args.wait_uploaded_complete is True
+    assert pipeline_args.check_runtime is True
     assert pipeline_args.write_summary is True
     assert pipeline_args.summary_output_dir == str(tmp_path / "summary")
     assert pipeline_args.save_path == "/downloads"
@@ -3166,9 +3167,9 @@ async def test_pipeline_keeps_source_info_error(monkeypatch, tmp_path) -> None:
     assert payload["status"] == "ok"
     assert payload["ready"] is False
     assert payload["blockers"] == []
-    assert payload["stages"][1]["stage"] == "source-info"
-    assert payload["stages"][1]["ok"] is False
-    assert payload["stages"][1]["error"] == "source unavailable"
+    source_info_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-info")
+    assert source_info_stage["ok"] is False
+    assert source_info_stage["error"] == "source unavailable"
 
 
 @pytest.mark.asyncio
@@ -3221,8 +3222,9 @@ async def test_pipeline_rejects_empty_source_info(monkeypatch, tmp_path) -> None
     payload = await ptcli_cli.pipeline_payload(args)
 
     assert payload["ready"] is False
-    assert payload["stages"][1]["ok"] is False
-    assert "no usable identifiers" in payload["stages"][1]["error"]
+    source_info_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-info")
+    assert source_info_stage["ok"] is False
+    assert "no usable identifiers" in source_info_stage["error"]
 
 
 @pytest.mark.asyncio
@@ -5210,6 +5212,102 @@ async def test_pipeline_target_execute_enables_uploaded_torrent_followup(monkeyp
     assert payload["closure"]["target"]["downloaded"] is True
     assert payload["closure"]["target"]["injected"] is True
     assert payload["closure"]["target"]["seeding"] is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_target_execute_blocks_missing_runtime_dependency(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_hash = "a" * 40
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 2,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": source_hash,
+        "description_length": 4,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Name", str(tmp_path / "target"), accept_rules=True)
+    target_torrent = tmp_path / "target.mteam-upload.torrent"
+    target_torrent.write_bytes(b"d4:infod")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    original_find_spec = ptcli_doctor.importlib.util.find_spec
+
+    def fake_find_spec(module):
+        if module == "qbittorrentapi":
+            return None
+        return original_find_spec(module)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (base_dir, source_id)
+        return source_info_from_tuple(tracker, "60635", (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", source_hash, "desc"), {})
+
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {"client": client_name, "complete": True, "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval}, "matches": [{"hash": source_hash, "content_path": content_path}]}
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": source_hash}]}
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
+
+    async def fake_target_upload_with_config(*_args, **_kwargs):
+        raise AssertionError("live target upload must not run when runtime dependencies are missing")
+
+    monkeypatch.setattr(ptcli_doctor.importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "_target_upload_with_config", fake_target_upload_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            "/downloads/Name",
+            "--package-dir",
+            package["package_dir"],
+            "--check-dupes",
+            "--accept-rules",
+            "--upload-target",
+            "--target-torrent-file",
+            str(target_torrent),
+            "--target-execute",
+            "--confirm-upload",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    runtime_stage = next(stage for stage in payload["stages"] if stage["stage"] == "runtime-check")
+    upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
+    assert runtime_stage["ok"] is False
+    assert "qbittorrent-api" in runtime_stage["result"]["message"]
+    assert upload_stage["ok"] is False
+    assert upload_stage["skipped"] is True
+    assert "focused ptcli runtime dependencies are not ready" in upload_stage["message"]
+    assert any(blocker.startswith("runtime-check: Missing PTCLI runtime dependencies") for blocker in payload["blockers"])
+    assert "Install the focused ptcli runtime dependencies" in payload["next_actions"][0]
+    assert payload["effective_actions"]["check_runtime"] is True
 
 
 @pytest.mark.asyncio

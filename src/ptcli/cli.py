@@ -19,7 +19,7 @@ from torf import Torrent
 
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
-from src.ptcli.doctor import build_doctor_check, extend_doctor_check
+from src.ptcli.doctor import build_doctor_check, build_runtime_dependency_check, extend_doctor_check
 from src.ptcli.flows import NEXUSPHP_MTEAM_SOURCE_TRACKERS, flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
@@ -226,6 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--wait-uploaded-complete", action="store_true", help="Wait for the injected target torrent to become complete in qBittorrent.")
     pipeline.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait with --wait-uploaded-complete.")
     pipeline.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for --wait-uploaded-complete.")
+    pipeline.add_argument("--check-runtime", action="store_true", help="Verify focused ptcli runtime dependencies before action stages. Enabled automatically by --target-execute.")
     pipeline.add_argument("--write-summary", action="store_true", help="Write ptcli-run-summary.json for audit and automation handoff.")
     pipeline.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to target package or ./tmp/retorrent-runs.")
     pipeline.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
@@ -290,6 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent paused.")
     retorrent.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait for the uploaded target torrent to become complete during --execute; uploaded completion wait is enabled automatically.")
     retorrent.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for uploaded target torrent completion during --execute; uploaded completion wait is enabled automatically.")
+    retorrent.add_argument("--check-runtime", action="store_true", help="Verify focused ptcli runtime dependencies before action stages. Enabled automatically by --execute.")
     retorrent.add_argument("--write-summary", action="store_true", help="Write ptcli-run-summary.json during --execute for audit and automation handoff. Enabled by default for --execute.")
     retorrent.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to target package or ./tmp/retorrent-runs.")
     retorrent.add_argument(
@@ -640,6 +642,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         wait_uploaded_complete=True,
         uploaded_wait_timeout=args.uploaded_wait_timeout,
         uploaded_wait_interval=args.uploaded_wait_interval,
+        check_runtime=True,
         write_summary=True,
         summary_output_dir=args.summary_output_dir,
         json=getattr(args, "json", False),
@@ -1389,6 +1392,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     effective_source_torrent_hash: str | None = None
     requested_actions = _pipeline_requested_actions(args)
     live_target_upload = bool(args.upload_target and args.target_execute)
+    runtime_check_requested = bool(getattr(args, "check_runtime", False) or live_target_upload)
     source_download_requested = bool(args.download_source or (live_target_upload and not args.content_path and not args.source_torrent_file))
     source_injection_requested = bool(args.inject_source or (live_target_upload and not args.content_path))
     source_wait_requested = bool(args.wait_complete or (live_target_upload and (source_injection_requested or args.content_path)))
@@ -1399,6 +1403,12 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         args.wait_uploaded_complete = True
 
     stages: list[dict[str, Any]] = []
+    if runtime_check_requested:
+        runtime_check = build_runtime_dependency_check()
+        stages.append({"stage": "runtime-check", "ok": bool(runtime_check.get("ok")), "message": runtime_check.get("message"), "result": runtime_check})
+    else:
+        stages.append({"stage": "runtime-check", "ok": True, "skipped": True, "message": "--check-runtime not provided; runtime dependency check skipped."})
+
     flow_check_result = build_flow_check(config, source_tracker, source_torrent_id, ",".join(target_trackers), args.client, base_dir=args.base_dir)
     stages.append({"stage": "flow-check", "ok": bool(flow_check_result.get("ready")), "result": flow_check_result})
 
@@ -1415,7 +1425,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     stages.append({"stage": "rule-check", "ok": True, "result": rule_check_result})
 
     if args.source_torrent_file:
-        if _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages):
+        if _runtime_check_ready(stages) and _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages):
             source_download_result = await _pipeline_stage(
                 "source-download",
                 lambda: _existing_source_torrent_payload(args.source_torrent_file),
@@ -1432,11 +1442,11 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                     "stage": "source-download",
                     "ok": False,
                     "skipped": True,
-                    "message": "Skipped because flow-check, source-info, or executable rule-check did not pass.",
+                    "message": "Skipped because runtime-check, flow-check, source-info, or executable rule-check did not pass.",
                 }
             )
     elif source_download_requested:
-        if _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages):
+        if _runtime_check_ready(stages) and _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages):
             source_download_result = await _pipeline_stage(
                 "source-download",
                 lambda: download_source_torrent(config, source_tracker, source_torrent_id, args.output_dir, base_dir=args.base_dir),
@@ -1453,7 +1463,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                     "stage": "source-download",
                     "ok": False,
                     "skipped": True,
-                    "message": "Skipped because flow-check, source-info, or executable rule-check did not pass.",
+                    "message": "Skipped because runtime-check, flow-check, source-info, or executable rule-check did not pass.",
                 }
             )
     else:
@@ -1602,6 +1612,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     effective_actions = _pipeline_effective_actions(
         args,
         live_target_upload=live_target_upload,
+        runtime_check=runtime_check_requested,
         source_download=source_download_requested,
         source_injection=source_injection_requested,
         source_wait=source_wait_requested,
@@ -1629,6 +1640,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because current pipeline run did not verify complete source qBittorrent content before live target upload."})
         elif args.target_execute and not (args.uploaded_torrent_file or args.uploaded_torrent_id) and not _target_duplicate_ready_for_live_upload(stages):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because current pipeline run did not complete a clean MTEAM duplicate check before live target upload."})
+        elif args.target_execute and not _runtime_check_ready(stages):
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because focused ptcli runtime dependencies are not ready for live target upload."})
         else:
             package_dir = str(target_prepare_stage.get("result", {}).get("package_dir", ""))
             upload_stage = await _pipeline_stage(
@@ -1713,6 +1726,11 @@ def _rule_check_ready(stages: list[dict[str, Any]]) -> bool:
         return False
     result = stage.get("result")
     return isinstance(result, dict) and bool(result.get("ready"))
+
+
+def _runtime_check_ready(stages: list[dict[str, Any]]) -> bool:
+    stage = _find_stage(stages, "runtime-check")
+    return True if stage is None or stage.get("skipped") else bool(stage.get("ok"))
 
 
 def _source_ready_for_live_target_upload(stages: list[dict[str, Any]]) -> bool:
@@ -2092,6 +2110,7 @@ def _pipeline_requested_actions(args: argparse.Namespace) -> dict[str, bool]:
         "target_torrent_sanitize": bool(args.sanitize_target_torrent),
         "upload_target": bool(args.upload_target),
         "target_execute": bool(args.target_execute),
+        "check_runtime": bool(getattr(args, "check_runtime", False)),
         "download_uploaded_torrent": bool(args.download_uploaded_torrent),
         "uploaded_torrent_id": bool(args.uploaded_torrent_id),
         "inject_uploaded_torrent": bool(args.inject_uploaded_torrent),
@@ -2104,6 +2123,7 @@ def _pipeline_effective_actions(
     args: argparse.Namespace,
     *,
     live_target_upload: bool,
+    runtime_check: bool,
     source_download: bool,
     source_injection: bool,
     source_wait: bool,
@@ -2112,6 +2132,7 @@ def _pipeline_effective_actions(
 ) -> dict[str, bool]:
     return {
         "live_target_upload": live_target_upload,
+        "check_runtime": runtime_check,
         "download_source": source_download,
         "inject_source": source_injection,
         "wait_complete": source_wait,
@@ -2556,8 +2577,10 @@ def _pipeline_next_actions(args: argparse.Namespace, blockers: list[str], closur
 
 
 def _pipeline_stage_blocker_next_action(blocker: str) -> str:
+    if blocker.startswith("runtime-check:"):
+        return "Install the focused ptcli runtime dependencies with requirements-ptcli.txt, then rerun the pipeline."
     if blocker.startswith("source-download:"):
-        return "Fix source torrent download prerequisites, then re-run with --download-source after flow-check, source-info, and rule-check pass."
+        return "Fix source torrent download prerequisites, then re-run with --download-source after runtime-check, flow-check, source-info, and rule-check pass."
     if blocker.startswith("inject-source: --save-path"):
         return "Provide a qBittorrent save path with --save-path when using --inject-source."
     if blocker.startswith("inject-source:"):
