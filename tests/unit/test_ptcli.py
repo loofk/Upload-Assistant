@@ -1588,6 +1588,22 @@ def test_pipeline_next_actions_explain_target_upload_followup_blockers() -> None
     assert any("--wait-uploaded-complete" in action for action in actions)
 
 
+def test_resume_next_command_uses_stage_blocker_details() -> None:
+    commands = {
+        "resume-target-upload": "python3 ptcli.py pipeline --upload-target",
+        "resume-uploaded-torrent": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent",
+        "resume-uploaded-torrent-download": "python3 ptcli.py target-upload --uploaded-torrent-id 999",
+    }
+
+    uploaded_wait = ptcli_cli._resume_next_command(["target-upload: uploaded_wait: torrent hash missing"], commands)
+    downloaded_missing = ptcli_cli._resume_next_command(["target-upload: downloaded_torrent: target torrent file does not exist on disk."], commands)
+    generic_target = ptcli_cli._resume_next_command(["target-upload: MTEAM upload failed."], commands)
+
+    assert uploaded_wait["stage"] == "resume-uploaded-torrent"
+    assert downloaded_missing["stage"] == "resume-uploaded-torrent-download"
+    assert generic_target["stage"] == "resume-target-upload"
+
+
 def test_pipeline_next_actions_reports_closure_blockers() -> None:
     parser = build_parser()
     args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--prepare-target", "--json"])

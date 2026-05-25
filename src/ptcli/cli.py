@@ -2719,6 +2719,8 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
 def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], resume_commands: list[dict[str, str]]) -> dict[str, Any]:
     closure = payload.get("closure") if isinstance(payload.get("closure"), dict) else {}
     blockers = closure.get("blockers") if isinstance(closure.get("blockers"), list) else []
+    blockers = [str(blocker) for blocker in blockers]
+    _extend_unique_string(blockers, _string_list(payload.get("blockers")))
     commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in resume_commands if isinstance(command, dict)}
     complete = bool(closure.get("complete"))
     next_command = {"stage": None, "command": None} if complete else _resume_next_command(blockers, commands_by_stage)
@@ -2735,13 +2737,25 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
         },
-        "blockers": [str(blocker) for blocker in blockers],
+        "blockers": blockers,
     }
 
 
 def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
     preferred_stages: list[str] = []
+    stage_detail_preferred: list[str] = []
+    stage_generic_preferred: list[str] = []
     blocker_names = {str(blocker) for blocker in blockers}
+    for blocker in (str(blocker) for blocker in blockers):
+        if blocker.startswith(("source-download:", "source-torrent-verify:", "inject-source:", "wait-complete:", "source-content-verify:")):
+            stage_detail_preferred.append("resume-source-torrent")
+        if blocker.startswith(("target-upload: downloaded_torrent:", "target-upload: downloaded_torrent_hash:")):
+            stage_detail_preferred.append("resume-uploaded-torrent-download")
+        elif blocker.startswith(("target-upload: injected_torrent:", "target-upload: uploaded_wait:", "target-upload: uploaded_torrent_hash:")):
+            stage_detail_preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
+        elif blocker.startswith("target-upload:"):
+            stage_generic_preferred.append("resume-target-upload")
+    preferred_stages.extend(stage_detail_preferred)
     if "source.ready" in blocker_names:
         preferred_stages.append("resume-source-torrent")
     if "target.downloaded" in blocker_names:
@@ -2750,6 +2764,7 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
         preferred_stages.append("resume-target-upload")
     if "target.injected" in blocker_names or "target.seeding" in blocker_names:
         preferred_stages.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
+    preferred_stages.extend(stage_generic_preferred)
     preferred_stages.extend(["resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
     for stage in preferred_stages:
         command = commands_by_stage.get(stage)
