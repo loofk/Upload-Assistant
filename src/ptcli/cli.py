@@ -1016,13 +1016,15 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
 def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str, Any], args: argparse.Namespace, summary_file: str) -> dict[str, Any]:
     downloaded_torrent = result.get("downloaded_torrent")
     uploaded_torrent_path = downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else args.uploaded_torrent_file
+    package_content_path = _mteam_package_content_path(preflight)
     return {
         "summary_file": summary_file,
         "package_dir": _path_artifact(args.package_dir),
+        "package_content_path": _path_artifact(package_content_path),
         "target_torrent_file": _path_artifact(args.torrent_file),
         "uploaded_torrent_id": _uploaded_torrent_id_from_result(result) or args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(uploaded_torrent_path),
-        "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or _mteam_package_content_path(preflight) or args.uploaded_save_path),
+        "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or package_content_path or args.uploaded_save_path),
     }
 
 
@@ -1103,6 +1105,7 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
         "available_stages": [str(command.get("stage")) for command in recommended_commands if isinstance(command, dict)],
         "artifacts": {
             "package_dir": bool(_path_artifact_exists(artifacts.get("package_dir"))),
+            "package_content_path": bool(isinstance(artifacts.get("package_content_path"), dict) and artifacts["package_content_path"].get("path")),
             "target_torrent_file": bool(_path_artifact_exists(artifacts.get("target_torrent_file"))),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(_path_artifact_exists(artifacts.get("uploaded_torrent_file"))),

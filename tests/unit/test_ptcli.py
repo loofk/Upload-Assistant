@@ -7611,12 +7611,15 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["summary"]["qbit_closure"]["wait"]["query"]["torrent_hash"] == uploaded_hash
     assert summary_payload["summary"]["rule_obligations"]["ready"] is True
     assert summary_payload["artifacts"]["package_dir"]["is_dir"] is True
+    assert summary_payload["artifacts"]["package_content_path"]["path"] == "/downloads/Example"
+    assert summary_payload["artifacts"]["package_content_path"]["exists"] is False
     assert summary_payload["artifacts"]["target_torrent_file"]["is_file"] is True
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["path"] == str(tmp_path / "MTEAM-999.torrent")
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["is_file"] is True
     assert summary_payload["resume_state"]["ready"] is True
     assert summary_payload["resume_state"]["next_stage"] is None
     assert summary_payload["resume_state"]["next_command"] is None
+    assert summary_payload["resume_state"]["artifacts"]["package_content_path"] is True
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     assert "target-upload-retry" in commands
