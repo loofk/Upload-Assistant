@@ -1333,12 +1333,31 @@ def _target_upload_retorrent_resume_args(
 
 
 def _append_uploaded_wait_options(command_args: list[str], args: argparse.Namespace) -> None:
-    timeout = getattr(args, "uploaded_wait_timeout", None)
-    interval = getattr(args, "uploaded_wait_interval", None)
-    if timeout is not None and float(timeout) != 600.0:
-        command_args.extend(["--uploaded-wait-timeout", _format_number_arg(timeout)])
-    if interval is not None and float(interval) != 15.0:
-        command_args.extend(["--uploaded-wait-interval", _format_number_arg(interval)])
+    _append_wait_options(
+        command_args,
+        timeout_option="--uploaded-wait-timeout",
+        timeout=getattr(args, "uploaded_wait_timeout", None),
+        default_timeout=600.0,
+        interval_option="--uploaded-wait-interval",
+        interval=getattr(args, "uploaded_wait_interval", None),
+        default_interval=15.0,
+    )
+
+
+def _append_wait_options(
+    command_args: list[str],
+    *,
+    timeout_option: str,
+    timeout: Any,
+    default_timeout: float,
+    interval_option: str,
+    interval: Any,
+    default_interval: float,
+) -> None:
+    if timeout is not None and float(timeout) != default_timeout:
+        command_args.extend([timeout_option, _format_number_arg(timeout)])
+    if interval is not None and float(interval) != default_interval:
+        command_args.extend([interval_option, _format_number_arg(interval)])
 
 
 def _format_number_arg(value: Any) -> str:
@@ -2539,6 +2558,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "client": args.client,
         "qbit_options": _pipeline_qbit_options(args),
         "output_options": _pipeline_output_options(args),
+        "wait_options": _pipeline_wait_options(args),
         "path": effective_content_path,
         "requested_path": args.content_path,
         "target_torrent_file": effective_target_torrent_file,
@@ -3135,6 +3155,19 @@ def _pipeline_output_options(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _pipeline_wait_options(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "source": {
+            "timeout": args.wait_timeout,
+            "interval": args.wait_interval,
+        },
+        "uploaded": {
+            "timeout": args.uploaded_wait_timeout,
+            "interval": args.uploaded_wait_interval,
+        },
+    }
+
+
 def _pipeline_stage_status(stage: dict[str, Any]) -> dict[str, Any]:
     return {
         "stage": str(stage.get("stage") or "unknown"),
@@ -3308,6 +3341,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "client": payload.get("client"),
         "qbit_options": payload.get("qbit_options"),
         "output_options": payload.get("output_options"),
+        "wait_options": payload.get("wait_options"),
         "path": payload.get("path"),
         "target_torrent_file": payload.get("target_torrent_file"),
         "ready": payload.get("ready"),
@@ -3413,11 +3447,34 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     uploaded_output_dir_args = ["--uploaded-output-dir", str(uploaded_output_dir)] if uploaded_output_dir else []
     summary_output_dir = output_options.get("summary_output_dir")
     summary_output_dir_args = ["--summary-output-dir", str(summary_output_dir)] if summary_output_dir else []
+    wait_options = payload.get("wait_options") if isinstance(payload.get("wait_options"), dict) else {}
+    source_wait_options = wait_options.get("source") if isinstance(wait_options.get("source"), dict) else {}
+    uploaded_wait_options = wait_options.get("uploaded") if isinstance(wait_options.get("uploaded"), dict) else {}
     content_path = payload.get("path")
     path_args = ["--path", str(content_path)] if content_path else []
     source_save_path = artifacts.get("source_save_path") or content_path or "/downloads"
     uploaded_save_path = artifacts.get("uploaded_save_path") or content_path
     uploaded_save_path_args = ["--uploaded-save-path", str(uploaded_save_path)] if uploaded_save_path else []
+    source_wait_args: list[str] = []
+    _append_wait_options(
+        source_wait_args,
+        timeout_option="--wait-timeout",
+        timeout=source_wait_options.get("timeout"),
+        default_timeout=3600.0,
+        interval_option="--wait-interval",
+        interval=source_wait_options.get("interval"),
+        default_interval=30.0,
+    )
+    uploaded_wait_args: list[str] = []
+    _append_wait_options(
+        uploaded_wait_args,
+        timeout_option="--uploaded-wait-timeout",
+        timeout=uploaded_wait_options.get("timeout"),
+        default_timeout=600.0,
+        interval_option="--uploaded-wait-interval",
+        interval=uploaded_wait_options.get("interval"),
+        default_interval=15.0,
+    )
     commands: list[dict[str, Any]] = []
 
     source_torrent_file = artifacts.get("source_torrent_file")
@@ -3444,6 +3501,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                     str(source_save_path),
                     *_qbit_resume_args(source_qbit_options, prefix=""),
                     "--wait-complete",
+                    *source_wait_args,
                     "--accept-rules",
                     "--write-summary",
                     *summary_output_dir_args,
@@ -3486,6 +3544,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                     *uploaded_save_path_args,
                     *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
                     "--wait-uploaded-complete",
+                    *uploaded_wait_args,
                     "--write-summary",
                     *summary_output_dir_args,
                     "--json",
@@ -3513,6 +3572,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                     *uploaded_save_path_args,
                     *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
                     "--wait-uploaded-complete",
+                    *uploaded_wait_args,
                     "--write-summary",
                     *summary_output_dir_args,
                     "--json",
@@ -3536,6 +3596,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                     *uploaded_save_path_args,
                     *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
                     "--wait-uploaded-complete",
+                    *uploaded_wait_args,
                     "--write-summary",
                     *summary_output_dir_args,
                     "--json",

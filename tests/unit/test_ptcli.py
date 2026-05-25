@@ -6808,8 +6808,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     wait_calls = []
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
-        _ = (config, timeout, interval)
-        wait_calls.append({"client_name": client_name, "content_path": content_path, "torrent_hash": torrent_hash})
+        _ = config
+        wait_calls.append({"client_name": client_name, "content_path": content_path, "torrent_hash": torrent_hash, "timeout": timeout, "interval": interval})
         return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": content_path or "/downloads/Name", "hash": torrent_hash or "a" * 40}]}
 
     async def fake_search_mteam_duplicates(_config, source_info):
@@ -6865,6 +6865,10 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
             "source-tag",
             "--paused",
             "--wait-complete",
+            "--wait-timeout",
+            "7200",
+            "--wait-interval",
+            "45",
             "--check-dupes",
             "--prepare-target",
             "--target-output-dir",
@@ -6883,6 +6887,10 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
             "retorrent",
             "--uploaded-paused",
             "--wait-uploaded-complete",
+            "--uploaded-wait-timeout",
+            "900",
+            "--uploaded-wait-interval",
+            "20",
             "--write-summary",
             "--summary-output-dir",
             str(tmp_path / "summary"),
@@ -6900,8 +6908,12 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert payload["closure"]["target"]["uploaded_torrent_hash"] == uploaded_hash
     assert payload["closure"]["target"]["seeding"] is True
     assert payload["closure"]["target"]["uploaded_wait"]["complete"] is True
+    assert wait_calls[0]["timeout"] == 7200.0
+    assert wait_calls[0]["interval"] == 45.0
     assert wait_calls[-1]["torrent_hash"] == uploaded_hash
     assert wait_calls[-1]["content_path"] == "/downloads"
+    assert wait_calls[-1]["timeout"] == 900.0
+    assert wait_calls[-1]["interval"] == 20.0
     summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
     assert summary_payload["complete"] is True
     assert summary_payload["config"] == str(tmp_path / "config.py")
@@ -6910,6 +6922,10 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["qbit_options"] == {
         "source": {"category": "SOURCE", "tags": "source-tag", "paused": True},
         "uploaded": {"category": "MTEAM", "tags": "retorrent", "paused": True},
+    }
+    assert summary_payload["wait_options"] == {
+        "source": {"timeout": 7200.0, "interval": 45.0},
+        "uploaded": {"timeout": 900.0, "interval": 20.0},
     }
     assert summary_payload["artifacts"]["source_torrent_file"].endswith("U2-60635.torrent")
     assert summary_payload["artifacts"]["source_torrent_hash"] == "a" * 40
@@ -6969,6 +6985,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "--qbit-category SOURCE" in resume_commands["resume-source-torrent"]
     assert "--qbit-tags source-tag" in resume_commands["resume-source-torrent"]
     assert "--paused" in resume_commands["resume-source-torrent"]
+    assert "--wait-timeout 7200" in resume_commands["resume-source-torrent"]
+    assert "--wait-interval 45" in resume_commands["resume-source-torrent"]
     assert config_arg in resume_commands["resume-source-torrent"]
     assert base_dir_arg in resume_commands["resume-source-torrent"]
     assert summary_output_arg in resume_commands["resume-source-torrent"]
@@ -6983,6 +7001,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "--uploaded-qbit-category MTEAM" in resume_commands["resume-target-upload"]
     assert "--uploaded-qbit-tags retorrent" in resume_commands["resume-target-upload"]
     assert "--uploaded-paused" in resume_commands["resume-target-upload"]
+    assert "--uploaded-wait-timeout 900" in resume_commands["resume-target-upload"]
+    assert "--uploaded-wait-interval 20" in resume_commands["resume-target-upload"]
     assert config_arg in resume_commands["resume-target-upload"]
     assert base_dir_arg in resume_commands["resume-target-upload"]
     assert summary_output_arg in resume_commands["resume-target-upload"]
@@ -6991,6 +7011,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "--uploaded-qbit-category MTEAM" in resume_commands["resume-uploaded-torrent"]
     assert "--uploaded-qbit-tags retorrent" in resume_commands["resume-uploaded-torrent"]
     assert "--uploaded-paused" in resume_commands["resume-uploaded-torrent"]
+    assert "--uploaded-wait-timeout 900" in resume_commands["resume-uploaded-torrent"]
+    assert "--uploaded-wait-interval 20" in resume_commands["resume-uploaded-torrent"]
     assert config_arg in resume_commands["resume-uploaded-torrent"]
     assert base_dir_arg not in resume_commands["resume-uploaded-torrent"]
     assert summary_output_arg in resume_commands["resume-uploaded-torrent"]
@@ -7062,6 +7084,11 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
             "--uploaded-qbit-tags",
             "retorrent",
             "--uploaded-paused",
+            "--wait-uploaded-complete",
+            "--uploaded-wait-timeout",
+            "900",
+            "--uploaded-wait-interval",
+            "20",
             "--write-summary",
             "--summary-output-dir",
             str(tmp_path / "summary"),
@@ -7103,6 +7130,8 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     assert "--uploaded-qbit-category MTEAM" in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-tags retorrent" in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-paused" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-wait-timeout 900" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-wait-interval 20" in resume_commands["resume-uploaded-torrent-download"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in resume_commands["resume-uploaded-torrent-download"]
 
 
