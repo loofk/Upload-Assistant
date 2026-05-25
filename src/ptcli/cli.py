@@ -2291,9 +2291,18 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         upload_result = target_upload.get("result")
         if isinstance(upload_result, dict):
             artifacts["uploaded_torrent_id"] = _uploaded_torrent_id_from_result(upload_result)
+            artifacts["uploaded_torrent_hash"] = _uploaded_torrent_hash_from_result(upload_result)
+            fresh_duplicate_check = upload_result.get("fresh_duplicate_check")
+            if isinstance(fresh_duplicate_check, dict):
+                artifacts["fresh_duplicate_check"] = fresh_duplicate_check
             downloaded_torrent = upload_result.get("downloaded_torrent")
             if isinstance(downloaded_torrent, dict):
                 artifacts["uploaded_torrent_file"] = downloaded_torrent.get("path")
+    if "fresh_duplicate_check" not in artifacts and isinstance(stages, list):
+        target_dupe_check = _find_stage(stages, "target-dupe-check")
+        dupe_result = target_dupe_check.get("result") if isinstance(target_dupe_check, dict) else None
+        if isinstance(dupe_result, dict):
+            artifacts["fresh_duplicate_check"] = dupe_result
     return artifacts
 
 

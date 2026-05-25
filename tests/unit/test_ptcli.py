@@ -4378,6 +4378,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["target_torrent_file"] == str(torrent_file)
     assert summary_payload["artifacts"]["target_package_dir"]
     assert summary_payload["artifacts"]["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
+    assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
+    assert summary_payload["artifacts"]["uploaded_torrent_hash"] == uploaded_hash
+    assert summary_payload["artifacts"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
     assert summary_payload["artifacts"]["source_torrent_file"] in resume_commands["resume-source-torrent"]
     assert "--client default" in resume_commands["resume-source-torrent"]
