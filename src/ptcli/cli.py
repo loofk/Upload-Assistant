@@ -1236,6 +1236,9 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
         if args.uploaded_paused:
             download_args.append("--uploaded-paused")
         commands.append(_ptcli_command_entry("resume-uploaded-torrent-download", download_args))
+        retorrent_args = _target_upload_retorrent_resume_args(args, str(package_artifact.get("path") or args.package_dir), uploaded_torrent_id=str(uploaded_torrent_id), uploaded_save_path_artifact=uploaded_save_path_artifact)
+        if retorrent_args:
+            commands.append(_ptcli_command_entry("retorrent-resume-uploaded-torrent-download", retorrent_args))
     if isinstance(package_artifact, dict) and isinstance(uploaded_torrent_artifact, dict) and uploaded_torrent_artifact.get("path"):
         resume_args = [
             "target-upload",
@@ -1261,9 +1264,67 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
         if args.uploaded_paused:
             resume_args.append("--uploaded-paused")
         commands.append(_ptcli_command_entry("resume-uploaded-torrent", resume_args))
+        retorrent_args = _target_upload_retorrent_resume_args(
+            args,
+            str(package_artifact.get("path") or args.package_dir),
+            uploaded_torrent_file=str(uploaded_torrent_artifact["path"]),
+            uploaded_save_path_artifact=uploaded_save_path_artifact,
+        )
+        if retorrent_args:
+            commands.append(_ptcli_command_entry("retorrent-resume-uploaded-torrent", retorrent_args))
     if summary.get("ready"):
         commands.append(_ptcli_command_entry("verify-seeding", ["inspect", "--client", args.client, "--json"]))
     return commands
+
+
+def _target_upload_retorrent_resume_args(
+    args: argparse.Namespace,
+    package_dir: str,
+    *,
+    uploaded_torrent_file: str | None = None,
+    uploaded_torrent_id: str | None = None,
+    uploaded_save_path_artifact: Any = None,
+) -> list[str] | None:
+    source_info = _source_info_from_existing_target_package(package_dir)
+    if not isinstance(source_info, dict) or not source_info.get("tracker") or not source_info.get("torrent_id"):
+        return None
+    retorrent_args = [
+        "retorrent",
+        "--from",
+        str(source_info["tracker"]),
+        "--source-id",
+        str(source_info["torrent_id"]),
+        "--to",
+        "MTEAM",
+        "--client",
+        args.client,
+        "--execute",
+        "--accept-rules",
+        "--confirm-upload",
+        "--package-dir",
+        package_dir,
+    ]
+    if args.config:
+        retorrent_args.extend(["--config", args.config])
+    if uploaded_torrent_file:
+        retorrent_args.extend(["--uploaded-torrent-file", uploaded_torrent_file])
+    if uploaded_torrent_id:
+        retorrent_args.extend(["--uploaded-torrent-id", uploaded_torrent_id, "--download-uploaded-torrent"])
+    if args.uploaded_output_dir and uploaded_torrent_id:
+        retorrent_args.extend(["--uploaded-output-dir", args.uploaded_output_dir])
+    if isinstance(uploaded_save_path_artifact, dict) and uploaded_save_path_artifact.get("path"):
+        retorrent_args.extend(["--uploaded-save-path", str(uploaded_save_path_artifact["path"])])
+    if args.uploaded_qbit_category:
+        retorrent_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
+    if args.uploaded_qbit_tags:
+        retorrent_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
+    if args.uploaded_paused:
+        retorrent_args.append("--uploaded-paused")
+    retorrent_args.append("--write-summary")
+    if args.summary_output_dir:
+        retorrent_args.extend(["--summary-output-dir", args.summary_output_dir])
+    retorrent_args.append("--json")
+    return retorrent_args
 
 
 def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, Any], recommended_commands: list[dict[str, Any]]) -> dict[str, Any]:

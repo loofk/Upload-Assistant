@@ -9644,6 +9644,14 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["resume-uploaded-torrent"]
+    assert str(tmp_path / "MTEAM-999.torrent") in commands["retorrent-resume-uploaded-torrent"]
+    assert "--package-dir" in commands["retorrent-resume-uploaded-torrent"]
+    assert "--from U2" in commands["retorrent-resume-uploaded-torrent"]
+    assert "--source-id 60635" in commands["retorrent-resume-uploaded-torrent"]
+    assert "--client default" in commands["retorrent-resume-uploaded-torrent"]
+    assert "--uploaded-save-path /downloads/Example" in commands["retorrent-resume-uploaded-torrent"]
+    assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["retorrent-resume-uploaded-torrent"]
+    assert command_argv["retorrent-resume-uploaded-torrent"][:3] == ["python3", "ptcli.py", "retorrent"]
     assert command_argv["verify-seeding"] == ["python3", "ptcli.py", "inspect", "--client", "default", "--json"]
     assert commands["verify-seeding"].startswith("python3 ptcli.py inspect")
 
@@ -9828,6 +9836,13 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent-download"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-torrent-id 999" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert "--download-uploaded-torrent" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert "--from U2" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert "--source-id 60635" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert "--uploaded-save-path /mnt/seedbox/Example" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert command_argv["retorrent-resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "retorrent"]
 
 
 def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path) -> None:
