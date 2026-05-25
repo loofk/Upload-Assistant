@@ -514,6 +514,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["client"] == "default"
     assert payload["output_options"]["uploaded_output_dir"] == str(tmp_path / "uploaded")
     assert payload["output_options"]["summary_output_dir"] == str(tmp_path / "summary")
+    assert payload["qbit_wait_diagnostics"] == {}
+    assert payload["qbit_wait_mismatch"] is False
+    assert payload["qbit_wait_mismatches"] == []
     assert payload["next_actions"] == ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
     assert payload["ready"] is True
     assert payload["closure"]["source"]["complete"] is True
@@ -926,6 +929,116 @@ def test_retorrent_execute_next_actions_explain_wait_evidence_blockers() -> None
     assert any("--wait-complete" in action for action in actions)
     assert any("--wait-uploaded-complete" in action for action in actions)
     assert all(not action.startswith("Retorrent closure is complete;") for action in actions)
+
+
+def test_retorrent_execute_next_actions_surface_qbit_wait_mismatches() -> None:
+    actions = ptcli_cli._retorrent_execute_next_actions(
+        {
+            "evidence": {
+                "source": {
+                    "qbit_closure": {
+                        "wait": {
+                            "complete": False,
+                            "completion_verification": {
+                                "complete_count": 1,
+                                "any_complete": True,
+                                "requested_hash_matched": False,
+                                "requested_content_path_matched": None,
+                                "observed_hashes": ["f" * 40],
+                                "observed_content_paths": ["/downloads/Other"],
+                            },
+                        }
+                    }
+                },
+                "target": {
+                    "qbit_closure": {
+                        "wait": {
+                            "complete": False,
+                            "completion_verification": {
+                                "complete_count": 1,
+                                "any_complete": True,
+                                "requested_hash_matched": True,
+                                "requested_content_path_matched": False,
+                                "observed_hashes": ["a" * 40],
+                                "observed_content_paths": ["/downloads/Wrong"],
+                            },
+                        }
+                    }
+                },
+            }
+        },
+        ["source.wait_evidence", "target.uploaded_wait_evidence"],
+    )
+
+    assert actions[0].startswith("Resolve the source qBittorrent wait mismatch")
+    assert actions[1].startswith("Resolve the uploaded qBittorrent wait mismatch")
+    assert any("--wait-complete" in action for action in actions)
+    assert any("--wait-uploaded-complete" in action for action in actions)
+
+
+@pytest.mark.asyncio
+async def test_retorrent_execute_exposes_qbit_wait_mismatch_diagnostics(monkeypatch, tmp_path) -> None:
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    async def fake_pipeline_payload(_args):
+        return {
+            "ready": False,
+            "status": "blocked",
+            "closure": {"complete": False, "blockers": ["source.wait_evidence"]},
+            "evidence": {
+                "source": {
+                    "qbit_closure": {
+                        "wait": {
+                            "complete": False,
+                            "completion_verification": {
+                                "complete_count": 1,
+                                "any_complete": True,
+                                "requested_hash_matched": False,
+                                "requested_content_path_matched": None,
+                                "observed_hashes": ["f" * 40],
+                                "observed_content_paths": ["/downloads/Other"],
+                                "observed_save_paths": ["/downloads"],
+                            },
+                            "blockers": ["qBittorrent matched torrents, but none matched requested hash."],
+                        }
+                    }
+                }
+            },
+            "next_actions": ["Re-run the source qBittorrent completion wait with --wait-complete."],
+            "stages": [{"stage": "source-qbit-wait", "ok": False}],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--save-path",
+            "/downloads",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    assert payload["status"] == "blocked"
+    assert payload["qbit_wait_mismatch"] is True
+    assert payload["qbit_wait_mismatches"] == ["source.requested_hash"]
+    assert payload["qbit_wait_diagnostics"]["source"]["request_mismatch"] is True
+    assert payload["qbit_wait_diagnostics"]["source"]["observed_hashes"] == ["f" * 40]
+    assert payload["next_actions"][0].startswith("Resolve the source qBittorrent wait mismatch")
 
 
 @pytest.mark.asyncio

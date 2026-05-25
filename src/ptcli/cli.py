@@ -550,6 +550,8 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     artifacts = _retorrent_execute_artifacts(pipeline_result, evidence, closure)
     blockers = _retorrent_execute_blockers(pipeline_result, closure, ready, artifacts)
     next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
+    qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(pipeline_result)
+    qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
     resume_commands = pipeline_result.get("resume_commands", [])
     return {
         "status": "complete" if not blockers else "blocked",
@@ -563,6 +565,9 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "evidence": evidence,
         "summary": summary,
         "summary_file": pipeline_result.get("summary_file"),
+        "qbit_wait_diagnostics": qbit_wait_diagnostics,
+        "qbit_wait_mismatch": bool(qbit_wait_mismatches),
+        "qbit_wait_mismatches": qbit_wait_mismatches,
         "artifacts": artifacts,
         "resume_commands": resume_commands,
         "resume_state": _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands),
@@ -725,6 +730,8 @@ def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: l
     if not blockers:
         return ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
     actions: list[str] = []
+    for action in _retorrent_execute_qbit_mismatch_actions(pipeline_result):
+        _append_unique_string(actions, action)
     for blocker in blockers:
         _append_unique_string(actions, _retorrent_execute_blocker_next_action(str(blocker)))
     pipeline_actions = pipeline_result.get("next_actions")
@@ -735,6 +742,21 @@ def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: l
                 continue
             _append_unique_string(actions, action_text)
     return actions or [f"Fix {blocker}" for blocker in blockers]
+
+
+def _retorrent_execute_qbit_mismatch_actions(pipeline_result: dict[str, Any]) -> list[str]:
+    diagnostics = _summary_qbit_wait_diagnostics(pipeline_result)
+    mismatches = set(_summary_qbit_wait_mismatches(diagnostics))
+    actions: list[str] = []
+    if any(mismatch.startswith("source.") for mismatch in mismatches):
+        actions.append(
+            "Resolve the source qBittorrent wait mismatch before rerunning: inspect qbit_wait_diagnostics for observed hashes/paths and retry with the matching source torrent or content path."
+        )
+    if any(mismatch.startswith("uploaded.") for mismatch in mismatches):
+        actions.append(
+            "Resolve the uploaded qBittorrent wait mismatch before rerunning: inspect qbit_wait_diagnostics for observed hashes/paths and retry with the downloaded target-site torrent and matching uploaded save path."
+        )
+    return actions
 
 
 def _retorrent_execute_blocker_next_action(blocker: str) -> str:
