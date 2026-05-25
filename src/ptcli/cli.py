@@ -566,6 +566,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "base_dir": args.base_dir,
         "client": args.client,
         "output_options": pipeline_result.get("output_options") if isinstance(pipeline_result.get("output_options"), dict) else _pipeline_output_options(pipeline_args),
+        "wait_options": pipeline_result.get("wait_options") if isinstance(pipeline_result.get("wait_options"), dict) else _pipeline_wait_options(pipeline_args),
         "pipeline": pipeline_result,
         "closure": closure,
         "evidence": evidence,

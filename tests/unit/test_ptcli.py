@@ -479,6 +479,10 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                 "uploaded_output_dir": str(tmp_path / "uploaded"),
                 "summary_output_dir": str(tmp_path / "summary"),
             },
+            "wait_options": {
+                "source": {"timeout": 7200.0, "interval": 45.0},
+                "uploaded": {"timeout": 900.0, "interval": 20.0},
+            },
             "artifacts": {},
             "resume_commands": [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}],
             "resume_state": {
@@ -512,6 +516,10 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "--confirm-upload",
             "--save-path",
             "/downloads",
+            "--wait-timeout",
+            "7200",
+            "--wait-interval",
+            "45",
             "--target-torrent-file",
             str(torrent_file),
             "--uploaded-output-dir",
@@ -521,6 +529,10 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "MTEAM",
             "--uploaded-qbit-tags",
             "retorrent",
+            "--uploaded-wait-timeout",
+            "900",
+            "--uploaded-wait-interval",
+            "20",
             "--write-summary",
             "--summary-output-dir",
             str(tmp_path / "summary"),
@@ -539,6 +551,10 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["client"] == "default"
     assert payload["output_options"]["uploaded_output_dir"] == str(tmp_path / "uploaded")
     assert payload["output_options"]["summary_output_dir"] == str(tmp_path / "summary")
+    assert payload["wait_options"] == {
+        "source": {"timeout": 7200.0, "interval": 45.0},
+        "uploaded": {"timeout": 900.0, "interval": 20.0},
+    }
     assert payload["qbit_wait_diagnostics"] == {}
     assert payload["qbit_wait_mismatch"] is False
     assert payload["qbit_wait_mismatches"] == []
@@ -614,6 +630,10 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.client == "default"
     assert pipeline_args.summary_output_dir == str(tmp_path / "summary")
     assert pipeline_args.save_path == "/downloads"
+    assert pipeline_args.wait_timeout == 7200.0
+    assert pipeline_args.wait_interval == 45.0
+    assert pipeline_args.uploaded_wait_timeout == 900.0
+    assert pipeline_args.uploaded_wait_interval == 20.0
     assert pipeline_args.target_torrent_file == str(torrent_file)
     assert pipeline_args.sanitize_target_torrent is True
 
