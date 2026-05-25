@@ -447,6 +447,13 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             },
             "summary": {"ready": True, "complete": True, "status": "complete"},
             "summary_file": str(tmp_path / "summary" / "ptcli-run-summary.json"),
+            "output_options": {
+                "source_output_dir": "./tmp/source",
+                "target_output_dir": "./tmp/target",
+                "target_torrent_output_dir": "./tmp/exported",
+                "uploaded_output_dir": str(tmp_path / "uploaded"),
+                "summary_output_dir": str(tmp_path / "summary"),
+            },
             "artifacts": {},
             "resume_commands": [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}],
             "resume_state": {
@@ -482,6 +489,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "/downloads",
             "--target-torrent-file",
             str(torrent_file),
+            "--uploaded-output-dir",
+            str(tmp_path / "uploaded"),
             "--inject-uploaded-torrent",
             "--uploaded-qbit-category",
             "MTEAM",
@@ -503,6 +512,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["config"] == "data/config.py"
     assert payload["base_dir"] == str(tmp_path)
     assert payload["client"] == "default"
+    assert payload["output_options"]["uploaded_output_dir"] == str(tmp_path / "uploaded")
+    assert payload["output_options"]["summary_output_dir"] == str(tmp_path / "summary")
     assert payload["next_actions"] == ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
     assert payload["ready"] is True
     assert payload["closure"]["source"]["complete"] is True
