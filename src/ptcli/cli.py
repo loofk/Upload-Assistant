@@ -2665,6 +2665,8 @@ def _source_info_from_existing_target_package(package_dir: str) -> dict[str, Any
     source_info = _source_info_from_mteam_preflight(package)
     if not isinstance(source_info, dict):
         return None
+    if source_info.get("tracker"):
+        source_info = {**source_info, "tracker": normalize_tracker(str(source_info["tracker"]))}
     match = re.match(r"(?P<tracker>[A-Za-z0-9]+)-(?P<torrent_id>.+)-to-[A-Za-z0-9,]+$", Path(package_dir).expanduser().name)
     if match:
         source_info = {

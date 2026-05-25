@@ -9932,6 +9932,49 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert command_argv["retorrent-resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "retorrent"]
 
 
+def test_target_upload_retorrent_resume_uses_package_source_identity_after_rename(tmp_path) -> None:
+    source_info = {
+        "tracker": "u2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    renamed_package_dir = tmp_path / "portable-mteam-package"
+    Path(package["package_dir"]).rename(renamed_package_dir)
+    preflight = build_mteam_upload_preflight(str(renamed_package_dir), execute=True, torrent_file=str(make_mteam_safe_torrent(tmp_path, "upload")))
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            str(renamed_package_dir),
+            "--uploaded-torrent-id",
+            "999",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--wait-uploaded-complete",
+            "--json",
+        ]
+    )
+
+    summary_file = ptcli_cli._write_target_upload_summary({"status": "uploaded", "uploaded_torrent_id": "999"}, preflight, args, str(renamed_package_dir))
+
+    summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+    commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
+    assert "--from U2" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert "--source-id 60635" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert str(renamed_package_dir) in command_argv["retorrent-resume-uploaded-torrent-download"]
+
+
 def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path) -> None:
     source_info = {
         "tracker": "U2",
