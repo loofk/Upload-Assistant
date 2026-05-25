@@ -793,6 +793,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
     needs_source_download = not bool(args.content_path or args.source_torrent_file or package_upload_resume)
     needs_source_injection = not bool(args.content_path or package_upload_resume)
     target_execute = not bool(args.uploaded_torrent_file or args.uploaded_torrent_id)
+    needs_target_torrent = bool(target_execute and not (args.uploaded_torrent_file or args.uploaded_torrent_id))
     return argparse.Namespace(
         command="pipeline",
         config=args.config,
@@ -820,9 +821,9 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         accept_rules=args.accept_rules,
         upload_target=True,
         target_torrent_file=args.target_torrent_file,
-        export_target_torrent=args.export_target_torrent or not bool(args.target_torrent_file),
+        export_target_torrent=bool(needs_target_torrent and (args.export_target_torrent or not args.target_torrent_file)),
         target_torrent_output_dir=args.target_torrent_output_dir,
-        sanitize_target_torrent=args.sanitize_target_torrent,
+        sanitize_target_torrent=bool(needs_target_torrent and args.sanitize_target_torrent),
         target_execute=target_execute,
         confirm_upload=args.confirm_upload,
         write_payload=args.write_payload,

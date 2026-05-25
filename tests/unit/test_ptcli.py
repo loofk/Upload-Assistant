@@ -801,6 +801,8 @@ async def test_retorrent_execute_reuses_package_for_uploaded_torrent_file_resume
     assert pipeline_args.prepare_target is False
     assert pipeline_args.check_dupes is False
     assert pipeline_args.target_execute is False
+    assert pipeline_args.export_target_torrent is False
+    assert pipeline_args.sanitize_target_torrent is False
     assert pipeline_args.download_source is False
     assert pipeline_args.inject_source is False
     assert pipeline_args.wait_complete is False
