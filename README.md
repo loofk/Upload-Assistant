@@ -1,143 +1,77 @@
-[![Create and publish a Docker image](https://github.com/Audionut/Upload-Assistant/actions/workflows/docker-image.yml/badge.svg?branch=master)](https://github.com/Audionut/Upload-Assistant/actions/workflows/docker-image.yml)
-[![Python Code Analysis](https://github.com/Audionut/Upload-Assistant/actions/workflows/python-code-analysis.yml/badge.svg?branch=master)](https://github.com/Audionut/Upload-Assistant/actions/workflows/python-code-analysis.yml)
-[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://www.python.org/downloads/)
-[![Security: Bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
-[![Security: Safety](https://img.shields.io/badge/security-safety-green.svg)](https://github.com/pyupio/safety)
-[![Lint: Ruff](https://img.shields.io/badge/lint-ruff-4B8BBE.svg?logo=ruff&logoColor=white)](https://github.com/astral-sh/ruff)
-[![Type Checker: Pyright](https://img.shields.io/badge/type%20checker-pyright-2D7FF9.svg?logo=python&logoColor=white)](https://github.com/microsoft/pyright)
+# Upload Assistant PT CLI
 
-Discord support https://discord.gg/QHHAZu7e2A
+本分支正在把 Upload Assistant 收束为一个适合盒子部署的中文 PT 转种 CLI。当前主入口是 `ptcli.py`：它面向 allowlist 内的中文/PT 站点，输出稳定 JSON，围绕 qBittorrent、源站拉种、MTEAM 目标站准备/查重/上传和上传后做种建立可审计闭环。
 
-# Upload Assistant
+原始 `upload.py`、Web UI、Discord bot 和大量海外 tracker 代码仍保留为迁移期兼容内容，但新功能优先在 `ptcli.py` 与 `src/ptcli/` 下推进。
 
-A simple tool to take the work out of uploading.
+## 当前范围
 
-This project is a fork of the original work of L4G https://github.com/L4GSP1KE/Upload-Assistant
-Immense thanks to him for establishing this project. Without his (and supporters) time and effort, this fork would not be a thing.
-Many thanks to all who have contributed.
+- 只面向 `src.ptcli.mainland.MAINLAND_PT_TRACKERS` 中的中文/PT 站点。
+- 当前 allowlist：`AUDIENCES`, `CHD`, `HDS`, `HDSKY`, `HHAN`, `MTEAM`, `OB`, `PTER`, `TJUPT`, `TTG`, `U2`。
+- MTEAM 是当前已实现 live target upload 的目标站。
+- U2/CHD -> MTEAM 是最早的参考流；同类 NexusPHP 源站逐步扩展到完整闭环。
+- 所有真实下载、上传、qBittorrent 注入动作都要求显式规则确认；上传还要求 `--confirm-upload`。
+- 站点规则不由 AI 猜测。CLI 会暴露规则 obligation、人工确认状态和当前程序化检查范围。
 
-## What It Can Do:
-  - Generates and Parses MediaInfo/BDInfo.
-  - Generates and Uploads screenshots. HDR tonemapping if config.
-  - Uses srrdb to fix scene names used at sites.
-  - Can grab descriptions from PTP/BLU/Aither/LST/OE/BHD (with config option automatically on filename match, or using arg).
-  - Can strip and use existing screenshots from descriptions to skip screenshot generation and uploading.
-  - Obtains TMDb/IMDb/MAL/TVDB/TVMAZE identifiers.
-  - Converts absolute to season episode numbering for Anime. Non-Anime support with TVDB credentials
-  - Generates custom .torrents without useless top level folders/nfos.
-  - Can re-use existing torrents instead of hashing new.
-  - Can automagically search qBitTorrent version 5+ clients for matching existing torrent.
-  - Includes support for [qui](https://github.com/autobrr/qui)
-  - Generates proper name for your upload using Mediainfo/BDInfo and TMDb/IMDb conforming to site rules.
-  - Checks for existing releases already on site.
-  - Adds to your client with fast resume, seeding instantly (rtorrent/qbittorrent/deluge/watch folder).
-  - ALL WITH MINIMAL INPUT!
-  - Currently works with .mkv/.mp4/Blu-ray/DVD/HD-DVDs.
+## 常用命令
 
-## Supported Sites:
+```bash
+# 查看站点和机器可读能力矩阵
+python3 ptcli.py sites --json
 
-|Name|Acronym|Name|Acronym|
-|-|:-:|-|:-:|
-|Aither|AITHER|Alpharatio|AR|
-|Amigos-Share|ASC|Anthelion|ANT|
-|AsianCinema|ACM|Aura4K|A4K|
-|AvistaZ|AZ|Beyond-HD|BHD|
-|BitHDTV|BHDTV|Blutopia|BLU|
-|BrasilJapão-Share|BJS|BrasilTracker|BT|
-|CapybaraBR|CBR|CinemaZ|CZ|
-|Cinematik|TIK|DarkPeers|DP|
-|DigitalCore|DC|Emuwarez|EMUW|
-|FearNoPeer|FNP|FileList|FL|
-|Friki|FRIKI|FunFile|FF|
-|GreatPosterWall|GPW|hawke-uno|HUNO|
-|HDBits|HDB|HD-Space|HDS|
-|HD-Torrents|HDT|HomieHelpDesk|HHD|
-|ImmortalSeed|IS|InfinityHD|IHD|
-|ItaTorrents|ITT|LastDigitalUnderground|LDU|
-|Lat-Team|LT|Locadora|LCD|
-|LST|LST|Luminarr|LUME|
-|MoreThanTV|MTV|Nebulance|NBL|
-|OldToonsWorld|OTW|OnlyEncodes+|OE|
-|PassThePopcorn|PTP|PolishTorrent|PTT|
-|Portugas|PT|PrivateHD|PHD|
-|PTerClub|PTER|PTSKIT|PTS|
-|Racing4Everyone|R4E|Rastastugan|RAS|
-|ReelFLiX|RF|RetroFlix|RTF|
-|Samaritano|SAM|seedpool|SP|
-|ShareIsland|SHRI|SkipTheCommerials|STC|
-|SpeedApp|SPD|Swarmazon|SN|
-|The Leach Zone|TLZ|TheOldSchool|TOS|
-|ToTheGlory|TTG|TorrentHR|THR|
-|Torrenteros|TTR|TorrentLeech|TL|
-|TVChaosUK|TVC|ULCX|ULCX|
-|UTOPIA|UTP|YOiNKED|YOINK|
-|YUSCENE|YUS|||
+# 查看规则审查 profile 和 obligation
+python3 ptcli.py rule-check --from U2 --to MTEAM --accept-rules --json
 
-## **Setup:**
-   - **REQUIRES AT LEAST PYTHON 3.9 AND PIP3**
-   - Also needs MediaInfo and ffmpeg installed on your system
-      - On Windows systems, ffmpeg must be added to PATH (https://windowsloop.com/install-ffmpeg-windows-10/)
-      - On linux systems, get it from your favorite package manager
-      - If you have issues with ffmpeg, such as `max workers` errors, see this [wiki](https://github.com/Audionut/Upload-Assistant/wiki/ffmpeg---max-workers-issues)
-   - Get the source:
-      - Clone the repo to your system `git clone https://github.com/Audionut/Upload-Assistant.git`
-      - Fetch all of the release tags `git fetch --all --tags`
-      - Check out the specifc release: see [releases](https://github.com/Audionut/Upload-Assistant/releases)
-      - `git checkout tags/tagname` where `tagname` is the release name, eg `v5.0.0`
-      - or download a zip of the source from the releases page and create/overwrite a local copy.
-   - Install necessary python modules `pip3 install --user -U -r requirements.txt`
-      - `sudo apt install pip` if needed
-  - If you receive an error about externally managed environment, or otherwise wish to keep UA python separate:
-      - Install virtual python environment `python3 -m venv venv`
-      - Activate the virtual environment `source venv/bin/activate`
-      - Then install the requirements `pip install -r requirements.txt`
-   - From the installation directory, run `python3 config-generator.py`
-   - OR
-   - Copy `data/example-config.py` to `data/config.py`, leaving `data/example-config.py` intact.
-   - NOTE: New users who use the webui will have the config file generated automatically.
-   - Edit `config.py` to use your information (more detailed information in example config options: [docs/example-config.md](docs/example-config.md))
-      - tmdb_api key can be obtained from https://www.themoviedb.org/settings/api
-      - image host api keys can be obtained from their respective sites
+# live 前检查，可选探测 qBittorrent、源站和 MTEAM API
+python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --connect-qbit --probe-source --probe-target --json
 
-   **Additional Resources are found in the [wiki](https://github.com/Audionut/Upload-Assistant/wiki)**
+# 高层一键闭环：源站拉种 -> QB 注入/等待 -> MTEAM 查重/准备/上传 -> 下载新种 -> QB 注入/等待
+python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json
 
-   Feel free to contact me if you need help, I'm not that hard to find.
+# 拆分排障：下载源种
+python3 ptcli.py source-download --tracker CHD --source-id 12345 --to MTEAM --output-dir ./tmp/source --accept-rules --json
 
-## **Updating:**
-  - To update first navigate into the Upload-Assistant directory: `cd Upload-Assistant`
-  - `git fetch --all --tags`
-  - `git checkout tags/tagname`
-  - Or download a fresh zip from the releases page and overwrite existing files
-  - Run `python3 -m pip install --user -U -r requirements.txt` to ensure dependencies are up to date
-  - Run `python3 config-generator.py` and select to grab new UA config options.
+# 拆分排障：从已有源种续跑到源站 QB 等待完成
+python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --source-torrent-file ./tmp/source/U2-60635.torrent --inject-source --save-path "/downloads" --wait-complete --accept-rules --json
 
-## **CLI Usage:**
+# 拆分排障：准备并上传 MTEAM，随后下载新种、注入 QB、等待完成
+python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downloads/content" --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --upload-target --target-torrent-output-dir ./tmp/exported --target-execute --confirm-upload --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json
 
-  `python3 upload.py "/path/to/content" --args`
+# 上传已成功但后续中断时，用 MTEAM 新种 ID 恢复下载/注入/等待
+python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --uploaded-torrent-id 999 --download-uploaded-torrent --uploaded-output-dir ./tmp/uploaded --inject-uploaded-torrent --uploaded-save-path "/downloads/content" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --wait-uploaded-complete --write-summary --json
+```
 
-  Args are OPTIONAL and ALWAYS follow path, for a list of acceptable args, pass `--help`.
-  Path works best in quotes.
-  - CLI arguments: [docs/cli-args.md](docs/cli-args.md)
+## AI 友好输出
 
-## **Docker Usage:**
-  Visit our wonderful [docker usage](docs/docker-wiki-full.md)
+- 关键命令支持 `--json`。
+- `sites --json` 暴露每个站点的 `source_info`、`source_download`、`target_upload`、`full_live_closure_to_mteam` 能力。
+- `pipeline` 和 `retorrent --execute` 返回 `closure`、`evidence`、`artifacts`、`resume_commands`、`next_actions`。
+- 带执行动作的命令未闭环时返回 `status: blocked`、顶层 blockers 和非 0 退出码。
+- `--write-summary` 会写出 `ptcli-run-summary.json`，便于 agent 或脚本续跑。
 
-  Also see this excellent video put together by a community member https://videos.badkitty.zone/ua
+## 配置要求
 
-  Web UI setup (Docker GUI / Unraid): [docs/docker-gui-wiki-full.md](docs/docker-gui-wiki-full.md)
-  Web UI docs: [docs/web-ui.md](docs/web-ui.md)
+- qBittorrent client 配置沿用 `data/config.py`。
+- 源站 cookie 放在 `data/cookies/<TRACKER>.txt` 或对应适配器要求的位置。
+- MTEAM 需要 `TRACKERS.MTEAM.api_key`。
+- live 验证需要在真实盒子环境中提供有效 cookie、MTEAM API key、qBittorrent 连接和实际内容路径。
 
-## **Attributions:**
+## 开发命令
 
-Built with updated BDInfoCLI from https://github.com/rokibhasansagar/BDInfoCLI-ng
+```bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+make smoke-ptcli PYTHON=.venv/bin/python
+make test PYTHON=.venv/bin/python
+python3 -m ruff check --config pyproject.toml src/ptcli tests/unit/test_ptcli.py
+```
 
-<p>
-  <a href="https://github.com/autobrr/mkbrr"><img src="https://github.com/autobrr/mkbrr/blob/main/.github/assets/mkbrr-dark.png?raw=true" alt="mkbrr" height="40px;"></a>&nbsp;&nbsp;
-  <a href="https://github.com/autobrr/qui"><img src="https://github.com/autobrr/qui/blob/develop/documentation/static/img/qui.png?raw=true" alt="qui" height="40px;"></a>&nbsp;&nbsp;
-  <a href="https://ffmpeg.org/"><img src="https://i.postimg.cc/xdj3BS7S/FFmpeg-Logo-new-svg.png" alt="FFmpeg" height="40px;"></a>&nbsp;&nbsp;
-  <a href="https://mediaarea.net/en/MediaInfo"><img src="https://i.postimg.cc/vTkjXmHh/Media-Info-Logo-svg.png" alt="Mediainfo" height="40px;"></a>&nbsp;&nbsp;
-  <a href="https://www.themoviedb.org/"><img src="https://i.postimg.cc/1tpXHx3k/blue-square-2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.png" alt="TMDb" height="40px;"></a>&nbsp;&nbsp;
-  <a href="https://www.imdb.com/"><img src="https://i.postimg.cc/CLVmvwr1/IMDb-Logo-Rectangle-Gold-CB443386186.png" alt="IMDb" height="40px;"></a>&nbsp;&nbsp;
-  <a href="https://thetvdb.com/"><img src="https://i.postimg.cc/Hs1KKqsS/logo1.png" alt="TheTVDB" height="40px;"></a>&nbsp;&nbsp;
-  <a href="https://www.tvmaze.com/"><img src="https://i.postimg.cc/2jdRzkJp/tvm-header-logo.png" alt="TVmaze" height="40px"></a>
-</p>
+## 迁移状态
+
+已实现：新 CLI 入口、中文 PT allowlist、规则 obligation 输出、qBittorrent inspect/match/export、源站信息和源种下载、MTEAM 准备/查重/上传预检和 live upload、上传后新种下载/注入/等待、`pipeline`/`retorrent --execute` 闭环证据与恢复命令。
+
+仍未完成：真实 U2/CHD cookie + MTEAM API + qBittorrent live 环境验证；旧 Web UI/Discord/海外 tracker 代码瘦身；所有站点规则的逐站程序化编码；MTEAM 以外目标站的 live upload 闭环。
+
+## 原项目说明
+
+本仓库基于 L4G 的 Upload Assistant 及后续 fork 演进。原始 UA 的 `upload.py` 仍可作为迁移期兼容入口，用于传统媒体信息、截图、描述和多 tracker 上传流程。

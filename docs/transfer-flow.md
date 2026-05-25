@@ -1,205 +1,115 @@
-# 转种流程文档
+# PTCLI 转种闭环流程
 
-本文档详细说明从 U2/CHD 转种到 MTEAM/TJUPT/TTG 的完整流程，标注所有需要人工干预的环节。
+本文档描述当前 `ptcli.py` 的中文 PT 转种流程。旧 `upload.py` 的传统上传流程仍保留为迁移期兼容入口，但新功能以 `ptcli.py` 为准。
 
-## 典型命令
+## 目标
+
+`ptcli.py` 的目标是在盒子上完成可审计、可恢复、对 AI 友好的转种闭环：
+
+```text
+源站详情/源种 -> qBittorrent 下载或匹配 -> 目标站查重/准备 -> MTEAM 上传 -> 下载新种 -> qBittorrent 注入/等待完成
+```
+
+当前 live target upload 只面向 MTEAM。完整闭环源站以 `python3 ptcli.py sites --json` 输出的 `full_live_closure_sources` 为准。
+
+## 一键闭环
 
 ```bash
-# U2 → MTEAM
-python3 upload.py /path/to/content -u2 12345 -tk MTEAM
-
-# CHD → MTEAM + TJUPT
-python3 upload.py /path/to/content -chd 8888 -tk MTEAM,TJUPT
-
-# 无人值守模式（减少交互）
-python3 upload.py /path/to/content -u2 12345 -tk MTEAM --unattended
-
-# 手动指定 IMDb 和豆瓣（跳过搜索）
-python3 upload.py /path/to/content -u2 12345 -tk MTEAM -imdb tt1234567 -douban 1291546
-
-# Debug 模式（不实际上传）
-python3 upload.py /path/to/content -u2 12345 -tk MTEAM --debug
+python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json
 ```
 
-## 完整 9 步流程
+`retorrent --execute` 会编排完整 pipeline：
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  python3 upload.py /path -u2 12345 -tk MTEAM                │
-└──────────────┬───────────────────────────────────────────────┘
-               │
-   ┌───────────▼───────────┐
-   │ 步骤 1: 参数解析       │  src/args.py
-   │ 解析 -u2, -tk, -imdb  │
-   └───────────┬───────────┘
-               │
-   ┌───────────▼────────────────────┐
-   │ 步骤 2: 源站元数据提取          │  src/trackermeta.py
-   │ U2/CHD.get_info_from_torrent_id │
-   │ → IMDb, TMDb, 豆瓣, 描述       │
-   │ ⚠️ 干预点 A: 描述编辑确认       │
-   └───────────┬────────────────────┘
-               │
-   ┌───────────▼────────────────────┐
-   │ 步骤 3: IMDb/TMDb 补全         │  src/imdb.py + src/tmdb.py
-   │ 步骤2未获得 → 搜索 IMDb/TMDb   │
-   │ ⚠️ 干预点 B: IMDb 候选选择      │
-   │ ⚠️ 干预点 C: 无结果手动输入     │
-   └───────────┬────────────────────┘
-               │
-   ┌───────────▼───────────────────────┐
-   │ 步骤 4: 元数据准备 (Prep)          │  src/prep.py
-   │ MediaInfo 提取、名称生成、截图     │
-   │ 分辨率/编码/类型判断              │
-   └───────────┬───────────────────────┘
-               │
-   ┌───────────▼─────────────────────┐
-   │ 步骤 5: 种子文件创建             │  src/torrentcreate.py
-   │ 创建 BASE .torrent               │
-   └───────────┬─────────────────────┘
-               │
-   ┌───────────▼──────────────────────┐
-   │ 步骤 6: 描述与截图生成           │  src/get_desc.py
-   │ 截图拍摄 → 上传图床 → 描述组装  │
-   └───────────┬──────────────────────┘
-               │
-   ┌───────────▼──────────────────────────┐
-   │ 步骤 7: Tracker 预检查               │  src/trackerstatus.py
-   │ PTGen 获取中文信息                   │
-   │ 查重 (search_existing)               │
-   │ banned_group 检查                    │
-   │ ⚠️ 干预点 D: 缺 IMDb 时手动输入      │
-   └───────────┬──────────────────────────┘
-               │
-   ┌───────────▼──────────────────────────┐
-   │ 步骤 8: 上传执行                      │  src/trackerhandle.py
-   │ 对每个目标 tracker 执行:              │
-   │   edit_desc → edit_name → upload     │
-   │ ⚠️ 干预点 E: 重复确认上传             │
-   └───────────┬──────────────────────────┘
-               │
-   ┌───────────▼──────────────────────────┐
-   │ 步骤 9: 做种                          │  src/clients.py
-   │ 添加到 qBittorrent/rTorrent 做种     │
-   └──────────────────────────────────────┘
+1. 检查源站、目标站、规则确认和本地配置。
+2. 读取源站详情。
+3. 下载源站 `.torrent`。
+4. 注入 qBittorrent 并等待下载完成。
+5. 从完成的 qBittorrent 任务推导内容路径。
+6. 对 MTEAM 做查重。
+7. 生成 MTEAM 准备包、描述、字段映射和 upload gate。
+8. 从 qBittorrent 导出目标候选种子并清理为 MTEAM-safe torrent。
+9. 执行 MTEAM 上传。
+10. 下载 MTEAM 上传后生成的新种。
+11. 把新种注入 qBittorrent，并等待任务完成。
+
+只有 `closure.complete=true` 且所有请求动作完成时，顶层 `status` 才会是 `complete`。否则命令返回 `status: blocked`、`blockers`、`next_actions` 和非 0 退出码。
+
+## 拆分排障命令
+
+### 能力矩阵
+
+```bash
+python3 ptcli.py sites --json
 ```
 
-## 各步骤详细说明
+重点字段：
 
-### 步骤 1: 参数解析 (`src/args.py`)
+- `capabilities.<TRACKER>.source_info`
+- `capabilities.<TRACKER>.source_download`
+- `capabilities.<TRACKER>.target_upload`
+- `capabilities.<TRACKER>.full_live_closure_to_mteam`
+- `full_live_closure_sources`
+- `flows`
 
-解析命令行参数，填充 `meta` 字典。关键参数：
+### 规则门禁
 
-| 参数 | 说明 |
-|------|------|
-| `-u2 <id>` | 从 U2 种子页获取元数据 |
-| `-chd <id>` | 从 CHD 种子页获取元数据 |
-| `-mteam <id>` | 从 MTEAM API 获取元数据 |
-| `-tk <trackers>` | 目标上传站点，逗号分隔 |
-| `-imdb <id>` | 手动指定 IMDb ID（跳过搜索） |
-| `-douban <id>` | 手动指定豆瓣 ID（加速 PTGen） |
-| `--unattended` | 无人值守模式 |
-| `--debug` | 调试模式，不实际上传 |
+```bash
+python3 ptcli.py rule-check --from U2 --to MTEAM --accept-rules --json
+```
 
-### 步骤 2: 源站元数据提取 (`src/trackermeta.py`)
+输出会包含 source 的 `download_and_retorrent` obligation 和 target 的 `upload_and_seed` obligation。当前 `site_specific_rules_encoded=false`，表示程序不会替用户推断站规，live 前仍必须人工审阅并确认源站/目标站规则。
 
-根据 `-u2`/`-chd`/`-mteam` 参数，调用对应 Tracker 的 `get_info_from_torrent_id()` 方法。
+### live 前检查
 
-**U2** (`src/trackers/U2.py`):
-- 通过 Cookie 爬取详情页 (`data/cookies/U2.txt`)
-- 提取 IMDb/TMDb 链接、豆瓣链接、AniDB aid
-- 若有 AniDB aid → 通过 `ids.moe` API 转换为 IMDb/TMDb（需配置 `ids_moe_api_key`）
+```bash
+python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --connect-qbit --probe-source --probe-target --json
+```
 
-**CHD** (`src/trackers/CHD.py`):
-- 通过 Cookie 爬取详情页 (`data/cookies/CHD.txt`)
-- 提取 IMDb/TMDb/豆瓣链接
-- 提取完整描述（HTML 格式）
+`doctor` 可检查配置、cookie、qBittorrent 连接、源站详情读取、MTEAM 查重 API、目标准备包、目标 torrent 文件和上传后新种 follow-up 条件。带 `--target-execute` 时会按 live pipeline 语义检查上传后下载、注入、等待条件。
 
-**MTEAM** (`src/trackers/MTEAM.py`):
-- 通过 API 调用 (`api_key` 认证)
-- 返回 JSON 格式的结构化数据
+### 源站下载与 qBittorrent 等待
 
-### 步骤 3: IMDb/TMDb 补全 (`src/imdb.py`, `src/tmdb.py`)
+```bash
+python3 ptcli.py source-download --tracker CHD --source-id 12345 --to MTEAM --output-dir ./tmp/source --accept-rules --json
 
-如果步骤 2 未获得 IMDb ID，执行搜索：
-1. 从种子名提取搜索词
-2. 用 SequenceMatcher 计算与 IMDb 结果的相似度
-3. 相似度 >= 0.85 且与次优差距 >= 0.10 → 自动选择
-4. 否则展示候选列表让用户选择
+python3 ptcli.py pipeline --from CHD --source-id 12345 --to MTEAM --source-torrent-file ./tmp/source/CHD-12345.torrent --inject-source --save-path "/downloads" --wait-complete --accept-rules --json
+```
 
-**常见失败原因**：
-- 动画种子名含 `[组名]`、技术参数，搜索词噪声大
-- 中文标题无法匹配英文 IMDb 条目
-- 日韩内容的命名格式与 IMDb 差异大
+源种文件证据会包含 `exists`、`size_bytes`、`sha1`、`torrent_hash`/`infohash`。注入时会解析 `.torrent` 的真实 infohash，用于后续等待和审计。
 
-### 步骤 4-6: 元数据准备 → 种子创建 → 描述生成
+### MTEAM 准备与上传
 
-这三步通常自动完成，无需干预。
+```bash
+python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downloads/content" --check-dupes --prepare-target --target-output-dir ./tmp/target --accept-rules --upload-target --target-torrent-output-dir ./tmp/exported --target-execute --confirm-upload --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json
+```
 
-### 步骤 7: Tracker 预检查 (`src/trackerstatus.py`)
+目标上传前会检查：
 
-对每个目标 Tracker 执行：
-1. **PTGen 调用** (`COMMON.ptgen()`): 用 IMDb/豆瓣 ID 获取中文标题、地区、类别
-2. **查重** (`search_existing()`): 在目标站搜索是否已存在同名种子
-3. **banned_group 检查**: 确认发布组不在禁止列表
+- MTEAM 查重结果干净。
+- upload gate ready。
+- 描述材料、名称、简介、分类和标准字段可用。
+- torrent announce/source/comment 符合 MTEAM-safe 元数据门禁。
+- 已显式传入 `--confirm-upload`。
 
-### 步骤 8: 上传执行 (`src/trackerhandle.py`)
+上传成功后会下载 MTEAM 新种并注入 qBittorrent。`summary` 和 `evidence` 会记录 `uploaded_torrent_id`、`uploaded_torrent_hash`、`uploaded_torrent_path`、`injection_verified` 和 `uploaded_wait`。
 
-对每个通过预检查的 Tracker：
-1. `edit_desc(meta)` — 生成目标站格式的描述（BBCode/Markdown）
-2. `edit_name(meta)` — 调整种子名称（移除不兼容内容）
-3. `upload(meta, disctype)` — 提交到目标站
+## 恢复路径
 
-### 步骤 9: 做种 (`src/clients.py`)
+如果 live 上传成功但后续下载/注入/等待中断，可以不重复上传，直接从已知新种 ID 或已下载新种恢复：
 
-将新种子添加到 qBittorrent/rTorrent/Deluge/Transmission。
+```bash
+python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --uploaded-torrent-id 999 --download-uploaded-torrent --uploaded-output-dir ./tmp/uploaded --inject-uploaded-torrent --uploaded-save-path "/downloads/content" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --wait-uploaded-complete --write-summary --json
 
----
+python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --uploaded-torrent-file ./tmp/uploaded/MTEAM-999.torrent --inject-uploaded-torrent --uploaded-save-path "/downloads/content" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --wait-uploaded-complete --write-summary --json
+```
 
-## 人工干预点汇总
+`retorrent --execute` 和 `pipeline --write-summary` 会在 `ptcli-run-summary.json` 中写入 `resume_commands`，优先使用这些命令续跑。
 
-| ID | 位置 | 触发条件 | 发生频率 | 干预方式 |
-|----|------|---------|---------|---------|
-| **A** | `trackermeta.py:487` | 源站提取到描述后确认 | 每次 | 选择: 编辑(e) / 丢弃(d) / 保留(Enter) |
-| **B** | `imdb.py:841` | IMDb 搜索返回多个候选 | **高**（动画/中文/日韩） | 输入编号选择，或输入 tt1234567 |
-| **C** | `imdb.py:883` | IMDb 搜索无结果 | 中 | 手动输入 IMDb ID 或输入 0 跳过 |
-| **D** | `trackerstatus.py:68` | 预检查时缺少 IMDb ID | 中 | 手动输入 IMDb ID |
-| **E** | `uphelper.py:113/157` | 查重发现可能的重复 | 低 | 确认是否继续上传 |
-| **F** | `tmdb.py:767/961` | TMDb 搜索需要选择 | 低 | 选择 TMDb 条目或手动输入 |
-| **G** | `get_tracker_data.py:347` | 从其他 Tracker 搜到 ID | 低 | 确认是否使用 |
+## 人工边界
 
-### unattended 模式下的行为
+当前仍需要人工处理或真实环境验证的部分：
 
-| 干预点 | unattended 行为 | 结果 |
-|--------|-----------------|------|
-| A 描述确认 | **仍会弹出确认** ⚠️ | 需改善 |
-| B IMDb 多候选 | 自动选择最佳匹配（>= 0.85） | OK |
-| C IMDb 无结果 | 返回 0，跳过 IMDb | 导致后续 PTGen 也失败 |
-| D 缺 IMDb | **仍会弹出输入** ⚠️ | 需改善 |
-| E 重复确认 | 使用 default 值 | OK |
-| F TMDb 选择 | **仍会弹出选择** ⚠️ | 需改善 |
-| G Tracker ID 确认 | **仍会弹出确认** ⚠️ | 需改善 |
-
-标记 ⚠️ 的是 unattended 模式下仍会阻塞的干预点，将在阶段三修复。
-
----
-
-## 配置要求
-
-### Cookie 文件
-
-| Tracker | 文件路径 | 格式 |
-|---------|---------|------|
-| U2 | `data/cookies/U2.txt` | Netscape (Firefox 导出) |
-| CHD | `data/cookies/CHD.txt` | Netscape |
-| TJUPT | `data/cookies/TJUPT.txt` | Netscape |
-| TTG | `data/cookies/TTG.json` | JSON (**注意与其他站不同**) |
-| OB | `data/cookies/OB.txt` | Netscape |
-
-### API Key
-
-| Tracker | 配置字段 | 获取方式 |
-|---------|---------|---------|
-| MTEAM | `TRACKERS.MTEAM.api_key` | 控制台 → 实验室 → 存取令牌 |
-| ids.moe | `TRACKERS.U2.ids_moe_api_key` | https://ids.moe 申请 |
-| TMDb | `DEFAULT.tmdb_api` | https://www.themoviedb.org/settings/api |
+- 在 live automation 前审阅源站下载/转载规则和目标站上传/做种规则。
+- 提供真实盒子环境里的源站 cookie、MTEAM API key、qBittorrent 连接和内容路径。
+- MTEAM 以外目标站尚未实现 live upload 闭环。
+- Web UI、Discord、海外 tracker 和非转种路径仍处于迁移期兼容状态，尚未完成瘦身。
