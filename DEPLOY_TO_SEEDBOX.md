@@ -107,7 +107,7 @@ python3 ptcli.py retorrent \
 
 输出中的顶层 `complete: true` 表示闭环已经完成；若为 `false`，按 `next_actions` 或 `resume_commands` 恢复执行。
 
-#### 旧 Upload Assistant 流程
+#### 旧 Upload Assistant 流程（legacy）
 
 ```bash
 # Debug 模式测试（不会实际上传）
@@ -141,11 +141,10 @@ scp data/config.py user@your-seedbox-ip:/path/to/config.py
 # 拉取最新镜像
 docker pull ghcr.io/loofk/upload-assistant:latest
 
-# 运行测试（Debug 模式）
+# 运行 PT 转种闭环
 docker run --rm -it --network=host \
   -v /path/to/config.py:/Upload-Assistant/data/config.py \
   -v /path/to/downloads:/downloads \
-  --entrypoint ptcli \
   ghcr.io/loofk/upload-assistant:latest \
   retorrent \
   --from U2 \
@@ -161,13 +160,15 @@ docker run --rm -it --network=host \
   --json
 ```
 
-如需运行旧 `upload.py` debug 流程，保留镜像默认 entrypoint：
+镜像默认入口现在是 `ptcli.py`。如需运行旧 `upload.py` debug 流程，必须显式覆盖 entrypoint：
 
 ```bash
 docker run --rm -it --network=host \
   -v /path/to/config.py:/Upload-Assistant/data/config.py \
   -v /path/to/downloads:/downloads \
+  --entrypoint python \
   ghcr.io/loofk/upload-assistant:latest \
+  /Upload-Assistant/upload.py \
   /downloads/path/to/video.mkv \
   --trackers MTEAM \
   --debug \
@@ -213,28 +214,40 @@ git apply my-changes.patch
 
 ## 快速测试命令
 
-### Debug 模式（推荐首次测试）
+### PTCLI smoke（推荐首次测试）
+
+```bash
+python3 ptcli.py sites --json
+python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --connect-qbit --json
+```
+
+### PTCLI 一键闭环 dry/readiness 检查
+
+```bash
+python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --dry-run --json
+```
+
+### PTCLI live 闭环
+
+```bash
+python3 ptcli.py retorrent \
+  --from U2 \
+  --source-id 60635 \
+  --to MTEAM \
+  --execute \
+  --accept-rules \
+  --confirm-upload \
+  --save-path "/downloads" \
+  --uploaded-qbit-category MTEAM \
+  --uploaded-qbit-tags retorrent \
+  --write-summary \
+  --json
+```
+
+### 旧 `upload.py` debug（legacy）
 
 ```bash
 python3 upload.py "/path/to/video.mkv" --trackers MTEAM --debug --no-seed
-```
-
-### 带 IMDb ID 的测试
-
-```bash
-python3 upload.py "/path/to/video.mkv" --trackers MTEAM --imdb tt0111161 --debug --no-seed
-```
-
-### 完整测试（包含截图）
-
-```bash
-python3 upload.py "/path/to/video.mkv" --trackers MTEAM --screens 3 --debug --no-seed
-```
-
-### 实际测试上传（移除 --debug）
-
-```bash
-python3 upload.py "/path/to/video.mkv" --trackers MTEAM --no-seed
 ```
 
 ---
@@ -267,6 +280,7 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 ```bash
 # 确保有执行权限
+chmod +x ptcli.py
 chmod +x upload.py
 
 # 确保配置文件可读
@@ -289,9 +303,12 @@ chmod 644 data/config.py
 - [ ] `data/config.py` 已配置
 - [ ] `tmdb_api` 已填写
 - [ ] `MTEAM.api_key` 已填写（Token）
-- [ ] 测试视频文件已准备好
-- [ ] Debug 模式测试通过
-- [ ] 实际上传测试（可选）
+- [ ] qBittorrent client 配置已填写并可连接
+- [ ] 源站 cookie 已准备好
+- [ ] `ptcli.py sites --json` 通过
+- [ ] `ptcli.py doctor ... --connect-qbit` 通过
+- [ ] `ptcli.py retorrent ... --dry-run --json` 输出可审计计划
+- [ ] 已人工确认源站和目标站规则后，再执行 live 闭环
 
 ---
 
@@ -299,5 +316,5 @@ chmod 644 data/config.py
 
 测试成功后，你可以：
 1. 将修改提交到 git（如果需要）
-2. 设置定时任务自动运行
-3. 配置其他 tracker 进行批量上传
+2. 用 `ptcli.py retorrent --execute --accept-rules --confirm-upload ...` 执行单条 live 闭环
+3. 根据 `ptcli-run-summary.json` 的 `resume_commands` 做断点恢复或接入自动化

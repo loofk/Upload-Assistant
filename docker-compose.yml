@@ -1,7 +1,9 @@
 services:
-  upload-assistant-cli:
+  legacy-webui:
     image: ghcr.io/loofk/upload-assistant:latest
-    container_name: UA
+    container_name: UA-legacy-webui
+    profiles:
+      - legacy-webui
     restart: unless-stopped
     networks:
       - yournetwork #change to the network with ur torrent instance

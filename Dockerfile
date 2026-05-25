@@ -64,5 +64,6 @@ RUN chown -R 1000:1000 /Upload-Assistant/bin/bdinfo
 RUN mkdir -p /Upload-Assistant/tmp && chmod 777 /Upload-Assistant/tmp
 ENV TMPDIR=/Upload-Assistant/tmp
 
-# Set the entry point for the container
-ENTRYPOINT ["python", "/Upload-Assistant/upload.py"]
+# Default to the focused PT retorrent CLI. The legacy upload.py workflow remains
+# available with: --entrypoint python ... /Upload-Assistant/upload.py
+ENTRYPOINT ["python", "/Upload-Assistant/ptcli.py"]

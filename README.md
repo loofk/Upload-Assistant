@@ -55,6 +55,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - qBittorrent client 配置沿用 `data/config.py`。
 - 源站 cookie 放在 `data/cookies/<TRACKER>.txt` 或对应适配器要求的位置。
 - MTEAM 需要 `TRACKERS.MTEAM.api_key`。
+- Docker 镜像默认入口是 `ptcli.py`；旧 `upload.py` 需要显式覆盖 entrypoint 才会运行。
 - live 验证需要在真实盒子环境中提供有效 cookie、MTEAM API key、qBittorrent 连接和实际内容路径。
 
 ## 开发命令
