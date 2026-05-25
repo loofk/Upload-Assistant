@@ -1,0 +1,32 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TMPDIR=/Upload-Assistant/tmp
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    mediainfo && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
+    update-ca-certificates
+
+WORKDIR /Upload-Assistant
+
+COPY requirements-ptcli.txt .
+RUN python -m pip install --upgrade pip==25.3 wheel==0.45.1 && \
+    pip install --no-cache-dir -r requirements-ptcli.txt
+
+RUN mkdir -p data
+COPY ptcli.py .
+COPY src/ src/
+COPY data/example-config.py data/example-config.py
+
+RUN chmod +x /Upload-Assistant/ptcli.py && \
+    ln -sf /Upload-Assistant/ptcli.py /usr/local/bin/ptcli && \
+    mkdir -p /Upload-Assistant/data/cookies /Upload-Assistant/tmp && \
+    chmod 777 /Upload-Assistant/tmp
+
+ENTRYPOINT ["python", "/Upload-Assistant/ptcli.py"]

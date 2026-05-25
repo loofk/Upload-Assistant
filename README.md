@@ -56,7 +56,8 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - qBittorrent client 配置沿用 `data/config.py`。
 - 源站 cookie 放在 `data/cookies/<TRACKER>.txt` 或对应适配器要求的位置。
 - MTEAM 需要 `TRACKERS.MTEAM.api_key`。
-- Docker 镜像默认入口是 `ptcli.py`；旧 `upload.py` 需要显式覆盖 entrypoint 才会运行。
+- `Dockerfile.ptcli` 是 focused CLI 镜像，只安装 `requirements-ptcli.txt` 和 ptcli 需要的系统依赖；旧 `Dockerfile` 保留给 legacy/full UA 入口。
+- 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；旧 `upload.py` 需要显式覆盖 entrypoint 或使用 legacy Dockerfile 才会运行。
 - `docker-compose.yml` 默认提供 `ptcli` 一次性 CLI 服务，可用 `docker compose run --rm ptcli retorrent ...` 在盒子上执行；legacy Web UI 需要显式 `--profile legacy-webui`。
 - live 验证需要在真实盒子环境中提供有效 cookie、MTEAM API key、qBittorrent 连接和实际内容路径。
 
@@ -65,6 +66,9 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 ```bash
 # 检查 focused CLI 能力矩阵
 docker compose run --rm ptcli sites --json
+
+# 本地构建 focused CLI 镜像
+docker compose build ptcli
 
 # 盒子上一键闭环示例
 docker compose run --rm ptcli retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json
@@ -84,7 +88,7 @@ make test PYTHON=.venv/bin/python
 python3 -m ruff check --config pyproject.toml src/ptcli tests/unit/test_ptcli.py
 ```
 
-`make smoke` 默认等同于 focused PT CLI smoke。`requirements.txt` 和 `make smoke-legacy` 仍保留给迁移期 legacy/full UA 入口；默认 Docker 镜像使用 `requirements-ptcli.txt`。
+`make smoke` 默认等同于 focused PT CLI smoke。`requirements.txt`、旧 `Dockerfile` 和 `make smoke-legacy` 仍保留给迁移期 legacy/full UA 入口；默认 Docker 镜像使用 `Dockerfile.ptcli` + `requirements-ptcli.txt`。
 
 ## 迁移状态
 

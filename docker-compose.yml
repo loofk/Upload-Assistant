@@ -1,6 +1,9 @@
 services:
   ptcli:
     image: ghcr.io/loofk/upload-assistant:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ptcli
     restart: "no"
     networks:
       - yournetwork # change to the network with your qBittorrent instance
