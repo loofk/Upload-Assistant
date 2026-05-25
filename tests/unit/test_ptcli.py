@@ -4946,6 +4946,97 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
 
 
+def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path, capsys) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    content_path = tmp_path / "downloads" / "Name"
+    content_path.mkdir(parents=True)
+    uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    code = main(
+        [
+            "doctor",
+            "--config",
+            str(tmp_path / "custom-config.py"),
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            str(content_path),
+            "--package-dir",
+            package["package_dir"],
+            "--accept-rules",
+            "--target-execute",
+            "--confirm-upload",
+            "--uploaded-torrent-file",
+            str(uploaded_torrent),
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            str(content_path),
+            "--uploaded-qbit-category",
+            "MTEAM",
+            "--uploaded-qbit-tags",
+            "retorrent",
+            "--uploaded-paused",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
+            "--json",
+        ]
+    )
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"live_safe_to_attempt": true' in out
+    summary_payload = json.loads((tmp_path / "summary" / "ptcli-doctor-summary.json").read_text(encoding="utf-8"))
+    commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
+    assert summary_payload["inputs"]["uploaded_torrent_file"] == str(uploaded_torrent)
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["path"] == str(uploaded_torrent)
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["is_file"] is True
+    assert "pipeline-live" not in commands
+    assert "--uploaded-torrent-file" in commands["resume-uploaded-torrent"]
+    assert str(uploaded_torrent) in commands["resume-uploaded-torrent"]
+    assert "--uploaded-save-path" in commands["resume-uploaded-torrent"]
+    assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent"]
+    assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent"]
+    assert "--uploaded-paused" in commands["resume-uploaded-torrent"]
+    assert summary_payload["resume_state"]["live_safe_to_attempt"] is True
+    assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent"
+    assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent"]
+    assert summary_payload["resume_state"]["next_command_argv"] == command_argv["resume-uploaded-torrent"]
+    assert command_argv["resume-uploaded-torrent"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert str(tmp_path / "custom-config.py") in command_argv["resume-uploaded-torrent"]
+    assert str(tmp_path / "summary") in command_argv["resume-uploaded-torrent"]
+    assert str(uploaded_torrent) in command_argv["resume-uploaded-torrent"]
+    assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
+
+
 def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> None:
     source_url = "https://u2.dmhy.org/details.php?id=60635&hit=1"
     config = {

@@ -1593,7 +1593,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if ready and live_safe else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
-    next_command = _summary_next_command(payload, resume_state, ("resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes", "doctor-retry"))
+    next_command = _summary_next_command(payload, resume_state, ("resume-uploaded-torrent", "resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes", "doctor-retry"))
     return _summary_check_result({
         "status": "ok" if ready and live_safe and not blockers else "blocked",
         "kind": payload.get("kind"),
@@ -1785,7 +1785,7 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
 
 
 def _doctor_next_command(payload: dict[str, Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
-    preferred_stages = ["resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes"] if payload.get("live_safe_to_attempt") else ["doctor-retry"]
+    preferred_stages = ["resume-uploaded-torrent", "resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes"] if payload.get("live_safe_to_attempt") else ["doctor-retry"]
     for stage in preferred_stages:
         command = commands_by_stage.get(stage)
         if command:
@@ -1863,6 +1863,35 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
         return commands
 
     commands.append(_ptcli_command_entry("doctor-live-probes", _doctor_retry_args(args, force_probes=True)))
+
+    if args.uploaded_torrent_file and args.package_dir:
+        uploaded_resume_args = [
+            "target-upload",
+            "--package-dir",
+            args.package_dir,
+            "--client",
+            args.client,
+            "--uploaded-torrent-file",
+            args.uploaded_torrent_file,
+            "--inject-uploaded-torrent",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+        if args.config:
+            uploaded_resume_args.extend(["--config", args.config])
+        if args.summary_output_dir:
+            uploaded_resume_args.extend(["--summary-output-dir", args.summary_output_dir])
+        if args.uploaded_save_path:
+            uploaded_resume_args.extend(["--uploaded-save-path", args.uploaded_save_path])
+        if args.uploaded_qbit_category:
+            uploaded_resume_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
+        if args.uploaded_qbit_tags:
+            uploaded_resume_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
+        if args.uploaded_paused:
+            uploaded_resume_args.append("--uploaded-paused")
+        commands.append(_ptcli_command_entry("resume-uploaded-torrent", uploaded_resume_args))
+        return commands
 
     if args.uploaded_torrent_id and args.package_dir:
         uploaded_resume_args = [
