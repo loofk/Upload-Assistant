@@ -1,4 +1,4 @@
-.PHONY: help lint test check smoke smoke-ptcli test-live
+.PHONY: help lint test check smoke smoke-ptcli smoke-legacy test-live
 
 PYTHON ?= python3
 
@@ -14,12 +14,14 @@ test: ## 运行 pytest（排除 live 标记的测试）
 
 check: lint test ## 运行 lint + test
 
-smoke: smoke-ptcli ## 快速导入检查（验证核心模块可正常导入）
+smoke: smoke-ptcli ## 快速导入检查（默认验证聚焦版 PT CLI）
+
+smoke-legacy: ## 迁移期 legacy/full UA 导入检查
 	$(PYTHON) -c "from src.args import Args; print('✓ args')"
 	$(PYTHON) -c "from src.prep import Prep; print('✓ prep')"
 	$(PYTHON) -c "from src.trackersetup import TRACKER_SETUP; print('✓ trackersetup')"
 	$(PYTHON) -c "from src.trackerhandle import process_trackers; print('✓ trackerhandle')"
-	@echo "All smoke checks passed."
+	@echo "Legacy/full UA smoke checks passed."
 
 smoke-ptcli: ## 快速导入检查（验证聚焦版 PT CLI 可正常导入）
 	$(PYTHON) -c "from src.ptcli.cli import build_parser, main; build_parser(); print('✓ ptcli.cli')"

@@ -46,9 +46,10 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - 关键命令支持 `--json`。
 - `sites --json` 暴露每个站点的 `source_info`、`source_download`、`target_upload`、`full_live_closure_to_mteam` 能力。
 - `rule-check --json` 暴露 `rule_obligations[].review_scope.required_confirmations`，供 agent 在 live 前逐项提示人工确认。
-- `pipeline` 和 `retorrent --execute` 返回 `closure`、`evidence`、`artifacts`、`resume_commands`、`next_actions`。
+- `pipeline` 和 `retorrent --execute` 返回 `closure`、`evidence`、`artifacts`、`resume_commands`、`resume_state`、`next_actions`。
 - 带执行动作的命令未闭环时返回 `status: blocked`、顶层 blockers 和非 0 退出码。
-- `--write-summary` 会写出 `ptcli-run-summary.json`，便于 agent 或脚本续跑。
+- `--write-summary` 会写出 `ptcli-run-summary.json`，其中 `resume_state.next_stage` / `resume_state.next_command` 可供 agent 或脚本直接续跑。
+- `doctor --check-runtime`、`pipeline --target-execute`、`retorrent --execute` 和需要 qBittorrent 注入的 `target-upload` 会检查 focused ptcli 运行时依赖，legacy Web UI/Discord 依赖不是默认要求。
 
 ## 配置要求
 
@@ -64,11 +65,12 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 pip install -r requirements-ptcli.txt
 pip install -r requirements-dev.txt
 make smoke-ptcli PYTHON=.venv/bin/python
+make smoke PYTHON=.venv/bin/python
 make test PYTHON=.venv/bin/python
 python3 -m ruff check --config pyproject.toml src/ptcli tests/unit/test_ptcli.py
 ```
 
-`requirements.txt` 仍保留给 legacy/full UA 入口；默认 Docker 镜像使用 `requirements-ptcli.txt`。
+`make smoke` 默认等同于 focused PT CLI smoke。`requirements.txt` 和 `make smoke-legacy` 仍保留给迁移期 legacy/full UA 入口；默认 Docker 镜像使用 `requirements-ptcli.txt`。
 
 ## 迁移状态
 
