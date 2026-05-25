@@ -2553,7 +2553,7 @@ def _wait_complete_result_blockers(result: dict[str, Any]) -> list[str]:
     if result.get("complete") is False:
         _append_unique_string(blockers, "qBittorrent did not report the source torrent as complete.")
     elif result.get("complete") is True and not _wait_result_completed(result):
-        _append_unique_string(blockers, "qBittorrent completion wait did not include matched torrent evidence.")
+        _extend_unique_string(blockers, _wait_completion_verification_blockers(result))
     return blockers
 
 
@@ -2571,7 +2571,20 @@ def _target_upload_result_blockers(result: dict[str, Any]) -> list[str]:
     if isinstance(uploaded_wait, dict) and uploaded_wait.get("complete") is False:
         _append_unique_string(blockers, "uploaded_wait: qBittorrent did not report the uploaded target torrent as complete.")
     elif isinstance(uploaded_wait, dict) and uploaded_wait.get("complete") is True and not _wait_result_completed(uploaded_wait):
-        _append_unique_string(blockers, "uploaded_wait: qBittorrent completion wait did not include matched torrent evidence.")
+        _extend_unique_string(blockers, [f"uploaded_wait: {blocker}" for blocker in _wait_completion_verification_blockers(uploaded_wait)])
+    return blockers
+
+
+def _wait_completion_verification_blockers(wait_result: dict[str, Any]) -> list[str]:
+    verification = wait_result.get("completion_verification")
+    blockers: list[str] = []
+    if isinstance(verification, dict):
+        if verification.get("requested_hash_matched") is False:
+            blockers.append("qBittorrent completion wait matched torrents, but not the requested hash.")
+        if verification.get("requested_content_path_matched") is False:
+            blockers.append("qBittorrent completion wait matched torrents, but not the requested content path.")
+    if not blockers:
+        blockers.append("qBittorrent completion wait did not include matched torrent evidence.")
     return blockers
 
 

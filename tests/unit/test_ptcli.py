@@ -2613,6 +2613,37 @@ def test_wait_result_completed_rejects_request_mismatch() -> None:
     ) is False
 
 
+def test_wait_complete_blockers_report_request_mismatch() -> None:
+    blockers = ptcli_cli._wait_complete_result_blockers(
+        {
+            "complete": True,
+            "matches": [{"hash": "a" * 40}],
+            "completion_verification": {"matched_count": 1, "complete_count": 1, "any_complete": True, "requested_hash_matched": False},
+        }
+    )
+
+    assert blockers == ["qBittorrent completion wait matched torrents, but not the requested hash."]
+
+
+def test_target_upload_blockers_report_uploaded_wait_request_mismatch() -> None:
+    summary = ptcli_cli._target_upload_summary(
+        {
+            "status": "uploaded",
+            "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+            "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+            "uploaded_wait": {
+                "complete": True,
+                "matches": [{"hash": "a" * 40, "content_path": "/downloads/Other"}],
+                "completion_verification": {"matched_count": 1, "complete_count": 1, "any_complete": True, "requested_content_path_matched": False},
+            },
+        },
+        {"status": "ready", "blockers": [], "rule_obligation_review": {"ready": True, "blockers": []}},
+    )
+
+    assert summary["ready"] is False
+    assert "uploaded_wait: qBittorrent completion wait matched torrents, but not the requested content path." in summary["blockers"]
+
+
 def test_target_upload_next_command_requires_uploaded_wait_match_evidence() -> None:
     next_command = ptcli_cli._target_upload_next_command(
         {
