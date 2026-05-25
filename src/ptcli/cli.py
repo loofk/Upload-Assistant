@@ -176,6 +176,10 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --package-dir or ./tmp/retorrent-runs.")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
+    summary_check = subparsers.add_parser("summary-check", help="Read a ptcli summary JSON and return a unified automation verdict.")
+    summary_check.add_argument("--summary-file", required=True, help="Path to ptcli-run-summary.json, ptcli-target-upload-summary.json, or ptcli-doctor-summary.json.")
+    summary_check.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
     pipeline = subparsers.add_parser(
         "pipeline",
         help="Run staged retorrent checks; with --target-execute it auto-runs the live closure follow-ups.",
@@ -1258,6 +1262,128 @@ def _target_upload_qbit_options(args: argparse.Namespace) -> dict[str, Any]:
             "tags": args.uploaded_qbit_tags,
             "paused": bool(args.uploaded_paused),
         },
+    }
+
+
+def summary_check_payload(args: argparse.Namespace) -> dict[str, Any]:
+    summary_path = Path(args.summary_file).expanduser()
+    if not summary_path.exists():
+        return {
+            "status": "blocked",
+            "summary_file": str(summary_path),
+            "blockers": ["Summary file does not exist."],
+        }
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return {
+            "status": "blocked",
+            "summary_file": str(summary_path),
+            "blockers": [f"Summary file is not valid JSON: {exc.msg}"],
+        }
+    if not isinstance(payload, dict):
+        return {
+            "status": "blocked",
+            "summary_file": str(summary_path),
+            "blockers": ["Summary file root must be a JSON object."],
+        }
+    return _summary_check_from_payload(payload, str(summary_path))
+
+
+def _summary_check_from_payload(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
+    kind = str(payload.get("kind") or "unknown")
+    if kind == "ptcli.pipeline.run_summary":
+        return _pipeline_summary_check(payload, summary_file)
+    if kind == "ptcli.target_upload.summary":
+        return _target_upload_summary_check(payload, summary_file)
+    if kind == "ptcli.doctor.live_readiness":
+        return _doctor_summary_check(payload, summary_file)
+    return {
+        "status": "blocked",
+        "kind": kind,
+        "summary_file": summary_file,
+        "blockers": [f"Unsupported ptcli summary kind: {kind}"],
+    }
+
+
+def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
+    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    blockers = _string_list(payload.get("blockers"))
+    if not blockers:
+        blockers = _string_list(resume_state.get("blockers"))
+    complete = bool(payload.get("complete"))
+    ready = bool(payload.get("ready"))
+    artifact_status = _summary_artifact_status(resume_state)
+    required = ("source_hash_consistent", "target_hash_consistent", "target_duplicate_clean", "target_rule_obligations")
+    missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
+    blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
+    return {
+        "status": "ok" if complete and ready and not blockers else "blocked",
+        "kind": payload.get("kind"),
+        "summary_file": summary_file,
+        "ready": ready,
+        "complete": complete,
+        "live_safe_to_attempt": complete and ready and not blockers,
+        "blockers": blockers,
+        "next_stage": resume_state.get("next_stage"),
+        "next_command": resume_state.get("next_command"),
+        **artifact_status,
+    }
+
+
+def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    blockers = _string_list(summary.get("blockers")) or _string_list(resume_state.get("blockers"))
+    ready = bool(summary.get("ready"))
+    artifact_status = _summary_artifact_status(resume_state)
+    required = ("target_hash_consistent", "target_duplicate_clean", "target_rule_obligations")
+    missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
+    blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
+    return {
+        "status": "ok" if ready and not blockers else "blocked",
+        "kind": payload.get("kind"),
+        "summary_file": summary_file,
+        "ready": ready,
+        "complete": ready,
+        "live_safe_to_attempt": ready and not blockers,
+        "blockers": blockers,
+        "next_stage": resume_state.get("next_stage"),
+        "next_command": resume_state.get("next_command"),
+        **artifact_status,
+    }
+
+
+def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
+    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    blockers = _string_list(payload.get("failed_check_names"))
+    ready = bool(payload.get("ready"))
+    live_safe = bool(payload.get("live_safe_to_attempt"))
+    artifact_status = _summary_artifact_status(resume_state)
+    required = ("flow_check_ready", "rule_check_ready", "rules_acknowledged", "target_rule_obligations", "target_package_preflight_ready")
+    missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
+    blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
+    return {
+        "status": "ok" if ready and live_safe and not blockers else "blocked",
+        "kind": payload.get("kind"),
+        "summary_file": summary_file,
+        "ready": ready,
+        "complete": live_safe,
+        "live_safe_to_attempt": live_safe and not blockers,
+        "blockers": blockers,
+        "next_stage": resume_state.get("next_stage"),
+        "next_command": resume_state.get("next_command"),
+        **artifact_status,
+    }
+
+
+def _summary_artifact_status(resume_state: dict[str, Any]) -> dict[str, Any]:
+    artifacts = resume_state.get("artifacts") if isinstance(resume_state.get("artifacts"), dict) else {}
+    normalized = {str(key): bool(value) for key, value in artifacts.items()}
+    return {
+        "artifacts": normalized,
+        "missing_artifacts": [key for key, ready in normalized.items() if not ready],
+        "available_stages": resume_state.get("available_stages") if isinstance(resume_state.get("available_stages"), list) else [],
     }
 
 
@@ -3851,6 +3977,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = _with_captured_stdout(lambda: asyncio.run(doctor_payload(args)), json_output)
             _print_payload(payload, json_output)
             return _doctor_exit_code(args, payload)
+
+        if args.command == "summary-check":
+            payload = summary_check_payload(args)
+            _print_payload(payload, json_output)
+            return 0 if payload.get("status") == "ok" else 1
 
         if args.command == "pipeline":
             payload = _with_captured_stdout(lambda: asyncio.run(pipeline_payload(args)), json_output)

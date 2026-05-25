@@ -1703,6 +1703,142 @@ def test_pipeline_next_actions_reports_completed_closure() -> None:
     assert actions == ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
 
 
+def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "resume_state": {
+                    "next_stage": None,
+                    "next_command": None,
+                    "available_stages": [],
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ok"
+    assert payload["complete"] is True
+    assert payload["live_safe_to_attempt"] is True
+    assert payload["missing_artifacts"] == []
+
+
+def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "resume_state": {
+                    "next_stage": "resume-target-upload",
+                    "next_command": "python3 ptcli.py pipeline --upload-target",
+                    "available_stages": ["resume-target-upload"],
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": False,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["next_stage"] == "resume-target-upload"
+    assert "target_rule_obligations" in payload["missing_artifacts"]
+    assert "missing audit artifact: target_rule_obligations" in payload["blockers"]
+
+
+def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-target-upload-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.target_upload.summary",
+                "summary": {"ready": True, "blockers": []},
+                "resume_state": {
+                    "next_stage": None,
+                    "next_command": None,
+                    "available_stages": ["verify-seeding"],
+                    "artifacts": {
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["available_stages"] == ["verify-seeding"]
+
+
+def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-doctor-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.doctor.live_readiness",
+                "ready": True,
+                "live_safe_to_attempt": True,
+                "failed_check_names": [],
+                "resume_state": {
+                    "next_stage": "pipeline-live",
+                    "next_command": "python3 ptcli.py pipeline --target-execute",
+                    "available_stages": ["pipeline-live"],
+                    "artifacts": {
+                        "flow_check_ready": True,
+                        "rule_check_ready": True,
+                        "rules_acknowledged": True,
+                        "target_rule_obligations": True,
+                        "target_package_preflight_ready": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ok"
+    assert payload["live_safe_to_attempt"] is True
+    assert payload["next_stage"] == "pipeline-live"
+
+
 def test_target_upload_result_requires_requested_uploaded_torrent_injection() -> None:
     payload = {
         "status": "uploaded",
