@@ -1158,6 +1158,7 @@ def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, s
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
     failed_checks = [check for check in checks if isinstance(check, dict) and not check.get("ok")]
     artifacts = _doctor_summary_artifacts(args)
+    recommended_commands = _doctor_recommended_commands(payload, args, artifacts)
     return {
         "schema_version": 1,
         "kind": "ptcli.doctor.live_readiness",
@@ -1177,13 +1178,45 @@ def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, s
         "failed_check_names": [str(check.get("name")) for check in failed_checks if isinstance(check, dict)],
         "effective_uploaded_save_path": payload.get("effective_uploaded_save_path"),
         "next_actions": payload.get("next_actions", []),
-        "recommended_commands": _doctor_recommended_commands(payload, args, artifacts),
+        "recommended_commands": recommended_commands,
+        "resume_state": _doctor_resume_state(payload, artifacts, failed_checks, recommended_commands),
         "checks": checks,
         "flow_check": payload.get("flow_check"),
         "rule_check": payload.get("rule_check"),
         "compliance": payload.get("compliance"),
         "package_preflight": payload.get("package_preflight"),
     }
+
+
+def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], failed_checks: list[Any], recommended_commands: list[dict[str, str]]) -> dict[str, Any]:
+    commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in recommended_commands if isinstance(command, dict)}
+    next_command = _doctor_next_command(payload, commands_by_stage)
+    return {
+        "ready": bool(payload.get("ready")),
+        "live_safe_to_attempt": bool(payload.get("live_safe_to_attempt")),
+        "resume_available": any(stage != "doctor-retry" for stage in commands_by_stage),
+        "next_stage": next_command.get("stage"),
+        "next_command": next_command.get("command"),
+        "available_stages": [str(command.get("stage")) for command in recommended_commands if isinstance(command, dict)],
+        "artifacts": {
+            "content_path": bool(_path_artifact_exists(artifacts.get("content_path"))),
+            "source_torrent_file": bool(_path_artifact_exists(artifacts.get("source_torrent_file"))),
+            "package_dir": bool(_path_artifact_exists(artifacts.get("package_dir"))),
+            "target_torrent_file": bool(_path_artifact_exists(artifacts.get("target_torrent_file"))),
+            "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
+            "uploaded_torrent_file": bool(_path_artifact_exists(artifacts.get("uploaded_torrent_file"))),
+        },
+        "failed_check_names": [str(check.get("name")) for check in failed_checks if isinstance(check, dict)],
+    }
+
+
+def _doctor_next_command(payload: dict[str, Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
+    preferred_stages = ["resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes"] if payload.get("live_safe_to_attempt") else ["doctor-retry"]
+    for stage in preferred_stages:
+        command = commands_by_stage.get(stage)
+        if command:
+            return {"stage": stage, "command": command}
+    return {"stage": None, "command": None}
 
 
 def _doctor_summary_inputs(args: argparse.Namespace) -> dict[str, Any]:

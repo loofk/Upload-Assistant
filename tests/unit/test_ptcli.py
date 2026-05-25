@@ -2877,6 +2877,14 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert "--target-execute --confirm-upload" in commands["pipeline-live"]
     assert str(content_path) in commands["pipeline-live"]
     assert str(target_torrent) in commands["pipeline-live"]
+    assert summary_payload["resume_state"]["ready"] is True
+    assert summary_payload["resume_state"]["live_safe_to_attempt"] is True
+    assert summary_payload["resume_state"]["resume_available"] is True
+    assert summary_payload["resume_state"]["next_stage"] == "pipeline-live"
+    assert summary_payload["resume_state"]["next_command"] == commands["pipeline-live"]
+    assert summary_payload["resume_state"]["artifacts"]["content_path"] is True
+    assert summary_payload["resume_state"]["artifacts"]["package_dir"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_torrent_file"] is True
 
 
 def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, capsys) -> None:
@@ -2957,6 +2965,10 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent-download"]
+    assert summary_payload["resume_state"]["live_safe_to_attempt"] is True
+    assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
+    assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent-download"]
+    assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
 
 
 def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> None:
@@ -3007,6 +3019,12 @@ def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> No
     assert payload["live_safe_to_attempt"] is False
     assert "target_package" in payload["failed_check_names"]
     assert payload["recommended_commands"][0]["stage"] == "doctor-retry"
+    assert payload["resume_state"]["ready"] is False
+    assert payload["resume_state"]["live_safe_to_attempt"] is False
+    assert payload["resume_state"]["resume_available"] is False
+    assert payload["resume_state"]["next_stage"] == "doctor-retry"
+    assert payload["resume_state"]["next_command"] == payload["recommended_commands"][0]["command"]
+    assert "target_package" in payload["resume_state"]["failed_check_names"]
     assert isinstance(payload["checks"], list)
 
 
