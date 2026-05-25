@@ -1946,6 +1946,113 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_NEXT_COMMAND='python3 ptcli.py pipeline --upload-target'\n" in out
 
 
+def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatch, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [{"stage": "resume-target-upload", "command": "python3 ptcli.py pipeline --upload-target"}],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_run(argv, check):
+        calls.append((argv, check))
+        return argparse.Namespace(returncode=7)
+
+    monkeypatch.setattr(ptcli_cli.subprocess, "run", fake_run)
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--run-next-command"])
+
+    assert code == 7
+    assert calls == [(["python3", "ptcli.py", "pipeline", "--upload-target"], False)]
+    assert capsys.readouterr().out == ""
+
+
+def test_summary_check_run_next_command_rejects_non_ptcli_command(tmp_path, monkeypatch, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [{"stage": "resume-target-upload", "command": "sh -c 'echo unsafe'"}],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    def fail_run(*_args, **_kwargs):
+        pytest.fail("unexpected subprocess call")
+
+    monkeypatch.setattr(ptcli_cli.subprocess, "run", fail_run)
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--run-next-command"])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""
+    assert "Refusing to run unsupported summary next_command" in captured.err
+
+
+def test_summary_check_run_next_command_is_noop_when_complete(tmp_path, monkeypatch, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    def fail_run(*_args, **_kwargs):
+        pytest.fail("unexpected subprocess call")
+
+    monkeypatch.setattr(ptcli_cli.subprocess, "run", fail_run)
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--run-next-command"])
+
+    assert code == 0
+    assert capsys.readouterr().out == ""
+
+
 def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-target-upload-summary.json"
     summary_file.write_text(

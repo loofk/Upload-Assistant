@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import shlex
+import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
@@ -184,6 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
     summary_output = summary_check.add_mutually_exclusive_group()
     summary_output.add_argument("--print-next-command", action="store_true", help="Print only the next resumable command; exits 0 when complete or command-ready, 1 when blocked without a command.")
     summary_output.add_argument("--print-shell", action="store_true", help="Print shell export lines for automation wrappers; inspect PTCLI_AUTOMATION_EXIT_CODE for the verdict.")
+    summary_output.add_argument("--run-next-command", action="store_true", help="Run the next resumable ptcli.py command without invoking a shell; exits with the child command status.")
     summary_check.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     pipeline = subparsers.add_parser(
@@ -4067,6 +4069,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _summary_check_print_next_command(payload)
             if args.print_shell:
                 return _summary_check_print_shell(payload)
+            if args.run_next_command:
+                return _summary_check_run_next_command(payload)
             _print_payload(payload, json_output)
             return 0 if payload.get("status") == "ok" else 1
 
@@ -4119,6 +4123,32 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     for key, value in fields.items():
         print(f"export {key}={shlex.quote('' if value is None else str(value))}")
     return 0
+
+
+def _summary_check_run_next_command(payload: dict[str, Any]) -> int:
+    command = payload.get("next_command")
+    if not payload.get("should_execute_next_command") or not command:
+        return 0 if payload.get("status") == "ok" else 1
+    argv = _summary_next_command_argv(str(command))
+    if argv is None:
+        print(f"Refusing to run unsupported summary next_command: {command}", file=sys.stderr)
+        return 2
+    completed = subprocess.run(argv, check=False)  # noqa: S603 - argv is restricted to generated ptcli.py commands.
+    return int(completed.returncode)
+
+
+def _summary_next_command_argv(command: str) -> list[str] | None:
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if len(argv) < 3:
+        return None
+    interpreter = Path(argv[0]).name
+    script = Path(argv[1]).name
+    if interpreter not in {"python", "python3"} or script != "ptcli.py":
+        return None
+    return argv
 
 
 def _shell_bool(value: Any) -> str:
