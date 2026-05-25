@@ -720,10 +720,35 @@ def _artifact_value_present(value: Any) -> bool:
 def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: list[str]) -> list[str]:
     if not blockers:
         return ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
+    actions: list[str] = []
+    for blocker in blockers:
+        _append_unique_string(actions, _retorrent_execute_blocker_next_action(str(blocker)))
     pipeline_actions = pipeline_result.get("next_actions")
     if isinstance(pipeline_actions, list) and pipeline_actions:
-        return [str(action) for action in pipeline_actions]
-    return [f"Fix {blocker}" for blocker in blockers]
+        for action in pipeline_actions:
+            action_text = str(action)
+            if action_text.startswith("Retorrent closure is complete;"):
+                continue
+            _append_unique_string(actions, action_text)
+    return actions or [f"Fix {blocker}" for blocker in blockers]
+
+
+def _retorrent_execute_blocker_next_action(blocker: str) -> str:
+    if blocker == "source.wait_evidence":
+        return "Re-run the source qBittorrent completion wait with --wait-complete, or provide a verified completed --path before target upload."
+    if blocker == "target.uploaded_wait_evidence":
+        return "Re-run the uploaded MTEAM torrent follow-up with --inject-uploaded-torrent and --wait-uploaded-complete until qBittorrent reports matched seeding evidence."
+    if blocker == "target.injected":
+        return "Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path."
+    if blocker == "target.seeding":
+        return "Verify the uploaded target torrent is active in qBittorrent, then re-run with --wait-uploaded-complete."
+    if blocker == "target.uploaded":
+        return "Resume the MTEAM target upload stage after duplicate and rule gates are ready."
+    if blocker == "pipeline did not report ready.":
+        return "Inspect the pipeline blockers and resume from the first incomplete stage."
+    if blocker.startswith("pipeline status is "):
+        return "Inspect the pipeline status and stage blockers before retrying retorrent --execute."
+    return f"Fix {blocker}"
 
 
 def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespace:
@@ -3138,13 +3163,13 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
         elif blocker.startswith("target-upload:"):
             stage_generic_preferred.append("resume-target-upload")
     preferred_stages.extend(stage_detail_preferred)
-    if "source.ready" in blocker_names or "source.hash_consistent" in blocker_names:
+    if "source.ready" in blocker_names or "source.hash_consistent" in blocker_names or "source.wait_evidence" in blocker_names:
         preferred_stages.append("resume-source-torrent")
     if "target.downloaded" in blocker_names:
         preferred_stages.append("resume-uploaded-torrent-download")
     if "target.uploaded" in blocker_names:
         preferred_stages.append("resume-target-upload")
-    if "target.injected" in blocker_names or "target.seeding" in blocker_names or "target.hash_consistent" in blocker_names:
+    if "target.injected" in blocker_names or "target.seeding" in blocker_names or "target.hash_consistent" in blocker_names or "target.uploaded_wait_evidence" in blocker_names:
         preferred_stages.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     preferred_stages.extend(stage_generic_preferred)
     preferred_stages.extend(["resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])

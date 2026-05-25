@@ -835,7 +835,8 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
     assert payload["complete"] is False
     assert payload["ready"] is False
     assert payload["blockers"] == ["target.injected", "pipeline did not report ready."]
-    assert payload["next_actions"] == ["Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path."]
+    assert "Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path." in payload["next_actions"]
+    assert "Inspect the pipeline blockers and resume from the first incomplete stage." in payload["next_actions"]
     assert payload["resume_state"]["complete"] is False
     assert payload["resume_state"]["pipeline_complete"] is False
     assert payload["resume_state"]["next_stage"] == "resume-uploaded-torrent"
@@ -891,6 +892,17 @@ def test_retorrent_execute_blockers_require_source_wait_evidence() -> None:
     )
 
     assert blockers == ["source.wait_evidence"]
+
+
+def test_retorrent_execute_next_actions_explain_wait_evidence_blockers() -> None:
+    actions = ptcli_cli._retorrent_execute_next_actions(
+        {"next_actions": ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]},
+        ["source.wait_evidence", "target.uploaded_wait_evidence"],
+    )
+
+    assert any("--wait-complete" in action for action in actions)
+    assert any("--wait-uploaded-complete" in action for action in actions)
+    assert all(not action.startswith("Retorrent closure is complete;") for action in actions)
 
 
 @pytest.mark.asyncio
@@ -1686,13 +1698,17 @@ def test_resume_next_command_uses_stage_blocker_details() -> None:
     }
 
     source_hash = ptcli_cli._resume_next_command(["source.hash_consistent"], commands)
+    source_wait = ptcli_cli._resume_next_command(["source.wait_evidence"], commands)
     target_hash = ptcli_cli._resume_next_command(["target.hash_consistent"], commands)
+    target_wait = ptcli_cli._resume_next_command(["target.uploaded_wait_evidence"], commands)
     uploaded_wait = ptcli_cli._resume_next_command(["target-upload: uploaded_wait: torrent hash missing"], commands)
     downloaded_missing = ptcli_cli._resume_next_command(["target-upload: downloaded_torrent: target torrent file does not exist on disk."], commands)
     generic_target = ptcli_cli._resume_next_command(["target-upload: MTEAM upload failed."], commands)
 
     assert source_hash["stage"] == "resume-source-torrent"
+    assert source_wait["stage"] == "resume-source-torrent"
     assert target_hash["stage"] == "resume-uploaded-torrent"
+    assert target_wait["stage"] == "resume-uploaded-torrent"
     assert uploaded_wait["stage"] == "resume-uploaded-torrent"
     assert downloaded_missing["stage"] == "resume-uploaded-torrent-download"
     assert generic_target["stage"] == "resume-target-upload"
