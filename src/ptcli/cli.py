@@ -3256,8 +3256,9 @@ async def _wait_complete_with_config(
 def _with_uploaded_injection(result: dict[str, Any], inject_result: dict[str, Any]) -> dict[str, Any]:
     payload = {**result, "injected_torrent": inject_result}
     uploaded_torrent_hash = _uploaded_torrent_hash_from_result(payload)
-    if uploaded_torrent_hash:
+    if uploaded_torrent_hash and not _normalize_torrent_hash(payload.get("uploaded_torrent_hash")):
         payload["uploaded_torrent_hash"] = uploaded_torrent_hash
+    if uploaded_torrent_hash:
         downloaded_torrent = payload.get("downloaded_torrent")
         if isinstance(downloaded_torrent, dict):
             downloaded_hash = _torrent_hash_from_result(downloaded_torrent)

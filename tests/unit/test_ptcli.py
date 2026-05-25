@@ -1646,6 +1646,24 @@ def test_target_upload_result_requires_uploaded_torrent_hash_consistency() -> No
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
 
 
+def test_uploaded_injection_preserves_upload_response_hash_for_consistency_check() -> None:
+    payload = ptcli_cli._with_uploaded_injection(
+        {
+            "status": "uploaded",
+            "uploaded_torrent_hash": "a" * 40,
+            "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "torrent_hash": "a" * 40},
+        },
+        {"hash": "b" * 40, "verified_in_client": True},
+    )
+
+    blockers = ptcli_cli._uploaded_torrent_hash_consistency_blockers(payload)
+
+    assert payload["uploaded_torrent_hash"] == "a" * 40
+    assert blockers
+    assert f"upload_response={'a' * 40}" in blockers[0]
+    assert f"injected_torrent={'b' * 40}" in blockers[0]
+
+
 def test_target_upload_result_requires_uploaded_torrent_completion_when_requested() -> None:
     payload = {
         "status": "uploaded",
