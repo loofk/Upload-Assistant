@@ -49,6 +49,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - `pipeline` 和 `retorrent --execute` 返回 `closure`、`evidence`、`artifacts`、`resume_commands`、`resume_state`、`next_actions`。
 - 带执行动作的命令未闭环时返回 `status: blocked`、顶层 blockers 和非 0 退出码。
 - `--write-summary` 会写出 `ptcli-run-summary.json`，其中 `resume_state.next_stage` / `resume_state.next_command` 可供 agent 或脚本直接续跑。
+- `summary-check --print-next-command` 可只输出下一条安全续跑命令；`summary-check --print-shell` 可输出 `PTCLI_*` shell 变量，便于 seedbox wrapper 判断 `PTCLI_AUTOMATION_ACTION`。
 - `doctor --check-runtime`、`pipeline --target-execute`、`retorrent --execute` 和需要 qBittorrent 注入的 `target-upload` 会检查 focused ptcli 运行时依赖，legacy Web UI/Discord 依赖不是默认要求。
 
 ## 配置要求

@@ -104,7 +104,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --uploaded-torrent-file ./tmp/uploaded/MTEAM-999.torrent --inject-uploaded-torrent --uploaded-save-path "/downloads/content" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --wait-uploaded-complete --write-summary --json
 ```
 
-`retorrent --execute` 和 `pipeline --write-summary` 会在 `ptcli-run-summary.json` 中写入 `resume_commands`，优先使用这些命令续跑。
+`retorrent --execute` 和 `pipeline --write-summary` 会在 `ptcli-run-summary.json` 中写入 `resume_commands`，优先使用这些命令续跑。盒子脚本可用 `summary-check --print-next-command` 只取下一条安全命令，或用 `summary-check --print-shell` 输出 `PTCLI_AUTOMATION_ACTION`、`PTCLI_NEXT_COMMAND`、`PTCLI_AUTOMATION_EXIT_CODE` 等 shell 变量。
 
 ## 人工边界
 

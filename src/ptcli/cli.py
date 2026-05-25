@@ -181,7 +181,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     summary_check = subparsers.add_parser("summary-check", help="Read a ptcli summary JSON and return a unified automation verdict.")
     summary_check.add_argument("--summary-file", required=True, help="Path to ptcli-run-summary.json, ptcli-target-upload-summary.json, or ptcli-doctor-summary.json.")
-    summary_check.add_argument("--print-next-command", action="store_true", help="Print only the next resumable command; exits 0 when complete or command-ready, 1 when blocked without a command.")
+    summary_output = summary_check.add_mutually_exclusive_group()
+    summary_output.add_argument("--print-next-command", action="store_true", help="Print only the next resumable command; exits 0 when complete or command-ready, 1 when blocked without a command.")
+    summary_output.add_argument("--print-shell", action="store_true", help="Print shell export lines for automation wrappers; inspect PTCLI_AUTOMATION_EXIT_CODE for the verdict.")
     summary_check.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     pipeline = subparsers.add_parser(
@@ -4063,6 +4065,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = summary_check_payload(args)
             if args.print_next_command:
                 return _summary_check_print_next_command(payload)
+            if args.print_shell:
+                return _summary_check_print_shell(payload)
             _print_payload(payload, json_output)
             return 0 if payload.get("status") == "ok" else 1
 
@@ -4097,6 +4101,28 @@ def _summary_check_print_next_command(payload: dict[str, Any]) -> int:
         print(str(command))
         return 0
     return 0 if payload.get("status") == "ok" else 1
+
+
+def _summary_check_print_shell(payload: dict[str, Any]) -> int:
+    fields = {
+        "PTCLI_SUMMARY_STATUS": payload.get("status"),
+        "PTCLI_AUTOMATION_ACTION": payload.get("automation_action"),
+        "PTCLI_AUTOMATION_EXIT_CODE": payload.get("automation_exit_code"),
+        "PTCLI_NEXT_STAGE": payload.get("next_stage"),
+        "PTCLI_NEXT_COMMAND": payload.get("next_command"),
+        "PTCLI_SHOULD_EXECUTE_NEXT_COMMAND": _shell_bool(payload.get("should_execute_next_command")),
+        "PTCLI_NEXT_COMMAND_READY": _shell_bool(payload.get("next_command_ready")),
+        "PTCLI_COMPLETE": _shell_bool(payload.get("complete")),
+        "PTCLI_LIVE_SAFE_TO_ATTEMPT": _shell_bool(payload.get("live_safe_to_attempt")),
+        "PTCLI_SUMMARY_FILE": payload.get("summary_file"),
+    }
+    for key, value in fields.items():
+        print(f"export {key}={shlex.quote('' if value is None else str(value))}")
+    return 0
+
+
+def _shell_bool(value: Any) -> str:
+    return "1" if bool(value) else "0"
 
 
 def _source_download_exit_code(payload: dict[str, Any]) -> int:

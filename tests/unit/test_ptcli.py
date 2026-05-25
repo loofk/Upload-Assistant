@@ -1911,6 +1911,41 @@ def test_summary_check_print_next_command_fails_without_resumable_command(tmp_pa
     assert capsys.readouterr().out == ""
 
 
+def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [{"stage": "resume-target-upload", "command": "python3 ptcli.py pipeline --upload-target"}],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_SUMMARY_STATUS=blocked\n" in out
+    assert "export PTCLI_AUTOMATION_ACTION=run_next_command\n" in out
+    assert "export PTCLI_AUTOMATION_EXIT_CODE=1\n" in out
+    assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
+    assert "export PTCLI_NEXT_COMMAND='python3 ptcli.py pipeline --upload-target'\n" in out
+
+
 def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-target-upload-summary.json"
     summary_file.write_text(
