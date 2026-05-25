@@ -2957,6 +2957,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
                 artifacts["uploaded_wait_evidence"] = True
             injected_torrent = upload_result.get("injected_torrent")
             if isinstance(injected_torrent, dict):
+                artifacts["uploaded_save_path"] = injected_torrent.get("save_path")
                 artifacts["uploaded_qbit_category"] = injected_torrent.get("category")
                 artifacts["uploaded_qbit_tags"] = injected_torrent.get("tags")
                 artifacts["uploaded_paused"] = bool(injected_torrent.get("paused"))
@@ -2985,7 +2986,9 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     uploaded_qbit_options = qbit_options.get("uploaded") if isinstance(qbit_options.get("uploaded"), dict) else {}
     content_path = payload.get("path")
     path_args = ["--path", str(content_path)] if content_path else []
-    uploaded_save_path_args = ["--uploaded-save-path", str(content_path)] if content_path else []
+    source_save_path = artifacts.get("source_save_path") or content_path or "/downloads"
+    uploaded_save_path = artifacts.get("uploaded_save_path") or content_path
+    uploaded_save_path_args = ["--uploaded-save-path", str(uploaded_save_path)] if uploaded_save_path else []
     commands: list[dict[str, str]] = []
 
     source_torrent_file = artifacts.get("source_torrent_file")
@@ -3008,7 +3011,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                         str(source_torrent_file),
                         "--inject-source",
                         "--save-path",
-                        str(content_path or "/downloads"),
+                        str(source_save_path),
                         *_qbit_resume_args(source_qbit_options, prefix=""),
                         "--wait-complete",
                         "--accept-rules",
@@ -3136,6 +3139,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
+            "uploaded_save_path": bool(artifacts.get("uploaded_save_path")),
             "uploaded_qbit_category": bool(artifacts.get("uploaded_qbit_category")),
             "uploaded_qbit_tags": bool(artifacts.get("uploaded_qbit_tags")),
             "uploaded_paused": "uploaded_paused" in artifacts,

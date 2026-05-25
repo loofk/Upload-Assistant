@@ -1714,6 +1714,33 @@ def test_resume_next_command_uses_stage_blocker_details() -> None:
     assert generic_target["stage"] == "resume-target-upload"
 
 
+def test_run_summary_resume_commands_prefer_artifact_save_paths() -> None:
+    payload = {
+        "source_tracker": "U2",
+        "source_torrent_id": "60635",
+        "target_trackers": ["MTEAM"],
+        "client": "default",
+        "qbit_options": {
+            "source": {"category": "SOURCE"},
+            "uploaded": {"category": "MTEAM"},
+        },
+    }
+    artifacts = {
+        "source_torrent_file": "/tmp/U2-60635.torrent",
+        "source_save_path": "/verified/source",
+        "target_package_dir": "/tmp/package",
+        "target_torrent_file": "/tmp/target.torrent",
+        "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
+        "uploaded_save_path": "/verified/uploaded",
+    }
+
+    commands = {command["stage"]: command["command"] for command in ptcli_cli._run_summary_resume_commands(payload, artifacts)}
+
+    assert "--save-path /verified/source" in commands["resume-source-torrent"]
+    assert "--uploaded-save-path /verified/uploaded" in commands["resume-target-upload"]
+    assert "--uploaded-save-path /verified/uploaded" in commands["resume-uploaded-torrent"]
+
+
 def test_pipeline_next_actions_reports_closure_blockers() -> None:
     parser = build_parser()
     args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--prepare-target", "--json"])
@@ -6090,6 +6117,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "target_torrent_file": True,
         "uploaded_torrent_id": True,
         "uploaded_torrent_file": True,
+        "uploaded_save_path": True,
         "uploaded_qbit_category": True,
         "uploaded_qbit_tags": True,
         "uploaded_paused": True,
@@ -6106,6 +6134,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert str(torrent_file) in resume_commands["resume-target-upload"]
     assert str(tmp_path / "MTEAM-999.torrent") in resume_commands["resume-uploaded-torrent"]
     assert shlex.quote(summary_payload["artifacts"]["target_package_dir"]) in resume_commands["resume-target-upload"]
+    assert summary_payload["artifacts"]["uploaded_save_path"] == "/downloads"
     assert "--uploaded-save-path /downloads" in resume_commands["resume-target-upload"]
     assert "--uploaded-qbit-category MTEAM" in resume_commands["resume-target-upload"]
     assert "--uploaded-qbit-tags retorrent" in resume_commands["resume-target-upload"]
