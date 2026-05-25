@@ -6982,6 +6982,62 @@ async def test_target_upload_execute_blocks_on_fresh_duplicate_check(monkeypatch
     assert any("fresh_duplicate_check" in blocker for blocker in result["blockers"])
 
 
+@pytest.mark.asyncio
+async def test_target_upload_recovery_blocks_missing_runtime_dependency(monkeypatch, tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
+    original_find_spec = ptcli_doctor.importlib.util.find_spec
+
+    def fake_find_spec(module):
+        if module == "qbittorrentapi":
+            return None
+        return original_find_spec(module)
+
+    async def fake_inject_source_with_config(*_args, **_kwargs):
+        raise AssertionError("qBittorrent injection must not run when runtime dependencies are missing")
+
+    monkeypatch.setattr(ptcli_doctor.importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            package["package_dir"],
+            "--uploaded-torrent-file",
+            str(uploaded_torrent),
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["status"] == "blocked"
+    assert result["runtime_check"]["ok"] is False
+    assert "runtime-check: Missing PTCLI runtime dependencies" in result["blockers"][0]
+    summary_payload = json.loads((Path(package["package_dir"]) / "ptcli-target-upload-summary.json").read_text(encoding="utf-8"))
+    assert summary_payload["preflight"]["runtime_check"]["ok"] is False
+    assert summary_payload["summary"]["ready"] is False
+    commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    assert "--inject-uploaded-torrent" in commands["target-upload-retry"]
+
+
 def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     source_info = {
         "tracker": "U2",

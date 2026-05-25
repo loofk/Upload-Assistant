@@ -250,6 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
     target_upload.add_argument("--wait-uploaded-complete", action="store_true", help="Wait for the injected target torrent to become complete in qBittorrent.")
     target_upload.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait with --wait-uploaded-complete.")
     target_upload.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for --wait-uploaded-complete.")
+    target_upload.add_argument("--check-runtime", action="store_true", help="Verify focused ptcli runtime dependencies before live upload or qBittorrent injection. Enabled automatically by --execute and --inject-uploaded-torrent.")
     target_upload.add_argument("--write-summary", action="store_true", help="Write ptcli-target-upload-summary.json for audit and automation handoff.")
     target_upload.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --package-dir.")
     target_upload.add_argument("--client", default="default", help="Configured qBittorrent client name for --inject-uploaded-torrent.")
@@ -758,8 +759,9 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
     preflight_torrent_file = args.torrent_file or args.uploaded_torrent_file
+    runtime_check = _target_upload_runtime_check(args)
     if args.uploaded_torrent_id:
-        preflight = _target_upload_recovery_preflight(args, preflight_torrent_file)
+        preflight = _target_upload_preflight_with_runtime(_target_upload_recovery_preflight(args, preflight_torrent_file), runtime_check)
         inferred_uploaded_save_path = _uploaded_save_path_from_preflight(args, preflight)
         blockers = [*preflight["blockers"], *_uploaded_torrent_id_reuse_blockers(args, inferred_uploaded_save_path=inferred_uploaded_save_path)]
         if blockers:
@@ -771,7 +773,7 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         result = await _apply_uploaded_torrent_followup(config, args, result, inferred_uploaded_save_path)
         return _maybe_write_target_upload_summary(args, result, preflight)
     if args.uploaded_torrent_file:
-        preflight = build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=preflight_torrent_file, write_payload=args.write_payload)
+        preflight = _target_upload_preflight_with_runtime(build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=preflight_torrent_file, write_payload=args.write_payload), runtime_check)
         inferred_uploaded_save_path = _uploaded_save_path_from_preflight(args, preflight)
         blockers = [*preflight["blockers"], *_uploaded_torrent_reuse_blockers(args, inferred_uploaded_save_path=inferred_uploaded_save_path)]
         if blockers:
@@ -782,12 +784,12 @@ async def target_upload_payload(args: argparse.Namespace) -> dict[str, Any]:
         result = await _apply_uploaded_torrent_followup(config, args, result, inferred_uploaded_save_path)
         return _maybe_write_target_upload_summary(args, result, preflight)
     if not args.execute:
-        preflight = build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=args.torrent_file, write_payload=args.write_payload)
+        preflight = _target_upload_preflight_with_runtime(build_mteam_upload_preflight(args.package_dir, execute=False, torrent_file=args.torrent_file, write_payload=args.write_payload), runtime_check)
         return _maybe_write_target_upload_summary(args, preflight, preflight)
     if not args.torrent_file:
-        preflight = build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
+        preflight = _target_upload_preflight_with_runtime(build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload), runtime_check)
         return _maybe_write_target_upload_summary(args, preflight, preflight)
-    preflight = build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload)
+    preflight = _target_upload_preflight_with_runtime(build_mteam_upload_preflight(args.package_dir, execute=True, torrent_file=args.torrent_file, write_payload=args.write_payload), runtime_check)
     inferred_uploaded_save_path = _uploaded_save_path_from_preflight(args, preflight)
     blockers = [*preflight["blockers"], *_target_upload_execute_blockers(args, inferred_uploaded_save_path=inferred_uploaded_save_path)]
     if blockers:
@@ -828,6 +830,25 @@ def _target_upload_recovery_preflight(args: argparse.Namespace, torrent_file: st
         "status": "blocked" if blockers else "ready",
         "blockers": blockers,
         "upload_payload": payload_summary if isinstance(payload_summary, dict) else preflight.get("upload_payload"),
+    }
+
+
+def _target_upload_runtime_check(args: argparse.Namespace) -> dict[str, Any] | None:
+    if not bool(getattr(args, "check_runtime", False) or args.execute or args.inject_uploaded_torrent):
+        return None
+    return build_runtime_dependency_check()
+
+
+def _target_upload_preflight_with_runtime(preflight: dict[str, Any], runtime_check: dict[str, Any] | None) -> dict[str, Any]:
+    if runtime_check is None:
+        return preflight
+    runtime_blockers = [] if runtime_check.get("ok") else [f"runtime-check: {runtime_check.get('message') or 'PTCLI runtime dependencies are not ready.'}"]
+    blockers = [*_string_list(preflight.get("blockers")), *runtime_blockers]
+    return {
+        **preflight,
+        "status": "blocked" if blockers else preflight.get("status", "ready"),
+        "runtime_check": runtime_check,
+        "blockers": blockers,
     }
 
 
@@ -1060,6 +1081,7 @@ def _target_upload_retry_command(args: argparse.Namespace) -> str:
         ("--inject-uploaded-torrent", args.inject_uploaded_torrent),
         ("--uploaded-paused", args.uploaded_paused),
         ("--wait-uploaded-complete", args.wait_uploaded_complete),
+        ("--check-runtime", getattr(args, "check_runtime", False)),
     ):
         if enabled:
             retry_args.append(option)
