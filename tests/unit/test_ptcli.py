@@ -8768,6 +8768,8 @@ def test_mteam_prepare_preview_contains_package_fields() -> None:
 
     assert preview["blockers"] == []
     assert preview["verified_content"] is True
+    assert preview["metadata"]["tracker"] is None
+    assert preview["metadata"]["torrent_id"] is None
     assert preview["meta_draft"]["type"] == "REMUX"
     assert preview["field_mapping"]["category"] == 439
     assert preview["field_mapping"]["standard"] == 6
@@ -8822,6 +8824,10 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     assert package["files"]["manifest"].endswith("mteam-package-manifest.json")
     assert package["package_manifest"]["schema_version"] == 1
     assert package["package_manifest"]["kind"] == "ptcli.mteam.prepare_package"
+    assert package["package_manifest"]["source"]["tracker"] == "U2"
+    assert package["package_manifest"]["source"]["torrent_id"] == "60635"
+    assert package["metadata"]["tracker"] == "U2"
+    assert package["metadata"]["torrent_id"] == "60635"
     assert package["package_manifest"]["files"]["preview"]["sha1"]
     assert package["package_manifest"]["rule_obligations"]["count"] == 2
     manifest_commands = {command["stage"]: command["command"] for command in package["package_manifest"]["commands"]}
@@ -8842,6 +8848,8 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     loaded = load_mteam_prepare_package(package["package_dir"])
     assert loaded["files"]["manifest"].endswith("mteam-package-manifest.json")
     assert loaded["package_manifest"]["ready"] is package["package_manifest"]["ready"]
+    assert loaded["package_manifest"]["source"]["tracker"] == "U2"
+    assert loaded["preview"]["metadata"]["torrent_id"] == "60635"
 
 
 def test_create_mteam_upload_torrent_candidate_sanitizes_export(tmp_path) -> None:

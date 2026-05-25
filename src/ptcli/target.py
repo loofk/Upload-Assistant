@@ -582,6 +582,8 @@ def build_mteam_prepare_preview(source_info: dict[str, Any] | None, target_track
         warnings.append("No completed qBittorrent match/wait evidence is available yet.")
 
     metadata = {
+        "tracker": source_info.get("tracker") if source_info else None,
+        "torrent_id": source_info.get("torrent_id") if source_info else None,
         "name": source_info.get("name") if source_info else None,
         "imdb_id": source_info.get("imdb_id") if source_info else None,
         "tmdb_id": source_info.get("tmdb_id") if source_info else None,
