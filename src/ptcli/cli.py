@@ -1193,7 +1193,10 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
         "package_content_path": _path_artifact(package_content_path),
         "target_torrent_file": _path_artifact(args.torrent_file),
         "uploaded_torrent_id": _uploaded_torrent_id_from_result(result) or args.uploaded_torrent_id,
+        "uploaded_torrent_hash": _uploaded_torrent_hash_from_result(result),
         "uploaded_torrent_file": _path_artifact(uploaded_torrent_path),
+        "injection_verified": _injected_torrent_verified(result.get("injected_torrent")),
+        "injected_torrent_hash": _torrent_hash_from_result(result.get("injected_torrent")),
         "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or args.uploaded_save_path or package_content_path),
         "uploaded_wait_evidence": _wait_result_completed(result.get("uploaded_wait")),
         "fresh_duplicate_check": duplicate_check,
@@ -1385,6 +1388,9 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
             "target_torrent_file": bool(_path_artifact_exists(artifacts.get("target_torrent_file"))),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(_path_artifact_exists(artifacts.get("uploaded_torrent_file"))),
+            "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
+            "injection_verified": bool(artifacts.get("injection_verified")),
+            "injected_torrent_hash": bool(artifacts.get("injected_torrent_hash")),
             "uploaded_save_path": bool(_path_artifact_exists(artifacts.get("uploaded_save_path"))),
             "uploaded_wait_evidence": bool(artifacts.get("uploaded_wait_evidence")),
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
@@ -1672,7 +1678,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     blockers = _string_list(summary.get("blockers")) or _string_list(resume_state.get("blockers"))
     ready = bool(summary.get("ready"))
     artifact_status = _summary_artifact_status(resume_state)
-    required = ("target_hash_consistent", "target_duplicate_clean", "target_rule_obligations", "uploaded_wait_evidence")
+    required = ("uploaded_torrent_hash", "injected_torrent_hash", "injection_verified", "target_hash_consistent", "target_duplicate_clean", "target_rule_obligations", "uploaded_wait_evidence")
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if ready else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
