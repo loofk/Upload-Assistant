@@ -11,7 +11,7 @@
 - MTEAM 是当前已实现 live target upload 的目标站。
 - U2/CHD -> MTEAM 是最早的参考流；同类 NexusPHP 源站逐步扩展到完整闭环。
 - 所有真实下载、上传、qBittorrent 注入动作都要求显式规则确认；上传还要求 `--confirm-upload`。
-- 站点规则不由 AI 猜测。CLI 会暴露规则 obligation、人工确认状态和当前程序化检查范围。
+- 站点规则不由 AI 猜测。CLI 会暴露规则 obligation、每个 obligation 的人工审查范围、确认状态和当前程序化检查范围。
 
 ## 常用命令
 
@@ -45,6 +45,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 
 - 关键命令支持 `--json`。
 - `sites --json` 暴露每个站点的 `source_info`、`source_download`、`target_upload`、`full_live_closure_to_mteam` 能力。
+- `rule-check --json` 暴露 `rule_obligations[].review_scope.required_confirmations`，供 agent 在 live 前逐项提示人工确认。
 - `pipeline` 和 `retorrent --execute` 返回 `closure`、`evidence`、`artifacts`、`resume_commands`、`next_actions`。
 - 带执行动作的命令未闭环时返回 `status: blocked`、顶层 blockers 和非 0 退出码。
 - `--write-summary` 会写出 `ptcli-run-summary.json`，便于 agent 或脚本续跑。

@@ -621,10 +621,32 @@ def _manual_rule_review_summary(rule_result: dict[str, Any], rule_obligations: A
         "target_trackers": rule_result.get("target_trackers") if isinstance(rule_result.get("target_trackers"), list) else [],
         "obligation_count": len([obligation for obligation in obligations if isinstance(obligation, dict)]),
         "rules_urls": sorted({str(obligation.get("rules_url")) for obligation in obligations if isinstance(obligation, dict) and obligation.get("rules_url")}),
+        "required_confirmations": _manual_rule_review_confirmations(obligations),
         "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in obligations if isinstance(obligation, dict) and isinstance(obligation.get("acknowledgement_evidence"), dict)],
         "site_specific_rules_encoded": False,
         "message": "Manual source/target rule review has been acknowledged." if accept_rules else "Manual source/target rule review is required before live upload.",
     }
+
+
+def _manual_rule_review_confirmations(obligations: list[Any]) -> list[dict[str, Any]]:
+    confirmations = []
+    for obligation in obligations:
+        if not isinstance(obligation, dict):
+            continue
+        review_scope = obligation.get("review_scope")
+        if not isinstance(review_scope, dict):
+            continue
+        required_confirmations = review_scope.get("required_confirmations")
+        confirmations.append(
+            {
+                "tracker": obligation.get("tracker"),
+                "role": obligation.get("role"),
+                "action": obligation.get("action"),
+                "rules_url": obligation.get("rules_url"),
+                "required_confirmations": required_confirmations if isinstance(required_confirmations, list) else [],
+            }
+        )
+    return confirmations
 
 
 def build_mteam_upload_gate(preview: dict[str, Any], stages: list[dict[str, Any]], accept_rules: bool) -> dict[str, Any]:
@@ -825,7 +847,17 @@ def _rule_obligation_check(name: str, obligations: Any, *, role: str, action: st
         return {"name": name, "ok": False, "message": f"{role} {action} rule obligation is missing a rules URL."}
     if not all(obligation.get("acknowledged") is True for obligation in matching):
         return {"name": name, "ok": False, "message": f"{role} {action} rule obligation has not been acknowledged."}
+    if not all(_rule_obligation_has_review_scope(obligation) for obligation in matching):
+        return {"name": name, "ok": False, "message": f"{role} {action} rule obligation is missing a concrete manual review scope."}
     return {"name": name, "ok": True, "message": f"{role} {action} rule obligation is acknowledged."}
+
+
+def _rule_obligation_has_review_scope(obligation: dict[str, Any]) -> bool:
+    review_scope = obligation.get("review_scope")
+    if not isinstance(review_scope, dict):
+        return False
+    confirmations = review_scope.get("required_confirmations")
+    return bool(review_scope.get("rules_url")) and isinstance(confirmations, list) and bool(confirmations)
 
 
 def _extend_unique(items: list[str], additions: Any) -> None:

@@ -57,7 +57,7 @@ python3 ptcli.py sites --json
 python3 ptcli.py rule-check --from U2 --to MTEAM --accept-rules --json
 ```
 
-输出会包含 source 的 `download_and_retorrent` obligation 和 target 的 `upload_and_seed` obligation。当前 `site_specific_rules_encoded=false`，表示程序不会替用户推断站规，live 前仍必须人工审阅并确认源站/目标站规则。
+输出会包含 source 的 `download_and_retorrent` obligation 和 target 的 `upload_and_seed` obligation。每个 obligation 都带有 `review_scope.required_confirmations`，用于提示 live 前必须人工确认的下载、转载、上传、分类和做种范围。当前 `site_specific_rules_encoded=false`，表示程序不会替用户推断站规，live 前仍必须人工审阅并确认源站/目标站规则。
 
 ### live 前检查
 
@@ -87,6 +87,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downlo
 
 - MTEAM 查重结果干净。
 - upload gate ready。
+- rule review package 内的每个 source/target obligation 都有规则 URL、确认状态和非空人工审查范围。
 - 描述材料、名称、简介、分类和标准字段可用。
 - torrent announce/source/comment 符合 MTEAM-safe 元数据门禁。
 - 已显式传入 `--confirm-upload`。

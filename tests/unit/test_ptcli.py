@@ -844,6 +844,8 @@ def test_rule_check_command_requires_ack_for_ready(capsys) -> None:
     assert payload["manual_review"]["acknowledged"] is False
     assert payload["manual_review"]["obligation_count"] == 2
     assert payload["manual_review"]["rules_urls"] == ["https://kp.m-team.cc/rules", "https://u2.dmhy.org/rules.php"]
+    assert len(payload["manual_review"]["required_confirmations"]) == 2
+    assert all(item["required_confirmations"] for item in payload["manual_review"]["required_confirmations"])
 
 
 def test_rule_check_blocks_unsupported_tracker_as_scope_result(capsys) -> None:
@@ -867,56 +869,33 @@ def test_rule_check_command_ready_for_reference_flow_with_ack(capsys) -> None:
     assert '"source_tracker": "CHD"' in out
     assert '"target_trackers": [' in out
     payload = json.loads(out)
-    assert payload["rule_obligations"] == [
-        {
-            "tracker": "CHD",
-            "role": "source",
-            "action": "download_and_retorrent",
-            "rules_url": "https://ptchdbits.co/rules.php",
-            "acknowledged": True,
-            "acknowledgement_evidence": {
-                "mode": "--accept-rules",
-                "acknowledged": True,
-                "tracker": "CHD",
-                "role": "source",
-                "action": "download_and_retorrent",
-                "rules_url": "https://ptchdbits.co/rules.php",
-                "site_specific_rules_encoded": False,
-                "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
-            },
-            "message": "CHD source download_and_retorrent rules have been acknowledged.",
-        },
-        {
-            "tracker": "MTEAM",
-            "role": "target",
-            "action": "upload_and_seed",
-            "rules_url": "https://kp.m-team.cc/rules",
-            "acknowledged": True,
-            "acknowledgement_evidence": {
-                "mode": "--accept-rules",
-                "acknowledged": True,
-                "tracker": "MTEAM",
-                "role": "target",
-                "action": "upload_and_seed",
-                "rules_url": "https://kp.m-team.cc/rules",
-                "site_specific_rules_encoded": False,
-                "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
-            },
-            "message": "MTEAM target upload_and_seed rules have been acknowledged.",
-        },
+    assert [(obligation["tracker"], obligation["role"], obligation["action"]) for obligation in payload["rule_obligations"]] == [
+        ("CHD", "source", "download_and_retorrent"),
+        ("MTEAM", "target", "upload_and_seed"),
     ]
-    assert payload["manual_review"] == {
-        "required": True,
-        "acknowledged": True,
-        "source_tracker": "CHD",
-        "target_trackers": ["MTEAM"],
-        "obligation_count": 2,
-        "acknowledged_count": 2,
-        "rules_urls": ["https://kp.m-team.cc/rules", "https://ptchdbits.co/rules.php"],
-        "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in payload["rule_obligations"]],
-        "site_specific_rules_encoded": False,
-        "message": "Manual source/target rule review has been acknowledged.",
-    }
+    assert all(obligation["acknowledged"] is True for obligation in payload["rule_obligations"])
+    assert all(obligation["rules_url"] for obligation in payload["rule_obligations"])
+    assert all(obligation["review_scope"]["required_confirmations"] for obligation in payload["rule_obligations"])
+    assert all("adapter_preflight_required" in obligation["review_scope"]["encoded_checks"] for obligation in payload["rule_obligations"])
+    assert payload["manual_review"]["required"] is True
+    assert payload["manual_review"]["acknowledged"] is True
+    assert payload["manual_review"]["source_tracker"] == "CHD"
+    assert payload["manual_review"]["target_trackers"] == ["MTEAM"]
+    assert payload["manual_review"]["obligation_count"] == 2
+    assert payload["manual_review"]["acknowledged_count"] == 2
+    assert payload["manual_review"]["rules_urls"] == ["https://kp.m-team.cc/rules", "https://ptchdbits.co/rules.php"]
+    assert payload["manual_review"]["required_confirmations"] == [
+        {
+            "tracker": obligation["tracker"],
+            "role": obligation["role"],
+            "action": obligation["action"],
+            "rules_url": obligation["rules_url"],
+            "required_confirmations": obligation["review_scope"]["required_confirmations"],
+        }
+        for obligation in payload["rule_obligations"]
+    ]
+    assert payload["manual_review"]["acknowledgement_evidence"] == [obligation["acknowledgement_evidence"] for obligation in payload["rule_obligations"]]
+    assert payload["manual_review"]["site_specific_rules_encoded"] is False
     assert payload["automation_scope"] == {
         "site_specific_rules_encoded": False,
         "concrete_policy_checks": "tracker_adapters",
@@ -5704,48 +5683,28 @@ def test_mteam_rule_review_records_site_rule_obligations() -> None:
         "target_trackers": ["MTEAM"],
         "obligation_count": 2,
         "rules_urls": ["https://kp.m-team.cc/rules", "https://u2.dmhy.org/rules.php"],
+        "required_confirmations": [
+            {
+                "tracker": obligation["tracker"],
+                "role": obligation["role"],
+                "action": obligation["action"],
+                "rules_url": obligation["rules_url"],
+                "required_confirmations": obligation["review_scope"]["required_confirmations"],
+            }
+            for obligation in review["rule_obligations"]
+        ],
         "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in review["rule_obligations"]],
         "site_specific_rules_encoded": False,
         "message": "Manual source/target rule review has been acknowledged.",
     }
-    assert review["rule_obligations"] == [
-        {
-            "tracker": "U2",
-            "role": "source",
-            "action": "download_and_retorrent",
-            "rules_url": "https://u2.dmhy.org/rules.php",
-            "acknowledged": True,
-            "acknowledgement_evidence": {
-                "mode": "--accept-rules",
-                "acknowledged": True,
-                "tracker": "U2",
-                "role": "source",
-                "action": "download_and_retorrent",
-                "rules_url": "https://u2.dmhy.org/rules.php",
-                "site_specific_rules_encoded": False,
-                "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
-            },
-            "message": "U2 source download_and_retorrent rules have been acknowledged.",
-        },
-        {
-            "tracker": "MTEAM",
-            "role": "target",
-            "action": "upload_and_seed",
-            "rules_url": "https://kp.m-team.cc/rules",
-            "acknowledged": True,
-            "acknowledgement_evidence": {
-                "mode": "--accept-rules",
-                "acknowledged": True,
-                "tracker": "MTEAM",
-                "role": "target",
-                "action": "upload_and_seed",
-                "rules_url": "https://kp.m-team.cc/rules",
-                "site_specific_rules_encoded": False,
-                "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
-            },
-            "message": "MTEAM target upload_and_seed rules have been acknowledged.",
-        },
+    assert [(obligation["tracker"], obligation["role"], obligation["action"]) for obligation in review["rule_obligations"]] == [
+        ("U2", "source", "download_and_retorrent"),
+        ("MTEAM", "target", "upload_and_seed"),
     ]
+    assert all(obligation["acknowledged"] is True for obligation in review["rule_obligations"])
+    assert all(obligation["acknowledgement_evidence"]["site_specific_rules_encoded"] is False for obligation in review["rule_obligations"])
+    assert all(obligation["review_scope"]["rules_url"] == obligation["rules_url"] for obligation in review["rule_obligations"])
+    assert all(obligation["review_scope"]["required_confirmations"] for obligation in review["rule_obligations"])
 
 
 def test_mteam_rule_review_blocks_without_ack() -> None:
@@ -5973,6 +5932,32 @@ def test_mteam_upload_preflight_blocks_execute_without_rule_obligations(tmp_path
     assert preview["rule_obligation_review"]["ready"] is False
     assert execute["status"] == "blocked"
     assert any("Rule obligations are missing" in blocker for blocker in execute["blockers"])
+
+
+def test_mteam_upload_preflight_blocks_execute_without_rule_review_scope(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    rule_review_path = Path(package["files"]["rule_review"])
+    rule_review = json.loads(rule_review_path.read_text(encoding="utf-8"))
+    for obligation in rule_review["rule_obligations"]:
+        obligation.pop("review_scope", None)
+    rule_review_path.write_text(json.dumps(rule_review), encoding="utf-8")
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    assert any("manual review scope" in blocker for blocker in preflight["blockers"])
 
 
 def test_mteam_upload_preflight_blocks_rule_review_blockers(tmp_path) -> None:

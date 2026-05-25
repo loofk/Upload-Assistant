@@ -21,10 +21,14 @@ class RuleProfile:
     review_required: bool
     automation_status: str
     notes: tuple[str, ...]
+    source_review_items: tuple[str, ...]
+    target_review_items: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["notes"] = list(self.notes)
+        payload["source_review_items"] = list(self.source_review_items)
+        payload["target_review_items"] = list(self.target_review_items)
         return payload
 
 
@@ -48,6 +52,18 @@ _DEFAULT_NOTES: Final[tuple[str, ...]] = (
     "Let the tracker adapter perform concrete field/category/description validation before upload.",
 )
 
+_SOURCE_REVIEW_ITEMS: Final[tuple[str, ...]] = (
+    "The source tracker rules page has been reviewed for download, repost, and retention requirements.",
+    "The selected torrent is not marked as forbidden to repost or otherwise restricted by the source tracker.",
+    "The automation will keep the downloaded source torrent compliant with source tracker requirements.",
+)
+
+_TARGET_REVIEW_ITEMS: Final[tuple[str, ...]] = (
+    "The target tracker rules page has been reviewed for upload, category, description, and seeding requirements.",
+    "The selected content is allowed in the target tracker category chosen by the adapter.",
+    "The uploader will seed the uploaded torrent according to the target tracker requirements.",
+)
+
 _ENABLED_AUTOMATION_TRACKERS: Final[set[str]] = {*NEXUSPHP_MTEAM_SOURCE_TRACKERS, "MTEAM"}
 
 
@@ -61,6 +77,8 @@ def get_rule_profile(tracker: str) -> RuleProfile:
         review_required=True,
         automation_status="enabled" if tracker in _ENABLED_AUTOMATION_TRACKERS else "planning",
         notes=_DEFAULT_NOTES,
+        source_review_items=_SOURCE_REVIEW_ITEMS,
+        target_review_items=_TARGET_REVIEW_ITEMS,
     )
 
 
@@ -111,6 +129,11 @@ def build_rule_check(source_tracker: str, target_trackers: list[str], *, accept_
             "name": "site_rule_obligations_acknowledged",
             "ok": all(obligation["acknowledged"] for obligation in obligations),
             "message": "Every source/target rule obligation has been acknowledged." if accept_rules else "Every involved site rule obligation must be acknowledged before automation.",
+        },
+        {
+            "name": "site_rule_review_scopes_present",
+            "ok": all(_obligation_review_scope_ready(obligation) for obligation in obligations),
+            "message": "Every source/target rule obligation includes a concrete manual review scope.",
         },
     ]
     return {
@@ -165,6 +188,7 @@ def _rule_obligation(tracker: str, profile: RuleProfile, *, role: str, action: s
         "rules_url": profile.rules_url,
         "acknowledged": accept_rules,
         "acknowledgement_evidence": _acknowledgement_evidence(tracker, role, action, profile.rules_url, accept_rules),
+        "review_scope": _review_scope(profile, role=role, action=action),
         "message": f"{tracker} {role} {action} rules have been acknowledged." if accept_rules else f"Review and acknowledge {tracker} {role} {action} rules before automation.",
     }
 
@@ -179,6 +203,7 @@ def _manual_review_summary(source_tracker: str, target_trackers: list[str], obli
         "obligation_count": len(obligations),
         "acknowledged_count": len([obligation for obligation in obligations if obligation.get("acknowledged") is True]),
         "rules_urls": rules_urls,
+        "required_confirmations": _manual_review_confirmations(obligations),
         "acknowledgement_evidence": [obligation["acknowledgement_evidence"] for obligation in obligations if isinstance(obligation.get("acknowledgement_evidence"), dict)],
         "site_specific_rules_encoded": False,
         "message": "Manual source/target rule review has been acknowledged." if accept_rules else "Manual source/target rule review is required before automation.",
@@ -196,6 +221,49 @@ def _acknowledgement_evidence(tracker: str, role: str, action: str, rules_url: s
         "site_specific_rules_encoded": False,
         "message": "Manual review flag applies only to this tracker/action/rules URL scope.",
     }
+
+
+def _review_scope(profile: RuleProfile, *, role: str, action: str) -> dict[str, Any]:
+    required_confirmations = profile.source_review_items if role == "source" else profile.target_review_items
+    return {
+        "role": role,
+        "action": action,
+        "rules_url": profile.rules_url,
+        "required_confirmations": list(required_confirmations),
+        "site_specific_rules_encoded": False,
+        "encoded_checks": [
+            "tracker_scope_allowlist",
+            "rules_url_present",
+            "manual_acknowledgement_scope",
+            "adapter_preflight_required",
+        ],
+    }
+
+
+def _manual_review_confirmations(obligations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    confirmations = []
+    for obligation in obligations:
+        review_scope = obligation.get("review_scope")
+        if not isinstance(review_scope, dict):
+            continue
+        confirmations.append(
+            {
+                "tracker": obligation.get("tracker"),
+                "role": obligation.get("role"),
+                "action": obligation.get("action"),
+                "rules_url": obligation.get("rules_url"),
+                "required_confirmations": review_scope.get("required_confirmations") if isinstance(review_scope.get("required_confirmations"), list) else [],
+            }
+        )
+    return confirmations
+
+
+def _obligation_review_scope_ready(obligation: dict[str, Any]) -> bool:
+    review_scope = obligation.get("review_scope")
+    if not isinstance(review_scope, dict):
+        return False
+    confirmations = review_scope.get("required_confirmations")
+    return bool(review_scope.get("rules_url")) and isinstance(confirmations, list) and bool(confirmations)
 
 
 def _rule_check_next_actions(checks: list[dict[str, Any]]) -> list[str]:
