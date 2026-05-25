@@ -420,6 +420,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "source_qbit_tags": "source-tag",
                     "source_paused": True,
                     "hash_consistent": True,
+                    "source_wait_evidence": True,
                     "content_path": "/downloads/Name",
                 },
                 "target": {
@@ -435,6 +436,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "hash_consistent": True,
                     "duplicate_clean": True,
                     "rule_obligations": rule_obligations,
+                    "uploaded_wait_evidence": True,
                 },
             },
             "summary": {"ready": True, "complete": True, "status": "complete"},
@@ -508,6 +510,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "source_qbit_tags": "source-tag",
         "source_paused": True,
         "source_hash_consistent": True,
+        "source_wait_evidence": True,
         "uploaded_torrent_id": "999",
         "uploaded_torrent_hash": "b" * 40,
         "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
@@ -516,6 +519,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "uploaded_qbit_category": "MTEAM",
         "uploaded_qbit_tags": "retorrent",
         "uploaded_paused": True,
+        "uploaded_wait_evidence": True,
         "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
         "target_hash_consistent": True,
         "target_duplicate_clean": True,
@@ -533,6 +537,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["source_qbit_tags"] is True
     assert payload["resume_state"]["artifacts"]["source_paused"] is True
     assert payload["resume_state"]["artifacts"]["source_hash_consistent"] is True
+    assert payload["resume_state"]["artifacts"]["source_wait_evidence"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_hash"] is True
@@ -540,6 +545,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["uploaded_qbit_category"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_qbit_tags"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_paused"] is True
+    assert payload["resume_state"]["artifacts"]["uploaded_wait_evidence"] is True
     assert payload["resume_state"]["artifacts"]["target_hash_consistent"] is True
     assert payload["resume_state"]["artifacts"]["target_duplicate_clean"] is True
     assert payload["resume_state"]["artifacts"]["target_rule_obligations"] is True
@@ -857,6 +863,34 @@ def test_retorrent_execute_blockers_promote_pipeline_stage_details() -> None:
         "pipeline did not report ready.",
         "pipeline status is blocked.",
     ]
+
+
+def test_retorrent_execute_blockers_require_uploaded_wait_evidence() -> None:
+    pipeline_result = {"status": "ok", "ready": True, "summary": {"blockers": []}}
+    closure = {"complete": True, "blockers": []}
+
+    blockers = ptcli_cli._retorrent_execute_blockers(
+        pipeline_result,
+        closure,
+        True,
+        {"source_wait_evidence": True, "uploaded_wait_evidence": False},
+    )
+
+    assert blockers == ["target.uploaded_wait_evidence"]
+
+
+def test_retorrent_execute_blockers_require_source_wait_evidence() -> None:
+    pipeline_result = {"status": "ok", "ready": True, "summary": {"blockers": []}}
+    closure = {"complete": True, "blockers": []}
+
+    blockers = ptcli_cli._retorrent_execute_blockers(
+        pipeline_result,
+        closure,
+        True,
+        {"uploaded_wait_evidence": True},
+    )
+
+    assert blockers == ["source.wait_evidence"]
 
 
 @pytest.mark.asyncio

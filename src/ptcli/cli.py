@@ -547,9 +547,9 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     evidence = pipeline_result.get("evidence") if isinstance(pipeline_result.get("evidence"), dict) else None
     summary = pipeline_result.get("summary") if isinstance(pipeline_result.get("summary"), dict) else None
     ready = bool(pipeline_result.get("ready"))
-    blockers = _retorrent_execute_blockers(pipeline_result, closure, ready)
-    next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
     artifacts = _retorrent_execute_artifacts(pipeline_result, evidence, closure)
+    blockers = _retorrent_execute_blockers(pipeline_result, closure, ready, artifacts)
+    next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
     resume_commands = pipeline_result.get("resume_commands", [])
     return {
         "status": "complete" if not blockers else "blocked",
@@ -665,7 +665,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
     }
 
 
-def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[str, Any] | None, ready: bool) -> list[str]:
+def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[str, Any] | None, ready: bool, artifacts: dict[str, Any] | None = None) -> list[str]:
     blockers: list[str] = []
     if closure is None:
         blockers.append("pipeline did not return a closure summary.")
@@ -680,6 +680,12 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
     _extend_unique_string(blockers, _string_list(summary.get("blockers")))
     if not ready:
         blockers.append("pipeline did not report ready.")
+    if ready and closure is not None and closure.get("complete") is True:
+        artifact_values = artifacts if isinstance(artifacts, dict) else {}
+        if artifact_values.get("source_wait_evidence") is not True:
+            blockers.append("source.wait_evidence")
+        if artifact_values.get("uploaded_wait_evidence") is not True:
+            blockers.append("target.uploaded_wait_evidence")
     if pipeline_result.get("status") not in {None, "ok", "complete"}:
         blockers.append(f"pipeline status is {pipeline_result.get('status')}.")
     return blockers
