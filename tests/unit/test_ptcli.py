@@ -4891,6 +4891,8 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     assert summary_payload["resume_state"]["live_safe_to_attempt"] is True
     assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
     assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent-download"]
+    assert summary_payload["resume_state"]["next_command_argv"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert "999" in summary_payload["resume_state"]["next_command_argv"]
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
 
 
@@ -6830,6 +6832,7 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     assert payload["resume_state"]["complete"] is False
     assert payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
     assert payload["resume_state"]["next_command"] == payload_resume_commands["resume-uploaded-torrent-download"]
+    assert payload["resume_state"]["next_command_argv"][:3] == ["python3", "ptcli.py", "target-upload"]
     summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
     assert summary_payload["output_options"]["uploaded_output_dir"] == uploaded_output_dir
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
@@ -6839,6 +6842,7 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     assert summary_payload["resume_state"]["resume_available"] is True
     assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
     assert summary_payload["resume_state"]["next_command"] == resume_commands["resume-uploaded-torrent-download"]
+    assert summary_payload["resume_state"]["next_command_argv"] == resume_argv["resume-uploaded-torrent-download"]
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is False
     assert "--uploaded-torrent-id 999" in resume_commands["resume-uploaded-torrent-download"]
@@ -9515,7 +9519,9 @@ async def test_target_upload_recovery_blocks_missing_runtime_dependency(monkeypa
     assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent"
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent"]
+    assert summary_payload["resume_state"]["next_command_argv"] == command_argv["resume-uploaded-torrent"]
     assert "--inject-uploaded-torrent" in commands["target-upload-retry"]
 
 

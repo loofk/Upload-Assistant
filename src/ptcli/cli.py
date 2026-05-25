@@ -1254,11 +1254,13 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
     commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in recommended_commands if isinstance(command, dict)}
     resume_available = any(stage.startswith("resume-") for stage in commands_by_stage)
     next_command = _target_upload_next_command(summary, commands_by_stage) if resume_available else {"stage": None, "command": None}
+    next_command_argv = _resume_state_next_command_argv(next_command, recommended_commands)
     return {
         "ready": bool(summary.get("ready")),
         "resume_available": resume_available,
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
+        "next_command_argv": next_command_argv,
         "available_stages": [str(command.get("stage")) for command in recommended_commands if isinstance(command, dict)],
         "artifacts": {
             "package_dir": bool(_path_artifact_exists(artifacts.get("package_dir"))),
@@ -1634,6 +1636,27 @@ def _summary_command_argv(payload: dict[str, Any], stage: str | None, command: s
     return None
 
 
+def _resume_state_next_command_argv(next_command: dict[str, Any], command_entries: list[dict[str, Any]]) -> list[str] | None:
+    command = next_command.get("command")
+    if not command:
+        return None
+    stage = next_command.get("stage")
+    for command_entry in command_entries:
+        if not isinstance(command_entry, dict):
+            continue
+        if stage and command_entry.get("stage") != stage:
+            continue
+        if command_entry.get("command") != command:
+            continue
+        argv = _argv_list(command_entry.get("argv"))
+        if argv is not None:
+            return argv
+    try:
+        return shlex.split(str(command))
+    except ValueError:
+        return None
+
+
 def _argv_list(value: Any) -> list[str] | None:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         return None
@@ -1722,15 +1745,17 @@ def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, s
     }
 
 
-def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], failed_checks: list[Any], recommended_commands: list[dict[str, str]]) -> dict[str, Any]:
+def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], failed_checks: list[Any], recommended_commands: list[dict[str, Any]]) -> dict[str, Any]:
     commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in recommended_commands if isinstance(command, dict)}
     next_command = _doctor_next_command(payload, commands_by_stage)
+    next_command_argv = _resume_state_next_command_argv(next_command, recommended_commands)
     return {
         "ready": bool(payload.get("ready")),
         "live_safe_to_attempt": bool(payload.get("live_safe_to_attempt")),
         "resume_available": any(stage != "doctor-retry" for stage in commands_by_stage),
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
+        "next_command_argv": next_command_argv,
         "available_stages": [str(command.get("stage")) for command in recommended_commands if isinstance(command, dict)],
         "artifacts": {
             "content_path": bool(_path_artifact_exists(artifacts.get("content_path"))),
@@ -3340,11 +3365,13 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
     commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in resume_commands if isinstance(command, dict)}
     complete = bool(closure.get("complete"))
     next_command = {"stage": None, "command": None} if complete else _resume_next_command(blockers, commands_by_stage)
+    next_command_argv = _resume_state_next_command_argv(next_command, resume_commands)
     return {
         "complete": complete,
         "resume_available": bool(resume_commands),
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
+        "next_command_argv": next_command_argv,
         "available_stages": [str(command.get("stage")) for command in resume_commands if isinstance(command, dict)],
         "artifacts": {
             "source_torrent_file": bool(artifacts.get("source_torrent_file")),
