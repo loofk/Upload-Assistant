@@ -782,6 +782,28 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
     assert payload["resume_state"]["blockers"] == ["target.injected", "pipeline did not report ready."]
 
 
+def test_retorrent_execute_blockers_promote_pipeline_stage_details() -> None:
+    pipeline_result = {
+        "status": "blocked",
+        "blockers": ["target-upload: uploaded_wait: torrent hash missing"],
+        "summary": {
+            "blockers": [
+                "target-upload: uploaded_wait: torrent hash missing",
+                "target-upload: Target upload stage did not complete every requested upload follow-up.",
+            ]
+        },
+    }
+    blockers = ptcli_cli._retorrent_execute_blockers(pipeline_result, {"complete": False, "blockers": ["target.seeding"]}, False)
+
+    assert blockers == [
+        "target.seeding",
+        "target-upload: uploaded_wait: torrent hash missing",
+        "target-upload: Target upload stage did not complete every requested upload follow-up.",
+        "pipeline did not report ready.",
+        "pipeline status is blocked.",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_retorrent_execute_blocks_without_live_confirmation(tmp_path) -> None:
     torrent_file = tmp_path / "target.torrent"

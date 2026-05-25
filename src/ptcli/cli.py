@@ -613,6 +613,9 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
             blockers.extend(str(blocker) for blocker in closure_blockers)
         if closure.get("complete") is not True and not blockers:
             blockers.append("retorrent closure did not complete.")
+    _extend_unique_string(blockers, _string_list(pipeline_result.get("blockers")))
+    summary = pipeline_result.get("summary") if isinstance(pipeline_result.get("summary"), dict) else {}
+    _extend_unique_string(blockers, _string_list(summary.get("blockers")))
     if not ready:
         blockers.append("pipeline did not report ready.")
     if pipeline_result.get("status") not in {None, "ok", "complete"}:
