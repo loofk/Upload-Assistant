@@ -3028,7 +3028,7 @@ def test_doctor_summary_artifacts_include_effective_uploaded_save_path(tmp_path)
         uploaded_torrent_file=None,
     )
 
-    artifacts = ptcli_cli._doctor_summary_artifacts(args, str(content_path))
+    artifacts = ptcli_cli._doctor_summary_artifacts(args, {}, str(content_path))
     resume_state = ptcli_cli._doctor_resume_state(
         {"ready": True, "live_safe_to_attempt": True},
         artifacts,
@@ -3482,6 +3482,12 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert summary_payload["artifacts"]["content_path"]["exists"] is True
     assert summary_payload["artifacts"]["package_dir"]["is_dir"] is True
     assert summary_payload["artifacts"]["target_torrent_file"]["is_file"] is True
+    assert summary_payload["artifacts"]["flow_check_ready"] is True
+    assert summary_payload["artifacts"]["rule_check_ready"] is True
+    assert summary_payload["artifacts"]["rules_acknowledged"] is True
+    assert summary_payload["artifacts"]["rule_obligations"]["ready"] is True
+    assert summary_payload["artifacts"]["target_rule_obligations"]["ready"] is True
+    assert summary_payload["artifacts"]["target_package_preflight_ready"] is True
     assert summary_payload["compliance"]["ready"] is True
     assert summary_payload["compliance"]["site_specific_rules_encoded"] is False
     assert summary_payload["failed_check_names"] == []
@@ -3499,6 +3505,11 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert summary_payload["resume_state"]["artifacts"]["content_path"] is True
     assert summary_payload["resume_state"]["artifacts"]["package_dir"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_torrent_file"] is True
+    assert summary_payload["resume_state"]["artifacts"]["flow_check_ready"] is True
+    assert summary_payload["resume_state"]["artifacts"]["rule_check_ready"] is True
+    assert summary_payload["resume_state"]["artifacts"]["rules_acknowledged"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_rule_obligations"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_package_preflight_ready"] is True
 
 
 def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, capsys) -> None:

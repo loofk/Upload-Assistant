@@ -1273,7 +1273,7 @@ def _write_doctor_summary(payload: dict[str, Any], args: argparse.Namespace, out
 def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, summary_file: str) -> dict[str, Any]:
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
     failed_checks = [check for check in checks if isinstance(check, dict) and not check.get("ok")]
-    artifacts = _doctor_summary_artifacts(args, payload.get("effective_uploaded_save_path"))
+    artifacts = _doctor_summary_artifacts(args, payload, payload.get("effective_uploaded_save_path"))
     recommended_commands = _doctor_recommended_commands(payload, args, artifacts)
     return {
         "schema_version": 1,
@@ -1322,6 +1322,11 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(_path_artifact_exists(artifacts.get("uploaded_torrent_file"))),
             "effective_uploaded_save_path": bool(_path_artifact_exists(artifacts.get("effective_uploaded_save_path"))),
+            "flow_check_ready": bool(artifacts.get("flow_check_ready")),
+            "rule_check_ready": bool(artifacts.get("rule_check_ready")),
+            "rules_acknowledged": bool(artifacts.get("rules_acknowledged")),
+            "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
+            "target_package_preflight_ready": bool(artifacts.get("target_package_preflight_ready")),
         },
         "failed_check_names": [str(check.get("name")) for check in failed_checks if isinstance(check, dict)],
     }
@@ -1361,7 +1366,14 @@ def _doctor_summary_inputs(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _doctor_summary_artifacts(args: argparse.Namespace, effective_uploaded_save_path: Any = None) -> dict[str, Any]:
+def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any], effective_uploaded_save_path: Any = None) -> dict[str, Any]:
+    flow_check = payload.get("flow_check") if isinstance(payload.get("flow_check"), dict) else {}
+    rule_check = payload.get("rule_check") if isinstance(payload.get("rule_check"), dict) else {}
+    compliance = payload.get("compliance") if isinstance(payload.get("compliance"), dict) else {}
+    package_preflight = payload.get("package_preflight") if isinstance(payload.get("package_preflight"), dict) else {}
+    target_rule_obligations = compliance.get("target_rule_obligation_review")
+    if not isinstance(target_rule_obligations, dict):
+        target_rule_obligations = package_preflight.get("rule_obligation_review") if isinstance(package_preflight.get("rule_obligation_review"), dict) else None
     return {
         "content_path": _path_artifact(args.content_path),
         "source_torrent_file": _path_artifact(args.source_torrent_file),
@@ -1370,6 +1382,12 @@ def _doctor_summary_artifacts(args: argparse.Namespace, effective_uploaded_save_
         "uploaded_torrent_id": args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(args.uploaded_torrent_file),
         "effective_uploaded_save_path": _path_artifact(str(effective_uploaded_save_path)) if effective_uploaded_save_path else None,
+        "flow_check_ready": bool(flow_check.get("ready")),
+        "rule_check_ready": bool(rule_check.get("ready")),
+        "rules_acknowledged": bool(compliance.get("rules_acknowledged")),
+        "rule_obligations": compliance.get("rule_obligations") if isinstance(compliance.get("rule_obligations"), dict) else None,
+        "target_rule_obligations": target_rule_obligations,
+        "target_package_preflight_ready": package_preflight.get("status") == "ready" if package_preflight else False,
     }
 
 
