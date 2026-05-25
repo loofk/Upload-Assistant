@@ -15,7 +15,6 @@ from bs4 import BeautifulSoup
 
 from src.ptcli.mainland import normalize_tracker
 from src.trackers.AUDIENCES import AUDIENCES
-from src.trackers.COMMON import COMMON
 from src.trackers.HDSKY import HDSKY
 from src.trackers.HHAN import HHAN
 from src.trackers.MTEAM import MTEAM
@@ -182,7 +181,7 @@ async def download_source_torrent(config: dict[str, Any], tracker: str, source_i
 
 
 async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torrent_id: str, meta: dict[str, Any]) -> SourceTorrentInfo:
-    common = COMMON(config=config)
+    _ = config
     cookiefile = os.path.join(meta["base_dir"], "data", "cookies", f"{tracker}.txt")
     cookie_exists = await asyncio.to_thread(os.path.exists, cookiefile)
     if not cookie_exists:
@@ -198,7 +197,7 @@ async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torre
             douban_url=None,
         )
 
-    cookies = await common.parseCookieFile(cookiefile)
+    cookies = await _load_cookie_file(cookiefile)
     async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
         response = await client.get(_generic_details_url(tracker, torrent_id))
     response.raise_for_status()
@@ -286,10 +285,9 @@ async def _download_nexus_torrent(config: dict[str, Any], tracker: str, torrent_
         raise ValueError(f"{tracker} passkey is not configured.")
 
     meta = create_source_meta(base_dir)
-    common = COMMON(config=config)
     cookiefile = os.path.join(meta["base_dir"], "data", "cookies", f"{tracker}.txt")
     cookie_exists = await asyncio.to_thread(os.path.exists, cookiefile)
-    cookies = await common.parseCookieFile(cookiefile) if cookie_exists else {}
+    cookies = await _load_cookie_file(cookiefile) if cookie_exists else {}
     download_url = f"{NEXUS_DOWNLOAD_BASE_URLS[tracker]}/download.php?id={torrent_id}&passkey={passkey}"
 
     async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
@@ -298,6 +296,46 @@ async def _download_nexus_torrent(config: dict[str, Any], tracker: str, torrent_
     await asyncio.to_thread(_assert_torrent_bytes, response.content)
     async with aiofiles.open(destination, "wb") as torrent_file:
         await torrent_file.write(response.content)
+
+
+async def _load_cookie_file(cookiefile: str | Path) -> dict[str, str]:
+    cookies: dict[str, str] = {}
+    async with aiofiles.open(cookiefile, encoding="utf-8") as cookie_file:
+        content = await cookie_file.read()
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#HttpOnly_"):
+            line = line.removeprefix("#HttpOnly_")
+        elif line.startswith("#"):
+            continue
+        if _parse_netscape_cookie_line(line, cookies):
+            continue
+        _parse_cookie_header_line(line, cookies)
+    return cookies
+
+
+def _parse_netscape_cookie_line(line: str, cookies: dict[str, str]) -> bool:
+    fields = [field for field in re.split(r"\s+", line) if field]
+    if len(fields) < 7:
+        return False
+    name = fields[5].strip()
+    value = fields[6].strip()
+    if not name:
+        return False
+    cookies[name] = value
+    return True
+
+
+def _parse_cookie_header_line(line: str, cookies: dict[str, str]) -> None:
+    for pair in line.split(";"):
+        if "=" not in pair:
+            continue
+        name, value = pair.split("=", 1)
+        name = name.strip()
+        if name:
+            cookies[name] = value.strip()
 
 
 def _validate_downloaded_torrent(path: Path) -> Path:

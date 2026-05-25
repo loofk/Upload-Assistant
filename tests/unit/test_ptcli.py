@@ -1017,10 +1017,35 @@ def test_source_module_registers_enabled_chinese_source_adapters() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ptcli_cookie_loader_reads_netscape_and_header_cookies(tmp_path) -> None:
+    cookiefile = tmp_path / "cookies.txt"
+    cookiefile.write_text(
+        "\n".join(
+            [
+                "# Netscape HTTP Cookie File",
+                ".example.test\tTRUE\t/\tFALSE\t1893456000\tuid\t123",
+                "#HttpOnly_.example.test\tTRUE\t/\tFALSE\t1893456000\tpass\tsecret",
+                "cf_clearance=token; locale=zh_CN;",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    cookies = await ptcli_source._load_cookie_file(cookiefile)
+
+    assert cookies == {
+        "uid": "123",
+        "pass": "secret",
+        "cf_clearance": "token",
+        "locale": "zh_CN",
+    }
+
+
+@pytest.mark.asyncio
 async def test_generic_source_info_parses_hds_details(monkeypatch, tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
-    (cookies_dir / "HDS.txt").write_text("uid=1;", encoding="utf-8")
+    (cookies_dir / "HDS.txt").write_text("uid=1; pass=secret;", encoding="utf-8")
     html = """
     <html>
       <head><title>Example.Movie.2024.1080p - HD-Space</title></head>
@@ -1041,8 +1066,8 @@ async def test_generic_source_info_parses_hds_details(monkeypatch, tmp_path) -> 
             return None
 
     class FakeClient:
-        def __init__(self, **_kwargs) -> None:
-            pass
+        def __init__(self, **kwargs) -> None:
+            assert kwargs["cookies"] == {"uid": "1", "pass": "secret"}
 
         async def __aenter__(self):
             return self
@@ -1067,6 +1092,40 @@ async def test_generic_source_info_parses_hds_details(monkeypatch, tmp_path) -> 
     assert info.douban_id == "1291546"
     assert info.douban_url == "https://movie.douban.com/subject/1291546/"
     assert info.description_length > 0
+
+
+@pytest.mark.asyncio
+async def test_nexus_source_download_uses_ptcli_cookie_loader(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text(".u2.dmhy.org\tTRUE\t/\tFALSE\t1893456000\tuid\t1\n", encoding="utf-8")
+
+    class FakeResponse:
+        content = b"d4:infod"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            assert kwargs["cookies"] == {"uid": "1"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url):
+            assert url == "https://u2.dmhy.org/download.php?id=60635&passkey=u2-passkey"
+            return FakeResponse()
+
+    monkeypatch.setattr(ptcli_source.httpx, "AsyncClient", FakeClient)
+
+    path = await ptcli_source.download_source_torrent({"TRACKERS": {"U2": {"passkey": "u2-passkey"}}}, "U2", "60635", str(tmp_path / "out"), base_dir=str(tmp_path))
+
+    assert path == tmp_path / "out" / "U2-60635.torrent"
+    assert path.read_bytes() == b"d4:infod"
 
 
 @pytest.mark.asyncio
