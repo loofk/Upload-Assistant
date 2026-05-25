@@ -250,7 +250,7 @@ class QbitReadOnlyService:
                     "complete": True,
                     "query": query,
                     "matched_count": len(matches),
-                    "completion_verification": _completion_verification(matches, completed),
+                    "completion_verification": _completion_verification(matches, completed, torrent_hash=torrent_hash, content_path=content_path),
                     "matches": summaries_to_dicts(completed),
                 }
 
@@ -259,7 +259,7 @@ class QbitReadOnlyService:
                     "complete": False,
                     "query": query,
                     "matched_count": len(last_matches),
-                    "completion_verification": _completion_verification(last_matches, []),
+                    "completion_verification": _completion_verification(last_matches, [], torrent_hash=torrent_hash, content_path=content_path),
                     "matches": summaries_to_dicts(last_matches),
                     "blockers": _wait_blockers(last_matches, torrent_hash=torrent_hash, content_path=content_path),
                 }
@@ -344,13 +344,15 @@ def _tag_set(tags: str | None) -> set[str]:
     return {tag.strip() for tag in re.split(r"[,;]", tags) if tag.strip()}
 
 
-def _completion_verification(matches: list[QbitTorrentSummary], completed: list[QbitTorrentSummary]) -> dict[str, Any]:
+def _completion_verification(matches: list[QbitTorrentSummary], completed: list[QbitTorrentSummary], *, torrent_hash: str | None = None, content_path: str | None = None) -> dict[str, Any]:
     return {
         "matched_count": len(matches),
         "complete_count": len(completed),
         "seeding_state_count": len([torrent for torrent in completed if _is_seeding_state(torrent)]),
         "all_matches_complete": bool(matches) and len(matches) == len(completed),
         "any_complete": bool(completed),
+        "requested_hash_matched": _requested_hash_matched(matches, torrent_hash),
+        "requested_content_path_matched": _requested_content_path_matched(matches, content_path),
         "observed_hashes": _observed_values(matches, "hash"),
         "observed_content_paths": _observed_values(matches, "content_path"),
         "observed_save_paths": _observed_values(matches, "save_path"),
@@ -361,6 +363,19 @@ def _completion_verification(matches: list[QbitTorrentSummary], completed: list[
 
 def _observed_values(matches: list[QbitTorrentSummary], field: str) -> list[str]:
     return sorted({str(value) for torrent in matches if (value := getattr(torrent, field))})
+
+
+def _requested_hash_matched(matches: list[QbitTorrentSummary], torrent_hash: str | None) -> bool | None:
+    if not torrent_hash:
+        return None
+    expected = _normalize_hash(torrent_hash)
+    return any(_normalize_hash(match.hash) == expected for match in matches)
+
+
+def _requested_content_path_matched(matches: list[QbitTorrentSummary], content_path: str | None) -> bool | None:
+    if not content_path:
+        return None
+    return any(_torrent_matches_save_path(match, content_path) for match in matches)
 
 
 def _is_seeding_state(torrent: QbitTorrentSummary) -> bool:

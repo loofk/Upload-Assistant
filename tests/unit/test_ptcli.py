@@ -2590,6 +2590,23 @@ def test_target_upload_summary_requires_uploaded_wait_match_evidence() -> None:
     assert "uploaded_wait: qBittorrent completion wait did not include matched torrent evidence." in summary["blockers"]
 
 
+def test_wait_result_completed_rejects_request_mismatch() -> None:
+    assert ptcli_cli._wait_result_completed(
+        {
+            "complete": True,
+            "matches": [{"hash": "a" * 40}],
+            "completion_verification": {"matched_count": 1, "complete_count": 1, "any_complete": True, "requested_hash_matched": False},
+        }
+    ) is False
+    assert ptcli_cli._wait_result_completed(
+        {
+            "complete": True,
+            "matches": [{"hash": "a" * 40, "content_path": "/downloads/Other"}],
+            "completion_verification": {"matched_count": 1, "complete_count": 1, "any_complete": True, "requested_content_path_matched": False},
+        }
+    ) is False
+
+
 def test_target_upload_next_command_requires_uploaded_wait_match_evidence() -> None:
     next_command = ptcli_cli._target_upload_next_command(
         {
@@ -9608,6 +9625,8 @@ async def test_qbit_service_waits_for_completed_match() -> None:
     assert result["completion_verification"]["matched_count"] == 1
     assert result["completion_verification"]["complete_count"] == 1
     assert result["completion_verification"]["all_matches_complete"] is True
+    assert result["completion_verification"]["requested_hash_matched"] is None
+    assert result["completion_verification"]["requested_content_path_matched"] is True
     assert result["completion_verification"]["observed_hashes"] == ["a" * 40]
     assert result["completion_verification"]["observed_content_paths"] == ["/downloads/One"]
     assert result["matches"][0]["hash"] == "a" * 40
@@ -9621,6 +9640,8 @@ async def test_qbit_service_wait_reports_seeding_state_summary() -> None:
 
     assert result["complete"] is True
     assert result["completion_verification"]["seeding_state_count"] == 1
+    assert result["completion_verification"]["requested_hash_matched"] is True
+    assert result["completion_verification"]["requested_content_path_matched"] is None
     assert result["completion_verification"]["observed_hashes"] == ["b" * 40]
     assert result["completion_verification"]["observed_content_paths"] == ["/downloads/One"]
     assert result["completion_verification"]["observed_states"] == ["uploading"]
@@ -9638,6 +9659,7 @@ async def test_qbit_service_wait_reports_hash_query() -> None:
     assert result["query"]["torrent_hash"] == "b" * 40
     assert result["matched_count"] == 1
     assert result["matches"][0]["hash"] == "b" * 40
+    assert result["completion_verification"]["requested_hash_matched"] is True
 
 
 @pytest.mark.asyncio

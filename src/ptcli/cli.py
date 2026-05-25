@@ -3554,6 +3554,10 @@ def _wait_result_completed(wait_result: Any) -> bool:
             return False
         if verification.get("matched_count") == 0:
             return False
+        if verification.get("requested_hash_matched") is False:
+            return False
+        if verification.get("requested_content_path_matched") is False:
+            return False
     matches = wait_result.get("matches")
     if isinstance(matches, list):
         return any(_match_has_evidence(match) for match in matches)
