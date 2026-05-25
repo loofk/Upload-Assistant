@@ -567,10 +567,10 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
     summary = pipeline_result.get("summary") if isinstance(pipeline_result.get("summary"), dict) else {}
     summary_source = summary.get("source") if isinstance(summary.get("source"), dict) else {}
     summary_target = summary.get("target") if isinstance(summary.get("target"), dict) else {}
-    for key in ("source_torrent_hash", "source_torrent_file"):
+    for key in ("source_torrent_hash", "source_torrent_file", "source_save_path"):
         if merged.get(key):
             continue
-        source_key = "torrent_hash" if key == "source_torrent_hash" else "source_torrent_path"
+        source_key = "torrent_hash" if key == "source_torrent_hash" else "source_torrent_path" if key == "source_torrent_file" else "source_save_path"
         value = evidence_source.get(source_key) or closure_source.get(source_key) or summary_source.get(source_key)
         if value:
             merged[key] = value
@@ -606,6 +606,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
         "artifacts": {
             "source_torrent_file": bool(artifacts.get("source_torrent_file")),
             "source_torrent_hash": bool(artifacts.get("source_torrent_hash")),
+            "source_save_path": bool(artifacts.get("source_save_path")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
@@ -2562,6 +2563,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
 def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
     stages = payload.get("stages")
     source_download = _find_stage(stages, "source-download") if isinstance(stages, list) else None
+    inject_source = _find_stage(stages, "inject-source") if isinstance(stages, list) else None
     target_prepare = _find_stage(stages, "target-prepare") if isinstance(stages, list) else None
     target_upload = _find_stage(stages, "target-upload") if isinstance(stages, list) else None
 
@@ -2574,6 +2576,10 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         source_result = source_download.get("result")
         if isinstance(source_result, dict):
             artifacts["source_torrent_file"] = source_result.get("path")
+    if isinstance(inject_source, dict):
+        inject_result = inject_source.get("result")
+        if isinstance(inject_result, dict):
+            artifacts["source_save_path"] = inject_result.get("save_path")
     if isinstance(target_prepare, dict):
         prepare_result = target_prepare.get("result")
         if isinstance(prepare_result, dict):
@@ -2750,6 +2756,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
         "artifacts": {
             "source_torrent_file": bool(artifacts.get("source_torrent_file")),
             "source_torrent_hash": bool(artifacts.get("source_torrent_hash")),
+            "source_save_path": bool(artifacts.get("source_save_path")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
@@ -2920,6 +2927,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "injection_verified": source_injected,
         "injected_torrent": inject_source.get("result") if inject_source and isinstance(inject_source.get("result"), dict) else None,
         "injected_torrent_hash": _torrent_hash_from_stage(inject_source),
+        "source_save_path": inject_source.get("result", {}).get("save_path") if inject_source and isinstance(inject_source.get("result"), dict) else None,
         "complete": source_complete,
         "matched": source_matched,
         "content_verified": source_content_verified,
@@ -3002,6 +3010,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "content_path": source.get("content_path"),
             "source_torrent": source.get("source_torrent"),
             "source_torrent_path": source.get("source_torrent_path"),
+            "source_save_path": source.get("source_save_path"),
             "source_wait": source.get("source_wait"),
             "qbit_closure": {
                 "injection": _qbit_injection_evidence(source.get("injected_torrent")),
