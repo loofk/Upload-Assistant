@@ -1883,7 +1883,7 @@ def _source_ready_for_live_target_upload(stages: list[dict[str, Any]]) -> bool:
     wait_complete = _find_stage(stages, "wait-complete")
     match = _find_stage(stages, "match")
     source_content_verify = _find_stage(stages, "source-content-verify")
-    source_downloaded_flow_ready = _stage_completed(source_download) and _source_injection_verified(inject_source) and _stage_completed(wait_complete)
+    source_downloaded_flow_ready = _stage_completed(source_download) and _source_injection_verified(inject_source) and _source_wait_completed(wait_complete)
     existing_content_ready = _match_stage_has_match(match) and _source_content_verified(source_content_verify)
     return source_downloaded_flow_ready or existing_content_ready
 
@@ -2829,7 +2829,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     target_prepare_result = target_prepare.get("result") if target_prepare and isinstance(target_prepare.get("result"), dict) else {}
     source_downloaded = _stage_completed(source_download)
     source_injected = _source_injection_verified(inject_source)
-    source_complete = _stage_completed(wait_complete)
+    source_complete = _source_wait_completed(wait_complete)
     source_matched = _match_stage_has_match(match)
     source_content_verified = _source_content_verified(source_content_verify)
     target_injected = _injected_torrent_verified(injected_torrent)
@@ -2962,6 +2962,13 @@ def _source_injection_verified(stage: dict[str, Any] | None) -> bool:
     if not _stage_completed(stage):
         return False
     return _injected_torrent_verified(stage.get("result"))
+
+
+def _source_wait_completed(stage: dict[str, Any] | None) -> bool:
+    if not _stage_completed(stage):
+        return False
+    result = stage.get("result")
+    return isinstance(result, dict) and bool(result.get("complete"))
 
 
 def _source_content_verified(stage: dict[str, Any] | None) -> bool:

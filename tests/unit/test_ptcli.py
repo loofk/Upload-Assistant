@@ -2125,6 +2125,35 @@ def test_pipeline_closure_requires_source_injection_client_verification() -> Non
     assert closure["source"]["injected_torrent_hash"] == "a" * 40
 
 
+def test_pipeline_closure_requires_source_wait_completion() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "result": {"torrent_path": "/tmp/U2-60635.torrent"}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": False, "matches": []}},
+        {"stage": "match", "ok": True, "result": {"matches": []}},
+        {"stage": "target-prepare", "ok": True, "result": {}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+
+    assert closure["complete"] is False
+    assert closure["blockers"] == ["source.ready"]
+    assert closure["source"]["downloaded"] is True
+    assert closure["source"]["injected"] is True
+    assert closure["source"]["complete"] is False
+    assert closure["source"]["source_wait"]["complete"] is False
+
+
 def test_pipeline_evidence_reports_source_injection_verification() -> None:
     closure = {
         "complete": True,
