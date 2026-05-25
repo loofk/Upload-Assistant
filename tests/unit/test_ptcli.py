@@ -4876,6 +4876,10 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
             "retorrent",
             "--uploaded-paused",
             "--wait-uploaded-complete",
+            "--uploaded-wait-timeout",
+            "42",
+            "--uploaded-wait-interval",
+            "3",
             "--write-summary",
             "--summary-output-dir",
             str(tmp_path / "summary"),
@@ -4913,6 +4917,10 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert "--uploaded-qbit-category MTEAM" in commands["pipeline-live"]
     assert "--uploaded-qbit-tags retorrent" in commands["pipeline-live"]
     assert "--uploaded-paused" in commands["pipeline-live"]
+    assert "--uploaded-wait-timeout 42" in commands["pipeline-live"]
+    assert "--uploaded-wait-interval 3" in commands["pipeline-live"]
+    assert "--uploaded-wait-timeout 42" in commands["doctor-retry"]
+    assert "--uploaded-wait-interval 3" in commands["doctor-retry"]
     assert command_argv["doctor-retry"][:3] == ["python3", "ptcli.py", "doctor"]
     assert command_argv["doctor-live-probes"][:3] == ["python3", "ptcli.py", "doctor"]
     assert command_argv["pipeline-live"][:3] == ["python3", "ptcli.py", "pipeline"]
@@ -4998,6 +5006,10 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
             "retorrent",
             "--uploaded-paused",
             "--wait-uploaded-complete",
+            "--uploaded-wait-timeout",
+            "42",
+            "--uploaded-wait-interval",
+            "3",
             "--write-summary",
             "--summary-output-dir",
             str(tmp_path / "summary"),
@@ -5022,6 +5034,8 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-wait-timeout 42" in commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-wait-interval 3" in commands["resume-uploaded-torrent-download"]
     assert summary_payload["resume_state"]["live_safe_to_attempt"] is True
     assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
     assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent-download"]
@@ -5090,6 +5104,10 @@ def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path,
             "retorrent",
             "--uploaded-paused",
             "--wait-uploaded-complete",
+            "--uploaded-wait-timeout",
+            "42",
+            "--uploaded-wait-interval",
+            "3",
             "--write-summary",
             "--summary-output-dir",
             str(tmp_path / "summary"),
@@ -5113,6 +5131,8 @@ def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path,
     assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent"]
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent"]
+    assert "--uploaded-wait-timeout 42" in commands["resume-uploaded-torrent"]
+    assert "--uploaded-wait-interval 3" in commands["resume-uploaded-torrent"]
     assert summary_payload["resume_state"]["live_safe_to_attempt"] is True
     assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent"
     assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent"]
@@ -9550,6 +9570,10 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
             "retorrent",
             "--uploaded-paused",
             "--wait-uploaded-complete",
+            "--uploaded-wait-timeout",
+            "42",
+            "--uploaded-wait-interval",
+            "3",
             "--write-summary",
             "--summary-output-dir",
             str(tmp_path / "summary"),
@@ -9575,6 +9599,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert result["uploaded_wait"]["complete"] is True
     assert result["uploaded_wait"]["query"]["torrent_hash"] == uploaded_hash
     assert result["uploaded_wait"]["query"]["content_path"] == "/downloads/Example"
+    assert result["uploaded_wait"]["query"]["timeout"] == 42.0
+    assert result["uploaded_wait"]["query"]["interval"] == 3.0
     assert result["qbit_wait_mismatch"] is False
     assert result["qbit_wait_mismatches"] == []
     assert result["qbit_wait_diagnostics"]["uploaded"]["complete"] is True
@@ -9643,6 +9669,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent"]
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent"]
+    assert "--uploaded-wait-timeout 42" in commands["resume-uploaded-torrent"]
+    assert "--uploaded-wait-interval 3" in commands["resume-uploaded-torrent"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["resume-uploaded-torrent"]
     assert str(tmp_path / "MTEAM-999.torrent") in commands["retorrent-resume-uploaded-torrent"]
     assert "--package-dir" in commands["retorrent-resume-uploaded-torrent"]
@@ -9650,6 +9678,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert "--source-id 60635" in commands["retorrent-resume-uploaded-torrent"]
     assert "--client default" in commands["retorrent-resume-uploaded-torrent"]
     assert "--uploaded-save-path /downloads/Example" in commands["retorrent-resume-uploaded-torrent"]
+    assert "--uploaded-wait-timeout 42" in commands["retorrent-resume-uploaded-torrent"]
+    assert "--uploaded-wait-interval 3" in commands["retorrent-resume-uploaded-torrent"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["retorrent-resume-uploaded-torrent"]
     assert command_argv["retorrent-resume-uploaded-torrent"][:3] == ["python3", "ptcli.py", "retorrent"]
     assert command_argv["verify-seeding"] == ["python3", "ptcli.py", "inspect", "--client", "default", "--json"]

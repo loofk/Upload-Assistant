@@ -173,6 +173,8 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for uploaded target torrent injection.")
     doctor.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent to qBittorrent paused.")
     doctor.add_argument("--wait-uploaded-complete", action="store_true", help="Check qBittorrent completion wait after uploaded target torrent injection.")
+    doctor.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait with --wait-uploaded-complete.")
+    doctor.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for --wait-uploaded-complete.")
     doctor.add_argument("--connect-qbit", action="store_true", help="Probe qBittorrent connectivity by listing one torrent.")
     doctor.add_argument("--probe-source", action="store_true", help="Probe source tracker metadata lookup with the configured credentials/cookies.")
     doctor.add_argument("--probe-target", action="store_true", help="Probe MTEAM target duplicate-search API with the source metadata signal.")
@@ -1235,6 +1237,7 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             download_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
         if args.uploaded_paused:
             download_args.append("--uploaded-paused")
+        _append_uploaded_wait_options(download_args, args)
         commands.append(_ptcli_command_entry("resume-uploaded-torrent-download", download_args))
         retorrent_args = _target_upload_retorrent_resume_args(args, str(package_artifact.get("path") or args.package_dir), uploaded_torrent_id=str(uploaded_torrent_id), uploaded_save_path_artifact=uploaded_save_path_artifact)
         if retorrent_args:
@@ -1263,6 +1266,7 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             resume_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
         if args.uploaded_paused:
             resume_args.append("--uploaded-paused")
+        _append_uploaded_wait_options(resume_args, args)
         commands.append(_ptcli_command_entry("resume-uploaded-torrent", resume_args))
         retorrent_args = _target_upload_retorrent_resume_args(
             args,
@@ -1320,11 +1324,27 @@ def _target_upload_retorrent_resume_args(
         retorrent_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
     if args.uploaded_paused:
         retorrent_args.append("--uploaded-paused")
+    _append_uploaded_wait_options(retorrent_args, args)
     retorrent_args.append("--write-summary")
     if args.summary_output_dir:
         retorrent_args.extend(["--summary-output-dir", args.summary_output_dir])
     retorrent_args.append("--json")
     return retorrent_args
+
+
+def _append_uploaded_wait_options(command_args: list[str], args: argparse.Namespace) -> None:
+    timeout = getattr(args, "uploaded_wait_timeout", None)
+    interval = getattr(args, "uploaded_wait_interval", None)
+    if timeout is not None and float(timeout) != 600.0:
+        command_args.extend(["--uploaded-wait-timeout", _format_number_arg(timeout)])
+    if interval is not None and float(interval) != 15.0:
+        command_args.extend(["--uploaded-wait-interval", _format_number_arg(interval)])
+
+
+def _format_number_arg(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:g}"
+    return str(value)
 
 
 def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, Any], recommended_commands: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1396,6 +1416,8 @@ def _target_upload_retry_args(args: argparse.Namespace) -> list[str]:
         ("--uploaded-save-path", args.uploaded_save_path),
         ("--uploaded-qbit-category", args.uploaded_qbit_category),
         ("--uploaded-qbit-tags", args.uploaded_qbit_tags),
+        ("--uploaded-wait-timeout", _format_number_arg(args.uploaded_wait_timeout) if args.wait_uploaded_complete and args.uploaded_wait_timeout != 600.0 else None),
+        ("--uploaded-wait-interval", _format_number_arg(args.uploaded_wait_interval) if args.wait_uploaded_complete and args.uploaded_wait_interval != 15.0 else None),
         ("--summary-output-dir", args.summary_output_dir),
         ("--client", args.client),
     ):
@@ -1958,6 +1980,7 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
             uploaded_resume_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
         if args.uploaded_paused:
             uploaded_resume_args.append("--uploaded-paused")
+        _append_uploaded_wait_options(uploaded_resume_args, args)
         commands.append(_ptcli_command_entry("resume-uploaded-torrent", uploaded_resume_args))
         return commands
 
@@ -1988,6 +2011,7 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
             uploaded_resume_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
         if args.uploaded_paused:
             uploaded_resume_args.append("--uploaded-paused")
+        _append_uploaded_wait_options(uploaded_resume_args, args)
         commands.append(_ptcli_command_entry("resume-uploaded-torrent-download", uploaded_resume_args))
         return commands
 
@@ -2032,6 +2056,7 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
         pipeline_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
     if args.uploaded_paused:
         pipeline_args.append("--uploaded-paused")
+    _append_uploaded_wait_options(pipeline_args, args)
     commands.append(_ptcli_command_entry("pipeline-live", pipeline_args))
     return commands
 
@@ -2069,6 +2094,7 @@ def _doctor_retry_args(args: argparse.Namespace, *, force_probes: bool = False) 
     ):
         if value:
             retry_args.extend([option, value])
+    _append_uploaded_wait_options(retry_args, args)
     for option, enabled in (
         ("--accept-rules", args.accept_rules),
         ("--target-execute", args.target_execute),
