@@ -6020,6 +6020,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "source_qbit_tags": True,
         "source_paused": True,
         "source_hash_consistent": True,
+        "source_wait_evidence": True,
         "target_package_dir": True,
         "target_torrent_file": True,
         "uploaded_torrent_id": True,
@@ -6027,6 +6028,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "uploaded_qbit_category": True,
         "uploaded_qbit_tags": True,
         "uploaded_paused": True,
+        "uploaded_wait_evidence": True,
         "target_hash_consistent": True,
         "target_duplicate_clean": True,
         "target_rule_obligations": True,
@@ -8660,6 +8662,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["path"] == str(tmp_path / "MTEAM-999.torrent")
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["is_file"] is True
     assert summary_payload["artifacts"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
+    assert summary_payload["artifacts"]["uploaded_wait_evidence"] is True
     assert summary_payload["artifacts"]["target_hash_consistent"] is True
     assert summary_payload["artifacts"]["target_duplicate_clean"] is True
     assert summary_payload["artifacts"]["target_rule_obligations"]["ready"] is True
@@ -8668,6 +8671,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["resume_state"]["next_command"] is None
     assert summary_payload["resume_state"]["artifacts"]["package_content_path"] is True
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
+    assert summary_payload["resume_state"]["artifacts"]["uploaded_wait_evidence"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_hash_consistent"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_duplicate_clean"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_rule_obligations"] is True

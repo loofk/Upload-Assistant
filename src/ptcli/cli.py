@@ -579,7 +579,16 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
     summary = pipeline_result.get("summary") if isinstance(pipeline_result.get("summary"), dict) else {}
     summary_source = summary.get("source") if isinstance(summary.get("source"), dict) else {}
     summary_target = summary.get("target") if isinstance(summary.get("target"), dict) else {}
-    for key in ("source_torrent_hash", "source_torrent_file", "source_save_path", "source_qbit_category", "source_qbit_tags", "source_paused", "source_hash_consistent"):
+    for key in (
+        "source_torrent_hash",
+        "source_torrent_file",
+        "source_save_path",
+        "source_qbit_category",
+        "source_qbit_tags",
+        "source_paused",
+        "source_hash_consistent",
+        "source_wait_evidence",
+    ):
         if key in merged and _artifact_value_present(merged.get(key)):
             continue
         source_key = _source_artifact_evidence_key(key)
@@ -594,6 +603,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         "uploaded_qbit_category",
         "uploaded_qbit_tags",
         "uploaded_paused",
+        "uploaded_wait_evidence",
         "fresh_duplicate_check",
         "target_hash_consistent",
         "target_duplicate_clean",
@@ -636,6 +646,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "source_qbit_tags": bool(artifacts.get("source_qbit_tags")),
             "source_paused": "source_paused" in artifacts,
             "source_hash_consistent": bool(artifacts.get("source_hash_consistent")),
+            "source_wait_evidence": bool(artifacts.get("source_wait_evidence")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
@@ -645,6 +656,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "uploaded_qbit_category": bool(artifacts.get("uploaded_qbit_category")),
             "uploaded_qbit_tags": bool(artifacts.get("uploaded_qbit_tags")),
             "uploaded_paused": "uploaded_paused" in artifacts,
+            "uploaded_wait_evidence": bool(artifacts.get("uploaded_wait_evidence")),
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
             "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
@@ -1105,6 +1117,7 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
         "uploaded_torrent_id": _uploaded_torrent_id_from_result(result) or args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(uploaded_torrent_path),
         "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or package_content_path or args.uploaded_save_path),
+        "uploaded_wait_evidence": _wait_result_completed(result.get("uploaded_wait")),
         "fresh_duplicate_check": result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else None,
         "target_hash_consistent": not _uploaded_torrent_hash_consistency_blockers(result),
         "target_duplicate_clean": _fresh_duplicate_check_clean(result.get("fresh_duplicate_check")),
@@ -1194,6 +1207,7 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(_path_artifact_exists(artifacts.get("uploaded_torrent_file"))),
             "uploaded_save_path": bool(_path_artifact_exists(artifacts.get("uploaded_save_path"))),
+            "uploaded_wait_evidence": bool(artifacts.get("uploaded_wait_evidence")),
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
             "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
@@ -2871,6 +2885,8 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
     }
     if _artifact_value_present(evidence_source.get("hash_consistent")):
         artifacts["source_hash_consistent"] = evidence_source.get("hash_consistent")
+    if _wait_result_completed(evidence_source.get("source_wait")):
+        artifacts["source_wait_evidence"] = True
     if _artifact_value_present(evidence_target.get("hash_consistent")):
         artifacts["target_hash_consistent"] = evidence_target.get("hash_consistent")
     if _artifact_value_present(evidence_target.get("duplicate_clean")):
@@ -2898,6 +2914,8 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         if isinstance(upload_result, dict):
             artifacts["uploaded_torrent_id"] = _uploaded_torrent_id_from_result(upload_result)
             artifacts["uploaded_torrent_hash"] = _uploaded_torrent_hash_from_result(upload_result)
+            if _wait_result_completed(upload_result.get("uploaded_wait")):
+                artifacts["uploaded_wait_evidence"] = True
             injected_torrent = upload_result.get("injected_torrent")
             if isinstance(injected_torrent, dict):
                 artifacts["uploaded_qbit_category"] = injected_torrent.get("category")
@@ -3074,6 +3092,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "source_qbit_tags": bool(artifacts.get("source_qbit_tags")),
             "source_paused": "source_paused" in artifacts,
             "source_hash_consistent": bool(artifacts.get("source_hash_consistent")),
+            "source_wait_evidence": bool(artifacts.get("source_wait_evidence")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
@@ -3081,6 +3100,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "uploaded_qbit_category": bool(artifacts.get("uploaded_qbit_category")),
             "uploaded_qbit_tags": bool(artifacts.get("uploaded_qbit_tags")),
             "uploaded_paused": "uploaded_paused" in artifacts,
+            "uploaded_wait_evidence": bool(artifacts.get("uploaded_wait_evidence")),
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
             "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
@@ -3393,6 +3413,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "source_qbit_tags": source.get("source_qbit_tags"),
             "source_paused": bool(source.get("source_paused")),
             "source_wait": source.get("source_wait"),
+            "source_wait_evidence": _wait_result_completed(source.get("source_wait")),
             "qbit_closure": {
                 "injection": _qbit_injection_evidence(source.get("injected_torrent")),
                 "wait": _qbit_wait_evidence(source.get("source_wait")),
@@ -3416,6 +3437,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "injection_verified": bool(target.get("injection_verified")),
             "seeding_verified": target_seeding,
             "uploaded_wait": target.get("uploaded_wait"),
+            "uploaded_wait_evidence": _wait_result_completed(target.get("uploaded_wait")),
             "uploaded_torrent": target.get("uploaded_torrent"),
             "uploaded_torrent_path": target.get("uploaded_torrent_path"),
             "uploaded_qbit_category": target.get("uploaded_qbit_category"),
