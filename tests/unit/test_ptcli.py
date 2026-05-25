@@ -305,14 +305,18 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert "--download-uploaded-torrent" in out
     assert '"stage": "retorrent-resume-uploaded-torrent"' in out
     assert "retorrent --from U2 --source-id 123 --to MTEAM --execute --accept-rules --confirm-upload --package-dir ./tmp/target/U2-123-to-MTEAM --uploaded-torrent-file ./tmp/uploaded/MTEAM-<id>.torrent" in out
+    assert "--uploaded-torrent-file ./tmp/uploaded/MTEAM-<id>.torrent --inject-uploaded-torrent" in out
     assert '"stage": "retorrent-resume-uploaded-torrent-download"' in out
     assert "retorrent --from U2 --source-id 123 --to MTEAM --execute --accept-rules --confirm-upload --package-dir ./tmp/target/U2-123-to-MTEAM --uploaded-torrent-id <id>" in out
+    assert "--uploaded-torrent-id <id> --download-uploaded-torrent --inject-uploaded-torrent" in out
     assert '"stage": "doctor-live"' in out
     assert "--target-execute --confirm-upload" in out
     assert "--package-dir ./tmp/target/U2-123-to-MTEAM" in out
     assert "--target-torrent-file ./tmp/exported/mteam.torrent" in out
     assert '"stage": "retorrent-execute"' in out
     assert "--execute --accept-rules --confirm-upload" in out
+    assert "--download-uploaded-torrent" in out
+    assert "--inject-uploaded-torrent" in out
     assert "--uploaded-qbit-category MTEAM" in out
     assert "--write-summary" in out
 
@@ -387,6 +391,7 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
     retorrent_resume_uploaded = commands["retorrent-resume-uploaded-torrent"]
     assert "--package-dir ./tmp/target/U2-60635-to-MTEAM" in retorrent_resume_uploaded
     assert "--uploaded-torrent-file ./tmp/uploaded/MTEAM-<id>.torrent" in retorrent_resume_uploaded
+    assert "--inject-uploaded-torrent" in retorrent_resume_uploaded
     assert '--uploaded-save-path "/downloads/Example"' in retorrent_resume_uploaded
     assert "--write-summary" in retorrent_resume_uploaded
     assert command_argv["retorrent-resume-uploaded-torrent"][:3] == ["python3", "ptcli.py", "retorrent"]
@@ -395,6 +400,7 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
     retorrent_resume_download = commands["retorrent-resume-uploaded-torrent-download"]
     assert "--uploaded-torrent-id <id>" in retorrent_resume_download
     assert "--download-uploaded-torrent" in retorrent_resume_download
+    assert "--inject-uploaded-torrent" in retorrent_resume_download
     assert '--uploaded-save-path "/downloads/Example"' in retorrent_resume_download
     assert command_argv["retorrent-resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "retorrent"]
 
