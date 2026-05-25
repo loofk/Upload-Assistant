@@ -6469,6 +6469,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["target_duplicate_clean"] is True
     assert summary_payload["artifacts"]["target_rule_obligations"]["ready"] is True
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
+    resume_argv = {command["stage"]: command["argv"] for command in summary_payload["resume_commands"]}
     summary_output_dir = str(tmp_path / "summary")
     summary_output_arg = f"--summary-output-dir {shlex.quote(summary_output_dir)}"
     config_arg = f"--config {shlex.quote(str(tmp_path / 'config.py'))}"
@@ -6500,6 +6501,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "target_rule_obligations": True,
     }
     assert summary_payload["artifacts"]["source_torrent_file"] in resume_commands["resume-source-torrent"]
+    assert resume_argv["resume-source-torrent"][:3] == ["python3", "ptcli.py", "pipeline"]
+    assert "--source-torrent-file" in resume_argv["resume-source-torrent"]
     assert "--client default" in resume_commands["resume-source-torrent"]
     assert "--qbit-category SOURCE" in resume_commands["resume-source-torrent"]
     assert "--qbit-tags source-tag" in resume_commands["resume-source-torrent"]
@@ -6509,6 +6512,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_output_arg in resume_commands["resume-source-torrent"]
     assert str(torrent_file) in resume_commands["resume-target-upload"]
     assert str(tmp_path / "MTEAM-999.torrent") in resume_commands["resume-uploaded-torrent"]
+    assert resume_argv["resume-target-upload"][:3] == ["python3", "ptcli.py", "pipeline"]
+    assert resume_argv["resume-uploaded-torrent"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert str(tmp_path / "MTEAM-999.torrent") in resume_argv["resume-uploaded-torrent"]
     assert shlex.quote(summary_payload["artifacts"]["target_package_dir"]) in resume_commands["resume-target-upload"]
     assert summary_payload["artifacts"]["uploaded_save_path"] == "/downloads"
     assert "--uploaded-save-path /downloads" in resume_commands["resume-target-upload"]
@@ -6617,12 +6623,15 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     assert "uploaded_torrent_file" not in summary_payload["artifacts"]
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
+    resume_argv = {command["stage"]: command["argv"] for command in summary_payload["resume_commands"]}
     assert summary_payload["resume_state"]["resume_available"] is True
     assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
     assert summary_payload["resume_state"]["next_command"] == resume_commands["resume-uploaded-torrent-download"]
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is False
     assert "--uploaded-torrent-id 999" in resume_commands["resume-uploaded-torrent-download"]
+    assert resume_argv["resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert "999" in resume_argv["resume-uploaded-torrent-download"]
     assert "--download-uploaded-torrent" in resume_commands["resume-uploaded-torrent-download"]
     assert f"--uploaded-output-dir {shlex.quote(uploaded_output_dir)}" in resume_commands["resume-uploaded-torrent-download"]
     assert "--inject-uploaded-torrent" in resume_commands["resume-uploaded-torrent-download"]
@@ -9162,14 +9171,18 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["resume_state"]["artifacts"]["target_duplicate_clean"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_rule_obligations"] is True
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert "target-upload-retry" in commands
+    assert command_argv["target-upload-retry"][:3] == ["python3", "ptcli.py", "target-upload"]
     assert str(tmp_path / "MTEAM-999.torrent") in commands["resume-uploaded-torrent"]
+    assert str(tmp_path / "MTEAM-999.torrent") in command_argv["resume-uploaded-torrent"]
     assert "--client default" in commands["resume-uploaded-torrent"]
     assert "--uploaded-save-path /downloads/Example" in commands["resume-uploaded-torrent"]
     assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent"]
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["resume-uploaded-torrent"]
+    assert command_argv["verify-seeding"] == ["python3", "ptcli.py", "inspect", "--client", "default", "--json"]
     assert commands["verify-seeding"].startswith("python3 ptcli.py inspect")
 
 
@@ -9340,7 +9353,10 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is False
     assert summary_payload["artifacts"]["uploaded_save_path"]["path"] == "/mnt/seedbox/Example"
+    command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert "--uploaded-torrent-id 999" in commands["resume-uploaded-torrent-download"]
+    assert command_argv["resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert "999" in command_argv["resume-uploaded-torrent-download"]
     assert "--download-uploaded-torrent" in commands["resume-uploaded-torrent-download"]
     assert "--inject-uploaded-torrent" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-save-path /mnt/seedbox/Example" in commands["resume-uploaded-torrent-download"]

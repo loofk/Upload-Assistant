@@ -1182,12 +1182,9 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
     }
 
 
-def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.Namespace, artifacts: dict[str, Any]) -> list[dict[str, str]]:
+def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.Namespace, artifacts: dict[str, Any]) -> list[dict[str, Any]]:
     commands = [
-        {
-            "stage": "target-upload-retry",
-            "command": _target_upload_retry_command(args),
-        }
+        _ptcli_command_entry("target-upload-retry", _target_upload_retry_args(args)),
     ]
     package_artifact = artifacts.get("package_dir")
     uploaded_torrent_artifact = artifacts.get("uploaded_torrent_file")
@@ -1220,7 +1217,7 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             download_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
         if args.uploaded_paused:
             download_args.append("--uploaded-paused")
-        commands.append({"stage": "resume-uploaded-torrent-download", "command": _ptcli_command(download_args)})
+        commands.append(_ptcli_command_entry("resume-uploaded-torrent-download", download_args))
     if isinstance(package_artifact, dict) and isinstance(uploaded_torrent_artifact, dict) and uploaded_torrent_artifact.get("path"):
         resume_args = [
             "target-upload",
@@ -1245,13 +1242,13 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             resume_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
         if args.uploaded_paused:
             resume_args.append("--uploaded-paused")
-        commands.append({"stage": "resume-uploaded-torrent", "command": _ptcli_command(resume_args)})
+        commands.append(_ptcli_command_entry("resume-uploaded-torrent", resume_args))
     if summary.get("ready"):
-        commands.append({"stage": "verify-seeding", "command": _ptcli_command(["inspect", "--client", args.client, "--json"])})
+        commands.append(_ptcli_command_entry("verify-seeding", ["inspect", "--client", args.client, "--json"]))
     return commands
 
 
-def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, Any], recommended_commands: list[dict[str, str]]) -> dict[str, Any]:
+def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, Any], recommended_commands: list[dict[str, Any]]) -> dict[str, Any]:
     commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in recommended_commands if isinstance(command, dict)}
     resume_available = any(stage.startswith("resume-") for stage in commands_by_stage)
     next_command = _target_upload_next_command(summary, commands_by_stage) if resume_available else {"stage": None, "command": None}
@@ -1301,7 +1298,7 @@ def _path_artifact_exists(artifact: Any) -> bool:
     return isinstance(artifact, dict) and bool(artifact.get("path")) and artifact.get("exists") is not False
 
 
-def _target_upload_retry_command(args: argparse.Namespace) -> str:
+def _target_upload_retry_args(args: argparse.Namespace) -> list[str]:
     retry_args = [
         "target-upload",
         "--package-dir",
@@ -1335,7 +1332,11 @@ def _target_upload_retry_command(args: argparse.Namespace) -> str:
     ):
         if enabled:
             retry_args.append(option)
-    return _ptcli_command(retry_args)
+    return retry_args
+
+
+def _target_upload_retry_command(args: argparse.Namespace) -> str:
+    return _ptcli_command(_target_upload_retry_args(args))
 
 
 def _target_upload_qbit_options(args: argparse.Namespace) -> dict[str, Any]:
@@ -3118,7 +3119,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
     return artifacts
 
 
-def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, Any]) -> list[dict[str, str]]:
+def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, Any]) -> list[dict[str, Any]]:
     source_tracker = str(payload.get("source_tracker") or "")
     source_torrent_id = str(payload.get("source_torrent_id") or "")
     target_trackers = payload.get("target_trackers")
@@ -3139,40 +3140,38 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     source_save_path = artifacts.get("source_save_path") or content_path or "/downloads"
     uploaded_save_path = artifacts.get("uploaded_save_path") or content_path
     uploaded_save_path_args = ["--uploaded-save-path", str(uploaded_save_path)] if uploaded_save_path else []
-    commands: list[dict[str, str]] = []
+    commands: list[dict[str, Any]] = []
 
     source_torrent_file = artifacts.get("source_torrent_file")
     if source_torrent_file:
         commands.append(
-            {
-                "stage": "resume-source-torrent",
-                "command": _ptcli_command(
-                    [
-                        "pipeline",
-                        "--from",
-                        source_tracker,
-                        "--source-id",
-                        source_torrent_id,
-                        "--to",
-                        target_trackers_arg,
-                        *config_args,
-                        *base_dir_args,
-                        "--client",
-                        client,
-                        "--source-torrent-file",
-                        str(source_torrent_file),
-                        "--inject-source",
-                        "--save-path",
-                        str(source_save_path),
-                        *_qbit_resume_args(source_qbit_options, prefix=""),
-                        "--wait-complete",
-                        "--accept-rules",
-                        "--write-summary",
-                        *summary_output_dir_args,
-                        "--json",
-                    ]
-                ),
-            }
+            _ptcli_command_entry(
+                "resume-source-torrent",
+                [
+                    "pipeline",
+                    "--from",
+                    source_tracker,
+                    "--source-id",
+                    source_torrent_id,
+                    "--to",
+                    target_trackers_arg,
+                    *config_args,
+                    *base_dir_args,
+                    "--client",
+                    client,
+                    "--source-torrent-file",
+                    str(source_torrent_file),
+                    "--inject-source",
+                    "--save-path",
+                    str(source_save_path),
+                    *_qbit_resume_args(source_qbit_options, prefix=""),
+                    "--wait-complete",
+                    "--accept-rules",
+                    "--write-summary",
+                    *summary_output_dir_args,
+                    "--json",
+                ],
+            )
         )
 
     target_package_dir = artifacts.get("target_package_dir")
@@ -3180,101 +3179,95 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     uploaded_torrent_id = artifacts.get("uploaded_torrent_id")
     if target_package_dir and target_torrent_file:
         commands.append(
-            {
-                "stage": "resume-target-upload",
-                "command": _ptcli_command(
-                    [
-                        "pipeline",
-                        "--from",
-                        source_tracker,
-                        "--source-id",
-                        source_torrent_id,
-                        "--to",
-                        target_trackers_arg,
-                        *config_args,
-                        *base_dir_args,
-                        "--client",
-                        client,
-                        *path_args,
-                        "--package-dir",
-                        str(target_package_dir),
-                        "--upload-target",
-                        "--target-torrent-file",
-                        str(target_torrent_file),
-                        "--accept-rules",
-                        "--target-execute",
-                        "--confirm-upload",
-                        "--download-uploaded-torrent",
-                        *uploaded_output_dir_args,
-                        "--inject-uploaded-torrent",
-                        *uploaded_save_path_args,
-                        *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
-                        "--wait-uploaded-complete",
-                        "--write-summary",
-                        *summary_output_dir_args,
-                        "--json",
-                    ]
-                ),
-            }
+            _ptcli_command_entry(
+                "resume-target-upload",
+                [
+                    "pipeline",
+                    "--from",
+                    source_tracker,
+                    "--source-id",
+                    source_torrent_id,
+                    "--to",
+                    target_trackers_arg,
+                    *config_args,
+                    *base_dir_args,
+                    "--client",
+                    client,
+                    *path_args,
+                    "--package-dir",
+                    str(target_package_dir),
+                    "--upload-target",
+                    "--target-torrent-file",
+                    str(target_torrent_file),
+                    "--accept-rules",
+                    "--target-execute",
+                    "--confirm-upload",
+                    "--download-uploaded-torrent",
+                    *uploaded_output_dir_args,
+                    "--inject-uploaded-torrent",
+                    *uploaded_save_path_args,
+                    *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
+                    "--wait-uploaded-complete",
+                    "--write-summary",
+                    *summary_output_dir_args,
+                    "--json",
+                ],
+            )
         )
 
     uploaded_torrent_file = artifacts.get("uploaded_torrent_file")
     if target_package_dir and uploaded_torrent_id and not uploaded_torrent_file:
         commands.append(
-            {
-                "stage": "resume-uploaded-torrent-download",
-                "command": _ptcli_command(
-                    [
-                        "target-upload",
-                        *config_args,
-                        "--package-dir",
-                        str(target_package_dir),
-                        "--client",
-                        client,
-                        "--uploaded-torrent-id",
-                        str(uploaded_torrent_id),
-                        "--download-uploaded-torrent",
-                        *uploaded_output_dir_args,
-                        "--inject-uploaded-torrent",
-                        *uploaded_save_path_args,
-                        *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
-                        "--wait-uploaded-complete",
-                        "--write-summary",
-                        *summary_output_dir_args,
-                        "--json",
-                    ]
-                ),
-            }
+            _ptcli_command_entry(
+                "resume-uploaded-torrent-download",
+                [
+                    "target-upload",
+                    *config_args,
+                    "--package-dir",
+                    str(target_package_dir),
+                    "--client",
+                    client,
+                    "--uploaded-torrent-id",
+                    str(uploaded_torrent_id),
+                    "--download-uploaded-torrent",
+                    *uploaded_output_dir_args,
+                    "--inject-uploaded-torrent",
+                    *uploaded_save_path_args,
+                    *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
+                    "--wait-uploaded-complete",
+                    "--write-summary",
+                    *summary_output_dir_args,
+                    "--json",
+                ],
+            )
         )
     if target_package_dir and uploaded_torrent_file:
         commands.append(
-            {
-                "stage": "resume-uploaded-torrent",
-                "command": _ptcli_command(
-                    [
-                        "target-upload",
-                        *config_args,
-                        "--package-dir",
-                        str(target_package_dir),
-                        "--client",
-                        client,
-                        "--uploaded-torrent-file",
-                        str(uploaded_torrent_file),
-                        "--inject-uploaded-torrent",
-                        *uploaded_save_path_args,
-                        *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
-                        "--wait-uploaded-complete",
-                        "--write-summary",
-                        *summary_output_dir_args,
-                        "--json",
-                    ]
-                ),
-            }
+            _ptcli_command_entry(
+                "resume-uploaded-torrent",
+                [
+                    "target-upload",
+                    *config_args,
+                    "--package-dir",
+                    str(target_package_dir),
+                    "--client",
+                    client,
+                    "--uploaded-torrent-file",
+                    str(uploaded_torrent_file),
+                    "--inject-uploaded-torrent",
+                    *uploaded_save_path_args,
+                    *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
+                    "--wait-uploaded-complete",
+                    "--write-summary",
+                    *summary_output_dir_args,
+                    "--json",
+                ],
+            )
         )
     return commands
 
 
-def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], resume_commands: list[dict[str, str]]) -> dict[str, Any]:
+def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], resume_commands: list[dict[str, Any]]) -> dict[str, Any]:
     closure = payload.get("closure") if isinstance(payload.get("closure"), dict) else {}
     blockers = closure.get("blockers") if isinstance(closure.get("blockers"), list) else []
     blockers = [str(blocker) for blocker in blockers]
@@ -3361,6 +3354,15 @@ def _qbit_resume_args(options: dict[str, Any], *, prefix: str) -> list[str]:
 
 def _ptcli_command(args: list[str]) -> str:
     return shlex.join(["python3", "ptcli.py", *args])
+
+
+def _ptcli_command_entry(stage: str, args: list[str]) -> dict[str, Any]:
+    argv = ["python3", "ptcli.py", *args]
+    return {
+        "stage": stage,
+        "command": shlex.join(argv),
+        "argv": argv,
+    }
 
 
 def _run_summary_dir(payload: dict[str, Any], output_dir: str | None) -> Path:
