@@ -3150,8 +3150,8 @@ async def _fresh_mteam_dupe_check_for_target_package(config: dict[str, Any], pac
 
 
 async def _apply_uploaded_torrent_followup(config: dict[str, Any], args: argparse.Namespace, result: dict[str, Any], uploaded_save_path: str | None) -> dict[str, Any]:
+    result = _with_downloaded_torrent_file_evidence(result)
     if args.inject_uploaded_torrent and result.get("status") == "uploaded" and isinstance(result.get("downloaded_torrent"), dict):
-        result = _with_downloaded_torrent_file_evidence(result)
         downloaded_path = str(result["downloaded_torrent"]["path"])
         if not uploaded_save_path:
             return {**result, "injected_torrent": {"status": "blocked", "blockers": ["uploaded save path could not be inferred."]}}

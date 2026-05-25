@@ -7650,6 +7650,56 @@ async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_target_upload_download_only_records_uploaded_torrent_file_evidence(monkeypatch, tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    uploaded_path = make_mteam_safe_torrent(tmp_path, "uploaded-download-only")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
+
+    async def fake_download_mteam_uploaded_torrent(_config, torrent_id, output_dir):
+        assert torrent_id == "999"
+        _ = output_dir
+        return {"status": "uploaded", "uploaded_torrent_id": torrent_id, "downloaded_torrent": {"torrent_id": torrent_id, "path": uploaded_path}}
+
+    monkeypatch.setattr(ptcli_cli, "download_mteam_uploaded_torrent", fake_download_mteam_uploaded_torrent)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--config",
+            "config.py",
+            "--package-dir",
+            package["package_dir"],
+            "--uploaded-torrent-id",
+            "999",
+            "--download-uploaded-torrent",
+            "--write-summary",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["status"] == "uploaded"
+    assert result["downloaded_torrent"]["exists"] is True
+    assert result["downloaded_torrent"]["size_bytes"] > 0
+    assert len(result["downloaded_torrent"]["sha1"]) == 40
+    assert result["downloaded_torrent"]["torrent_hash"] == Torrent.read(uploaded_path, validate=False).infohash
+    assert result["summary"]["uploaded_torrent"]["exists"] is True
+    assert result["summary"]["uploaded_torrent_hash"] == result["downloaded_torrent"]["torrent_hash"]
+
+
+@pytest.mark.asyncio
 async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path) -> None:
     source_info = {
         "tracker": "U2",
