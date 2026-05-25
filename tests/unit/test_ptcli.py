@@ -1648,7 +1648,7 @@ def test_pipeline_next_actions_reports_closure_blockers() -> None:
     actions = ptcli_cli._pipeline_next_actions(
         args,
         [],
-        {"complete": False, "blockers": ["source.ready", "source.hash_consistent", "target.prepared", "target.uploaded", "target.downloaded", "target.hash_consistent"]},
+        {"complete": False, "blockers": ["source.ready", "source.hash_consistent", "target.prepared", "target.uploaded", "target.downloaded", "target.hash_consistent", "target.duplicate_clean"]},
     )
 
     assert any("--source-torrent-file" in action for action in actions)
@@ -1657,6 +1657,7 @@ def test_pipeline_next_actions_reports_closure_blockers() -> None:
     assert any("--upload-target --target-execute --confirm-upload" in action for action in actions)
     assert any("--uploaded-torrent-file" in action for action in actions)
     assert any("different uploaded hash" in action for action in actions)
+    assert any("fresh MTEAM duplicate check" in action for action in actions)
 
 
 def test_pipeline_next_actions_reports_completed_closure() -> None:
@@ -2056,6 +2057,7 @@ def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40},
@@ -2090,6 +2092,7 @@ def test_pipeline_closure_rejects_unverified_existing_qbit_match() -> None:
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "c" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "c" * 40, "verified_in_client": True},
@@ -2124,6 +2127,7 @@ def test_pipeline_closure_preserves_torrent_file_evidence() -> None:
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": uploaded_torrent,
                 "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
@@ -2152,6 +2156,7 @@ def test_pipeline_closure_requires_target_injection_client_verification() -> Non
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40, "verified_in_client": False},
             },
@@ -2180,6 +2185,7 @@ def test_pipeline_closure_requires_uploaded_torrent_completion_when_waited() -> 
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
                 "uploaded_wait": {"complete": False, "matches": [{"hash": "b" * 40}]},
@@ -2208,6 +2214,7 @@ def test_pipeline_closure_requires_uploaded_torrent_hash_consistency() -> None:
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "c" * 40},
                 "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
@@ -2226,6 +2233,37 @@ def test_pipeline_closure_requires_uploaded_torrent_hash_consistency() -> None:
     assert evidence["target"]["seeding"] is True
 
 
+def test_pipeline_closure_requires_clean_target_duplicate_check() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {"stage": "target-prepare", "ok": True, "result": {}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 1, "dupes": [{"name": "Existing"}]},
+                "uploaded_torrent_hash": "b" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "b" * 40},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "query": {"torrent_hash": "b" * 40}, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    assert closure["complete"] is False
+    assert closure["blockers"] == ["target.duplicate_clean"]
+    assert closure["target"]["duplicate_clean"] is False
+    assert evidence["target"]["duplicate_clean"] is False
+    assert evidence["target"]["fresh_duplicate_check"]["count"] == 1
+
+
 def test_pipeline_closure_requires_source_injection_client_verification() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"torrent_path": "/tmp/U2-60635.torrent"}},
@@ -2238,6 +2276,7 @@ def test_pipeline_closure_requires_source_injection_client_verification() -> Non
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
@@ -2268,6 +2307,7 @@ def test_pipeline_closure_reports_source_hash_inconsistency() -> None:
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "c" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "c" * 40},
                 "injected_torrent": {"hash": "c" * 40, "verified_in_client": True},
@@ -2297,6 +2337,7 @@ def test_pipeline_closure_requires_source_wait_completion() -> None:
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
@@ -2402,6 +2443,7 @@ def test_pipeline_evidence_reports_resume_sources() -> None:
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "reused": True},
                 "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
@@ -2434,6 +2476,7 @@ def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
@@ -2461,6 +2504,7 @@ def test_pipeline_closure_rejects_empty_qbit_match_evidence() -> None:
             "ok": True,
             "result": {
                 "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
                 "injected_torrent": {"hash": "b" * 40},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
