@@ -1,4 +1,16 @@
 services:
+  ptcli:
+    image: ghcr.io/loofk/upload-assistant:latest
+    restart: "no"
+    networks:
+      - yournetwork # change to the network with your qBittorrent instance
+    volumes:
+      - /path/to/torrents/:/downloads/:rw # map this to qBittorrent download location with matching container paths
+      - /mnt/user/appdata/Upload-Assistant/data/config.py:/Upload-Assistant/data/config.py:rw
+      - /mnt/user/appdata/Upload-Assistant/data/cookies/:/Upload-Assistant/data/cookies/:rw
+      - /mnt/user/appdata/Upload-Assistant/tmp/:/Upload-Assistant/tmp/:rw
+    command: ["sites", "--json"]
+
   legacy-webui:
     image: ghcr.io/loofk/upload-assistant:latest
     container_name: UA-legacy-webui
