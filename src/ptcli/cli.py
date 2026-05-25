@@ -606,6 +606,8 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         "source_qbit_tags",
         "source_paused",
         "source_hash_consistent",
+        "source_injected_torrent_hash",
+        "source_injection_verified",
         "source_wait_evidence",
     ):
         if key in merged and _artifact_value_present(merged.get(key)):
@@ -672,6 +674,8 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "source_qbit_tags": bool(artifacts.get("source_qbit_tags")),
             "source_paused": "source_paused" in artifacts,
             "source_hash_consistent": bool(artifacts.get("source_hash_consistent")),
+            "source_injected_torrent_hash": bool(artifacts.get("source_injected_torrent_hash")),
+            "source_injection_verified": bool(artifacts.get("source_injection_verified")),
             "source_wait_evidence": bool(artifacts.get("source_wait_evidence")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
@@ -712,6 +716,13 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
         artifact_values = artifacts if isinstance(artifacts, dict) else {}
         if artifact_values.get("source_wait_evidence") is not True:
             blockers.append("source.wait_evidence")
+        if _source_injection_audit_required(pipeline_result, closure):
+            if artifact_values.get("source_torrent_hash") is None:
+                blockers.append("source.torrent_hash")
+            if artifact_values.get("source_injected_torrent_hash") is None:
+                blockers.append("source.injected_torrent_hash")
+            if artifact_values.get("source_injection_verified") is not True:
+                blockers.append("source.injection_verified")
         if artifact_values.get("uploaded_wait_evidence") is not True:
             blockers.append("target.uploaded_wait_evidence")
         if artifact_values.get("uploaded_torrent_hash") is None:
@@ -733,7 +744,19 @@ def _source_artifact_evidence_key(artifact_key: str) -> str:
         "source_qbit_tags": "source_qbit_tags",
         "source_paused": "source_paused",
         "source_hash_consistent": "hash_consistent",
+        "source_injected_torrent_hash": "injected_torrent_hash",
+        "source_injection_verified": "injection_verified",
     }.get(artifact_key, artifact_key)
+
+
+def _source_injection_audit_required(pipeline_result: dict[str, Any], closure: dict[str, Any] | None) -> bool:
+    evidence = pipeline_result.get("evidence") if isinstance(pipeline_result.get("evidence"), dict) else {}
+    evidence_source = evidence.get("source") if isinstance(evidence.get("source"), dict) else {}
+    mode = evidence_source.get("mode")
+    if mode in {"downloaded", "resumed_torrent"}:
+        return True
+    closure_source = closure.get("source") if isinstance(closure, dict) and isinstance(closure.get("source"), dict) else {}
+    return bool(closure_source.get("downloaded") or closure_source.get("injected") or closure_source.get("source_torrent_reused"))
 
 
 def _target_artifact_evidence_key(artifact_key: str) -> str:
@@ -787,6 +810,8 @@ def _retorrent_execute_qbit_mismatch_actions(pipeline_result: dict[str, Any]) ->
 def _retorrent_execute_blocker_next_action(blocker: str) -> str:
     if blocker == "source.wait_evidence":
         return "Re-run the source qBittorrent completion wait with --wait-complete, or provide a verified completed --path before target upload."
+    if blocker in {"source.torrent_hash", "source.injected_torrent_hash", "source.injection_verified"}:
+        return "Re-run the source side with --download-source or --source-torrent-file plus --inject-source and --wait-complete so qBittorrent source injection evidence is recorded."
     if blocker == "target.uploaded_wait_evidence":
         return "Re-run the uploaded MTEAM torrent follow-up with --inject-uploaded-torrent and --wait-uploaded-complete until qBittorrent reports matched seeding evidence."
     if blocker in {"target.uploaded_torrent_hash", "target.injected_torrent_hash", "target.injection_verified"}:
@@ -1663,7 +1688,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     complete = bool(payload.get("complete"))
     ready = bool(payload.get("ready"))
     artifact_status = _summary_artifact_status(resume_state)
-    required = (
+    required = [
         "source_hash_consistent",
         "source_wait_evidence",
         "uploaded_torrent_hash",
@@ -1673,7 +1698,9 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "target_duplicate_clean",
         "target_rule_obligations",
         "uploaded_wait_evidence",
-    )
+    ]
+    if _summary_source_injection_audit_required(payload):
+        required.extend(["source_torrent_hash", "source_injected_torrent_hash", "source_injection_verified"])
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if complete and ready else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
@@ -1812,7 +1839,7 @@ def _argv_list(value: Any) -> list[str] | None:
 
 def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, ...]:
     preferred: list[str] = []
-    if "source_wait_evidence" in missing_audit or "source_hash_consistent" in missing_audit:
+    if any(name in missing_audit for name in ("source_wait_evidence", "source_hash_consistent", "source_torrent_hash", "source_injected_torrent_hash", "source_injection_verified")):
         preferred.append("resume-source-torrent")
     if any(name in missing_audit for name in ("uploaded_torrent_hash", "injected_torrent_hash", "injection_verified", "uploaded_wait_evidence")):
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
@@ -1822,6 +1849,17 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
         preferred.append("resume-target-upload")
     preferred.extend(["resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
     return tuple(dict.fromkeys(preferred))
+
+
+def _summary_source_injection_audit_required(payload: dict[str, Any]) -> bool:
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    source = evidence.get("source") if isinstance(evidence.get("source"), dict) else {}
+    mode = source.get("mode")
+    if mode in {"downloaded", "resumed_torrent"}:
+        return True
+    closure = payload.get("closure") if isinstance(payload.get("closure"), dict) else {}
+    closure_source = closure.get("source") if isinstance(closure.get("source"), dict) else {}
+    return bool(closure_source.get("downloaded") or closure_source.get("injected") or closure_source.get("source_torrent_reused"))
 
 
 def _target_upload_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, ...]:
@@ -3411,6 +3449,10 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
     }
     if _artifact_value_present(evidence_source.get("hash_consistent")):
         artifacts["source_hash_consistent"] = evidence_source.get("hash_consistent")
+    if _artifact_value_present(evidence_source.get("injected_torrent_hash")):
+        artifacts["source_injected_torrent_hash"] = evidence_source.get("injected_torrent_hash")
+    if _artifact_value_present(evidence_source.get("injection_verified")):
+        artifacts["source_injection_verified"] = evidence_source.get("injection_verified")
     if _wait_result_completed(evidence_source.get("source_wait")):
         artifacts["source_wait_evidence"] = True
     if _artifact_value_present(evidence_target.get("hash_consistent")):
@@ -3430,6 +3472,8 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
             artifacts["source_qbit_category"] = inject_result.get("category")
             artifacts["source_qbit_tags"] = inject_result.get("tags")
             artifacts["source_paused"] = bool(inject_result.get("paused"))
+            artifacts["source_injected_torrent_hash"] = _torrent_hash_from_result(inject_result)
+            artifacts["source_injection_verified"] = _injected_torrent_verified(inject_result)
     if isinstance(target_prepare, dict):
         prepare_result = target_prepare.get("result")
         if isinstance(prepare_result, dict):
@@ -3663,6 +3707,8 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "source_qbit_tags": bool(artifacts.get("source_qbit_tags")),
             "source_paused": "source_paused" in artifacts,
             "source_hash_consistent": bool(artifacts.get("source_hash_consistent")),
+            "source_injected_torrent_hash": bool(artifacts.get("source_injected_torrent_hash")),
+            "source_injection_verified": bool(artifacts.get("source_injection_verified")),
             "source_wait_evidence": bool(artifacts.get("source_wait_evidence")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
@@ -3699,7 +3745,14 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
         elif blocker.startswith("target-upload:"):
             stage_generic_preferred.append("resume-target-upload")
     preferred_stages.extend(stage_detail_preferred)
-    if "source.ready" in blocker_names or "source.hash_consistent" in blocker_names or "source.wait_evidence" in blocker_names:
+    if (
+        "source.ready" in blocker_names
+        or "source.hash_consistent" in blocker_names
+        or "source.wait_evidence" in blocker_names
+        or "source.torrent_hash" in blocker_names
+        or "source.injected_torrent_hash" in blocker_names
+        or "source.injection_verified" in blocker_names
+    ):
         preferred_stages.append("resume-source-torrent")
     if "target.downloaded" in blocker_names:
         preferred_stages.append("resume-uploaded-torrent-download")
