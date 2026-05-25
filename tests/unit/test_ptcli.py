@@ -6207,6 +6207,75 @@ async def test_mteam_duplicate_search_requires_imdb() -> None:
     assert "IMDb" in result["reason"]
 
 
+@pytest.mark.asyncio
+async def test_mteam_duplicate_search_uses_ptcli_api_client(monkeypatch) -> None:
+    closed = {"value": False}
+
+    class FakeMTeamApiClient:
+        def __init__(self, config):
+            assert config["TRACKERS"]["MTEAM"]["api_key"] == "fake"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            closed["value"] = True
+
+        async def search_by_imdb(self, imdb):
+            assert imdb == "tt1234567"
+            return {
+                "data": [
+                    {
+                        "id": 999,
+                        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+                        "size": 123,
+                        "numfiles": "1",
+                        "standard": 1,
+                        "source": 8,
+                        "smallDescr": "Example",
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(ptcli_target, "MTeamApiClient", FakeMTeamApiClient)
+
+    result = await search_mteam_duplicates(
+        {"TRACKERS": {"MTEAM": {"api_key": "fake"}}},
+        {"name": "Example.Movie.2024.1080p.WEB-DL-GROUP", "imdb_id": 1234567, "content_path": "/downloads/Example"},
+    )
+
+    assert closed["value"] is True
+    assert result["searched"] is True
+    assert result["count"] == 1
+    assert result["dupes"][0]["id"] == 999
+    assert result["dupes"][0]["res"] == "1080p"
+    assert result["dupes"][0]["type"] == "WEBDL"
+
+
+@pytest.mark.asyncio
+async def test_mteam_uploaded_torrent_download_uses_ptcli_api_client(monkeypatch, tmp_path) -> None:
+    class FakeMTeamApiClient:
+        def __init__(self, config):
+            assert config["TRACKERS"]["MTEAM"]["api_key"] == "fake"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def download_torrent(self, torrent_id, destination):
+            assert torrent_id == "999"
+            await asyncio.to_thread(Path(destination).write_bytes, b"d4:infod")
+
+    monkeypatch.setattr(ptcli_target, "MTeamApiClient", FakeMTeamApiClient)
+
+    result = await ptcli_target.download_mteam_uploaded_torrent({"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, "999", str(tmp_path))
+
+    assert result["uploaded_torrent_id"] == "999"
+    assert await asyncio.to_thread(Path(result["downloaded_torrent"]["path"]).read_bytes) == b"d4:infod"
+
+
 def test_mteam_meta_draft_and_field_mapping_from_name() -> None:
     source_info = {
         "name": "Example.Movie.2024.1080p.WEB-DL.DDP5.1.H.265-GROUP",

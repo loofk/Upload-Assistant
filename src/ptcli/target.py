@@ -13,7 +13,7 @@ from typing import Any
 
 from torf import Torrent
 
-from src.trackers.MTEAM import MTEAM
+from src.ptcli.mteam_api import MTeamApiClient, MTeamApiError
 
 REQUIRED_MTEAM_PACKAGE_FILES = {
     "preview": "mteam-prepare-preview.json",
@@ -27,6 +27,22 @@ REQUIRED_MTEAM_PACKAGE_FILES = {
 MTEAM_PACKAGE_MANIFEST_FILENAME = "mteam-package-manifest.json"
 MTEAM_UPLOAD_ANNOUNCE = "https://fake.tracker"
 MTEAM_SOURCE_FLAG = "MTEAM"
+MTEAM_STANDARD_ID_TO_RESOLUTION = {
+    "1": "1080p",
+    "2": "1080i",
+    "3": "720p",
+    "5": "SD",
+    "6": "2160p",
+    "7": "8K",
+}
+MTEAM_SOURCE_ID_TO_TYPE = {
+    "1": "BluRay",
+    "3": "DVD",
+    "4": "REMUX",
+    "5": "HDTV",
+    "6": "Other",
+    "8": "WEBDL",
+}
 
 
 def create_mteam_upload_torrent_candidate(torrent_file: str, output_dir: str | None = None) -> dict[str, Any]:
@@ -499,19 +515,57 @@ async def search_mteam_duplicates(config: dict[str, Any], source_info: dict[str,
         "uuid": source_info.get("name") or "ptcli-mteam-dupe-check",
         "debug": False,
     }
-    tracker = MTEAM(config=config)
     try:
-        dupes = await tracker.search_existing(meta_for_search, "")
-    finally:
-        await tracker.session.aclose()
+        async with MTeamApiClient(config) as client:
+            search_result = await client.search_by_imdb(f"tt{meta_for_search['imdb']}")
+    except MTeamApiError as exc:
+        return {"searched": False, "reason": exc.message, "count": 0, "dupes": []}
 
-    dupe_list = dupes if isinstance(dupes, list) else []
+    dupe_list = _mteam_dupe_entries(search_result)
     return {
         "searched": True,
         "query": {"imdb": f"tt{meta_for_search['imdb']}"},
         "count": len(dupe_list),
         "dupes": dupe_list,
     }
+
+
+def _mteam_dupe_entries(search_result: Any) -> list[dict[str, Any]]:
+    torrents = search_result if isinstance(search_result, list) else (search_result.get("data", []) or search_result.get("torrents", []) if isinstance(search_result, dict) else [])
+    if not isinstance(torrents, list):
+        return []
+
+    dupes: list[dict[str, Any]] = []
+    for torrent in torrents:
+        if not isinstance(torrent, dict):
+            continue
+        name = str(torrent.get("name") or torrent.get("title") or "").strip()
+        if not name:
+            continue
+        torrent_id = torrent.get("id")
+        numfiles = torrent.get("numfiles")
+        file_count = int(numfiles) if numfiles is not None and str(numfiles).isdigit() else 0
+        standard_id = torrent.get("standard")
+        source_id = torrent.get("source")
+        dupes.append(
+            {
+                "name": name,
+                "size": torrent.get("size"),
+                "files": [],
+                "file_count": file_count,
+                "trumpable": False,
+                "link": f"https://kp.m-team.cc/details/{torrent_id}" if torrent_id else None,
+                "download": None,
+                "flags": list(torrent.get("labelsNew", [])) if isinstance(torrent.get("labelsNew"), list) else [],
+                "id": torrent_id,
+                "type": MTEAM_SOURCE_ID_TO_TYPE.get(str(source_id).strip(), "") if source_id is not None else _infer_type(name),
+                "res": MTEAM_STANDARD_ID_TO_RESOLUTION.get(str(standard_id).strip(), "") if standard_id is not None else _infer_resolution(name),
+                "internal": 0,
+                "bd_info": None,
+                "description": torrent.get("smallDescr"),
+            }
+        )
+    return dupes
 
 
 def build_mteam_prepare_preview(source_info: dict[str, Any] | None, target_trackers: list[str], stages: list[dict[str, Any]], content_path: str | None) -> dict[str, Any]:
@@ -976,11 +1030,8 @@ async def _submit_mteam_upload(config: dict[str, Any], package_dir: str, torrent
         "file": (torrent_path.name, torrent_bytes, "application/x-bittorrent"),
     }
 
-    tracker = MTEAM(config=config)
-    try:
-        response = await tracker._request("https://api.m-team.cc/api/torrent/createOredit", data=data, files=files)
-    finally:
-        await tracker.session.aclose()
+    async with MTeamApiClient(config) as client:
+        response = await client.upload_torrent(data, files)
 
     return {
         "submitted": True,
@@ -990,11 +1041,8 @@ async def _submit_mteam_upload(config: dict[str, Any], package_dir: str, torrent
 
 async def _download_mteam_uploaded_torrent(config: dict[str, Any], torrent_id: str, output_dir: str) -> str:
     destination = await asyncio.to_thread(_uploaded_torrent_destination, output_dir, torrent_id)
-    tracker = MTEAM(config=config)
-    try:
-        await tracker.download_new_torrent(torrent_id, str(destination))
-    finally:
-        await tracker.session.aclose()
+    async with MTeamApiClient(config) as client:
+        await client.download_torrent(torrent_id, destination)
     await asyncio.to_thread(_assert_torrent_file, destination)
     return str(destination)
 
