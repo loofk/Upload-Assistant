@@ -7225,6 +7225,7 @@ def test_target_upload_execute_requires_uploaded_torrent_followup_before_config_
     out = capsys.readouterr().out
     assert "download-uploaded-torrent" in out
     assert "inject-uploaded-torrent" in out
+    assert "wait-uploaded-complete" in out
     assert "Config file not found" not in out
 
 
@@ -7444,6 +7445,7 @@ async def test_target_upload_execute_blocks_on_fresh_duplicate_check(monkeypatch
             "--confirm-upload",
             "--download-uploaded-torrent",
             "--inject-uploaded-torrent",
+            "--wait-uploaded-complete",
             "--json",
         ]
     )
@@ -7886,6 +7888,45 @@ async def test_target_upload_inject_requires_download_flag(tmp_path) -> None:
 
     assert result["status"] == "blocked"
     assert any("requires --download-uploaded-torrent" in blocker for blocker in result["blockers"])
+
+
+@pytest.mark.asyncio
+async def test_target_upload_execute_requires_uploaded_completion_wait(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            package["package_dir"],
+            "--torrent-file",
+            str(torrent_file),
+            "--execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["status"] == "blocked"
+    assert any("--wait-uploaded-complete is required" in blocker for blocker in result["blockers"])
 
 
 def test_torrent_file_evidence_includes_infohash(tmp_path) -> None:

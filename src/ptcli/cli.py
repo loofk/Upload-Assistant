@@ -913,6 +913,8 @@ def _target_upload_execute_blockers(args: argparse.Namespace, *, inferred_upload
         blockers.append("--inject-uploaded-torrent requires --download-uploaded-torrent.")
     elif not inferred_uploaded_save_path:
         blockers.append("--uploaded-save-path is required with --inject-uploaded-torrent when the MTEAM package has no content path.")
+    if not args.wait_uploaded_complete:
+        blockers.append("--wait-uploaded-complete is required with target-upload --execute for full live retorrent closure.")
     if args.wait_uploaded_complete and not args.inject_uploaded_torrent:
         blockers.append("--wait-uploaded-complete requires --inject-uploaded-torrent.")
     return blockers
