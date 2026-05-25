@@ -1736,6 +1736,10 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     assert payload["status"] == "ok"
     assert payload["schema_version_ok"] is True
     assert payload["kind_supported"] is True
+    assert payload["automation_action"] == "complete"
+    assert payload["next_command_ready"] is False
+    assert payload["should_execute_next_command"] is False
+    assert payload["automation_exit_code"] == 0
     assert payload["complete"] is True
     assert payload["live_safe_to_attempt"] is True
     assert payload["missing_artifacts"] == []
@@ -1811,6 +1815,10 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
     assert payload["status"] == "blocked"
     assert payload["next_stage"] == "resume-target-upload"
     assert payload["next_command"] == "python3 ptcli.py pipeline --upload-target"
+    assert payload["automation_action"] == "run_next_command"
+    assert payload["next_command_ready"] is True
+    assert payload["should_execute_next_command"] is True
+    assert payload["automation_exit_code"] == 1
 
 
 def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> None:
@@ -1937,6 +1945,8 @@ def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> No
     assert payload["expected_schema_version"] == 1
     assert payload["schema_version_ok"] is False
     assert payload["kind_supported"] is True
+    assert payload["automation_action"] == "replace_summary"
+    assert payload["should_execute_next_command"] is False
     assert any("Unsupported summary schema_version" in blocker for blocker in payload["blockers"])
 
 

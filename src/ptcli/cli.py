@@ -1271,31 +1271,31 @@ def _target_upload_qbit_options(args: argparse.Namespace) -> dict[str, Any]:
 def summary_check_payload(args: argparse.Namespace) -> dict[str, Any]:
     summary_path = Path(args.summary_file).expanduser()
     if not summary_path.exists():
-        return {
+        return _summary_check_result({
             "status": "blocked",
             "summary_file": str(summary_path),
             "expected_schema_version": SUMMARY_SCHEMA_VERSION,
             "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
             "blockers": ["Summary file does not exist."],
-        }
+        })
     try:
         payload = json.loads(summary_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        return {
+        return _summary_check_result({
             "status": "blocked",
             "summary_file": str(summary_path),
             "expected_schema_version": SUMMARY_SCHEMA_VERSION,
             "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
             "blockers": [f"Summary file is not valid JSON: {exc.msg}"],
-        }
+        })
     if not isinstance(payload, dict):
-        return {
+        return _summary_check_result({
             "status": "blocked",
             "summary_file": str(summary_path),
             "expected_schema_version": SUMMARY_SCHEMA_VERSION,
             "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
             "blockers": ["Summary file root must be a JSON object."],
-        }
+        })
     return _summary_check_from_payload(payload, str(summary_path))
 
 
@@ -1308,12 +1308,12 @@ def _summary_check_from_payload(payload: dict[str, Any], summary_file: str) -> d
     if not diagnostics["kind_supported"]:
         blockers.append(f"Unsupported ptcli summary kind: {kind}")
     if blockers:
-        return {
+        return _summary_check_result({
             "status": "blocked",
             "summary_file": summary_file,
             "blockers": blockers,
             **diagnostics,
-        }
+        })
     if kind == "ptcli.pipeline.run_summary":
         return _pipeline_summary_check(payload, summary_file)
     if kind == "ptcli.target_upload.summary":
@@ -1337,6 +1337,32 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
+    status = str(payload.get("status") or "blocked")
+    blockers = _string_list(payload.get("blockers"))
+    next_command = payload.get("next_command")
+    next_command_ready = bool(next_command)
+    if status == "ok":
+        automation_action = "complete"
+    elif next_command_ready:
+        automation_action = "run_next_command"
+    elif payload.get("schema_version_ok") is False or payload.get("kind_supported") is False:
+        automation_action = "replace_summary"
+    elif any("does not exist" in blocker for blocker in blockers):
+        automation_action = "provide_summary"
+    elif payload.get("missing_artifacts"):
+        automation_action = "restore_artifacts"
+    else:
+        automation_action = "resolve_blockers"
+    return {
+        **payload,
+        "automation_action": automation_action,
+        "next_command_ready": next_command_ready,
+        "should_execute_next_command": automation_action == "run_next_command",
+        "automation_exit_code": 0 if status == "ok" else 1,
+    }
+
+
 def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
     resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
     blockers = _string_list(payload.get("blockers"))
@@ -1349,7 +1375,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     next_command = _summary_next_command(payload, resume_state, ("resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"))
-    return {
+    return _summary_check_result({
         "status": "ok" if complete and ready and not blockers else "blocked",
         "kind": payload.get("kind"),
         "summary_file": summary_file,
@@ -1361,7 +1387,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "next_command": next_command.get("command"),
         **_summary_check_diagnostics(payload),
         **artifact_status,
-    }
+    })
 
 
 def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
@@ -1374,7 +1400,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     next_command = _summary_next_command(payload, resume_state, ("resume-uploaded-torrent", "resume-uploaded-torrent-download", "target-upload-retry"))
-    return {
+    return _summary_check_result({
         "status": "ok" if ready and not blockers else "blocked",
         "kind": payload.get("kind"),
         "summary_file": summary_file,
@@ -1386,7 +1412,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "next_command": next_command.get("command"),
         **_summary_check_diagnostics(payload),
         **artifact_status,
-    }
+    })
 
 
 def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
@@ -1399,7 +1425,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
     missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     next_command = _summary_next_command(payload, resume_state, ("resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes", "doctor-retry"))
-    return {
+    return _summary_check_result({
         "status": "ok" if ready and live_safe and not blockers else "blocked",
         "kind": payload.get("kind"),
         "summary_file": summary_file,
@@ -1411,7 +1437,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
         "next_command": next_command.get("command"),
         **_summary_check_diagnostics(payload),
         **artifact_status,
-    }
+    })
 
 
 def _summary_next_command(payload: dict[str, Any], resume_state: dict[str, Any], preferred_stages: tuple[str, ...]) -> dict[str, str | None]:
