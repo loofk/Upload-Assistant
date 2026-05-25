@@ -500,6 +500,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["status"] == "complete"
     assert payload["complete"] is True
     assert payload["blockers"] == []
+    assert payload["config"] == "data/config.py"
+    assert payload["base_dir"] == str(tmp_path)
+    assert payload["client"] == "default"
     assert payload["next_actions"] == ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
     assert payload["ready"] is True
     assert payload["closure"]["source"]["complete"] is True
@@ -567,6 +570,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.wait_uploaded_complete is True
     assert pipeline_args.check_runtime is True
     assert pipeline_args.write_summary is True
+    assert pipeline_args.config == "data/config.py"
+    assert pipeline_args.base_dir == str(tmp_path)
+    assert pipeline_args.client == "default"
     assert pipeline_args.summary_output_dir == str(tmp_path / "summary")
     assert pipeline_args.save_path == "/downloads"
     assert pipeline_args.target_torrent_file == str(torrent_file)

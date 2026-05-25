@@ -554,6 +554,9 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "status": "complete" if not blockers else "blocked",
         "plan": plan_payload,
+        "config": args.config,
+        "base_dir": args.base_dir,
+        "client": args.client,
         "pipeline": pipeline_result,
         "closure": closure,
         "evidence": evidence,
