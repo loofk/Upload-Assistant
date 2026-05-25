@@ -3118,17 +3118,32 @@ async def _target_upload_with_config(
         result = await _existing_uploaded_torrent_payload(args.uploaded_torrent_file)
         uploaded_save_path = args.uploaded_save_path or inferred_content_path
         return await _apply_uploaded_torrent_followup(config, args, result, uploaded_save_path)
+    upload_torrent_file = target_torrent_file or args.target_torrent_file
+    if args.target_execute:
+        fresh_dupe_check = await _fresh_mteam_dupe_check_for_target_package(config, package_dir)
+        dupe_blockers = _fresh_mteam_dupe_check_blockers(fresh_dupe_check)
+        if dupe_blockers:
+            return {"status": "blocked", "fresh_duplicate_check": fresh_dupe_check, "blockers": dupe_blockers}
+    else:
+        fresh_dupe_check = None
     result = await upload_mteam_from_package(
         config,
         package_dir,
-        target_torrent_file or args.target_torrent_file,
+        upload_torrent_file,
         execute=args.target_execute,
         confirm_upload=args.confirm_upload,
         write_payload=args.write_payload,
         download_uploaded=args.download_uploaded_torrent,
         uploaded_output_dir=args.uploaded_output_dir,
     )
+    if isinstance(fresh_dupe_check, dict):
+        result = {**result, "fresh_duplicate_check": fresh_dupe_check}
     return await _apply_uploaded_torrent_followup(config, args, result, args.uploaded_save_path or inferred_content_path)
+
+
+async def _fresh_mteam_dupe_check_for_target_package(config: dict[str, Any], package_dir: str) -> dict[str, Any]:
+    package = load_mteam_prepare_package(package_dir)
+    return await search_mteam_duplicates(config, _source_info_from_mteam_preflight(package))
 
 
 async def _apply_uploaded_torrent_followup(config: dict[str, Any], args: argparse.Namespace, result: dict[str, Any], uploaded_save_path: str | None) -> dict[str, Any]:
