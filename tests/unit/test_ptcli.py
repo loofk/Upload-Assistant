@@ -4299,6 +4299,11 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["artifacts"]["summary_file"] == str(summary_path)
     assert summary_payload["artifacts"]["target_package_dir"] == target_stage["result"]["package_dir"]
     assert summary_payload["artifacts"]["target_package_files"] == target_stage["result"]["files"]
+    assert summary_payload["resume_state"]["complete"] is False
+    assert summary_payload["resume_state"]["resume_available"] is False
+    assert summary_payload["resume_state"]["next_stage"] is None
+    assert summary_payload["resume_state"]["artifacts"]["target_package_dir"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_torrent_file"] is False
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
     assert "resume-target-upload" not in resume_commands
     assert summary_payload["next_actions"]
@@ -4558,6 +4563,17 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["uploaded_torrent_hash"] == uploaded_hash
     assert summary_payload["artifacts"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
+    assert summary_payload["resume_state"]["complete"] is True
+    assert summary_payload["resume_state"]["resume_available"] is True
+    assert summary_payload["resume_state"]["next_stage"] is None
+    assert summary_payload["resume_state"]["next_command"] is None
+    assert summary_payload["resume_state"]["artifacts"] == {
+        "source_torrent_file": True,
+        "target_package_dir": True,
+        "target_torrent_file": True,
+        "uploaded_torrent_id": True,
+        "uploaded_torrent_file": True,
+    }
     assert summary_payload["artifacts"]["source_torrent_file"] in resume_commands["resume-source-torrent"]
     assert "--client default" in resume_commands["resume-source-torrent"]
     assert "--qbit-category SOURCE" in resume_commands["resume-source-torrent"]
@@ -4653,10 +4669,18 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     assert payload["artifacts"]["uploaded_torrent_id"] == "999"
     payload_resume_commands = {command["stage"]: command["command"] for command in payload["resume_commands"]}
     assert "--uploaded-torrent-id 999" in payload_resume_commands["resume-uploaded-torrent-download"]
+    assert payload["resume_state"]["complete"] is False
+    assert payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
+    assert payload["resume_state"]["next_command"] == payload_resume_commands["resume-uploaded-torrent-download"]
     summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     assert "uploaded_torrent_file" not in summary_payload["artifacts"]
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
+    assert summary_payload["resume_state"]["resume_available"] is True
+    assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
+    assert summary_payload["resume_state"]["next_command"] == resume_commands["resume-uploaded-torrent-download"]
+    assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
+    assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is False
     assert "--uploaded-torrent-id 999" in resume_commands["resume-uploaded-torrent-download"]
     assert "--download-uploaded-torrent" in resume_commands["resume-uploaded-torrent-download"]
     assert "--inject-uploaded-torrent" in resume_commands["resume-uploaded-torrent-download"]

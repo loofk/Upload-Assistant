@@ -1723,7 +1723,9 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         summary["summary_file"] = summary_file
     artifacts = _run_summary_artifacts(payload, str(payload.get("summary_file") or ""))
     payload["artifacts"] = artifacts
-    payload["resume_commands"] = _run_summary_resume_commands(payload, artifacts)
+    resume_commands = _run_summary_resume_commands(payload, artifacts)
+    payload["resume_commands"] = resume_commands
+    payload["resume_state"] = _run_summary_resume_state(payload, artifacts, resume_commands)
     return payload
 
 
@@ -2343,6 +2345,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / "ptcli-run-summary.json"
     artifacts = _run_summary_artifacts(payload, str(destination))
+    resume_commands = _run_summary_resume_commands(payload, artifacts)
     summary_payload = {
         "schema_version": 1,
         "kind": "ptcli.pipeline.run_summary",
@@ -2367,7 +2370,8 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "evidence": payload.get("evidence"),
         "next_actions": payload.get("next_actions", []),
         "artifacts": artifacts,
-        "resume_commands": _run_summary_resume_commands(payload, artifacts),
+        "resume_commands": resume_commands,
+        "resume_state": _run_summary_resume_state(payload, artifacts, resume_commands),
         "stages": payload.get("stages", []),
     }
     destination.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -2545,6 +2549,48 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
             }
         )
     return commands
+
+
+def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], resume_commands: list[dict[str, str]]) -> dict[str, Any]:
+    closure = payload.get("closure") if isinstance(payload.get("closure"), dict) else {}
+    blockers = closure.get("blockers") if isinstance(closure.get("blockers"), list) else []
+    commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in resume_commands if isinstance(command, dict)}
+    complete = bool(closure.get("complete"))
+    next_command = {"stage": None, "command": None} if complete else _resume_next_command(blockers, commands_by_stage)
+    return {
+        "complete": complete,
+        "resume_available": bool(resume_commands),
+        "next_stage": next_command.get("stage"),
+        "next_command": next_command.get("command"),
+        "available_stages": [str(command.get("stage")) for command in resume_commands if isinstance(command, dict)],
+        "artifacts": {
+            "source_torrent_file": bool(artifacts.get("source_torrent_file")),
+            "target_package_dir": bool(artifacts.get("target_package_dir")),
+            "target_torrent_file": bool(artifacts.get("target_torrent_file")),
+            "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
+            "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
+        },
+        "blockers": [str(blocker) for blocker in blockers],
+    }
+
+
+def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
+    preferred_stages: list[str] = []
+    blocker_names = {str(blocker) for blocker in blockers}
+    if "source.ready" in blocker_names:
+        preferred_stages.append("resume-source-torrent")
+    if "target.downloaded" in blocker_names:
+        preferred_stages.append("resume-uploaded-torrent-download")
+    if "target.uploaded" in blocker_names:
+        preferred_stages.append("resume-target-upload")
+    if "target.injected" in blocker_names or "target.seeding" in blocker_names:
+        preferred_stages.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
+    preferred_stages.extend(["resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
+    for stage in preferred_stages:
+        command = commands_by_stage.get(stage)
+        if command:
+            return {"stage": stage, "command": command}
+    return {"stage": None, "command": None}
 
 
 def _qbit_resume_args(options: dict[str, Any], *, prefix: str) -> list[str]:
