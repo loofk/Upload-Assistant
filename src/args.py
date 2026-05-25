@@ -10,6 +10,14 @@ from typing import Any, Optional, cast
 
 from src.console import console
 
+LEGACY_UPLOAD_NOTICE = """\
+Legacy entrypoint notice:
+  upload.py is kept for the original broad Upload Assistant workflow.
+  For focused mainland/CN PT retorrent automation, use ptcli.py instead:
+    python3 ptcli.py sites --json
+    python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path /downloads --json
+"""
+
 
 class ShortHelpFormatter(argparse.HelpFormatter):
     """
@@ -26,6 +34,10 @@ class ShortHelpFormatter(argparse.HelpFormatter):
         """
         short_usage = "usage: upload.py [path...] [options]\n\n"
         short_options = """
+Legacy entrypoint:
+  upload.py is retained for the original broad UA upload workflow.
+  Use ptcli.py for mainland/CN PT retorrent automation and seedbox qBittorrent closure.
+
 Common options:
   -tmdb, --tmdb              Specify the TMDb id to use with movie/ or tv/ prefix
   -imdb, --imdb              Specify the IMDb id to use
@@ -80,6 +92,8 @@ class Args:
         input = list(argv)
         parser = CustomArgumentParser(
             usage="upload.py [path...] [options]",
+            description=LEGACY_UPLOAD_NOTICE,
+            epilog="Run `python3 ptcli.py --help` for the focused PT retorrent CLI.",
         )
 
         parser.add_argument('path', nargs='*', help="Path to file/directory (in single/double quotes is best)")

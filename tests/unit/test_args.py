@@ -18,6 +18,15 @@ def empty_meta():
 class TestArgsBasicParsing:
     """测试基本参数解析。"""
 
+    def test_upload_help_points_to_ptcli(self, args_parser, empty_meta):
+        _meta, parser, _before = args_parser.parse(["/path/to/content"], empty_meta)
+        help_text = parser.format_help()
+
+        assert "upload.py is kept for the original broad Upload" in help_text
+        assert "Assistant workflow" in help_text
+        assert "python3 ptcli.py sites --json" in help_text
+        assert "ptcli.py --help" in help_text
+
     def test_basic_path(self, args_parser, empty_meta):
         meta, _parser, _before = args_parser.parse(["/path/to/content"], empty_meta)
         assert meta.get("path") == "/path/to/content"
