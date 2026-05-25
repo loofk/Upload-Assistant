@@ -1317,6 +1317,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     required = ("source_hash_consistent", "target_hash_consistent", "target_duplicate_clean", "target_rule_obligations")
     missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
+    next_command = _summary_next_command(payload, resume_state, ("resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"))
     return {
         "status": "ok" if complete and ready and not blockers else "blocked",
         "kind": payload.get("kind"),
@@ -1325,8 +1326,8 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "complete": complete,
         "live_safe_to_attempt": complete and ready and not blockers,
         "blockers": blockers,
-        "next_stage": resume_state.get("next_stage"),
-        "next_command": resume_state.get("next_command"),
+        "next_stage": next_command.get("stage"),
+        "next_command": next_command.get("command"),
         **artifact_status,
     }
 
@@ -1340,6 +1341,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     required = ("target_hash_consistent", "target_duplicate_clean", "target_rule_obligations")
     missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
+    next_command = _summary_next_command(payload, resume_state, ("resume-uploaded-torrent", "resume-uploaded-torrent-download", "target-upload-retry"))
     return {
         "status": "ok" if ready and not blockers else "blocked",
         "kind": payload.get("kind"),
@@ -1348,8 +1350,8 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "complete": ready,
         "live_safe_to_attempt": ready and not blockers,
         "blockers": blockers,
-        "next_stage": resume_state.get("next_stage"),
-        "next_command": resume_state.get("next_command"),
+        "next_stage": next_command.get("stage"),
+        "next_command": next_command.get("command"),
         **artifact_status,
     }
 
@@ -1363,6 +1365,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
     required = ("flow_check_ready", "rule_check_ready", "rules_acknowledged", "target_rule_obligations", "target_package_preflight_ready")
     missing_audit = [name for name in required if artifact_status["artifacts"].get(name) is False]
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
+    next_command = _summary_next_command(payload, resume_state, ("resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes", "doctor-retry"))
     return {
         "status": "ok" if ready and live_safe and not blockers else "blocked",
         "kind": payload.get("kind"),
@@ -1371,10 +1374,27 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
         "complete": live_safe,
         "live_safe_to_attempt": live_safe and not blockers,
         "blockers": blockers,
-        "next_stage": resume_state.get("next_stage"),
-        "next_command": resume_state.get("next_command"),
+        "next_stage": next_command.get("stage"),
+        "next_command": next_command.get("command"),
         **artifact_status,
     }
+
+
+def _summary_next_command(payload: dict[str, Any], resume_state: dict[str, Any], preferred_stages: tuple[str, ...]) -> dict[str, str | None]:
+    stage = resume_state.get("next_stage")
+    command = resume_state.get("next_command")
+    if command:
+        return {"stage": str(stage) if stage else None, "command": str(command)}
+    commands = []
+    for key in ("resume_commands", "recommended_commands"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            commands.extend(command for command in value if isinstance(command, dict))
+    commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in commands if command.get("stage") and command.get("command")}
+    for preferred_stage in preferred_stages:
+        if commands_by_stage.get(preferred_stage):
+            return {"stage": preferred_stage, "command": commands_by_stage[preferred_stage]}
+    return {"stage": None, "command": None}
 
 
 def _summary_artifact_status(resume_state: dict[str, Any]) -> dict[str, Any]:
