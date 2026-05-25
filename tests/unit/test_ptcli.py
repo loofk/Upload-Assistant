@@ -458,6 +458,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "ready": True,
                     "uploaded_torrent_id": "999",
                     "uploaded_torrent_hash": "b" * 40,
+                    "injected_torrent_hash": "b" * 40,
+                    "injection_verified": True,
                     "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
                     "uploaded_save_path": "/downloads/Name",
                     "uploaded_qbit_category": "MTEAM",
@@ -577,6 +579,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "source_wait_evidence": True,
         "uploaded_torrent_id": "999",
         "uploaded_torrent_hash": "b" * 40,
+        "injected_torrent_hash": "b" * 40,
+        "injection_verified": True,
         "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
         "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
         "uploaded_save_path": "/downloads/Name",
@@ -605,6 +609,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_hash"] is True
+    assert payload["resume_state"]["artifacts"]["injected_torrent_hash"] is True
+    assert payload["resume_state"]["artifacts"]["injection_verified"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_save_path"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_qbit_category"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_qbit_tags"] is True
@@ -798,6 +804,9 @@ async def test_retorrent_execute_reuses_package_for_uploaded_torrent_file_resume
                 "target_package_dir": str(package_dir),
                 "uploaded_torrent_file": str(uploaded_torrent),
                 "source_wait_evidence": True,
+                "uploaded_torrent_hash": "b" * 40,
+                "injected_torrent_hash": "b" * 40,
+                "injection_verified": True,
                 "uploaded_wait_evidence": True,
             },
             "stages": [{"stage": "target-upload", "ok": True}],
@@ -1025,7 +1034,7 @@ def test_retorrent_execute_blockers_require_uploaded_wait_evidence() -> None:
         pipeline_result,
         closure,
         True,
-        {"source_wait_evidence": True, "uploaded_wait_evidence": False},
+        {"source_wait_evidence": True, "uploaded_wait_evidence": False, "uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_verified": True},
     )
 
     assert blockers == ["target.uploaded_wait_evidence"]
@@ -1039,10 +1048,24 @@ def test_retorrent_execute_blockers_require_source_wait_evidence() -> None:
         pipeline_result,
         closure,
         True,
-        {"uploaded_wait_evidence": True},
+        {"uploaded_wait_evidence": True, "uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_verified": True},
     )
 
     assert blockers == ["source.wait_evidence"]
+
+
+def test_retorrent_execute_blockers_require_uploaded_injection_artifacts() -> None:
+    pipeline_result = {"status": "ok", "ready": True, "summary": {"blockers": []}}
+    closure = {"complete": True, "blockers": []}
+
+    blockers = ptcli_cli._retorrent_execute_blockers(
+        pipeline_result,
+        closure,
+        True,
+        {"source_wait_evidence": True, "uploaded_wait_evidence": True},
+    )
+
+    assert blockers == ["target.uploaded_torrent_hash", "target.injected_torrent_hash", "target.injection_verified"]
 
 
 def test_retorrent_execute_next_actions_explain_wait_evidence_blockers() -> None:
@@ -2058,6 +2081,9 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
                     "artifacts": {
                         "source_hash_consistent": True,
                         "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
@@ -2118,9 +2144,15 @@ def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) 
     assert payload["status"] == "blocked"
     assert payload["next_stage"] == "resume-target-upload"
     assert "source_wait_evidence" in payload["missing_artifacts"]
+    assert "uploaded_torrent_hash" in payload["missing_artifacts"]
+    assert "injected_torrent_hash" in payload["missing_artifacts"]
+    assert "injection_verified" in payload["missing_artifacts"]
     assert "target_rule_obligations" in payload["missing_artifacts"]
     assert "uploaded_wait_evidence" in payload["missing_artifacts"]
     assert "missing audit artifact: source_wait_evidence" in payload["blockers"]
+    assert "missing audit artifact: uploaded_torrent_hash" in payload["blockers"]
+    assert "missing audit artifact: injected_torrent_hash" in payload["blockers"]
+    assert "missing audit artifact: injection_verified" in payload["blockers"]
     assert "missing audit artifact: target_rule_obligations" in payload["blockers"]
     assert "missing audit artifact: uploaded_wait_evidence" in payload["blockers"]
 
@@ -2145,6 +2177,9 @@ def test_summary_check_prefers_uploaded_resume_for_uploaded_wait_artifact(tmp_pa
                     "artifacts": {
                         "source_hash_consistent": True,
                         "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
@@ -2305,6 +2340,9 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
                     "artifacts": {
                         "source_hash_consistent": True,
                         "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
@@ -2346,6 +2384,9 @@ def test_summary_check_print_next_command_outputs_only_command(tmp_path, capsys)
                     "artifacts": {
                         "source_hash_consistent": True,
                         "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
@@ -2377,6 +2418,9 @@ def test_summary_check_print_next_command_is_quiet_when_complete(tmp_path, capsy
                     "artifacts": {
                         "source_hash_consistent": True,
                         "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
@@ -2640,6 +2684,9 @@ def test_summary_check_run_next_command_is_noop_when_complete(tmp_path, monkeypa
                     "artifacts": {
                         "source_hash_consistent": True,
                         "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
@@ -6962,6 +7009,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     assert summary_payload["artifacts"]["uploaded_torrent_hash"] == uploaded_hash
+    assert summary_payload["artifacts"]["injected_torrent_hash"] == uploaded_hash
+    assert summary_payload["artifacts"]["injection_verified"] is True
     assert summary_payload["artifacts"]["uploaded_qbit_category"] == "MTEAM"
     assert summary_payload["artifacts"]["uploaded_qbit_tags"] == "retorrent"
     assert summary_payload["artifacts"]["uploaded_paused"] is True
@@ -6992,6 +7041,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "target_torrent_file": True,
         "uploaded_torrent_id": True,
         "uploaded_torrent_file": True,
+        "uploaded_torrent_hash": True,
+        "injected_torrent_hash": True,
+        "injection_verified": True,
         "uploaded_save_path": True,
         "uploaded_qbit_category": True,
         "uploaded_qbit_tags": True,

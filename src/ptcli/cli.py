@@ -617,6 +617,8 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
     for key in (
         "uploaded_torrent_id",
         "uploaded_torrent_hash",
+        "injected_torrent_hash",
+        "injection_verified",
         "uploaded_torrent_path",
         "uploaded_save_path",
         "uploaded_qbit_category",
@@ -676,6 +678,8 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
             "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
+            "injected_torrent_hash": bool(artifacts.get("injected_torrent_hash")),
+            "injection_verified": bool(artifacts.get("injection_verified")),
             "uploaded_save_path": bool(artifacts.get("uploaded_save_path")),
             "uploaded_qbit_category": bool(artifacts.get("uploaded_qbit_category")),
             "uploaded_qbit_tags": bool(artifacts.get("uploaded_qbit_tags")),
@@ -710,6 +714,12 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
             blockers.append("source.wait_evidence")
         if artifact_values.get("uploaded_wait_evidence") is not True:
             blockers.append("target.uploaded_wait_evidence")
+        if artifact_values.get("uploaded_torrent_hash") is None:
+            blockers.append("target.uploaded_torrent_hash")
+        if artifact_values.get("injected_torrent_hash") is None:
+            blockers.append("target.injected_torrent_hash")
+        if artifact_values.get("injection_verified") is not True:
+            blockers.append("target.injection_verified")
     if pipeline_result.get("status") not in {None, "ok", "complete"}:
         blockers.append(f"pipeline status is {pipeline_result.get('status')}.")
     return blockers
@@ -779,6 +789,8 @@ def _retorrent_execute_blocker_next_action(blocker: str) -> str:
         return "Re-run the source qBittorrent completion wait with --wait-complete, or provide a verified completed --path before target upload."
     if blocker == "target.uploaded_wait_evidence":
         return "Re-run the uploaded MTEAM torrent follow-up with --inject-uploaded-torrent and --wait-uploaded-complete until qBittorrent reports matched seeding evidence."
+    if blocker in {"target.uploaded_torrent_hash", "target.injected_torrent_hash", "target.injection_verified"}:
+        return "Re-run the uploaded MTEAM torrent follow-up with --inject-uploaded-torrent so qBittorrent visibility and exact uploaded torrent hash evidence are recorded."
     if blocker == "target.injected":
         return "Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path."
     if blocker == "target.seeding":
@@ -1651,7 +1663,17 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     complete = bool(payload.get("complete"))
     ready = bool(payload.get("ready"))
     artifact_status = _summary_artifact_status(resume_state)
-    required = ("source_hash_consistent", "source_wait_evidence", "target_hash_consistent", "target_duplicate_clean", "target_rule_obligations", "uploaded_wait_evidence")
+    required = (
+        "source_hash_consistent",
+        "source_wait_evidence",
+        "uploaded_torrent_hash",
+        "injected_torrent_hash",
+        "injection_verified",
+        "target_hash_consistent",
+        "target_duplicate_clean",
+        "target_rule_obligations",
+        "uploaded_wait_evidence",
+    )
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if complete and ready else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
@@ -1792,7 +1814,7 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
     preferred: list[str] = []
     if "source_wait_evidence" in missing_audit or "source_hash_consistent" in missing_audit:
         preferred.append("resume-source-torrent")
-    if "uploaded_wait_evidence" in missing_audit:
+    if any(name in missing_audit for name in ("uploaded_torrent_hash", "injected_torrent_hash", "injection_verified", "uploaded_wait_evidence")):
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     if "target_hash_consistent" in missing_audit:
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
@@ -3418,6 +3440,8 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         if isinstance(upload_result, dict):
             artifacts["uploaded_torrent_id"] = _uploaded_torrent_id_from_result(upload_result)
             artifacts["uploaded_torrent_hash"] = _uploaded_torrent_hash_from_result(upload_result)
+            artifacts["injected_torrent_hash"] = _torrent_hash_from_result(upload_result.get("injected_torrent"))
+            artifacts["injection_verified"] = _injected_torrent_verified(upload_result.get("injected_torrent"))
             if _wait_result_completed(upload_result.get("uploaded_wait")):
                 artifacts["uploaded_wait_evidence"] = True
             injected_torrent = upload_result.get("injected_torrent")
@@ -3644,6 +3668,9 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
+            "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
+            "injected_torrent_hash": bool(artifacts.get("injected_torrent_hash")),
+            "injection_verified": bool(artifacts.get("injection_verified")),
             "uploaded_save_path": bool(artifacts.get("uploaded_save_path")),
             "uploaded_qbit_category": bool(artifacts.get("uploaded_qbit_category")),
             "uploaded_qbit_tags": bool(artifacts.get("uploaded_qbit_tags")),
@@ -3678,7 +3705,15 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
         preferred_stages.append("resume-uploaded-torrent-download")
     if "target.uploaded" in blocker_names:
         preferred_stages.append("resume-target-upload")
-    if "target.injected" in blocker_names or "target.seeding" in blocker_names or "target.hash_consistent" in blocker_names or "target.uploaded_wait_evidence" in blocker_names:
+    if (
+        "target.injected" in blocker_names
+        or "target.seeding" in blocker_names
+        or "target.hash_consistent" in blocker_names
+        or "target.uploaded_wait_evidence" in blocker_names
+        or "target.uploaded_torrent_hash" in blocker_names
+        or "target.injected_torrent_hash" in blocker_names
+        or "target.injection_verified" in blocker_names
+    ):
         preferred_stages.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     preferred_stages.extend(stage_generic_preferred)
     preferred_stages.extend(["resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
