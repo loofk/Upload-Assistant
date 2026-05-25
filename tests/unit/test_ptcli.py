@@ -2733,6 +2733,27 @@ def test_target_upload_result_requires_uploaded_torrent_hash_consistency() -> No
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
 
 
+def test_target_upload_result_checks_uploaded_wait_match_hash_consistency() -> None:
+    payload = {
+        "status": "uploaded",
+        "uploaded_torrent_hash": "a" * 40,
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "torrent_hash": "a" * 40},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "uploaded_wait": {
+            "complete": True,
+            "query": {"torrent_hash": "a" * 40, "content_path": "/downloads/Name"},
+            "matches": [{"hash": "b" * 40, "content_path": "/downloads/Name"}],
+        },
+    }
+
+    blockers = ptcli_cli._uploaded_torrent_hash_consistency_blockers(payload)
+
+    assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True, wait_uploaded_complete=True) is False
+    assert blockers
+    assert f"uploaded_wait_query={'a' * 40}" in blockers[0]
+    assert f"uploaded_wait_match={'b' * 40}" in blockers[0]
+
+
 def test_uploaded_injection_preserves_upload_response_hash_for_consistency_check() -> None:
     payload = ptcli_cli._with_uploaded_injection(
         {
@@ -6372,8 +6393,9 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
         }
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+        injected_hash = uploaded_hash if "MTEAM" in str(torrent_path) else "a" * 40
         return {
-            "hash": uploaded_hash,
+            "hash": injected_hash,
             "torrent_path": torrent_path,
             "save_path": save_path,
             "category": category,
@@ -6808,8 +6830,9 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
         return torrent_path
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+        injected_hash = uploaded_hash if "MTEAM" in str(torrent_path) else "a" * 40
         return {
-            "hash": uploaded_hash,
+            "hash": injected_hash,
             "torrent_path": torrent_path,
             "save_path": save_path,
             "category": category,
@@ -6820,7 +6843,8 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, content_path, torrent_hash, timeout, interval)
-        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}
+        matched_hash = uploaded_hash if torrent_hash == uploaded_hash else "a" * 40
+        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": matched_hash}]}
 
     async def fake_search_mteam_duplicates(_config, source_info):
         return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}

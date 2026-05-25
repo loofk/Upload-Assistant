@@ -2771,8 +2771,32 @@ def _uploaded_torrent_hash_evidence(result: dict[str, Any]) -> dict[str, str]:
         if isinstance(query, dict):
             wait_hash = _normalize_torrent_hash(query.get("torrent_hash"))
             if wait_hash:
-                evidence["uploaded_wait"] = wait_hash
+                evidence["uploaded_wait_query"] = wait_hash
+        evidence.update(_uploaded_wait_hash_evidence(uploaded_wait))
     return evidence
+
+
+def _uploaded_wait_hash_evidence(uploaded_wait: dict[str, Any]) -> dict[str, str]:
+    hashes: list[str] = []
+    matches = uploaded_wait.get("matches")
+    if isinstance(matches, list):
+        for match in matches:
+            if isinstance(match, dict):
+                torrent_hash = _normalize_torrent_hash(match.get("hash") or match.get("torrent_hash") or match.get("torrenthash"))
+                if torrent_hash:
+                    hashes.append(torrent_hash)
+    verification = uploaded_wait.get("completion_verification")
+    if isinstance(verification, dict):
+        observed_hashes = verification.get("observed_hashes")
+        if isinstance(observed_hashes, list):
+            for value in observed_hashes:
+                torrent_hash = _normalize_torrent_hash(value)
+                if torrent_hash:
+                    hashes.append(torrent_hash)
+    unique_hashes = list(dict.fromkeys(hashes))
+    if len(unique_hashes) == 1:
+        return {"uploaded_wait_match": unique_hashes[0]}
+    return {f"uploaded_wait_match_{index}": torrent_hash for index, torrent_hash in enumerate(unique_hashes, start=1)}
 
 
 def _string_list(value: Any) -> list[str]:
