@@ -553,6 +553,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(pipeline_result)
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
     resume_commands = pipeline_result.get("resume_commands", [])
+    resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands)
     return {
         "status": "complete" if not blockers else "blocked",
         "plan": plan_payload,
@@ -570,7 +571,10 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "qbit_wait_mismatches": qbit_wait_mismatches,
         "artifacts": artifacts,
         "resume_commands": resume_commands,
-        "resume_state": _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands),
+        "resume_state": resume_state,
+        "next_stage": resume_state.get("next_stage"),
+        "next_command": resume_state.get("next_command"),
+        "next_command_argv": resume_state.get("next_command_argv"),
         "ready": ready,
         "complete": not blockers,
         "blockers": blockers,

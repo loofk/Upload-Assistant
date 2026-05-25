@@ -882,6 +882,9 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
     assert payload["resume_state"]["next_stage"] == "resume-uploaded-torrent"
     assert payload["resume_state"]["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
     assert payload["resume_state"]["next_command_argv"] == ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"]
+    assert payload["next_stage"] == "resume-uploaded-torrent"
+    assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
+    assert payload["next_command_argv"] == ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"]
     assert payload["resume_state"]["blockers"] == ["target.injected", "pipeline did not report ready."]
 
 
