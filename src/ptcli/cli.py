@@ -1150,13 +1150,14 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
         "summary_file": str(destination),
         "client": args.client,
         "qbit_options": _target_upload_qbit_options(args),
-        "summary": _target_upload_summary(result, preflight),
+        "summary": summary,
         "artifacts": artifacts,
         "recommended_commands": recommended_commands,
         "resume_state": _target_upload_resume_state(summary, artifacts, recommended_commands),
         "preflight": preflight,
         "result": result,
     }
+    payload.update(_qbit_wait_summary_fields(payload))
     destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return str(destination)
 
@@ -1433,6 +1434,16 @@ def _summary_qbit_wait_mismatches(qbit_wait_diagnostics: dict[str, Any]) -> list
         if diagnostics.get("requested_content_path_matched") is False:
             mismatches.append(f"{scope}.requested_content_path")
     return mismatches
+
+
+def _qbit_wait_summary_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(payload)
+    qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
+    return {
+        "qbit_wait_diagnostics": qbit_wait_diagnostics,
+        "qbit_wait_mismatch": bool(qbit_wait_mismatches),
+        "qbit_wait_mismatches": qbit_wait_mismatches,
+    }
 
 
 def _summary_qbit_wait_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2350,6 +2361,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "next_actions": _pipeline_next_actions(args, blockers, closure),
         "stages": stages,
     }
+    payload.update(_qbit_wait_summary_fields(payload))
     if getattr(args, "write_summary", False):
         summary_file = _write_run_summary(payload, args.summary_output_dir)
         payload["summary_file"] = summary_file
@@ -3093,6 +3105,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),
         "next_actions": payload.get("next_actions", []),
+        **_qbit_wait_summary_fields(payload),
         "artifacts": artifacts,
         "resume_commands": resume_commands,
         "resume_state": _run_summary_resume_state(payload, artifacts, resume_commands),

@@ -2105,6 +2105,57 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
     assert diagnostics["observed_content_paths"] == ["/downloads/Other"]
 
 
+def test_run_summary_exposes_qbit_wait_request_mismatch(tmp_path) -> None:
+    summary_file = ptcli_cli._write_run_summary(
+        {
+            "status": "blocked",
+            "ready": False,
+            "complete": False,
+            "blockers": ["source.wait_evidence"],
+            "evidence": {
+                "source": {
+                    "source_wait": {
+                        "complete": True,
+                        "completion_verification": {
+                            "matched_count": 1,
+                            "complete_count": 1,
+                            "any_complete": True,
+                            "requested_hash_matched": False,
+                            "requested_content_path_matched": True,
+                            "observed_hashes": ["f" * 40],
+                            "observed_content_paths": ["/downloads/Example"],
+                            "observed_save_paths": ["/downloads"],
+                        },
+                    }
+                },
+                "target": {
+                    "uploaded_wait": {
+                        "complete": True,
+                        "completion_verification": {
+                            "matched_count": 1,
+                            "complete_count": 1,
+                            "any_complete": True,
+                            "requested_hash_matched": True,
+                            "requested_content_path_matched": False,
+                            "observed_hashes": ["b" * 40],
+                            "observed_content_paths": ["/downloads/Other"],
+                            "observed_save_paths": ["/downloads"],
+                        },
+                    }
+                },
+            },
+            "stages": [],
+        },
+        str(tmp_path),
+    )
+
+    payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+    assert payload["qbit_wait_mismatch"] is True
+    assert payload["qbit_wait_mismatches"] == ["source.requested_hash", "uploaded.requested_content_path"]
+    assert payload["qbit_wait_diagnostics"]["source"]["observed_hashes"] == ["f" * 40]
+    assert payload["qbit_wait_diagnostics"]["uploaded"]["observed_content_paths"] == ["/downloads/Other"]
+
+
 def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
@@ -9309,6 +9360,10 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["summary"]["qbit_closure"]["injection"]["tags"] == "retorrent"
     assert summary_payload["summary"]["qbit_closure"]["wait"]["complete"] is True
     assert summary_payload["summary"]["qbit_closure"]["wait"]["query"]["torrent_hash"] == uploaded_hash
+    assert summary_payload["qbit_wait_mismatch"] is False
+    assert summary_payload["qbit_wait_mismatches"] == []
+    assert summary_payload["qbit_wait_diagnostics"]["uploaded"]["complete"] is True
+    assert summary_payload["qbit_wait_diagnostics"]["uploaded"]["requested_hash_matched"] is None
     assert summary_payload["summary"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
     assert summary_payload["summary"]["hash_consistent"] is True
     assert summary_payload["summary"]["duplicate_clean"] is True
@@ -9527,6 +9582,70 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent-download"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["resume-uploaded-torrent-download"]
+
+
+def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(uploaded_torrent))
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            package["package_dir"],
+            "--uploaded-torrent-file",
+            str(uploaded_torrent),
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+    )
+    result = {
+        "status": "blocked",
+        "uploaded_wait": {
+            "complete": True,
+            "query": {"torrent_hash": "b" * 40, "content_path": "/downloads/Example"},
+            "matches": [{"hash": "b" * 40, "content_path": "/downloads/Other"}],
+            "completion_verification": {
+                "matched_count": 1,
+                "complete_count": 1,
+                "any_complete": True,
+                "requested_hash_matched": True,
+                "requested_content_path_matched": False,
+                "observed_hashes": ["b" * 40],
+                "observed_content_paths": ["/downloads/Other"],
+                "observed_save_paths": ["/downloads"],
+            },
+        },
+    }
+
+    summary_file = ptcli_cli._write_target_upload_summary(result, preflight, args, package["package_dir"])
+
+    summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+    assert summary_payload["qbit_wait_mismatch"] is True
+    assert summary_payload["qbit_wait_mismatches"] == ["uploaded.requested_content_path"]
+    diagnostics = summary_payload["qbit_wait_diagnostics"]["uploaded"]
+    assert diagnostics["complete"] is True
+    assert diagnostics["request_mismatch"] is True
+    assert diagnostics["requested_hash_matched"] is True
+    assert diagnostics["requested_content_path_matched"] is False
+    assert diagnostics["observed_hashes"] == ["b" * 40]
+    assert diagnostics["observed_content_paths"] == ["/downloads/Other"]
 
 
 @pytest.mark.asyncio
