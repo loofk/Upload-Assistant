@@ -4148,6 +4148,7 @@ def _summary_next_command_argv(command: str) -> list[str] | None:
     script = Path(argv[1]).name
     if interpreter not in {"python", "python3"} or script != "ptcli.py":
         return None
+    argv[0] = sys.executable
     return argv
 
 

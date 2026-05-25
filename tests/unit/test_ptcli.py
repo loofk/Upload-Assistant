@@ -1980,7 +1980,7 @@ def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatc
     code = main(["summary-check", "--summary-file", str(summary_file), "--run-next-command"])
 
     assert code == 7
-    assert calls == [(["python3", "ptcli.py", "pipeline", "--upload-target"], False)]
+    assert calls == [([ptcli_cli.sys.executable, "ptcli.py", "pipeline", "--upload-target"], False)]
     assert capsys.readouterr().out == ""
 
 
