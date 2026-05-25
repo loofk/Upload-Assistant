@@ -3243,7 +3243,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_content_verified = _source_content_verified(source_content_verify)
     source_hash_consistent = _source_hash_consistent(source_torrent_hash, source_download, inject_source, wait_complete, source_content_verify)
     target_injected = _injected_torrent_verified(injected_torrent)
-    target_seeding = target_injected and isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete"))
+    target_seeding = target_injected and _wait_result_completed(uploaded_wait)
     target_hash_consistent = not _uploaded_torrent_hash_consistency_blockers(target_upload_result)
     injected_target_hash = _torrent_hash_from_result(injected_torrent)
     uploaded_target_hash = target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None
@@ -3357,7 +3357,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
     source = closure.get("source") if isinstance(closure.get("source"), dict) else {}
     target = closure.get("target") if isinstance(closure.get("target"), dict) else {}
     target_wait = target.get("uploaded_wait") if isinstance(target.get("uploaded_wait"), dict) else {}
-    target_seeding = bool(target.get("seeding") or target_wait.get("complete"))
+    target_seeding = bool(target.get("seeding") or _wait_result_completed(target_wait))
     return {
         "complete": bool(closure.get("complete")),
         "blockers": closure.get("blockers") if isinstance(closure.get("blockers"), list) else [],
@@ -3448,7 +3448,28 @@ def _source_wait_completed(stage: dict[str, Any] | None) -> bool:
     if not _stage_completed(stage):
         return False
     result = stage.get("result")
-    return isinstance(result, dict) and bool(result.get("complete"))
+    return _wait_result_completed(result)
+
+
+def _wait_result_completed(wait_result: Any) -> bool:
+    if not isinstance(wait_result, dict) or not wait_result.get("complete"):
+        return False
+    verification = wait_result.get("completion_verification")
+    if isinstance(verification, dict):
+        if verification.get("any_complete") is False or verification.get("complete_count") == 0:
+            return False
+        if verification.get("matched_count") == 0:
+            return False
+    matches = wait_result.get("matches")
+    if isinstance(matches, list):
+        return any(_match_has_evidence(match) for match in matches)
+    matched_count = wait_result.get("matched_count")
+    if matched_count is not None:
+        try:
+            return int(matched_count) > 0
+        except (TypeError, ValueError):
+            return False
+    return False
 
 
 def _source_content_verified(stage: dict[str, Any] | None) -> bool:

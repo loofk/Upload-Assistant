@@ -2656,7 +2656,7 @@ def test_pipeline_closure_preserves_torrent_file_evidence() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": source_torrent},
         {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
-        {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True, "matches": [{"hash": "a" * 40, "content_path": "/downloads/Name"}]}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
         {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
         {
@@ -2850,6 +2850,62 @@ def test_pipeline_closure_requires_uploaded_torrent_completion_when_waited() -> 
     assert closure["target"]["injected"] is True
     assert closure["target"]["seeding"] is False
     assert closure["target"]["uploaded_wait"]["complete"] is False
+
+
+def test_pipeline_closure_requires_source_wait_match_evidence() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "result": {"torrent_path": "/tmp/U2-60635.torrent"}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True, "matches": []}},
+        {"stage": "match", "ok": True, "result": {"matches": []}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+
+    assert closure["complete"] is False
+    assert closure["source"]["complete"] is False
+    assert "source.ready" in closure["blockers"]
+
+
+def test_pipeline_closure_requires_uploaded_wait_match_evidence() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "matches": []},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    assert closure["complete"] is False
+    assert closure["target"]["seeding"] is False
+    assert "target.seeding" in closure["blockers"]
+    assert evidence["target"]["seeding"] is False
 
 
 def test_pipeline_closure_requires_uploaded_torrent_hash_consistency() -> None:
@@ -3119,7 +3175,7 @@ def test_pipeline_evidence_reports_resume_sources() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent", "reused": True}},
         {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
-        {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True, "matches": [{"hash": "a" * 40, "content_path": "/downloads/Name"}]}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
         {"stage": "target-prepare", "ok": True, "result": {"package_dir": "/tmp/package", "reused": True, "rule_review": mteam_clean_rule_review()}},
         {
