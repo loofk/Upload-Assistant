@@ -2143,7 +2143,49 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_AUTOMATION_ACTION=run_next_command\n" in out
     assert "export PTCLI_AUTOMATION_EXIT_CODE=1\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
+    assert "export PTCLI_QBIT_WAIT_MISMATCH=0\n" in out
+    assert "export PTCLI_QBIT_WAIT_MISMATCHES=''\n" in out
     assert "export PTCLI_NEXT_COMMAND='python3 ptcli.py pipeline --upload-target'\n" in out
+
+
+def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["source.wait_evidence"],
+                "resume_commands": [{"stage": "resume-source-torrent", "command": "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent"}],
+                "evidence": {
+                    "source": {
+                        "qbit_closure": {
+                            "wait": {
+                                "complete": False,
+                                "completion_verification": {
+                                    "requested_hash_matched": False,
+                                    "requested_content_path_matched": None,
+                                },
+                            }
+                        }
+                    }
+                },
+                "resume_state": {"artifacts": {"source_hash_consistent": True, "source_wait_evidence": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_AUTOMATION_ACTION=resolve_qbit_wait_mismatch\n" in out
+    assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=0\n" in out
+    assert "export PTCLI_QBIT_WAIT_MISMATCH=1\n" in out
+    assert "export PTCLI_QBIT_WAIT_MISMATCHES=source.requested_hash\n" in out
 
 
 def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatch, capsys) -> None:

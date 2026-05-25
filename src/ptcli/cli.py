@@ -4321,6 +4321,8 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_NEXT_COMMAND": payload.get("next_command"),
         "PTCLI_SHOULD_EXECUTE_NEXT_COMMAND": _shell_bool(payload.get("should_execute_next_command")),
         "PTCLI_NEXT_COMMAND_READY": _shell_bool(payload.get("next_command_ready")),
+        "PTCLI_QBIT_WAIT_MISMATCH": _shell_bool(payload.get("qbit_wait_mismatch")),
+        "PTCLI_QBIT_WAIT_MISMATCHES": ",".join(_string_list(payload.get("qbit_wait_mismatches"))),
         "PTCLI_COMPLETE": _shell_bool(payload.get("complete")),
         "PTCLI_LIVE_SAFE_TO_ATTEMPT": _shell_bool(payload.get("live_safe_to_attempt")),
         "PTCLI_SUMMARY_FILE": payload.get("summary_file"),
