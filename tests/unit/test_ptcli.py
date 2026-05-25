@@ -8945,6 +8945,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
             "--uploaded-paused",
             "--wait-uploaded-complete",
             "--write-summary",
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
             "--client",
             "default",
             "--json",
@@ -8968,7 +8970,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert result["uploaded_wait"]["query"]["torrent_hash"] == uploaded_hash
     assert result["uploaded_wait"]["query"]["content_path"] == "/downloads/Example"
     summary_path = Path(result["summary_file"])
-    assert summary_path == Path(package["package_dir"]) / "ptcli-target-upload-summary.json"
+    assert summary_path == tmp_path / "summary" / "ptcli-target-upload-summary.json"
     summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
     assert summary_payload["schema_version"] == 1
     assert summary_payload["kind"] == "ptcli.target_upload.summary"
@@ -9025,6 +9027,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent"]
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent"]
+    assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["resume-uploaded-torrent"]
     assert commands["verify-seeding"].startswith("python3 ptcli.py inspect")
 
 
@@ -9175,6 +9178,8 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
             "retorrent",
             "--uploaded-paused",
             "--write-summary",
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
             "--client",
             "default",
             "--json",
@@ -9200,6 +9205,7 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent-download"]
+    assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["resume-uploaded-torrent-download"]
 
 
 @pytest.mark.asyncio

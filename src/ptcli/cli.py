@@ -1184,6 +1184,8 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
         ]
         if args.uploaded_output_dir:
             download_args.extend(["--uploaded-output-dir", args.uploaded_output_dir])
+        if args.summary_output_dir:
+            download_args.extend(["--summary-output-dir", args.summary_output_dir])
         if isinstance(uploaded_save_path_artifact, dict) and uploaded_save_path_artifact.get("path"):
             download_args.extend(["--uploaded-save-path", str(uploaded_save_path_artifact["path"])])
         if args.uploaded_qbit_category:
@@ -1209,6 +1211,8 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
         ]
         if isinstance(uploaded_save_path_artifact, dict) and uploaded_save_path_artifact.get("path"):
             resume_args.extend(["--uploaded-save-path", str(uploaded_save_path_artifact["path"])])
+        if args.summary_output_dir:
+            resume_args.extend(["--summary-output-dir", args.summary_output_dir])
         if args.uploaded_qbit_category:
             resume_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
         if args.uploaded_qbit_tags:
