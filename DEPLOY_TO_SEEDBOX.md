@@ -221,7 +221,7 @@ git apply my-changes.patch
 
 ```bash
 python3 ptcli.py sites --json
-python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --connect-qbit --json
+python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --check-runtime --connect-qbit --json
 ```
 
 ### PTCLI 一键闭环 dry/readiness 检查
@@ -309,7 +309,7 @@ chmod 644 data/config.py
 - [ ] qBittorrent client 配置已填写并可连接
 - [ ] 源站 cookie 已准备好
 - [ ] `ptcli.py sites --json` 通过
-- [ ] `ptcli.py doctor ... --connect-qbit` 通过
+- [ ] `ptcli.py doctor ... --check-runtime --connect-qbit` 通过
 - [ ] `ptcli.py retorrent ... --dry-run --json` 输出可审计计划
 - [ ] 已人工确认源站和目标站规则后，再执行 live 闭环
 

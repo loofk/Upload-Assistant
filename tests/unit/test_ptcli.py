@@ -8,6 +8,7 @@ import pytest
 from torf import Torrent
 
 import src.ptcli.cli as ptcli_cli
+import src.ptcli.doctor as ptcli_doctor
 import src.ptcli.source as ptcli_source
 import src.ptcli.target as ptcli_target
 from src.ptcli.cli import _with_captured_stdout, build_parser, build_plan, main
@@ -2574,6 +2575,123 @@ def test_doctor_reports_blockers_for_missing_package(tmp_path) -> None:
     assert any(check["name"] == "target_package" and check["ok"] is False for check in payload["checks"])
 
 
+def test_doctor_runtime_check_reports_ptcli_dependencies(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        check_runtime=True,
+    )
+
+    runtime_check = next(check for check in payload["checks"] if check["name"] == "runtime.ptcli_dependencies")
+    assert runtime_check["ok"] is True
+    assert any(item["module"] == "qbittorrentapi" and item["available"] is True for item in runtime_check["required"])
+    assert runtime_check["legacy_optional"]["message"] == "Legacy Web UI/Discord/client dependencies are not required for ptcli."
+
+
+def test_doctor_runtime_check_blocks_missing_ptcli_dependency(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    original_find_spec = ptcli_doctor.importlib.util.find_spec
+
+    def fake_find_spec(module: str):
+        if module == "qbittorrentapi":
+            return None
+        return original_find_spec(module)
+
+    monkeypatch.setattr(ptcli_doctor.importlib.util, "find_spec", fake_find_spec)
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        check_runtime=True,
+    )
+
+    runtime_check = next(check for check in payload["checks"] if check["name"] == "runtime.ptcli_dependencies")
+    assert runtime_check["ok"] is False
+    assert "qbittorrent-api" in runtime_check["message"]
+
+
+def test_doctor_runtime_check_blocks_live_safe_when_requested(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    content_path = tmp_path / "downloads" / "Name"
+    content_path.mkdir(parents=True)
+    target_torrent = make_mteam_safe_torrent(tmp_path, "target")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+    original_find_spec = ptcli_doctor.importlib.util.find_spec
+
+    def fake_find_spec(module: str):
+        if module == "qbittorrentapi":
+            return None
+        return original_find_spec(module)
+
+    monkeypatch.setattr(ptcli_doctor.importlib.util, "find_spec", fake_find_spec)
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        content_path=str(content_path),
+        package_dir=package["package_dir"],
+        target_torrent_file=target_torrent,
+        accept_rules=True,
+        target_execute=True,
+        confirm_upload=True,
+        download_uploaded_torrent=True,
+        inject_uploaded_torrent=True,
+        uploaded_save_path=str(content_path),
+        wait_uploaded_complete=True,
+        check_runtime=True,
+    )
+
+    assert payload["ready"] is False
+    assert payload["live_safe_to_attempt"] is False
+    assert any(check["name"] == "runtime.ptcli_dependencies" and check["ok"] is False for check in payload["checks"])
+
+
 def test_doctor_command_outputs_json(monkeypatch, tmp_path, capsys) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -2868,6 +2986,26 @@ def test_doctor_command_can_probe_qbit_connection(monkeypatch, tmp_path, capsys)
     out = capsys.readouterr().out
     assert '"name": "qbit.connection"' in out
     assert "connected: default" in out
+
+
+def test_doctor_command_can_check_runtime(monkeypatch, tmp_path, capsys) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    code = main(["doctor", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--base-dir", str(tmp_path), "--check-runtime", "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    runtime_check = next(check for check in payload["checks"] if check["name"] == "runtime.ptcli_dependencies")
+    assert runtime_check["ok"] is True
+    assert payload["ready"] is False
 
 
 def test_doctor_command_can_probe_source_and_target(monkeypatch, tmp_path, capsys) -> None:

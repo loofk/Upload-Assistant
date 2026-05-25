@@ -169,6 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--connect-qbit", action="store_true", help="Probe qBittorrent connectivity by listing one torrent.")
     doctor.add_argument("--probe-source", action="store_true", help="Probe source tracker metadata lookup with the configured credentials/cookies.")
     doctor.add_argument("--probe-target", action="store_true", help="Probe MTEAM target duplicate-search API with the source metadata signal.")
+    doctor.add_argument("--check-runtime", action="store_true", help="Verify focused ptcli runtime dependencies are importable without requiring legacy Web UI/Discord dependencies.")
     doctor.add_argument("--write-summary", action="store_true", help="Write ptcli-doctor-summary.json for live-readiness audit handoff.")
     doctor.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --package-dir or ./tmp/retorrent-runs.")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
@@ -732,6 +733,7 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
         inject_uploaded_torrent=args.inject_uploaded_torrent,
         uploaded_save_path=args.uploaded_save_path,
         wait_uploaded_complete=args.wait_uploaded_complete,
+        check_runtime=args.check_runtime,
     )
     live_checks = []
     if args.connect_qbit:
@@ -1133,6 +1135,7 @@ def _doctor_summary_inputs(args: argparse.Namespace) -> dict[str, Any]:
         "connect_qbit": bool(args.connect_qbit),
         "probe_source": bool(args.probe_source),
         "probe_target": bool(args.probe_target),
+        "check_runtime": bool(args.check_runtime),
     }
 
 
@@ -1273,6 +1276,7 @@ def _doctor_retry_command(args: argparse.Namespace, *, force_probes: bool = Fals
         ("--connect-qbit", force_probes or args.connect_qbit),
         ("--probe-source", force_probes or args.probe_source),
         ("--probe-target", force_probes or args.probe_target),
+        ("--check-runtime", args.check_runtime),
     ):
         if enabled:
             retry_args.append(option)

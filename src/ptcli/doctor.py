@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ def build_doctor_check(
     inject_uploaded_torrent: bool = False,
     uploaded_save_path: str | None = None,
     wait_uploaded_complete: bool = False,
+    check_runtime: bool = False,
 ) -> dict[str, Any]:
     if target_execute:
         if not uploaded_torrent_file and not uploaded_torrent_id:
@@ -62,6 +64,8 @@ def build_doctor_check(
     else:
         checks.append(_check("target_package", False, "Target package directory was not provided."))
         checks.append(_rule_obligations_check(None, target_execute))
+    if check_runtime:
+        checks.append(_runtime_dependency_check())
     checks.extend(_upload_followup_checks(download_uploaded_torrent, uploaded_torrent_id, uploaded_torrent_file, inject_uploaded_torrent, effective_uploaded_save_path, target_execute, wait_uploaded_complete))
 
     return {
@@ -86,6 +90,58 @@ def extend_doctor_check(payload: dict[str, Any], checks: list[dict[str, Any]], *
         "live_safe_to_attempt": bool(payload.get("live_safe_to_attempt")) and all(check.get("ok") for check in checks),
         "checks": merged_checks,
         "next_actions": _next_actions(merged_checks, target_execute),
+    }
+
+
+_PTCLI_RUNTIME_MODULES: tuple[tuple[str, str], ...] = (
+    ("aiofiles", "aiofiles"),
+    ("beautifulsoup4", "bs4"),
+    ("bencode.py", "bencodepy"),
+    ("cli-ui", "cli_ui"),
+    ("click", "click"),
+    ("httpx", "httpx"),
+    ("langcodes", "langcodes"),
+    ("lxml", "lxml"),
+    ("pymediainfo", "pymediainfo"),
+    ("qbittorrent-api", "qbittorrentapi"),
+    ("requests", "requests"),
+    ("rich", "rich"),
+    ("torf", "torf"),
+    ("typing_extensions", "typing_extensions"),
+    ("unidecode", "unidecode"),
+)
+
+_LEGACY_RUNTIME_MODULES: tuple[tuple[str, str], ...] = (
+    ("discord.py", "discord"),
+    ("flask", "flask"),
+    ("waitress", "waitress"),
+    ("deluge-client", "deluge_client"),
+    ("transmission-rpc", "transmission_rpc"),
+)
+
+
+def _runtime_dependency_check() -> dict[str, Any]:
+    required = [_module_status(package, module) for package, module in _PTCLI_RUNTIME_MODULES]
+    legacy = [_module_status(package, module) for package, module in _LEGACY_RUNTIME_MODULES]
+    missing = [item["package"] for item in required if not item["available"]]
+    legacy_present = [item["package"] for item in legacy if item["available"]]
+    return {
+        "name": "runtime.ptcli_dependencies",
+        "ok": not missing,
+        "message": "PTCLI runtime dependencies are importable." if not missing else f"Missing PTCLI runtime dependencies: {', '.join(missing)}",
+        "required": required,
+        "legacy_optional": {
+            "present": legacy_present,
+            "message": "Legacy Web UI/Discord/client dependencies are not required for ptcli.",
+        },
+    }
+
+
+def _module_status(package: str, module: str) -> dict[str, Any]:
+    return {
+        "package": package,
+        "module": module,
+        "available": importlib.util.find_spec(module) is not None,
     }
 
 
@@ -332,6 +388,8 @@ def _live_safe_to_attempt(checks: list[dict[str, Any]], target_execute: bool) ->
         "wait_uploaded_complete",
     }
     checks_by_name = {str(check["name"]): bool(check["ok"]) for check in checks}
+    if "runtime.ptcli_dependencies" in checks_by_name and not checks_by_name["runtime.ptcli_dependencies"]:
+        return False
     return all(checks_by_name.get(name, False) for name in required_names)
 
 

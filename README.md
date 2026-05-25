@@ -23,7 +23,7 @@ python3 ptcli.py sites --json
 python3 ptcli.py rule-check --from U2 --to MTEAM --accept-rules --json
 
 # live 前检查，可选探测 qBittorrent、源站和 MTEAM API
-python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --connect-qbit --probe-source --probe-target --json
+python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --check-runtime --connect-qbit --probe-source --probe-target --json
 
 # 高层一键闭环：源站拉种 -> QB 注入/等待 -> MTEAM 查重/准备/上传 -> 下载新种 -> QB 注入/等待
 python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json

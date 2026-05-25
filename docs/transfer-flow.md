@@ -62,10 +62,10 @@ python3 ptcli.py rule-check --from U2 --to MTEAM --accept-rules --json
 ### live 前检查
 
 ```bash
-python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --connect-qbit --probe-source --probe-target --json
+python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --check-runtime --connect-qbit --probe-source --probe-target --json
 ```
 
-`doctor` 可检查配置、cookie、qBittorrent 连接、源站详情读取、MTEAM 查重 API、目标准备包、目标 torrent 文件和上传后新种 follow-up 条件。带 `--target-execute` 时会按 live pipeline 语义检查上传后下载、注入、等待条件。
+`doctor` 可检查配置、cookie、PTCLI runtime 依赖、qBittorrent 连接、源站详情读取、MTEAM 查重 API、目标准备包、目标 torrent 文件和上传后新种 follow-up 条件。带 `--target-execute` 时会按 live pipeline 语义检查上传后下载、注入、等待条件。
 
 ### 源站下载与 qBittorrent 等待
 
