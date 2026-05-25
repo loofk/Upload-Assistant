@@ -562,10 +562,12 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
     merged = dict(artifacts) if isinstance(artifacts, dict) else {}
     evidence_target = evidence.get("target") if isinstance(evidence, dict) and isinstance(evidence.get("target"), dict) else {}
     closure_target = closure.get("target") if isinstance(closure, dict) and isinstance(closure.get("target"), dict) else {}
-    for key in ("uploaded_torrent_id", "uploaded_torrent_hash", "uploaded_torrent_path", "fresh_duplicate_check"):
+    summary = pipeline_result.get("summary") if isinstance(pipeline_result.get("summary"), dict) else {}
+    summary_target = summary.get("target") if isinstance(summary.get("target"), dict) else {}
+    for key in ("uploaded_torrent_id", "uploaded_torrent_hash", "uploaded_torrent_path", "uploaded_save_path", "fresh_duplicate_check"):
         if merged.get(key):
             continue
-        value = evidence_target.get(key) or closure_target.get(key)
+        value = evidence_target.get(key) or closure_target.get(key) or summary_target.get(key)
         if value:
             merged[key] = value
     if not merged.get("uploaded_torrent_file") and merged.get("uploaded_torrent_path"):
@@ -598,6 +600,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
             "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
+            "uploaded_save_path": bool(artifacts.get("uploaded_save_path")),
         },
         "blockers": [str(blocker) for blocker in blockers],
     }

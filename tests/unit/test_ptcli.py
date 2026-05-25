@@ -407,6 +407,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "uploaded_torrent_id": "999",
                     "uploaded_torrent_hash": "b" * 40,
                     "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
+                    "uploaded_save_path": "/downloads/Name",
                     "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 },
             },
@@ -478,6 +479,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "uploaded_torrent_hash": "b" * 40,
         "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
         "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
+        "uploaded_save_path": "/downloads/Name",
         "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
     }
     assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
@@ -488,6 +490,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_hash"] is True
+    assert payload["resume_state"]["artifacts"]["uploaded_save_path"] is True
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True
