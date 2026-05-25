@@ -2681,6 +2681,64 @@ def test_pipeline_closure_preserves_torrent_file_evidence() -> None:
     assert evidence["target"]["uploaded_torrent"] == uploaded_torrent
 
 
+def test_pipeline_closure_requires_existing_source_torrent_file_evidence() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent", "exists": False}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
+        {"stage": "match", "ok": True, "result": {"matches": []}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                "uploaded_torrent_hash": "b" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+
+    assert closure["complete"] is False
+    assert closure["source"]["downloaded"] is False
+    assert "source.ready" in closure["blockers"]
+
+
+def test_pipeline_closure_requires_existing_uploaded_torrent_file_evidence() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent"}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
+        {"stage": "match", "ok": True, "result": {"matches": []}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                "uploaded_torrent_hash": "b" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "exists": False},
+                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    assert closure["complete"] is False
+    assert closure["target"]["downloaded"] is False
+    assert "target.downloaded" in closure["blockers"]
+    assert evidence["target"]["downloaded"] is False
+
+
 def test_pipeline_closure_requires_target_injection_client_verification() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "skipped": True},

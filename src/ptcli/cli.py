@@ -3236,7 +3236,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     target_prepare_result = target_prepare.get("result") if target_prepare and isinstance(target_prepare.get("result"), dict) else {}
     rule_review = target_prepare_result.get("rule_review") if isinstance(target_prepare_result, dict) else None
     rule_obligations = _rule_obligation_summary(rule_review)
-    source_downloaded = _stage_completed(source_download)
+    source_downloaded = _stage_completed(source_download) and _torrent_file_present(source_download_result)
     source_injected = _source_injection_verified(inject_source)
     source_complete = _source_wait_completed(wait_complete)
     source_matched = _match_stage_has_match(match)
@@ -3273,7 +3273,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     target = {
         "prepared": _stage_completed(target_prepare),
         "uploaded": isinstance(target_upload_result, dict) and target_upload_result.get("status") == "uploaded",
-        "downloaded": isinstance(downloaded_torrent, dict),
+        "downloaded": _torrent_file_present(downloaded_torrent),
         "injected": target_injected,
         "injection_verified": target_injected,
         "hash_consistent": target_hash_consistent,
@@ -3456,6 +3456,18 @@ def _source_content_verified(stage: dict[str, Any] | None) -> bool:
 
 def _stage_completed(stage: dict[str, Any] | None) -> bool:
     return bool(stage and stage.get("ok") and not stage.get("skipped"))
+
+
+def _torrent_file_present(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if not (value.get("path") or value.get("torrent_path")):
+        return False
+    if value.get("exists") is False:
+        return False
+    if value.get("size_bytes") == 0:
+        return False
+    return value.get("metadata_readable") is not False
 
 
 def _match_stage_has_match(stage: dict[str, Any] | None) -> bool:
