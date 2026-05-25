@@ -79,6 +79,9 @@ class MTeamApiClient:
             },
         )
 
+    async def torrent_detail(self, torrent_id: str) -> Any:
+        return await self.request("https://api.m-team.cc/api/torrent/detail", json={"id": int(torrent_id)})
+
     async def upload_torrent(self, data: dict[str, Any], files: dict[str, Any]) -> Any:
         return await self.request("https://api.m-team.cc/api/torrent/createOredit", data=data, files=files)
 

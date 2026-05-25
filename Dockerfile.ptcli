@@ -23,16 +23,6 @@ RUN mkdir -p data
 COPY ptcli.py .
 COPY src/__init__.py src/__init__.py
 COPY src/ptcli/ src/ptcli/
-COPY src/trackers/__init__.py src/trackers/__init__.py
-COPY src/trackers/COMMON.py src/trackers/COMMON.py
-COPY src/trackers/MTEAM.py src/trackers/MTEAM.py
-COPY src/bbcode.py src/bbcode.py
-COPY src/cleanup.py src/cleanup.py
-COPY src/console.py src/console.py
-COPY src/cookie_auth.py src/cookie_auth.py
-COPY src/exceptions.py src/exceptions.py
-COPY src/exportmi.py src/exportmi.py
-COPY src/languages.py src/languages.py
 COPY data/example-config.py data/example-config.py
 
 RUN chmod +x /Upload-Assistant/ptcli.py && \

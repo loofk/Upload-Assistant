@@ -1006,12 +1006,13 @@ def test_source_info_uses_enabled_chinese_source_adapter(monkeypatch, capsys) ->
 
 
 def test_source_module_registers_enabled_chinese_source_adapters() -> None:
-    assert set(ptcli_source.SOURCE_TRACKER_CLASSES) == {"MTEAM"}
+    assert set(ptcli_source.SOURCE_TRACKER_CLASSES) == set()
+    assert set(ptcli_source.MTEAM_API_TRACKERS) == {"MTEAM"}
     for tracker in ["AUDIENCES", "CHD", "HDSKY", "HHAN", "PTER", "TJUPT", "U2"]:
         assert tracker in ptcli_source.NEXUS_DOWNLOAD_BASE_URLS
     for tracker in ["AUDIENCES", "CHD", "HDS", "HDSKY", "HHAN", "OB", "PTER", "TJUPT", "TTG", "U2"]:
         assert tracker in ptcli_source.GENERIC_DETAILS_BASE_URLS
-    assert set(ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES) == {"MTEAM"}
+    assert set(ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES) == set()
     assert set(ptcli_source.TTG_DOWNLOAD_BASE_URLS) == {"TTG"}
 
 
@@ -2360,53 +2361,90 @@ def test_source_info_from_tuple_includes_meta_side_effects() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_source_info_closes_tracker_session(monkeypatch) -> None:
+async def test_mteam_source_info_uses_ptcli_api_client(monkeypatch) -> None:
     closed = {"value": False}
 
-    class FakeSession:
-        async def aclose(self):
+    class FakeMTeamApiClient:
+        def __init__(self, config):
+            assert config["TRACKERS"]["MTEAM"]["api_key"] == "fake"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
             closed["value"] = True
 
-    class FakeTracker:
-        def __init__(self, config):
-            self.config = config
-            self.session = FakeSession()
+        async def torrent_detail(self, torrent_id):
+            assert torrent_id == "60635"
+            return {
+                "imdb": "https://www.imdb.com/title/tt1234567/",
+                "tmdb": "https://www.themoviedb.org/movie/76543",
+                "douban": "https://movie.douban.com/subject/1291546/",
+                "name": "MTEAM.Name.2024",
+                "hash": "a" * 40,
+                "descr": "desc",
+            }
 
-        async def get_info_from_torrent_id(self, torrent_id, meta=None):
-            _ = meta
-            return (1234567, 2, f"Name-{torrent_id}", "a" * 40, "desc")
-
-    monkeypatch.setitem(ptcli_source.SOURCE_TRACKER_CLASSES, "MTEAM", FakeTracker)
+    monkeypatch.setattr(ptcli_source, "MTeamApiClient", FakeMTeamApiClient)
 
     info = await ptcli_source.fetch_source_info({"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, "MTEAM", "60635")
 
-    assert info.name == "Name-60635"
+    assert info.name == "MTEAM.Name.2024"
+    assert info.imdb_id == 1234567
+    assert info.tmdb_id == 76543
+    assert info.douban_id == "1291546"
+    assert info.description_length == 4
     assert closed["value"] is True
 
 
 @pytest.mark.asyncio
-async def test_fetch_source_info_closes_tracker_session_on_error(monkeypatch) -> None:
+async def test_mteam_source_info_closes_api_client_on_error(monkeypatch) -> None:
     closed = {"value": False}
 
-    class FakeSession:
-        async def aclose(self):
+    class FakeMTeamApiClient:
+        def __init__(self, config):
+            _ = config
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
             closed["value"] = True
 
-    class FakeTracker:
-        def __init__(self, config):
-            self.config = config
-            self.session = FakeSession()
-
-        async def get_info_from_torrent_id(self, torrent_id, meta=None):
-            _ = (torrent_id, meta)
+        async def torrent_detail(self, torrent_id):
+            _ = torrent_id
             raise RuntimeError("metadata failed")
 
-    monkeypatch.setitem(ptcli_source.SOURCE_TRACKER_CLASSES, "MTEAM", FakeTracker)
+    monkeypatch.setattr(ptcli_source, "MTeamApiClient", FakeMTeamApiClient)
 
     with pytest.raises(RuntimeError, match="metadata failed"):
         await ptcli_source.fetch_source_info({"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, "MTEAM", "60635")
 
     assert closed["value"] is True
+
+
+@pytest.mark.asyncio
+async def test_mteam_source_download_uses_ptcli_api_client(monkeypatch, tmp_path) -> None:
+    class FakeMTeamApiClient:
+        def __init__(self, config):
+            assert config["TRACKERS"]["MTEAM"]["api_key"] == "fake"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def download_torrent(self, torrent_id, destination):
+            assert torrent_id == "60635"
+            await asyncio.to_thread(Path(destination).write_bytes, b"d4:infod")
+
+    monkeypatch.setattr(ptcli_source, "MTeamApiClient", FakeMTeamApiClient)
+
+    path = await ptcli_source.download_source_torrent({"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, "MTEAM", "60635", str(tmp_path))
+
+    assert path == tmp_path / "MTEAM-60635.torrent"
+    assert await asyncio.to_thread(path.read_bytes) == b"d4:infod"
 
 
 def test_flow_check_ready_for_u2_to_mteam(tmp_path) -> None:

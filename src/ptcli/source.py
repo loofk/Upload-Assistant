@@ -14,7 +14,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from src.ptcli.mainland import normalize_tracker
-from src.trackers.MTEAM import MTEAM
+from src.ptcli.mteam_api import MTeamApiClient
 
 
 class SourceTrackerProtocol(Protocol):
@@ -24,9 +24,7 @@ class SourceTrackerProtocol(Protocol):
         ...
 
 
-SOURCE_TRACKER_CLASSES: dict[str, type[Any]] = {
-    "MTEAM": MTEAM,
-}
+SOURCE_TRACKER_CLASSES: dict[str, type[Any]] = {}
 
 NEXUS_DOWNLOAD_BASE_URLS: dict[str, str] = {
     "AUDIENCES": "https://audiences.me",
@@ -39,8 +37,10 @@ NEXUS_DOWNLOAD_BASE_URLS: dict[str, str] = {
     "U2": "https://u2.dmhy.org",
 }
 
-DIRECT_DOWNLOAD_TRACKER_CLASSES: dict[str, type[Any]] = {
-    "MTEAM": MTEAM,
+DIRECT_DOWNLOAD_TRACKER_CLASSES: dict[str, type[Any]] = {}
+
+MTEAM_API_TRACKERS: dict[str, str] = {
+    "MTEAM": "https://api.m-team.cc",
 }
 
 TTG_DOWNLOAD_BASE_URLS: dict[str, str] = {
@@ -140,6 +140,9 @@ async def fetch_source_info(config: dict[str, Any], tracker: str, source_id: str
     source_tracker = normalize_tracker(tracker)
     torrent_id = extract_torrent_id(source_id)
     meta = create_source_meta(base_dir)
+    if source_tracker in MTEAM_API_TRACKERS:
+        return await _fetch_mteam_source_info(config, source_tracker, torrent_id)
+
     if source_tracker in GENERIC_DETAILS_BASE_URLS:
         return await _fetch_generic_source_info(config, source_tracker, torrent_id, meta)
 
@@ -160,6 +163,10 @@ async def download_source_torrent(config: dict[str, Any], tracker: str, source_i
     torrent_id = extract_torrent_id(source_id)
     destination = await asyncio.to_thread(_prepare_destination, output_dir, source_tracker, torrent_id)
 
+    if source_tracker in MTEAM_API_TRACKERS:
+        await _download_mteam_source_torrent(config, torrent_id, destination)
+        return _validate_downloaded_torrent(destination)
+
     if source_tracker in DIRECT_DOWNLOAD_TRACKER_CLASSES:
         tracker_instance = DIRECT_DOWNLOAD_TRACKER_CLASSES[source_tracker](config=config)
         try:
@@ -177,6 +184,33 @@ async def download_source_torrent(config: dict[str, Any], tracker: str, source_i
         return _validate_downloaded_torrent(destination)
 
     raise ValueError(f"Source torrent download is not enabled for tracker: {source_tracker}")
+
+
+async def _fetch_mteam_source_info(config: dict[str, Any], tracker: str, torrent_id: str) -> SourceTorrentInfo:
+    async with MTeamApiClient(config) as client:
+        data = await client.torrent_detail(torrent_id)
+    return _mteam_source_info_from_detail(tracker, torrent_id, data)
+
+
+def _mteam_source_info_from_detail(tracker: str, torrent_id: str, data: Any) -> SourceTorrentInfo:
+    detail = data if isinstance(data, dict) else {}
+    douban_id, douban_url = _extract_douban_from_value(detail.get("douban"))
+    return SourceTorrentInfo(
+        tracker=tracker,
+        torrent_id=torrent_id,
+        imdb_id=_extract_id_from_url(detail.get("imdb"), r"tt(\d+)"),
+        tmdb_id=_extract_id_from_url(detail.get("tmdb"), r"/(?:movie|tv)/(\d+)"),
+        name=_optional_str(detail.get("name") or detail.get("title")),
+        torrenthash=_optional_str(detail.get("hash") or detail.get("infoHash")),
+        description_length=len(_optional_str(detail.get("descr") or detail.get("description")) or ""),
+        douban_id=douban_id,
+        douban_url=douban_url,
+    )
+
+
+async def _download_mteam_source_torrent(config: dict[str, Any], torrent_id: str, destination: Path) -> None:
+    async with MTeamApiClient(config) as client:
+        await client.download_torrent(torrent_id, destination)
 
 
 async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torrent_id: str, meta: dict[str, Any]) -> SourceTorrentInfo:
@@ -227,6 +261,25 @@ def _generic_details_url(tracker: str, torrent_id: str) -> str:
 def _extract_first_int(pattern: str, text: str) -> int | None:
     match = re.search(pattern, text, flags=re.IGNORECASE)
     return int(match.group(1)) if match else None
+
+
+def _extract_id_from_url(value: Any, pattern: str) -> int | None:
+    if not isinstance(value, str):
+        return None
+    return _extract_first_int(pattern, value)
+
+
+def _extract_douban_from_value(value: Any) -> tuple[str | None, str | None]:
+    if value is None:
+        return None, None
+    douban_value = str(value).strip()
+    if not douban_value:
+        return None, None
+    match = re.search(r"(?:/subject/)?(\d+)", douban_value)
+    if not match:
+        return None, None
+    douban_id = match.group(1)
+    return douban_id, f"https://movie.douban.com/subject/{douban_id}/"
 
 
 def _extract_douban(page_text: str, html: str) -> tuple[str | None, str | None]:
