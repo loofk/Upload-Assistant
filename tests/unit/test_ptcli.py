@@ -406,6 +406,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "torrent_hash": "a" * 40,
                     "source_torrent_path": "/tmp/U2-60635.torrent",
                     "source_save_path": "/downloads",
+                    "source_qbit_category": "SOURCE",
+                    "source_qbit_tags": "source-tag",
+                    "source_paused": True,
                     "content_path": "/downloads/Name",
                 },
                 "target": {
@@ -484,6 +487,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "source_torrent_hash": "a" * 40,
         "source_torrent_file": "/tmp/U2-60635.torrent",
         "source_save_path": "/downloads",
+        "source_qbit_category": "SOURCE",
+        "source_qbit_tags": "source-tag",
+        "source_paused": True,
         "uploaded_torrent_id": "999",
         "uploaded_torrent_hash": "b" * 40,
         "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
@@ -499,6 +505,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["source_torrent_file"] is True
     assert payload["resume_state"]["artifacts"]["source_torrent_hash"] is True
     assert payload["resume_state"]["artifacts"]["source_save_path"] is True
+    assert payload["resume_state"]["artifacts"]["source_qbit_category"] is True
+    assert payload["resume_state"]["artifacts"]["source_qbit_tags"] is True
+    assert payload["resume_state"]["artifacts"]["source_paused"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_hash"] is True
@@ -5066,6 +5075,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["source_torrent_file"].endswith("U2-60635.torrent")
     assert summary_payload["artifacts"]["source_torrent_hash"] == "a" * 40
     assert summary_payload["artifacts"]["source_save_path"] == "/downloads"
+    assert summary_payload["artifacts"]["source_qbit_category"] == "SOURCE"
+    assert summary_payload["artifacts"]["source_qbit_tags"] == "source-tag"
+    assert summary_payload["artifacts"]["source_paused"] is True
     assert summary_payload["artifacts"]["target_torrent_file"] == str(torrent_file)
     assert summary_payload["artifacts"]["target_package_dir"]
     assert summary_payload["artifacts"]["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
@@ -5081,6 +5093,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "source_torrent_file": True,
         "source_torrent_hash": True,
         "source_save_path": True,
+        "source_qbit_category": True,
+        "source_qbit_tags": True,
+        "source_paused": True,
         "target_package_dir": True,
         "target_torrent_file": True,
         "uploaded_torrent_id": True,
