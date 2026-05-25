@@ -288,6 +288,7 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--paused", action="store_true", help="Add injected source torrent paused.")
     retorrent.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait for qBittorrent completion during --execute.")
     retorrent.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds during --execute.")
+    retorrent.add_argument("--package-dir", help="Reuse an existing MTEAM package during --execute instead of preparing a new one.")
     retorrent.add_argument("--target-output-dir", default="./tmp/target", help="Directory for MTEAM target preparation package.")
     retorrent.add_argument("--target-torrent-file", help="MTEAM .torrent file used by the live upload stage.")
     retorrent.add_argument("--export-target-torrent", action="store_true", help="Export the matched qBittorrent .torrent as the target upload candidate if --target-torrent-file is omitted.")
@@ -538,8 +539,9 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         return {"status": "blocked", "plan": plan_payload, "blockers": plan.blockers}
     if not args.confirm_upload:
         return {"status": "blocked", "plan": plan_payload, "blockers": ["--confirm-upload is required with retorrent --execute."]}
-    if not args.content_path and not args.save_path:
-        return {"status": "blocked", "plan": plan_payload, "blockers": ["--path or --save-path is required with retorrent --execute."]}
+    package_upload_resume = bool(args.package_dir and (args.uploaded_torrent_file or args.uploaded_torrent_id))
+    if not args.content_path and not args.save_path and not package_upload_resume:
+        return {"status": "blocked", "plan": plan_payload, "blockers": ["--path or --save-path is required with retorrent --execute unless --package-dir is used with an uploaded torrent resume."]}
 
     pipeline_args = _pipeline_args_from_retorrent(args)
     pipeline_result = await pipeline_payload(pipeline_args)
@@ -787,8 +789,10 @@ def _retorrent_execute_blocker_next_action(blocker: str) -> str:
 
 
 def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespace:
-    needs_source_download = not bool(args.content_path or args.source_torrent_file)
-    needs_source_injection = not bool(args.content_path)
+    package_upload_resume = bool(args.package_dir and (args.uploaded_torrent_file or args.uploaded_torrent_id))
+    needs_source_download = not bool(args.content_path or args.source_torrent_file or package_upload_resume)
+    needs_source_injection = not bool(args.content_path or package_upload_resume)
+    target_execute = not bool(args.uploaded_torrent_file or args.uploaded_torrent_id)
     return argparse.Namespace(
         command="pipeline",
         config=args.config,
@@ -809,17 +813,17 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         wait_complete=needs_source_injection or bool(args.content_path),
         wait_timeout=args.wait_timeout,
         wait_interval=args.wait_interval,
-        prepare_target=True,
-        package_dir=None,
+        prepare_target=not bool(args.package_dir),
+        package_dir=args.package_dir,
         target_output_dir=args.target_output_dir,
-        check_dupes=True,
+        check_dupes=not bool(args.package_dir and (args.uploaded_torrent_file or args.uploaded_torrent_id)),
         accept_rules=args.accept_rules,
         upload_target=True,
         target_torrent_file=args.target_torrent_file,
         export_target_torrent=args.export_target_torrent or not bool(args.target_torrent_file),
         target_torrent_output_dir=args.target_torrent_output_dir,
         sanitize_target_torrent=args.sanitize_target_torrent,
-        target_execute=True,
+        target_execute=target_execute,
         confirm_upload=args.confirm_upload,
         write_payload=args.write_payload,
         download_uploaded_torrent=True,
