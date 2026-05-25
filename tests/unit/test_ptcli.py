@@ -6944,6 +6944,10 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["artifacts"]["target_torrent_file"]["is_file"] is True
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["path"] == str(tmp_path / "MTEAM-999.torrent")
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["is_file"] is True
+    assert summary_payload["resume_state"]["ready"] is True
+    assert summary_payload["resume_state"]["next_stage"] is None
+    assert summary_payload["resume_state"]["next_command"] is None
+    assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     assert "target-upload-retry" in commands
     assert str(tmp_path / "MTEAM-999.torrent") in commands["resume-uploaded-torrent"]
@@ -7058,7 +7062,11 @@ async def test_target_upload_recovery_blocks_missing_runtime_dependency(monkeypa
     summary_payload = json.loads((Path(package["package_dir"]) / "ptcli-target-upload-summary.json").read_text(encoding="utf-8"))
     assert summary_payload["preflight"]["runtime_check"]["ok"] is False
     assert summary_payload["summary"]["ready"] is False
+    assert summary_payload["resume_state"]["ready"] is False
+    assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent"
+    assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent"]
     assert "--inject-uploaded-torrent" in commands["target-upload-retry"]
 
 
@@ -7107,6 +7115,11 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert summary_payload["summary"]["uploaded_torrent_id"] == "999"
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    assert summary_payload["resume_state"]["resume_available"] is True
+    assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
+    assert summary_payload["resume_state"]["next_command"] == commands["resume-uploaded-torrent-download"]
+    assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
+    assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is False
     assert "--uploaded-torrent-id 999" in commands["resume-uploaded-torrent-download"]
     assert "--download-uploaded-torrent" in commands["resume-uploaded-torrent-download"]
     assert "--inject-uploaded-torrent" in commands["resume-uploaded-torrent-download"]

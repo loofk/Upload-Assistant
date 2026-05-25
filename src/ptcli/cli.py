@@ -957,6 +957,7 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
     destination = destination_dir / "ptcli-target-upload-summary.json"
     summary = _target_upload_summary(result, preflight)
     artifacts = _target_upload_summary_artifacts(result, preflight, args, str(destination))
+    recommended_commands = _target_upload_recommended_commands(summary, args, artifacts)
     payload = {
         "schema_version": 1,
         "kind": "ptcli.target_upload.summary",
@@ -965,7 +966,8 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
         "qbit_options": _target_upload_qbit_options(args),
         "summary": _target_upload_summary(result, preflight),
         "artifacts": artifacts,
-        "recommended_commands": _target_upload_recommended_commands(summary, args, artifacts),
+        "recommended_commands": recommended_commands,
+        "resume_state": _target_upload_resume_state(summary, artifacts, recommended_commands),
         "preflight": preflight,
         "result": result,
     }
@@ -1049,6 +1051,51 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
     if summary.get("ready"):
         commands.append({"stage": "verify-seeding", "command": _ptcli_command(["inspect", "--client", args.client, "--json"])})
     return commands
+
+
+def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, Any], recommended_commands: list[dict[str, str]]) -> dict[str, Any]:
+    commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in recommended_commands if isinstance(command, dict)}
+    resume_available = any(stage.startswith("resume-") for stage in commands_by_stage)
+    next_command = _target_upload_next_command(summary, commands_by_stage) if resume_available else {"stage": None, "command": None}
+    return {
+        "ready": bool(summary.get("ready")),
+        "resume_available": resume_available,
+        "next_stage": next_command.get("stage"),
+        "next_command": next_command.get("command"),
+        "available_stages": [str(command.get("stage")) for command in recommended_commands if isinstance(command, dict)],
+        "artifacts": {
+            "package_dir": bool(_path_artifact_exists(artifacts.get("package_dir"))),
+            "target_torrent_file": bool(_path_artifact_exists(artifacts.get("target_torrent_file"))),
+            "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
+            "uploaded_torrent_file": bool(_path_artifact_exists(artifacts.get("uploaded_torrent_file"))),
+            "uploaded_save_path": bool(_path_artifact_exists(artifacts.get("uploaded_save_path"))),
+        },
+        "blockers": _string_list(summary.get("blockers")),
+    }
+
+
+def _target_upload_next_command(summary: dict[str, Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
+    uploaded_wait = summary.get("uploaded_wait")
+    uploaded_wait_complete = isinstance(uploaded_wait, dict) and bool(uploaded_wait.get("complete"))
+    if summary.get("injected") and (summary.get("seeding_verified") or uploaded_wait_complete):
+        return {"stage": None, "command": None}
+    blockers = _string_list(summary.get("blockers"))
+    blocker_text = "\n".join(blockers)
+    preferred_stages: list[str] = []
+    if "downloaded_torrent" in blocker_text or not summary.get("downloaded"):
+        preferred_stages.append("resume-uploaded-torrent-download")
+    if "injected_torrent" in blocker_text or "uploaded_wait" in blocker_text or not summary.get("injected") or not summary.get("seeding_verified"):
+        preferred_stages.append("resume-uploaded-torrent")
+    preferred_stages.extend(["resume-uploaded-torrent-download", "resume-uploaded-torrent", "target-upload-retry"])
+    for stage in preferred_stages:
+        command = commands_by_stage.get(stage)
+        if command:
+            return {"stage": stage, "command": command}
+    return {"stage": None, "command": None}
+
+
+def _path_artifact_exists(artifact: Any) -> bool:
+    return isinstance(artifact, dict) and bool(artifact.get("path")) and artifact.get("exists") is not False
 
 
 def _target_upload_retry_command(args: argparse.Namespace) -> str:
