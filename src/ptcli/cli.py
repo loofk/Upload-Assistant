@@ -2908,7 +2908,7 @@ async def _existing_source_torrent_payload(source_torrent_file: str) -> dict[str
 
 
 async def _existing_uploaded_torrent_payload(uploaded_torrent_file: str) -> dict[str, Any]:
-    torrent = await asyncio.to_thread(_validate_existing_torrent_file, uploaded_torrent_file, "Uploaded target")
+    torrent = await asyncio.to_thread(_validate_existing_torrent_file, uploaded_torrent_file, "Uploaded target", True)
     return {
         "status": "uploaded",
         "downloaded_torrent": torrent,
@@ -4613,7 +4613,7 @@ def _with_downloaded_torrent_file_evidence(result: dict[str, Any]) -> dict[str, 
     downloaded_torrent = result.get("downloaded_torrent")
     if not isinstance(downloaded_torrent, dict) or not downloaded_torrent.get("path"):
         return result
-    evidence = _torrent_file_evidence(str(downloaded_torrent["path"]))
+    evidence = _torrent_file_evidence(str(downloaded_torrent["path"]), require_metadata=True)
     return {
         **result,
         "downloaded_torrent": {
