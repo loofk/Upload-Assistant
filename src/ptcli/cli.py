@@ -1591,6 +1591,7 @@ def summary_check_payload(args: argparse.Namespace) -> dict[str, Any]:
         return _summary_check_result({
             "status": "blocked",
             "summary_file": str(summary_path),
+            "automation_handoff": _summary_automation_handoff(str(summary_path)),
             "expected_schema_version": SUMMARY_SCHEMA_VERSION,
             "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
             "blockers": ["Summary file does not exist."],
@@ -1601,6 +1602,7 @@ def summary_check_payload(args: argparse.Namespace) -> dict[str, Any]:
         return _summary_check_result({
             "status": "blocked",
             "summary_file": str(summary_path),
+            "automation_handoff": _summary_automation_handoff(str(summary_path)),
             "expected_schema_version": SUMMARY_SCHEMA_VERSION,
             "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
             "blockers": [f"Summary file is not valid JSON: {exc.msg}"],
@@ -1609,6 +1611,7 @@ def summary_check_payload(args: argparse.Namespace) -> dict[str, Any]:
         return _summary_check_result({
             "status": "blocked",
             "summary_file": str(summary_path),
+            "automation_handoff": _summary_automation_handoff(str(summary_path)),
             "expected_schema_version": SUMMARY_SCHEMA_VERSION,
             "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
             "blockers": ["Summary file root must be a JSON object."],
@@ -1628,6 +1631,7 @@ def _summary_check_from_payload(payload: dict[str, Any], summary_file: str) -> d
         return _summary_check_result({
             "status": "blocked",
             "summary_file": summary_file,
+            "automation_handoff": _summary_automation_handoff(summary_file),
             "blockers": blockers,
             **diagnostics,
         })
@@ -1780,6 +1784,8 @@ def _summary_qbit_wait_from(container: dict[str, Any], fallback_key: str) -> dic
 def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     status = str(payload.get("status") or "blocked")
     blockers = _string_list(payload.get("blockers"))
+    summary_file = str(payload.get("summary_file") or "")
+    automation_handoff = payload.get("automation_handoff") if isinstance(payload.get("automation_handoff"), dict) else _summary_automation_handoff(summary_file)
     next_command = payload.get("next_command")
     next_command_argv = _summary_next_command_raw_argv(payload.get("next_command_argv")) if payload.get("next_command_argv") else _summary_next_command_raw_argv(str(next_command)) if next_command else None
     next_command_metadata = _summary_next_command_metadata(next_command_argv)
@@ -1810,6 +1816,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     automation_reason = _summary_automation_reason(payload, automation_action, blockers, next_command_run_blocker=next_command_metadata["run_blocker"])
     return {
         **payload,
+        "automation_handoff": automation_handoff,
         "automation_action": automation_action,
         "automation_reason": automation_reason,
         "next_command_ready": next_command_ready,
@@ -1820,7 +1827,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         "next_command_source": payload.get("next_command_source"),
         "candidate_commands": candidate_commands,
         "candidate_command_count": len(candidate_commands),
-        "runnable_command_count": sum(1 for command in candidate_commands if command["run_allowed"]),
+        "runnable_command_count": sum(1 for command in candidate_commands if isinstance(command, dict) and command.get("run_allowed") is True),
         "should_execute_next_command": automation_action == "run_next_command",
         "automation_exit_code": 0 if status == "ok" else 1,
     }
@@ -1886,6 +1893,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "status": "ok" if complete and ready and not blockers else "blocked",
         "kind": payload.get("kind"),
         "summary_file": summary_file,
+        "automation_handoff": _summary_automation_handoff(summary_file),
         "ready": ready,
         "complete": complete,
         "live_safe_to_attempt": complete and ready and not blockers,
@@ -1927,6 +1935,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "status": "ok" if ready and not blockers else "blocked",
         "kind": payload.get("kind"),
         "summary_file": summary_file,
+        "automation_handoff": _summary_automation_handoff(summary_file),
         "ready": ready,
         "complete": ready,
         "live_safe_to_attempt": ready and not blockers,
@@ -1967,6 +1976,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
         "status": "ok" if ready and live_safe and not blockers else "blocked",
         "kind": payload.get("kind"),
         "summary_file": summary_file,
+        "automation_handoff": _summary_automation_handoff(summary_file),
         "ready": ready,
         "complete": live_safe,
         "live_safe_to_attempt": live_safe and not blockers,

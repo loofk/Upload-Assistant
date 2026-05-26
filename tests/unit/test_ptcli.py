@@ -2547,6 +2547,9 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     assert payload["kind_supported"] is True
     assert payload["automation_action"] == "complete"
     assert payload["automation_reason"] == "Summary is complete and no follow-up command is required."
+    assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--json"]
+    assert payload["automation_handoff"]["print_next_argv"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--print-next-argv"]
+    assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--run-next-command"])
     assert payload["next_command_ready"] is False
     assert payload["next_command_run_allowed"] is False
     assert payload["next_command_subcommand"] is None
@@ -3968,6 +3971,7 @@ def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> No
     assert payload["schema_version_ok"] is False
     assert payload["kind_supported"] is True
     assert payload["automation_action"] == "replace_summary"
+    assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--json"]
     assert payload["should_execute_next_command"] is False
     assert any("Unsupported summary schema_version" in blocker for blocker in payload["blockers"])
 
@@ -3991,8 +3995,21 @@ def test_summary_check_blocks_unknown_kind_with_supported_kinds(tmp_path, capsys
     assert payload["status"] == "blocked"
     assert payload["schema_version_ok"] is True
     assert payload["kind_supported"] is False
+    assert payload["automation_handoff"]["print_shell"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--print-shell"]
     assert "ptcli.pipeline.run_summary" in payload["supported_kinds"]
     assert "Unsupported ptcli summary kind: not.ptcli" in payload["blockers"]
+
+
+def test_summary_check_missing_file_includes_automation_handoff(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "missing-summary.json"
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["automation_action"] == "provide_summary"
+    assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--json"]
+    assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--run-next-command"])
 
 
 def test_target_upload_result_requires_requested_uploaded_torrent_injection() -> None:
