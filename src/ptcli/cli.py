@@ -1219,6 +1219,8 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
         "summary_file": str(destination),
         "client": args.client,
         "qbit_options": _target_upload_qbit_options(args),
+        "output_options": _target_upload_output_options(args),
+        "wait_options": _target_upload_wait_options(args),
         "summary": summary,
         "artifacts": artifacts,
         "recommended_commands": recommended_commands,
@@ -1526,6 +1528,22 @@ def _target_upload_qbit_options(args: argparse.Namespace) -> dict[str, Any]:
             "category": args.uploaded_qbit_category,
             "tags": args.uploaded_qbit_tags,
             "paused": bool(args.uploaded_paused),
+        },
+    }
+
+
+def _target_upload_output_options(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "uploaded_output_dir": args.uploaded_output_dir,
+        "summary_output_dir": args.summary_output_dir,
+    }
+
+
+def _target_upload_wait_options(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "uploaded": {
+            "timeout": args.uploaded_wait_timeout,
+            "interval": args.uploaded_wait_interval,
         },
     }
 

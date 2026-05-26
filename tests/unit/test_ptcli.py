@@ -10208,6 +10208,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["summary_file"] == str(summary_path)
     assert summary_payload["client"] == "default"
     assert summary_payload["qbit_options"] == {"uploaded": {"category": "MTEAM", "tags": "retorrent", "paused": True}}
+    assert summary_payload["output_options"] == {"uploaded_output_dir": None, "summary_output_dir": str(tmp_path / "summary")}
+    assert summary_payload["wait_options"] == {"uploaded": {"timeout": 42.0, "interval": 3.0}}
     assert summary_payload["summary"]["uploaded"] is True
     assert summary_payload["summary"]["injected"] is True
     assert summary_payload["summary"]["injection_verified"] is True
@@ -10711,6 +10713,9 @@ async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_p
     assert result["injected_torrent"]["tags"] == "retorrent"
     assert result["injected_torrent"]["paused"] is True
     assert result["uploaded_wait"]["complete"] is True
+    summary_payload = json.loads((Path(package["package_dir"]) / "ptcli-target-upload-summary.json").read_text(encoding="utf-8"))
+    assert summary_payload["output_options"] == {"uploaded_output_dir": "uploaded", "summary_output_dir": None}
+    assert summary_payload["wait_options"] == {"uploaded": {"timeout": 600.0, "interval": 15.0}}
 
 
 @pytest.mark.asyncio
