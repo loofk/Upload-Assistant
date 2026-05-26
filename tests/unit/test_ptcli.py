@@ -2833,11 +2833,11 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
                                     "seeding_state_count": 1,
                                     "requested_hash_matched": False,
                                     "requested_content_path_matched": None,
-                                    "observed_hashes": ["f" * 40],
-                                    "observed_content_paths": ["/downloads/Other"],
-                                    "observed_save_paths": ["/downloads"],
-                                    "observed_states": ["uploading"],
-                                    "observed_progress": [1.0],
+                                    "observed_hashes": ["f" * 40, "e" * 40],
+                                    "observed_content_paths": ["/downloads/Other", "/downloads/Second"],
+                                    "observed_save_paths": ["/downloads", "/downloads2"],
+                                    "observed_states": ["uploading", "stalledUP"],
+                                    "observed_progress": [1.0, 0.5],
                                 },
                                 "blockers": ["qBittorrent matched torrents, but none matched requested hash bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb."],
                             }
@@ -2883,15 +2883,20 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
     assert diagnostics["seeding_state_count"] == 1
     assert diagnostics["complete_count"] == 1
     assert diagnostics["requested_hash_matched"] is False
-    assert diagnostics["observed_hashes"] == ["f" * 40]
-    assert diagnostics["observed_content_paths"] == ["/downloads/Other"]
-    assert diagnostics["observed_states"] == ["uploading"]
-    assert diagnostics["observed_progress"] == [1.0]
+    assert diagnostics["observed_hashes"] == ["f" * 40, "e" * 40]
+    assert diagnostics["observed_content_paths"] == ["/downloads/Other", "/downloads/Second"]
+    assert diagnostics["observed_states"] == ["uploading", "stalledUP"]
+    assert diagnostics["observed_progress"] == [1.0, 0.5]
     retry_hint = payload["qbit_wait_retry_hints"]["source"]
     assert retry_hint["retry_recommended"] is True
     assert retry_hint["suggested_torrent_hash"] == "f" * 40
     assert retry_hint["suggested_content_path"] == "/downloads/Expected"
     assert retry_hint["suggested_save_path"] == "/downloads"
+    assert retry_hint["observed_candidate_count"] == 2
+    assert retry_hint["observed_candidates"] == [
+        {"hash": "f" * 40, "content_path": "/downloads/Other", "save_path": "/downloads", "state": "uploading", "progress": 1.0},
+        {"hash": "e" * 40, "content_path": "/downloads/Second", "save_path": "/downloads2", "state": "stalledUP", "progress": 0.5},
+    ]
     assert retry_hint["reason"] == "source qBittorrent wait matched a different torrent/content than requested_hash."
 
 

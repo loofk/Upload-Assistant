@@ -1826,6 +1826,7 @@ def _summary_qbit_wait_retry_hints(qbit_wait_diagnostics: dict[str, Any]) -> dic
         observed_hash = _first_string(diagnostics.get("observed_hashes"))
         observed_content_path = _first_string(diagnostics.get("observed_content_paths"))
         observed_save_path = _first_string(diagnostics.get("observed_save_paths"))
+        observed_candidates = _qbit_wait_observed_candidates(diagnostics)
         suggested_hash = observed_hash if diagnostics.get("requested_hash_matched") is False or not diagnostics.get("requested_hash") else diagnostics.get("requested_hash")
         suggested_content_path = observed_content_path if diagnostics.get("requested_content_path_matched") is False or not diagnostics.get("requested_content_path") else diagnostics.get("requested_content_path")
         hints[str(scope)] = {
@@ -1833,9 +1834,38 @@ def _summary_qbit_wait_retry_hints(qbit_wait_diagnostics: dict[str, Any]) -> dic
             "suggested_torrent_hash": suggested_hash,
             "suggested_content_path": suggested_content_path,
             "suggested_save_path": observed_save_path or diagnostics.get("requested_save_path"),
+            "observed_candidate_count": len(observed_candidates),
+            "observed_candidates": observed_candidates,
             "reason": _qbit_wait_retry_reason(str(scope), diagnostics) if request_mismatch else None,
         }
     return hints
+
+
+def _qbit_wait_observed_candidates(diagnostics: dict[str, Any]) -> list[dict[str, Any]]:
+    observed_hashes = diagnostics.get("observed_hashes") if isinstance(diagnostics.get("observed_hashes"), list) else []
+    observed_content_paths = diagnostics.get("observed_content_paths") if isinstance(diagnostics.get("observed_content_paths"), list) else []
+    observed_save_paths = diagnostics.get("observed_save_paths") if isinstance(diagnostics.get("observed_save_paths"), list) else []
+    observed_states = diagnostics.get("observed_states") if isinstance(diagnostics.get("observed_states"), list) else []
+    observed_progress = diagnostics.get("observed_progress") if isinstance(diagnostics.get("observed_progress"), list) else []
+    candidate_count = max(len(observed_hashes), len(observed_content_paths), len(observed_save_paths), len(observed_states), len(observed_progress))
+    candidates: list[dict[str, Any]] = []
+    for index in range(candidate_count):
+        candidate = {
+            "hash": _list_value(observed_hashes, index),
+            "content_path": _list_value(observed_content_paths, index),
+            "save_path": _list_value(observed_save_paths, index),
+            "state": _list_value(observed_states, index),
+            "progress": _list_value(observed_progress, index),
+        }
+        candidates.append({key: value for key, value in candidate.items() if value is not None})
+    return candidates
+
+
+def _list_value(items: list[Any], index: int) -> Any:
+    if index >= len(items):
+        return None
+    value = items[index]
+    return value if isinstance(value, (str, int, float, bool)) else None
 
 
 def _qbit_wait_retry_reason(scope: str, diagnostics: dict[str, Any]) -> str:

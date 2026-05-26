@@ -101,7 +101,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downlo
 所有本地 `.torrent` 文件证据都会同时暴露 `hash`、`torrent_hash` 和 `infohash`（同一个 infohash 值），让脚本可以用统一的 `hash` 字段把下载的种子文件、qBittorrent 注入结果和等待结果串起来。
 qBittorrent 等待完成证据还必须匹配请求的 torrent hash 和内容路径；即使缺少 `completion_verification`，也会用 `query` 与 `matches` 复核，避免把别的已完成任务当作本次转种闭环。
 `qbit_wait_diagnostics` 会同时暴露请求的 hash、内容路径、保存路径、等待参数，以及 qBittorrent 实际观察到的 hash、内容路径、保存路径、状态和进度，便于自动化脚本在 mismatch 时选择正确的恢复参数。
-`qbit_wait_retry_hints` 会在 wait query mismatch 时给出保守的 `retry_recommended`、`suggested_torrent_hash`、`suggested_content_path` 和 `suggested_save_path`，这些值来自 qBittorrent 实际观测结果，供盒子脚本生成下一次恢复参数。
+`qbit_wait_retry_hints` 会在 wait query mismatch 时给出保守的 `retry_recommended`、`suggested_torrent_hash`、`suggested_content_path` 和 `suggested_save_path`，这些值来自 qBittorrent 实际观测结果，供盒子脚本生成下一次恢复参数；如果 qBittorrent 返回多个匹配项，`observed_candidates` 会保留按序对齐的 hash、内容路径、保存路径、状态和进度，避免只靠第一个候选做判断。
 `retorrent --execute` 的 `next_actions` 在遇到 qBittorrent wait mismatch 时也会带出这些 suggested 值，方便人或 agent 不展开完整 diagnostics 就能看到下一次重试应优先核对的 hash/path。
 `summary-check` 的 `automation_reason` 也会在 `resolve_qbit_wait_mismatch` 时附带相同 suggested 值，便于只记录 reason 的盒子日志保留恢复线索。
 `closure_status` 是面向调度器的机器可读摘要，会把 pipeline 状态、closure blockers、closure audit 缺口、qBittorrent wait mismatch，以及 source/target 两侧的 ready/hash/rule/wait 关键布尔值收敛到一个入口。
