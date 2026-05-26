@@ -500,7 +500,7 @@ def build_plan(args: argparse.Namespace) -> RetorrentPlan:
         "upload only to targets that pass validation",
         "inject uploaded torrents into qBittorrent for seeding",
     ]
-    commands = build_plan_commands(source_tracker, source_torrent_id, target_trackers, args.content_path)
+    commands = build_plan_commands(source_tracker, source_torrent_id, target_trackers, args.content_path, config=args.config, client=args.client, base_dir=args.base_dir)
 
     return RetorrentPlan(
         source_tracker=source_tracker,
@@ -5061,7 +5061,16 @@ async def _target_connection_check(config: dict[str, Any], target_trackers_raw: 
     }
 
 
-def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trackers: list[str], content_path: str | None) -> list[dict[str, Any]]:
+def build_plan_commands(
+    source_tracker: str,
+    source_torrent_id: str,
+    target_trackers: list[str],
+    content_path: str | None,
+    *,
+    config: str | None = None,
+    client: str = "default",
+    base_dir: str | None = None,
+) -> list[dict[str, Any]]:
     target_trackers_arg = ",".join(target_trackers)
     retorrent_path_arg = f"--path {json.dumps(content_path, ensure_ascii=False)}" if content_path else '--save-path "/downloads"'
     doctor_path_arg = f"--path {json.dumps(content_path, ensure_ascii=False)}" if content_path else '--uploaded-save-path "/downloads"'
@@ -5131,7 +5140,37 @@ def build_plan_commands(source_tracker: str, source_torrent_id: str, target_trac
                 ["match", "--path", content_path, "--json"],
             )
         )
-    return commands
+    return _augment_plan_commands(commands, config=config, client=client, base_dir=base_dir)
+
+
+def _augment_plan_commands(commands: list[dict[str, Any]], *, config: str | None, client: str, base_dir: str | None) -> list[dict[str, Any]]:
+    supports_config = {"source-info", "source-download", "flow-check", "doctor", "pipeline", "target-upload", "retorrent", "match", "export", "inspect"}
+    supports_client = {"flow-check", "doctor", "pipeline", "target-upload", "retorrent", "match", "export", "inspect"}
+    supports_base_dir = {"source-info", "source-download", "flow-check", "doctor", "pipeline", "retorrent"}
+    augmented: list[dict[str, Any]] = []
+    for command in commands:
+        argv = _argv_list(command.get("argv"))
+        if len(argv) < 3:
+            augmented.append(command)
+            continue
+        original_argv = list(argv)
+        subcommand = argv[2]
+        if config and subcommand in supports_config:
+            _append_absent_option(argv, "--config", config)
+        if client != "default" and subcommand in supports_client:
+            _append_absent_option(argv, "--client", client)
+        if base_dir and subcommand in supports_base_dir:
+            _append_absent_option(argv, "--base-dir", base_dir)
+        if argv == original_argv:
+            augmented.append(command)
+        else:
+            augmented.append({"stage": command.get("stage"), "command": shlex.join(argv), "argv": argv})
+    return augmented
+
+
+def _append_absent_option(argv: list[str], option: str, value: str) -> None:
+    if option not in argv:
+        argv.extend([option, value])
 
 
 def _plan_command_entry(stage: str, command: str, args: list[str]) -> dict[str, Any]:

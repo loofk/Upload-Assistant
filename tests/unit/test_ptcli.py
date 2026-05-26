@@ -443,6 +443,52 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
     assert command_argv["retorrent-execute"][:3] == ["python3", "ptcli.py", "retorrent"]
 
 
+def test_retorrent_plan_commands_preserve_runtime_context() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--config",
+            "/etc/ua/config.py",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--path",
+            "/downloads/Example",
+            "--client",
+            "seedbox",
+            "--base-dir",
+            "/srv/Upload-Assistant",
+            "--dry-run",
+            "--json",
+        ]
+    )
+
+    plan = build_plan(args)
+    command_argv = {command["stage"]: command["argv"] for command in plan.commands}
+    commands = {command["stage"]: command["command"] for command in plan.commands}
+
+    assert "--config /etc/ua/config.py" in commands["source-info"]
+    assert "--base-dir /srv/Upload-Assistant" in commands["source-info"]
+    assert "/etc/ua/config.py" in command_argv["source-download"]
+    assert "/srv/Upload-Assistant" in command_argv["source-download"]
+    assert "--client seedbox" in commands["resume-source-torrent"]
+    assert "--config /etc/ua/config.py" in commands["resume-target-package"]
+    assert "--client seedbox" in commands["resume-target-package"]
+    assert "--base-dir /srv/Upload-Assistant" in commands["resume-target-package"]
+    assert "--client seedbox" in commands["doctor-live"]
+    assert "--base-dir /srv/Upload-Assistant" in commands["doctor-live"]
+    assert "--config /etc/ua/config.py" in commands["retorrent-execute"]
+    assert "--client seedbox" in commands["retorrent-execute"]
+    assert "--base-dir /srv/Upload-Assistant" in commands["retorrent-execute"]
+    assert "--client seedbox" in commands["match"]
+    assert "/etc/ua/config.py" in command_argv["match"]
+    assert "--base-dir" not in command_argv["match"]
+
+
 def test_retorrent_execute_blocked_returns_nonzero(capsys, tmp_path) -> None:
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
