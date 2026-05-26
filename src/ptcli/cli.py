@@ -1795,14 +1795,40 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         automation_action = "repair_closure"
     else:
         automation_action = "resolve_blockers"
+    automation_reason = _summary_automation_reason(payload, automation_action, blockers)
     return {
         **payload,
         "automation_action": automation_action,
+        "automation_reason": automation_reason,
         "next_command_ready": next_command_ready,
         "next_command_placeholder": next_command_placeholder,
         "should_execute_next_command": automation_action == "run_next_command",
         "automation_exit_code": 0 if status == "ok" else 1,
     }
+
+
+def _summary_automation_reason(payload: dict[str, Any], automation_action: str, blockers: list[str]) -> str:
+    if automation_action == "complete":
+        return "Summary is complete and no follow-up command is required."
+    if automation_action == "resolve_qbit_wait_mismatch":
+        mismatches = ", ".join(_string_list(payload.get("qbit_wait_mismatches")))
+        return f"qBittorrent wait evidence mismatched the requested torrent/content: {mismatches}." if mismatches else "qBittorrent wait evidence mismatched the requested torrent/content."
+    if automation_action == "fill_command_placeholders":
+        return "Next command contains placeholders and requires manual values before execution."
+    if automation_action == "run_next_command":
+        stage = payload.get("next_stage")
+        return f"Next generated ptcli command is ready to run for stage {stage}." if stage else "Next generated ptcli command is ready to run."
+    if automation_action == "replace_summary":
+        return "Summary schema or kind is unsupported; regenerate the summary with the current ptcli."
+    if automation_action == "provide_summary":
+        return "Summary file is missing and must be provided before automation can continue."
+    if automation_action == "restore_artifacts":
+        return "Required artifacts are missing from the summary and must be restored or regenerated."
+    if automation_action == "repair_closure":
+        return "Closure audit is missing required evidence and must be repaired before automation can continue."
+    if blockers:
+        return f"Resolve blockers before automation can continue: {blockers[0]}"
+    return "Resolve blockers before automation can continue."
 
 
 def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
@@ -5394,6 +5420,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     fields = {
         "PTCLI_SUMMARY_STATUS": payload.get("status"),
         "PTCLI_AUTOMATION_ACTION": payload.get("automation_action"),
+        "PTCLI_AUTOMATION_REASON": payload.get("automation_reason"),
         "PTCLI_AUTOMATION_EXIT_CODE": payload.get("automation_exit_code"),
         "PTCLI_NEXT_STAGE": payload.get("next_stage"),
         "PTCLI_NEXT_COMMAND": payload.get("next_command"),

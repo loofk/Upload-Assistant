@@ -2500,6 +2500,7 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     assert payload["schema_version_ok"] is True
     assert payload["kind_supported"] is True
     assert payload["automation_action"] == "complete"
+    assert payload["automation_reason"] == "Summary is complete and no follow-up command is required."
     assert payload["next_command_ready"] is False
     assert payload["should_execute_next_command"] is False
     assert payload["automation_exit_code"] == 0
@@ -3039,6 +3040,7 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
     assert payload["next_stage"] == "resume-target-upload"
     assert payload["next_command"] == "python3 ptcli.py pipeline --upload-target"
     assert payload["automation_action"] == "run_next_command"
+    assert payload["automation_reason"] == "Next generated ptcli command is ready to run for stage resume-target-upload."
     assert payload["next_command_ready"] is True
     assert payload["should_execute_next_command"] is True
     assert payload["automation_exit_code"] == 1
@@ -3197,6 +3199,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     out = capsys.readouterr().out
     assert "export PTCLI_SUMMARY_STATUS=blocked\n" in out
     assert "export PTCLI_AUTOMATION_ACTION=run_next_command\n" in out
+    assert "export PTCLI_AUTOMATION_REASON='Next generated ptcli command is ready to run for stage resume-target-upload.'\n" in out
     assert "export PTCLI_AUTOMATION_EXIT_CODE=1\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=0\n" in out
@@ -3241,6 +3244,7 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
     assert code == 0
     out = capsys.readouterr().out
     assert "export PTCLI_AUTOMATION_ACTION=resolve_qbit_wait_mismatch\n" in out
+    assert "export PTCLI_AUTOMATION_REASON='qBittorrent wait evidence mismatched the requested torrent/content: source.requested_hash.'\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=0\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCHES=source.requested_hash\n" in out
