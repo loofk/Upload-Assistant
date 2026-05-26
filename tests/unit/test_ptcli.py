@@ -2230,6 +2230,114 @@ def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> 
     assert payload["source_torrent_verification"]["expected_hash"] == source_hash
     assert payload["source_torrent_verification"]["actual_hash"] == source_hash
     assert payload["source_torrent_verification"]["verified"] is True
+    assert payload["qbit_handoff"]["ready"] is False
+    assert payload["qbit_handoff"]["blockers"] == ["--save-path is required before the generated qBittorrent source injection handoff can run."]
+    assert payload["next_stage"] == "resume-source-torrent"
+    assert payload["next_command_ready"] is False
+    assert payload["next_command_placeholder"] is True
+    assert payload["should_execute_next_command"] is False
+    assert payload["recommended_commands"][0]["stage"] == "resume-source-torrent"
+    assert payload["recommended_commands"][0]["argv"][:3] == ["python3", "ptcli.py", "pipeline"]
+    assert "--source-torrent-file" in payload["next_command_argv"]
+    assert payload["source_torrent"]["path"] in payload["next_command_argv"]
+    assert "--save-path" in payload["next_command_argv"]
+    assert "<save-path>" in payload["next_command_argv"]
+
+
+def test_source_download_generates_ready_qbit_handoff(monkeypatch, capsys, tmp_path) -> None:
+    source_url = "https://u2.dmhy.org/details.php?id=60635&hit=1"
+    expected_torrent_path = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(expected_torrent_path, tmp_path / "source-content" / "Name.mkv")
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (_config, base_dir)
+        return source_info_from_tuple(tracker, extract_torrent_id(source_id), (1, 2, "Name", source_hash, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (tracker, base_dir)
+        assert source_id == source_url
+        assert output_dir == "source-out"
+        return expected_torrent_path
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+
+    code = main(
+        [
+            "source-download",
+            "--config",
+            "/etc/ua/config.py",
+            "--tracker",
+            "U2",
+            "--source-id",
+            source_url,
+            "--to",
+            "MTEAM",
+            "--output-dir",
+            "source-out",
+            "--client",
+            "box",
+            "--base-dir",
+            "/srv/Upload-Assistant",
+            "--save-path",
+            "/downloads",
+            "--qbit-category",
+            "SOURCE",
+            "--qbit-tags",
+            "retorrent",
+            "--paused",
+            "--wait-timeout",
+            "900",
+            "--wait-interval",
+            "10",
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ok"
+    assert payload["qbit_handoff"]["ready"] is True
+    assert payload["qbit_handoff"]["blockers"] == []
+    assert payload["next_command_ready"] is True
+    assert payload["next_command_placeholder"] is False
+    assert payload["should_execute_next_command"] is True
+    assert payload["next_command_argv"] == [
+        "python3",
+        "ptcli.py",
+        "pipeline",
+        "--from",
+        "U2",
+        "--source-id",
+        "60635",
+        "--to",
+        "MTEAM",
+        "--source-torrent-file",
+        payload["source_torrent"]["path"],
+        "--inject-source",
+        "--save-path",
+        "/downloads",
+        "--wait-complete",
+        "--accept-rules",
+        "--json",
+        "--config",
+        "/etc/ua/config.py",
+        "--client",
+        "box",
+        "--base-dir",
+        "/srv/Upload-Assistant",
+        "--qbit-category",
+        "SOURCE",
+        "--qbit-tags",
+        "retorrent",
+        "--paused",
+        "--wait-timeout",
+        "900",
+        "--wait-interval",
+        "10",
+    ]
 
 
 def test_source_download_blocks_unreadable_torrent_metadata(monkeypatch, capsys, tmp_path) -> None:

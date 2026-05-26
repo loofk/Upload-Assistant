@@ -139,6 +139,13 @@ def build_parser() -> argparse.ArgumentParser:
     source_download.add_argument("--source-id", required=True, help="Source tracker torrent id or details URL.")
     source_download.add_argument("--to", dest="target_trackers", help="Target tracker codes for executable source-download rule gates.")
     source_download.add_argument("--output-dir", required=True, help="Directory where the source .torrent file will be written.")
+    source_download.add_argument("--client", default="default", help="Configured qBittorrent client name for the generated source injection handoff.")
+    source_download.add_argument("--save-path", help="qBittorrent save path for the generated source injection handoff.")
+    source_download.add_argument("--qbit-category", help="Optional qBittorrent category for the generated source injection handoff.")
+    source_download.add_argument("--qbit-tags", help="Optional qBittorrent tags for the generated source injection handoff.")
+    source_download.add_argument("--paused", action="store_true", help="Mark the generated source injection handoff as paused.")
+    source_download.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds for the generated source completion wait handoff.")
+    source_download.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds for the generated source completion wait handoff.")
     source_download.add_argument("--base-dir", help="Project/base directory used for cookies, defaults to current directory.")
     source_download.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
     source_download.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
@@ -439,6 +446,7 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
     output_path = await download_source_torrent(config, source_tracker, args.source_id, args.output_dir, base_dir=args.base_dir)
     source_torrent = _torrent_file_evidence(output_path, require_metadata=True)
     source_torrent_verification = _source_torrent_verify_stage({"result": source_torrent}, source.get("torrenthash"))
+    qbit_handoff = _source_download_qbit_handoff(args, source_torrent["path"], target_trackers)
     if not source_torrent_verification.get("ok"):
         verification = source_torrent_verification.get("result", {})
         verification_blockers = verification.get("blockers") if isinstance(verification, dict) else None
@@ -452,6 +460,8 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
             "source": source,
             "source_torrent": source_torrent,
             "source_torrent_verification": verification,
+            "qbit_handoff": qbit_handoff,
+            "recommended_commands": [qbit_handoff["command"]],
             "path": source_torrent["path"],
             "blockers": blockers,
         }
@@ -464,8 +474,62 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
         "source": source,
         "source_torrent": source_torrent,
         "source_torrent_verification": source_torrent_verification["result"],
+        "qbit_handoff": qbit_handoff,
+        "recommended_commands": [qbit_handoff["command"]],
+        "next_stage": qbit_handoff["stage"],
+        "next_command": qbit_handoff["command"]["command"],
+        "next_command_argv": qbit_handoff["command"]["argv"],
+        "next_command_ready": qbit_handoff["ready"],
+        "next_command_placeholder": not qbit_handoff["ready"],
+        "should_execute_next_command": qbit_handoff["ready"],
         "path": source_torrent["path"],
     }
+
+
+def _source_download_qbit_handoff(args: argparse.Namespace, source_torrent_file: str, target_trackers: list[str]) -> dict[str, Any]:
+    command_args = [
+        "pipeline",
+        "--from",
+        normalize_tracker(args.tracker),
+        "--source-id",
+        extract_torrent_id(args.source_id),
+        "--to",
+        ",".join(target_trackers),
+        "--source-torrent-file",
+        source_torrent_file,
+        "--inject-source",
+        "--save-path",
+        args.save_path or "<save-path>",
+        "--wait-complete",
+        "--accept-rules",
+        "--json",
+    ]
+    _append_optional_command_arg(command_args, "--config", args.config)
+    _append_optional_command_arg(command_args, "--client", args.client)
+    _append_optional_command_arg(command_args, "--base-dir", args.base_dir)
+    _append_optional_command_arg(command_args, "--qbit-category", args.qbit_category)
+    _append_optional_command_arg(command_args, "--qbit-tags", args.qbit_tags)
+    if args.paused:
+        command_args.append("--paused")
+    _append_float_command_arg(command_args, "--wait-timeout", args.wait_timeout, default=3600.0)
+    _append_float_command_arg(command_args, "--wait-interval", args.wait_interval, default=30.0)
+    ready = bool(args.save_path)
+    return {
+        "stage": "resume-source-torrent",
+        "ready": ready,
+        "blockers": [] if ready else ["--save-path is required before the generated qBittorrent source injection handoff can run."],
+        "command": _ptcli_command_entry("resume-source-torrent", command_args),
+    }
+
+
+def _append_optional_command_arg(command_args: list[str], option: str, value: Any) -> None:
+    if value is not None and value != "":
+        command_args.extend([option, str(value)])
+
+
+def _append_float_command_arg(command_args: list[str], option: str, value: Any, *, default: float) -> None:
+    if value is not None and float(value) != default:
+        command_args.extend([option, f"{float(value):g}"])
 
 
 def build_plan(args: argparse.Namespace) -> RetorrentPlan:
