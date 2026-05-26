@@ -122,7 +122,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --package-dir .
 ```
 
 `pipeline --package-dir ... --upload-target --uploaded-torrent-id/--uploaded-torrent-file` 会按恢复语义自动开启上传后新种的下载（仅 ID 场景）、注入和等待完成；若准备包里能推导内容路径，可以不额外传 `--uploaded-save-path`。run summary 生成的上传后恢复命令会显式带上 `--download-uploaded-torrent`（ID 场景）、`--inject-uploaded-torrent` 和 `--wait-uploaded-complete`，让命令文本与实际闭环动作一致。
-`target-upload --write-summary` 生成的上传后恢复命令会保留 `--config`、summary 输出目录、qBittorrent 分类/标签和等待参数，避免盒子续跑时退回默认配置。
+`target-upload` 本次 JSON 会同步返回 `summary`、`artifacts`、`recommended_commands`、`resume_state`、`next_command_*`、候选命令审计字段和 `automation_action`；`target-upload --write-summary` 生成的上传后恢复命令会保留 `--config`、summary 输出目录、qBittorrent 分类/标签和等待参数，避免盒子续跑时退回默认配置。
 如果源站下载阶段还没产出本地 `.torrent`，run summary 会生成 `resume-source-download`，用于重新拉取源种并按原来的 qBittorrent 分类、标签、暂停状态、save path 和等待参数继续源侧闭环；已有源种文件时仍优先使用 `resume-source-torrent` 精确续跑。
 单独运行 `source-download --json` 时也会返回 `qbit_handoff`、`recommended_commands` 和 `next_command_*`；如果同时传入 `--save-path`、`--client`、`--qbit-category`、`--qbit-tags`、`--paused` 或等待参数，它会生成可直接执行的 `pipeline --source-torrent-file ... --inject-source --wait-complete` 命令。未传 `--save-path` 时命令会保留 `<save-path>` 占位符，并标记 `next_command_placeholder=true`，避免盒子脚本误执行不完整命令。
 

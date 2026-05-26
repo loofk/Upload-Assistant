@@ -11854,6 +11854,18 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert result["qbit_wait_mismatch"] is False
     assert result["qbit_wait_mismatches"] == []
     assert result["qbit_wait_diagnostics"]["uploaded"]["complete"] is True
+    assert result["summary"]["ready"] is True
+    assert result["resume_state"]["ready"] is True
+    assert result["resume_state"]["next_stage"] is None
+    assert result["next_command"] is None
+    assert result["automation_action"] == "complete"
+    assert result["automation_reason"] == "Summary is complete and no follow-up command is required."
+    assert result["automation_exit_code"] == 0
+    assert result["should_execute_next_command"] is False
+    assert result["candidate_command_count"] == 4
+    assert result["runnable_command_count"] == 2
+    assert result["recommended_commands"][0]["stage"] == "target-upload-retry"
+    assert result["first_runnable_stage"] == "target-upload-retry"
     summary_path = Path(result["summary_file"])
     assert summary_path == tmp_path / "summary" / "ptcli-target-upload-summary.json"
     assert result["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
@@ -12441,6 +12453,19 @@ async def test_target_upload_download_only_records_uploaded_torrent_file_evidenc
     assert result["summary"]["uploaded_torrent"]["exists"] is True
     assert result["summary"]["uploaded_torrent_hash"] == result["downloaded_torrent"]["torrent_hash"]
     assert result["summary"]["mode"] == "resumed_uploaded_id"
+    assert result["resume_state"]["ready"] is True
+    assert result["resume_state"]["next_stage"] == "resume-uploaded-torrent"
+    assert result["next_command"] == result["resume_state"]["next_command"]
+    assert "--uploaded-torrent-file" in result["next_command_argv"]
+    assert str(uploaded_path) in result["next_command_argv"]
+    assert result["next_command_ready"] is True
+    assert result["next_command_run_allowed"] is True
+    assert result["automation_action"] == "run_next_command"
+    assert result["automation_reason"] == "Next generated ptcli command is ready to run for stage resume-uploaded-torrent."
+    assert result["automation_exit_code"] == 1
+    assert result["should_execute_next_command"] is True
+    assert result["candidate_command_count"] == 4
+    assert result["runnable_command_count"] == 2
 
 
 @pytest.mark.asyncio

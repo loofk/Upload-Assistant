@@ -1395,10 +1395,57 @@ def _uploaded_torrent_id_reuse_blockers(args: argparse.Namespace, *, inferred_up
 def _maybe_write_target_upload_summary(args: argparse.Namespace, result: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
     summary = _target_upload_summary(result, preflight, args)
     qbit_wait_fields = _qbit_wait_summary_fields({"summary": summary, "result": result})
+    handoff_fields = _target_upload_handoff_fields(summary, result, preflight, args, summary_file=None)
     if not getattr(args, "write_summary", False):
-        return {**result, **qbit_wait_fields}
+        return {**result, **handoff_fields, **qbit_wait_fields}
     summary_file = _write_target_upload_summary(result, preflight, args, args.summary_output_dir or args.package_dir)
-    return {**result, "summary": summary, "summary_file": summary_file, "automation_handoff": _summary_automation_handoff(summary_file), **qbit_wait_fields}
+    handoff_fields = _target_upload_handoff_fields(summary, result, preflight, args, summary_file=summary_file)
+    return {**result, **handoff_fields, "summary_file": summary_file, "automation_handoff": _summary_automation_handoff(summary_file), **qbit_wait_fields}
+
+
+def _target_upload_handoff_fields(summary: dict[str, Any], result: dict[str, Any], preflight: dict[str, Any], args: argparse.Namespace, *, summary_file: str | None) -> dict[str, Any]:
+    artifacts = _target_upload_summary_artifacts(result, preflight, args, summary_file or "")
+    recommended_commands = _target_upload_recommended_commands(summary, args, artifacts)
+    resume_state = _target_upload_resume_state(summary, artifacts, recommended_commands)
+    command_audit = _resume_command_audit_fields(recommended_commands, resume_state.get("next_command"), resume_state.get("next_command_argv"))
+    automation_fields = _target_upload_automation_fields(summary, resume_state, command_audit)
+    return {
+        "summary": summary,
+        "artifacts": artifacts,
+        "recommended_commands": recommended_commands,
+        "resume_state": resume_state,
+        "next_stage": resume_state.get("next_stage"),
+        "next_command": resume_state.get("next_command"),
+        "next_command_argv": resume_state.get("next_command_argv"),
+        **command_audit,
+        **automation_fields,
+    }
+
+
+def _target_upload_automation_fields(summary: dict[str, Any], resume_state: dict[str, Any], command_audit: dict[str, Any]) -> dict[str, Any]:
+    blockers = _string_list(summary.get("blockers"))
+    next_command = resume_state.get("next_command")
+    if summary.get("ready") and not next_command:
+        automation_action = "complete"
+    elif command_audit.get("next_command_placeholder"):
+        automation_action = "fill_command_placeholders"
+    elif next_command and command_audit.get("next_command_run_allowed"):
+        automation_action = "run_next_command"
+    elif next_command and command_audit.get("next_command_ready"):
+        automation_action = "unsupported_next_command"
+    else:
+        automation_action = "resolve_blockers"
+    payload = {
+        "status": "ok" if summary.get("ready") else "blocked",
+        "blockers": blockers,
+        "next_stage": resume_state.get("next_stage"),
+    }
+    return {
+        "automation_action": automation_action,
+        "automation_reason": _summary_automation_reason(payload, automation_action, blockers, next_command_run_blocker=command_audit.get("next_command_run_blocker")),
+        "automation_exit_code": 0 if automation_action == "complete" else 1,
+        "should_execute_next_command": automation_action == "run_next_command",
+    }
 
 
 def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, Any], args: argparse.Namespace, output_dir: str) -> str:
