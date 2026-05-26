@@ -1448,8 +1448,10 @@ def _target_upload_handoff_fields(summary: dict[str, Any], result: dict[str, Any
 
 def _target_upload_automation_fields(summary: dict[str, Any], resume_state: dict[str, Any], command_audit: dict[str, Any]) -> dict[str, Any]:
     blockers = _string_list(summary.get("blockers"))
+    missing_audit = _target_upload_missing_audit_artifacts(resume_state) if summary.get("ready") else []
+    blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     next_command = resume_state.get("next_command")
-    if summary.get("ready") and not next_command:
+    if summary.get("ready") and not blockers and not next_command:
         automation_action = "complete"
     elif command_audit.get("next_command_placeholder"):
         automation_action = "fill_command_placeholders"
@@ -1460,7 +1462,7 @@ def _target_upload_automation_fields(summary: dict[str, Any], resume_state: dict
     else:
         automation_action = "resolve_blockers"
     payload = {
-        "status": "ok" if summary.get("ready") else "blocked",
+        "status": "ok" if summary.get("ready") and not blockers else "blocked",
         "blockers": blockers,
         "next_stage": resume_state.get("next_stage"),
     }
@@ -1470,6 +1472,21 @@ def _target_upload_automation_fields(summary: dict[str, Any], resume_state: dict
         "automation_exit_code": 0 if automation_action == "complete" else 1,
         "should_execute_next_command": automation_action == "run_next_command",
     }
+
+
+def _target_upload_missing_audit_artifacts(resume_state: dict[str, Any]) -> list[str]:
+    artifact_status = _summary_artifact_status(resume_state)
+    required = (
+        "uploaded_torrent_hash",
+        "injected_torrent_hash",
+        "injection_visible_in_client",
+        "injection_verified",
+        "target_hash_consistent",
+        "target_duplicate_clean",
+        "target_rule_obligations",
+        "uploaded_wait_evidence",
+    )
+    return _missing_required_summary_artifacts(artifact_status, required)
 
 
 def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, Any], args: argparse.Namespace, output_dir: str) -> str:
@@ -2334,17 +2351,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     blockers = _string_list(summary.get("blockers")) or _string_list(resume_state.get("blockers"))
     ready = bool(summary.get("ready"))
     artifact_status = _summary_artifact_status(resume_state)
-    required = (
-        "uploaded_torrent_hash",
-        "injected_torrent_hash",
-        "injection_visible_in_client",
-        "injection_verified",
-        "target_hash_consistent",
-        "target_duplicate_clean",
-        "target_rule_obligations",
-        "uploaded_wait_evidence",
-    )
-    missing_audit = _missing_required_summary_artifacts(artifact_status, required) if ready else []
+    missing_audit = _target_upload_missing_audit_artifacts(resume_state) if ready else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(diagnostics))

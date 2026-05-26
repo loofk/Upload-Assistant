@@ -1155,6 +1155,36 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
     assert payload["should_execute_next_command"] is True
 
 
+def test_target_upload_automation_requires_complete_audit_artifacts() -> None:
+    fields = ptcli_cli._target_upload_automation_fields(
+        {"ready": True, "blockers": []},
+        {
+            "next_stage": None,
+            "next_command": None,
+            "artifacts": {
+                "uploaded_torrent_hash": True,
+                "injected_torrent_hash": False,
+                "injection_visible_in_client": False,
+                "injection_verified": False,
+                "target_hash_consistent": True,
+                "target_duplicate_clean": True,
+                "target_rule_obligations": True,
+                "uploaded_wait_evidence": False,
+            },
+        },
+        {
+            "next_command_placeholder": False,
+            "next_command_ready": False,
+            "next_command_run_allowed": False,
+        },
+    )
+
+    assert fields["automation_action"] == "resolve_blockers"
+    assert fields["automation_exit_code"] == 1
+    assert fields["should_execute_next_command"] is False
+    assert fields["automation_reason"] == "Resolve blockers before automation can continue: missing audit artifact: injected_torrent_hash"
+
+
 def test_retorrent_execute_blockers_promote_pipeline_stage_details() -> None:
     pipeline_result = {
         "status": "blocked",
