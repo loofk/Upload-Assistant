@@ -2611,6 +2611,7 @@ def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -
     assert payload["next_stage"] == "resume-uploaded-torrent"
     assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
     assert payload["automation_action"] == "run_next_command"
+    assert payload["next_command_source"] == "resume_commands"
     assert payload["next_command_subcommand"] == "target-upload"
     assert payload["next_command_run_allowed"] is True
     assert payload["next_command_run_blocker"] is None
@@ -2648,6 +2649,7 @@ def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) 
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "blocked"
     assert payload["next_stage"] == "resume-target-upload"
+    assert payload["next_command_source"] == "resume_state"
     assert "source_wait_evidence" in payload["missing_artifacts"]
     assert "uploaded_torrent_hash" in payload["missing_artifacts"]
     assert "injected_torrent_hash" in payload["missing_artifacts"]
@@ -3093,6 +3095,7 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
     assert payload["next_command"] == "python3 ptcli.py pipeline --upload-target"
     assert payload["automation_action"] == "run_next_command"
     assert payload["automation_reason"] == "Next generated ptcli command is ready to run for stage resume-target-upload."
+    assert payload["next_command_source"] == "resume_commands"
     assert payload["next_command_ready"] is True
     assert payload["next_command_run_allowed"] is True
     assert payload["next_command_subcommand"] == "pipeline"
@@ -3262,6 +3265,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_SOURCE_MODE=downloaded\n" in out
     assert "export PTCLI_TARGET_MODE=prepared\n" in out
     assert "export PTCLI_NEXT_COMMAND='python3 ptcli.py pipeline --upload-target'\n" in out
+    assert "export PTCLI_NEXT_COMMAND_SOURCE=resume_commands\n" in out
     assert "export PTCLI_NEXT_COMMAND_SUBCOMMAND=pipeline\n" in out
     assert "export PTCLI_NEXT_COMMAND_RUN_ALLOWED=1\n" in out
     assert "export PTCLI_NEXT_COMMAND_RUN_BLOCKER=''\n" in out
@@ -3405,6 +3409,7 @@ def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) ->
     assert payload["next_stage"] == "resume-target-upload"
     assert payload["next_command"] == "python3 ptcli.py pipeline --upload-target"
     assert payload["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]
+    assert payload["next_command_source"] == "resume_commands"
     assert payload["next_command_subcommand"] == "pipeline"
     assert payload["next_command_run_allowed"] is True
     assert payload["next_command_run_blocker"] is None

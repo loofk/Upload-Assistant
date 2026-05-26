@@ -1814,6 +1814,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         "next_command_run_allowed": next_command_run_allowed,
         "next_command_subcommand": next_command_metadata["subcommand"],
         "next_command_run_blocker": next_command_metadata["run_blocker"],
+        "next_command_source": payload.get("next_command_source"),
         "should_execute_next_command": automation_action == "run_next_command",
         "automation_exit_code": 0 if status == "ok" else 1,
     }
@@ -1886,6 +1887,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
+        "next_command_source": next_command.get("source"),
         **diagnostics,
         **artifact_status,
         **closure_audit_status,
@@ -1925,6 +1927,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
+        "next_command_source": next_command.get("source"),
         **diagnostics,
         **artifact_status,
     })
@@ -1963,6 +1966,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
+        "next_command_source": next_command.get("source"),
         **_summary_check_diagnostics(payload),
         **artifact_status,
     })
@@ -1973,15 +1977,15 @@ def _summary_next_command(payload: dict[str, Any], resume_state: dict[str, Any],
     command = resume_state.get("next_command")
     if command:
         stage_text = str(stage) if stage else None
-        return {"stage": stage_text, "command": str(command), "argv": _summary_command_argv(payload, stage_text, str(command))}
+        return {"stage": stage_text, "command": str(command), "argv": _summary_command_argv(payload, stage_text, str(command)), "source": "resume_state"}
     commands = _summary_command_entries(payload)
     commands_by_stage = {str(command.get("stage")): command for command in commands if command.get("stage") and command.get("command")}
     for preferred_stage in preferred_stages:
         command_entry = commands_by_stage.get(preferred_stage)
         if command_entry:
             command_text = str(command_entry["command"])
-            return {"stage": preferred_stage, "command": command_text, "argv": _argv_list(command_entry.get("argv"))}
-    return {"stage": None, "command": None, "argv": None}
+            return {"stage": preferred_stage, "command": command_text, "argv": _argv_list(command_entry.get("argv")), "source": command_entry.get("_summary_command_source")}
+    return {"stage": None, "command": None, "argv": None, "source": None}
 
 
 def _summary_command_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1989,7 +1993,7 @@ def _summary_command_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
     for key in ("resume_commands", "recommended_commands"):
         value = payload.get(key)
         if isinstance(value, list):
-            commands.extend(command for command in value if isinstance(command, dict))
+            commands.extend({**command, "_summary_command_source": key} for command in value if isinstance(command, dict))
     return commands
 
 
@@ -5478,6 +5482,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_NEXT_STAGE": payload.get("next_stage"),
         "PTCLI_NEXT_COMMAND": payload.get("next_command"),
         "PTCLI_NEXT_COMMAND_ARGV": json.dumps(payload.get("next_command_argv"), ensure_ascii=False) if payload.get("next_command_argv") else None,
+        "PTCLI_NEXT_COMMAND_SOURCE": payload.get("next_command_source"),
         "PTCLI_NEXT_COMMAND_SUBCOMMAND": payload.get("next_command_subcommand"),
         "PTCLI_NEXT_COMMAND_RUN_ALLOWED": _shell_bool(payload.get("next_command_run_allowed")),
         "PTCLI_NEXT_COMMAND_RUN_BLOCKER": payload.get("next_command_run_blocker"),
