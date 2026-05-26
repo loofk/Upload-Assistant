@@ -2424,6 +2424,7 @@ def test_pipeline_next_actions_explain_target_upload_followup_blockers() -> None
 
 def test_resume_next_command_uses_stage_blocker_details() -> None:
     commands = {
+        "resume-source-download": "python3 ptcli.py pipeline --download-source --inject-source --save-path /downloads",
         "resume-source-torrent": "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent",
         "resume-target-upload": "python3 ptcli.py pipeline --upload-target",
         "resume-uploaded-torrent": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent",
@@ -2437,9 +2438,11 @@ def test_resume_next_command_uses_stage_blocker_details() -> None:
     uploaded_wait = ptcli_cli._resume_next_command(["target-upload: uploaded_wait: torrent hash missing"], commands)
     downloaded_missing = ptcli_cli._resume_next_command(["target-upload: downloaded_torrent: target torrent file does not exist on disk."], commands)
     generic_target = ptcli_cli._resume_next_command(["target-upload: MTEAM upload failed."], commands)
+    source_download = ptcli_cli._resume_next_command(["source-download: temporary tracker error"], {"resume-source-download": commands["resume-source-download"]})
 
     assert source_hash["stage"] == "resume-source-torrent"
     assert source_wait["stage"] == "resume-source-torrent"
+    assert source_download["stage"] == "resume-source-download"
     assert target_hash["stage"] == "resume-uploaded-torrent"
     assert target_wait["stage"] == "resume-uploaded-torrent"
     assert uploaded_wait["stage"] == "resume-uploaded-torrent"
@@ -2472,6 +2475,44 @@ def test_run_summary_resume_commands_prefer_artifact_save_paths() -> None:
     assert "--save-path /verified/source" in commands["resume-source-torrent"]
     assert "--uploaded-save-path /verified/uploaded" in commands["resume-target-upload"]
     assert "--uploaded-save-path /verified/uploaded" in commands["resume-uploaded-torrent"]
+
+
+def test_run_summary_resume_commands_include_source_download_retry_without_torrent_file() -> None:
+    payload = {
+        "source_tracker": "U2",
+        "source_torrent_id": "60635",
+        "target_trackers": ["MTEAM"],
+        "config": "/tmp/config.py",
+        "base_dir": "/tmp/base",
+        "client": "seedbox",
+        "source_save_path": "/downloads/source",
+        "qbit_options": {"source": {"category": "SOURCE", "tags": "source-tag", "paused": True}},
+        "output_options": {"source_output_dir": "/tmp/source", "summary_output_dir": "/tmp/summary"},
+        "wait_options": {"source": {"timeout": 7200.0, "interval": 45.0}},
+        "requested_actions": {"download_source": False, "inject_source": False, "wait_complete": False},
+        "effective_actions": {"live_target_upload": True, "download_source": True, "inject_source": True, "wait_complete": True},
+    }
+
+    commands = {command["stage"]: command for command in ptcli_cli._run_summary_resume_commands(payload, {})}
+
+    assert "resume-source-download" in commands
+    command = commands["resume-source-download"]["command"]
+    argv = commands["resume-source-download"]["argv"]
+    assert argv[:3] == ["python3", "ptcli.py", "pipeline"]
+    assert "--download-source" in argv
+    assert "--output-dir /tmp/source" in command
+    assert "--inject-source" in argv
+    assert "--save-path /downloads/source" in command
+    assert "--qbit-category SOURCE" in command
+    assert "--qbit-tags source-tag" in command
+    assert "--paused" in argv
+    assert "--wait-complete" in argv
+    assert "--wait-timeout 7200" in command
+    assert "--wait-interval 45" in command
+    assert "--config /tmp/config.py" in command
+    assert "--base-dir /tmp/base" in command
+    assert "--client seedbox" in command
+    assert "--summary-output-dir /tmp/summary" in command
 
 
 def test_pipeline_next_actions_reports_closure_blockers() -> None:

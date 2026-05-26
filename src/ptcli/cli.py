@@ -3249,6 +3249,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "wait_options": _pipeline_wait_options(args),
         "path": effective_content_path,
         "requested_path": args.content_path,
+        "source_save_path": args.save_path,
         "target_torrent_file": effective_target_torrent_file,
         "ready": ready,
         "complete": bool(closure.get("complete")),
@@ -4097,6 +4098,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "output_options": payload.get("output_options"),
         "wait_options": payload.get("wait_options"),
         "path": payload.get("path"),
+        "source_save_path": payload.get("source_save_path"),
         "target_torrent_file": payload.get("target_torrent_file"),
         "ready": payload.get("ready"),
         "complete": payload.get("complete"),
@@ -4213,6 +4215,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     output_options = payload.get("output_options") if isinstance(payload.get("output_options"), dict) else {}
     source_qbit_options = qbit_options.get("source") if isinstance(qbit_options.get("source"), dict) else {}
     uploaded_qbit_options = qbit_options.get("uploaded") if isinstance(qbit_options.get("uploaded"), dict) else {}
+    source_output_dir = output_options.get("source_output_dir") or "./tmp/source"
     uploaded_output_dir = output_options.get("uploaded_output_dir")
     uploaded_output_dir_args = ["--uploaded-output-dir", str(uploaded_output_dir)] if uploaded_output_dir else []
     summary_output_dir = output_options.get("summary_output_dir")
@@ -4222,7 +4225,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     uploaded_wait_options = wait_options.get("uploaded") if isinstance(wait_options.get("uploaded"), dict) else {}
     content_path = payload.get("path")
     path_args = ["--path", str(content_path)] if content_path else []
-    source_save_path = artifacts.get("source_save_path") or content_path or "/downloads"
+    source_save_path = artifacts.get("source_save_path") or payload.get("source_save_path") or content_path or "/downloads"
     uploaded_save_path = artifacts.get("uploaded_save_path") or content_path
     uploaded_save_path_args = ["--uploaded-save-path", str(uploaded_save_path)] if uploaded_save_path else []
     source_wait_args: list[str] = []
@@ -4247,7 +4250,48 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     )
     commands: list[dict[str, Any]] = []
 
+    requested_actions = payload.get("requested_actions") if isinstance(payload.get("requested_actions"), dict) else {}
+    effective_actions = payload.get("effective_actions") if isinstance(payload.get("effective_actions"), dict) else {}
     source_torrent_file = artifacts.get("source_torrent_file")
+    source_download_planned = bool(requested_actions.get("download_source") or effective_actions.get("download_source"))
+    source_closure_planned = bool(
+        requested_actions.get("inject_source")
+        or requested_actions.get("wait_complete")
+        or effective_actions.get("inject_source")
+        or effective_actions.get("wait_complete")
+        or effective_actions.get("live_target_upload")
+    )
+    if not source_torrent_file and source_download_planned:
+        source_download_args = [
+            "pipeline",
+            "--from",
+            source_tracker,
+            "--source-id",
+            source_torrent_id,
+            "--to",
+            target_trackers_arg,
+            *config_args,
+            *base_dir_args,
+            "--client",
+            client,
+            "--download-source",
+            "--output-dir",
+            str(source_output_dir),
+        ]
+        if source_closure_planned:
+            source_download_args.extend(
+                [
+                    "--inject-source",
+                    "--save-path",
+                    str(source_save_path),
+                    *_qbit_resume_args(source_qbit_options, prefix=""),
+                    "--wait-complete",
+                    *source_wait_args,
+                ]
+            )
+        source_download_args.extend(["--accept-rules", "--write-summary", *summary_output_dir_args, "--json"])
+        commands.append(_ptcli_command_entry("resume-source-download", source_download_args))
+
     if source_torrent_file:
         commands.append(
             _ptcli_command_entry(
@@ -4442,7 +4486,9 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
     stage_generic_preferred: list[str] = []
     blocker_names = {str(blocker) for blocker in blockers}
     for blocker in (str(blocker) for blocker in blockers):
-        if blocker.startswith(("source-download:", "source-torrent-verify:", "inject-source:", "wait-complete:", "source-content-verify:")):
+        if blocker.startswith("source-download:"):
+            stage_detail_preferred.extend(["resume-source-download", "resume-source-torrent"])
+        elif blocker.startswith(("source-torrent-verify:", "inject-source:", "wait-complete:", "source-content-verify:")):
             stage_detail_preferred.append("resume-source-torrent")
         if blocker.startswith(("target-upload: downloaded_torrent:", "target-upload: downloaded_torrent_hash:")):
             stage_detail_preferred.append("resume-uploaded-torrent-download")
@@ -4460,7 +4506,7 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
         or "source.injection_visible_in_client" in blocker_names
         or "source.injection_verified" in blocker_names
     ):
-        preferred_stages.append("resume-source-torrent")
+        preferred_stages.extend(["resume-source-torrent", "resume-source-download"])
     if "target.downloaded" in blocker_names:
         preferred_stages.append("resume-uploaded-torrent-download")
     if "target.uploaded" in blocker_names:
@@ -4477,7 +4523,7 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
     ):
         preferred_stages.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     preferred_stages.extend(stage_generic_preferred)
-    preferred_stages.extend(["resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
+    preferred_stages.extend(["resume-source-torrent", "resume-source-download", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
     for stage in preferred_stages:
         command = commands_by_stage.get(stage)
         if command:
