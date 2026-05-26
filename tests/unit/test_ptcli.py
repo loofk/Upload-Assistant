@@ -2363,6 +2363,7 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
                         "source_wait_evidence": True,
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
                         "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
@@ -2417,6 +2418,7 @@ def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -
                         "source_wait_evidence": True,
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
                         "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
@@ -2477,12 +2479,14 @@ def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) 
     assert "source_wait_evidence" in payload["missing_artifacts"]
     assert "uploaded_torrent_hash" in payload["missing_artifacts"]
     assert "injected_torrent_hash" in payload["missing_artifacts"]
+    assert "injection_visible_in_client" in payload["missing_artifacts"]
     assert "injection_verified" in payload["missing_artifacts"]
     assert "target_rule_obligations" in payload["missing_artifacts"]
     assert "uploaded_wait_evidence" in payload["missing_artifacts"]
     assert "missing audit artifact: source_wait_evidence" in payload["blockers"]
     assert "missing audit artifact: uploaded_torrent_hash" in payload["blockers"]
     assert "missing audit artifact: injected_torrent_hash" in payload["blockers"]
+    assert "missing audit artifact: injection_visible_in_client" in payload["blockers"]
     assert "missing audit artifact: injection_verified" in payload["blockers"]
     assert "missing audit artifact: target_rule_obligations" in payload["blockers"]
     assert "missing audit artifact: uploaded_wait_evidence" in payload["blockers"]
@@ -2510,6 +2514,7 @@ def test_summary_check_prefers_uploaded_resume_for_uploaded_wait_artifact(tmp_pa
                         "source_wait_evidence": True,
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
                         "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
@@ -2634,6 +2639,7 @@ def test_summary_check_blocks_complete_pipeline_qbit_wait_mismatch(tmp_path, cap
                         "source_wait_evidence": True,
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
                         "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
@@ -2688,6 +2694,7 @@ def test_summary_check_blocks_ready_target_upload_qbit_wait_mismatch(tmp_path, c
                     "artifacts": {
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
                         "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
@@ -2788,6 +2795,7 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
                         "source_wait_evidence": True,
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
                         "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
@@ -2832,6 +2840,7 @@ def test_summary_check_print_next_command_outputs_only_command(tmp_path, capsys)
                         "source_wait_evidence": True,
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
                         "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
@@ -2866,6 +2875,7 @@ def test_summary_check_print_next_command_is_quiet_when_complete(tmp_path, capsy
                         "source_wait_evidence": True,
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
                         "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
@@ -3132,6 +3142,7 @@ def test_summary_check_run_next_command_is_noop_when_complete(tmp_path, monkeypa
                         "source_wait_evidence": True,
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
                         "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
@@ -3169,6 +3180,7 @@ def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> Non
                     "artifacts": {
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
                         "injection_verified": True,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,

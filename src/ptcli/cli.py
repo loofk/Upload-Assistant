@@ -1735,6 +1735,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "source_wait_evidence",
         "uploaded_torrent_hash",
         "injected_torrent_hash",
+        "injection_visible_in_client",
         "injection_verified",
         "target_hash_consistent",
         "target_duplicate_clean",
@@ -1742,7 +1743,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "uploaded_wait_evidence",
     ]
     if _summary_source_injection_audit_required(payload):
-        required.extend(["source_torrent_hash", "source_injected_torrent_hash", "source_injection_verified"])
+        required.extend(["source_torrent_hash", "source_injected_torrent_hash", "source_injection_visible_in_client", "source_injection_verified"])
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if complete and ready else []
     closure_audit_status = _summary_closure_audit_status(payload)
     missing_closure_audit = closure_audit_status["missing_closure_audit"]
@@ -1774,7 +1775,16 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     blockers = _string_list(summary.get("blockers")) or _string_list(resume_state.get("blockers"))
     ready = bool(summary.get("ready"))
     artifact_status = _summary_artifact_status(resume_state)
-    required = ("uploaded_torrent_hash", "injected_torrent_hash", "injection_verified", "target_hash_consistent", "target_duplicate_clean", "target_rule_obligations", "uploaded_wait_evidence")
+    required = (
+        "uploaded_torrent_hash",
+        "injected_torrent_hash",
+        "injection_visible_in_client",
+        "injection_verified",
+        "target_hash_consistent",
+        "target_duplicate_clean",
+        "target_rule_obligations",
+        "uploaded_wait_evidence",
+    )
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if ready else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
