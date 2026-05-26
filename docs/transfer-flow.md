@@ -103,6 +103,7 @@ qBittorrent 等待完成证据还必须匹配请求的 torrent hash 和内容路
 `qbit_wait_diagnostics` 会同时暴露请求的 hash、内容路径、保存路径、等待参数，以及 qBittorrent 实际观察到的 hash、内容路径、保存路径、状态和进度，便于自动化脚本在 mismatch 时选择正确的恢复参数。
 `qbit_wait_retry_hints` 会在 wait query mismatch 时给出保守的 `retry_recommended`、`suggested_torrent_hash`、`suggested_content_path` 和 `suggested_save_path`，这些值来自 qBittorrent 实际观测结果，供盒子脚本生成下一次恢复参数。
 `retorrent --execute` 的 `next_actions` 在遇到 qBittorrent wait mismatch 时也会带出这些 suggested 值，方便人或 agent 不展开完整 diagnostics 就能看到下一次重试应优先核对的 hash/path。
+`summary-check` 的 `automation_reason` 也会在 `resolve_qbit_wait_mismatch` 时附带相同 suggested 值，便于只记录 reason 的盒子日志保留恢复线索。
 `closure_status` 是面向调度器的机器可读摘要，会把 pipeline 状态、closure blockers、closure audit 缺口、qBittorrent wait mismatch，以及 source/target 两侧的 ready/hash/rule/wait 关键布尔值收敛到一个入口。
 单独运行 `target-upload --write-summary` 时，`summary.mode` 也会使用与 pipeline 一致的目标侧模式：`live_upload`、`resumed_uploaded_id`、`resumed_uploaded_torrent`、`prepared` 或 `blocked`。
 

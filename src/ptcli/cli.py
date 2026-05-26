@@ -1978,7 +1978,9 @@ def _summary_automation_reason(payload: dict[str, Any], automation_action: str, 
         return "Summary is complete and no follow-up command is required."
     if automation_action == "resolve_qbit_wait_mismatch":
         mismatches = ", ".join(_string_list(payload.get("qbit_wait_mismatches")))
-        return f"qBittorrent wait evidence mismatched the requested torrent/content: {mismatches}." if mismatches else "qBittorrent wait evidence mismatched the requested torrent/content."
+        hint_text = _qbit_wait_retry_hint_reason(payload.get("qbit_wait_retry_hints"))
+        base = f"qBittorrent wait evidence mismatched the requested torrent/content: {mismatches}." if mismatches else "qBittorrent wait evidence mismatched the requested torrent/content."
+        return f"{base} {hint_text}" if hint_text else base
     if automation_action == "fill_command_placeholders":
         return "Next command contains placeholders and requires manual values before execution."
     if automation_action == "run_next_command":
@@ -1997,6 +1999,26 @@ def _summary_automation_reason(payload: dict[str, Any], automation_action: str, 
     if blockers:
         return f"Resolve blockers before automation can continue: {blockers[0]}"
     return "Resolve blockers before automation can continue."
+
+
+def _qbit_wait_retry_hint_reason(qbit_wait_retry_hints: Any) -> str:
+    if not isinstance(qbit_wait_retry_hints, dict):
+        return ""
+    hints: list[str] = []
+    for scope in ("source", "uploaded"):
+        hint = qbit_wait_retry_hints.get(scope)
+        if not isinstance(hint, dict) or not hint.get("retry_recommended"):
+            continue
+        details = []
+        if hint.get("suggested_torrent_hash"):
+            details.append(f"hash={hint['suggested_torrent_hash']}")
+        if hint.get("suggested_content_path"):
+            details.append(f"path={hint['suggested_content_path']}")
+        if hint.get("suggested_save_path"):
+            details.append(f"save_path={hint['suggested_save_path']}")
+        if details:
+            hints.append(f"{scope} suggested retry values: {', '.join(details)}")
+    return " ".join(f"{hint}." for hint in hints)
 
 
 def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
