@@ -2548,6 +2548,9 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     assert payload["automation_action"] == "complete"
     assert payload["automation_reason"] == "Summary is complete and no follow-up command is required."
     assert payload["next_command_ready"] is False
+    assert payload["next_command_run_allowed"] is False
+    assert payload["next_command_subcommand"] is None
+    assert payload["next_command_run_blocker"] == "next command is missing or unparsable"
     assert payload["should_execute_next_command"] is False
     assert payload["automation_exit_code"] == 0
     assert payload["complete"] is True
@@ -2608,6 +2611,9 @@ def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -
     assert payload["next_stage"] == "resume-uploaded-torrent"
     assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
     assert payload["automation_action"] == "run_next_command"
+    assert payload["next_command_subcommand"] == "target-upload"
+    assert payload["next_command_run_allowed"] is True
+    assert payload["next_command_run_blocker"] is None
 
 
 def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) -> None:
@@ -3088,6 +3094,9 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
     assert payload["automation_action"] == "run_next_command"
     assert payload["automation_reason"] == "Next generated ptcli command is ready to run for stage resume-target-upload."
     assert payload["next_command_ready"] is True
+    assert payload["next_command_run_allowed"] is True
+    assert payload["next_command_subcommand"] == "pipeline"
+    assert payload["next_command_run_blocker"] is None
     assert payload["should_execute_next_command"] is True
     assert payload["automation_exit_code"] == 1
 
@@ -3253,6 +3262,9 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_SOURCE_MODE=downloaded\n" in out
     assert "export PTCLI_TARGET_MODE=prepared\n" in out
     assert "export PTCLI_NEXT_COMMAND='python3 ptcli.py pipeline --upload-target'\n" in out
+    assert "export PTCLI_NEXT_COMMAND_SUBCOMMAND=pipeline\n" in out
+    assert "export PTCLI_NEXT_COMMAND_RUN_ALLOWED=1\n" in out
+    assert "export PTCLI_NEXT_COMMAND_RUN_BLOCKER=''\n" in out
 
 
 def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) -> None:
@@ -3393,9 +3405,49 @@ def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) ->
     assert payload["next_stage"] == "resume-target-upload"
     assert payload["next_command"] == "python3 ptcli.py pipeline --upload-target"
     assert payload["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]
+    assert payload["next_command_subcommand"] == "pipeline"
+    assert payload["next_command_run_allowed"] is True
+    assert payload["next_command_run_blocker"] is None
     assert payload["flow_diagnostics"]["present"] is True
     assert payload["flow_diagnostics"]["source_capability"]["source_download_adapter"] == "nexusphp_passkey"
     assert payload["credential_requirements"] == ["TRACKERS.U2.passkey", "data/cookies/U2.txt", "TRACKERS.MTEAM.api_key"]
+
+
+def test_summary_check_exposes_unsupported_next_command_metadata(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [{"stage": "resume-target-upload", "command": "python3 ptcli.py inspect --client default --json"}],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["automation_action"] == "unsupported_next_command"
+    assert payload["next_command_ready"] is True
+    assert payload["next_command_run_allowed"] is False
+    assert payload["next_command_subcommand"] == "inspect"
+    assert payload["next_command_run_blocker"] == "ptcli subcommand inspect is not in the summary-check auto-run allowlist"
+    assert payload["should_execute_next_command"] is False
+    assert payload["automation_reason"] == "Next command is present but is not allowed for automatic execution: ptcli subcommand inspect is not in the summary-check auto-run allowlist."
 
 
 def test_summary_check_run_next_command_rejects_non_ptcli_command(tmp_path, monkeypatch, capsys) -> None:

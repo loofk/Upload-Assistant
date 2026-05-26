@@ -1780,16 +1780,20 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     blockers = _string_list(payload.get("blockers"))
     next_command = payload.get("next_command")
     next_command_argv = _summary_next_command_raw_argv(payload.get("next_command_argv")) if payload.get("next_command_argv") else _summary_next_command_raw_argv(str(next_command)) if next_command else None
-    next_command_placeholder = _argv_has_placeholder(next_command_argv)
+    next_command_metadata = _summary_next_command_metadata(next_command_argv)
+    next_command_placeholder = bool(next_command_metadata["placeholder"])
     next_command_ready = bool(next_command) and not next_command_placeholder
+    next_command_run_allowed = bool(next_command_ready and next_command_metadata["run_allowed"])
     if status == "ok":
         automation_action = "complete"
     elif payload.get("qbit_wait_mismatch"):
         automation_action = "resolve_qbit_wait_mismatch"
     elif next_command_placeholder:
         automation_action = "fill_command_placeholders"
-    elif next_command_ready:
+    elif next_command_run_allowed:
         automation_action = "run_next_command"
+    elif next_command_ready:
+        automation_action = "unsupported_next_command"
     elif payload.get("schema_version_ok") is False or payload.get("kind_supported") is False:
         automation_action = "replace_summary"
     elif any("does not exist" in blocker for blocker in blockers):
@@ -1800,19 +1804,22 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         automation_action = "repair_closure"
     else:
         automation_action = "resolve_blockers"
-    automation_reason = _summary_automation_reason(payload, automation_action, blockers)
+    automation_reason = _summary_automation_reason(payload, automation_action, blockers, next_command_run_blocker=next_command_metadata["run_blocker"])
     return {
         **payload,
         "automation_action": automation_action,
         "automation_reason": automation_reason,
         "next_command_ready": next_command_ready,
         "next_command_placeholder": next_command_placeholder,
+        "next_command_run_allowed": next_command_run_allowed,
+        "next_command_subcommand": next_command_metadata["subcommand"],
+        "next_command_run_blocker": next_command_metadata["run_blocker"],
         "should_execute_next_command": automation_action == "run_next_command",
         "automation_exit_code": 0 if status == "ok" else 1,
     }
 
 
-def _summary_automation_reason(payload: dict[str, Any], automation_action: str, blockers: list[str]) -> str:
+def _summary_automation_reason(payload: dict[str, Any], automation_action: str, blockers: list[str], *, next_command_run_blocker: str | None = None) -> str:
     if automation_action == "complete":
         return "Summary is complete and no follow-up command is required."
     if automation_action == "resolve_qbit_wait_mismatch":
@@ -1823,6 +1830,8 @@ def _summary_automation_reason(payload: dict[str, Any], automation_action: str, 
     if automation_action == "run_next_command":
         stage = payload.get("next_stage")
         return f"Next generated ptcli command is ready to run for stage {stage}." if stage else "Next generated ptcli command is ready to run."
+    if automation_action == "unsupported_next_command":
+        return f"Next command is present but is not allowed for automatic execution: {next_command_run_blocker}." if next_command_run_blocker else "Next command is present but is not allowed for automatic execution."
     if automation_action == "replace_summary":
         return "Summary schema or kind is unsupported; regenerate the summary with the current ptcli."
     if automation_action == "provide_summary":
@@ -5469,6 +5478,9 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_NEXT_STAGE": payload.get("next_stage"),
         "PTCLI_NEXT_COMMAND": payload.get("next_command"),
         "PTCLI_NEXT_COMMAND_ARGV": json.dumps(payload.get("next_command_argv"), ensure_ascii=False) if payload.get("next_command_argv") else None,
+        "PTCLI_NEXT_COMMAND_SUBCOMMAND": payload.get("next_command_subcommand"),
+        "PTCLI_NEXT_COMMAND_RUN_ALLOWED": _shell_bool(payload.get("next_command_run_allowed")),
+        "PTCLI_NEXT_COMMAND_RUN_BLOCKER": payload.get("next_command_run_blocker"),
         "PTCLI_SHOULD_EXECUTE_NEXT_COMMAND": _shell_bool(payload.get("should_execute_next_command")),
         "PTCLI_NEXT_COMMAND_READY": _shell_bool(payload.get("next_command_ready")),
         "PTCLI_QBIT_WAIT_MISMATCH": _shell_bool(payload.get("qbit_wait_mismatch")),
@@ -5487,6 +5499,10 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
 def _summary_check_run_next_command(payload: dict[str, Any]) -> int:
     command = payload.get("next_command")
     if not payload.get("should_execute_next_command") or not command:
+        if command and payload.get("automation_action") == "unsupported_next_command":
+            reason = payload.get("next_command_run_blocker") or "unsupported summary next_command"
+            print(f"Refusing to run unsupported summary next_command: {command} ({reason})", file=sys.stderr)
+            return 2
         return 0 if payload.get("status") == "ok" else 1
     argv = _summary_next_command_argv(payload.get("next_command_argv")) or _summary_next_command_argv(str(command))
     if argv is None:
@@ -5494,6 +5510,23 @@ def _summary_check_run_next_command(payload: dict[str, Any]) -> int:
         return 2
     completed = subprocess.run(argv, check=False)  # noqa: S603 - argv is restricted to generated ptcli.py commands.
     return int(completed.returncode)
+
+
+def _summary_next_command_metadata(argv: list[str] | None) -> dict[str, Any]:
+    if argv is None:
+        return {"subcommand": None, "run_allowed": False, "run_blocker": "next command is missing or unparsable", "placeholder": False}
+    if len(argv) < 3:
+        return {"subcommand": None, "run_allowed": False, "run_blocker": "next command must include python, ptcli.py, and a subcommand", "placeholder": _argv_has_placeholder(argv)}
+    subcommand = argv[2]
+    if _argv_has_placeholder(argv):
+        return {"subcommand": subcommand, "run_allowed": False, "run_blocker": "next command contains placeholders", "placeholder": True}
+    interpreter = Path(argv[0]).name
+    script = Path(argv[1]).name
+    if interpreter not in {"python", "python3"} or script != "ptcli.py":
+        return {"subcommand": subcommand, "run_allowed": False, "run_blocker": "next command is not a generated ptcli.py invocation", "placeholder": False}
+    if subcommand not in SUMMARY_CHECK_RUN_COMMANDS:
+        return {"subcommand": subcommand, "run_allowed": False, "run_blocker": f"ptcli subcommand {subcommand} is not in the summary-check auto-run allowlist", "placeholder": False}
+    return {"subcommand": subcommand, "run_allowed": True, "run_blocker": None, "placeholder": False}
 
 
 def _summary_next_command_argv(command: Any) -> list[str] | None:
