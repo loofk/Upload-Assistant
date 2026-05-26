@@ -2492,6 +2492,54 @@ def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) 
     assert "missing audit artifact: uploaded_wait_evidence" in payload["blockers"]
 
 
+def test_summary_check_prefers_source_resume_for_source_visibility_artifact(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "evidence": {"source": {"mode": "downloaded"}},
+                "resume_commands": [
+                    {"stage": "resume-source-torrent", "command": "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent"},
+                    {"stage": "resume-uploaded-torrent", "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"},
+                ],
+                "resume_state": {
+                    "available_stages": ["resume-source-torrent", "resume-uploaded-torrent"],
+                    "artifacts": {
+                        "source_torrent_hash": True,
+                        "source_injected_torrent_hash": True,
+                        "source_injection_visible_in_client": False,
+                        "source_injection_verified": True,
+                        "source_hash_consistent": True,
+                        "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
+                        "injection_verified": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["next_stage"] == "resume-source-torrent"
+    assert payload["next_command"] == "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent"
+    assert "source_injection_visible_in_client" in payload["missing_artifacts"]
+
+
 def test_summary_check_prefers_uploaded_resume_for_uploaded_wait_artifact(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
@@ -2532,6 +2580,45 @@ def test_summary_check_prefers_uploaded_resume_for_uploaded_wait_artifact(tmp_pa
     payload = json.loads(capsys.readouterr().out)
     assert payload["next_stage"] == "resume-uploaded-torrent"
     assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
+
+
+def test_summary_check_prefers_uploaded_resume_for_target_visibility_artifact(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-target-upload-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.target_upload.summary",
+                "summary": {"ready": True, "blockers": []},
+                "recommended_commands": [
+                    {"stage": "target-upload-retry", "command": "python3 ptcli.py target-upload --execute"},
+                    {"stage": "resume-uploaded-torrent", "command": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"},
+                ],
+                "resume_state": {
+                    "available_stages": ["target-upload-retry", "resume-uploaded-torrent"],
+                    "artifacts": {
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_visible_in_client": False,
+                        "injection_verified": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["next_stage"] == "resume-uploaded-torrent"
+    assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
+    assert "injection_visible_in_client" in payload["missing_artifacts"]
 
 
 def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> None:

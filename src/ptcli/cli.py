@@ -1904,6 +1904,7 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
             "source_hash_consistent",
             "source_torrent_hash",
             "source_injected_torrent_hash",
+            "source_injection_visible_in_client",
             "source_injection_verified",
             "source.ready",
             "source.hash_consistent",
@@ -1919,6 +1920,7 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
         for name in (
             "uploaded_torrent_hash",
             "injected_torrent_hash",
+            "injection_visible_in_client",
             "injection_verified",
             "uploaded_wait_evidence",
             "target.downloaded",
@@ -1972,7 +1974,7 @@ def _summary_closure_audit_status(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _target_upload_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, ...]:
     preferred: list[str] = []
-    if "uploaded_wait_evidence" in missing_audit or "target_hash_consistent" in missing_audit:
+    if any(name in missing_audit for name in ("injection_visible_in_client", "injection_verified", "uploaded_wait_evidence", "target_hash_consistent")):
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     if "target_duplicate_clean" in missing_audit or "target_rule_obligations" in missing_audit:
         preferred.append("target-upload-retry")
