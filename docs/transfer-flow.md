@@ -93,6 +93,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downlo
 - rule review package 内的每个 source/target obligation 都有规则 URL、确认状态和非空人工审查范围。
 - 描述材料、名称、简介、分类和标准字段可用。
 - torrent announce/source/comment 符合 MTEAM-safe 元数据门禁，且没有残留 `announce-list` 或其他非预期顶层字段。
+- 源站若暴露 infohash，下载到本地的源种必须能读出 infohash 并与源站元数据一致。
 - 已显式传入 `--confirm-upload`。
 
 源站种子和上传成功后的 MTEAM 新种都会在注入 qBittorrent 后做同一类可见性验证。`summary`、`evidence` 和 `closure_audit` 会记录 `uploaded_torrent_id`、`uploaded_torrent_hash`、`uploaded_torrent_path`、独立的 qBittorrent 可见性证据、`injection_verified` 和 `uploaded_wait`；只有 `visible_in_client`、`client_verification.visible` 或实际 `client_matches` 能证明注入种子已出现在 qBittorrent 列表中。

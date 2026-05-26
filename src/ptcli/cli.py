@@ -3089,6 +3089,18 @@ def _source_torrent_verify_stage(source_download_stage: dict[str, Any], expected
                 "blockers": [f"source torrent hash mismatch: expected {expected}, got {actual_hash}"],
             },
         }
+    if expected and not actual_hash:
+        return {
+            "stage": "source-torrent-verify",
+            "ok": False,
+            "message": "Downloaded source torrent infohash is unavailable for source tracker metadata verification.",
+            "result": {
+                "verified": False,
+                "expected_hash": expected,
+                "actual_hash": actual_hash,
+                "blockers": [f"source torrent infohash unavailable: expected {expected}"],
+            },
+        }
     return {
         "stage": "source-torrent-verify",
         "ok": True,

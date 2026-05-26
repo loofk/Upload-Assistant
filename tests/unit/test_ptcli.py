@@ -2242,6 +2242,19 @@ def test_source_download_blocks_downloaded_torrent_hash_mismatch(monkeypatch, ca
     assert payload["blockers"] == [f"source-torrent-verify: source torrent hash mismatch: expected {'a' * 40}, got {torrent.infohash}"]
 
 
+def test_source_torrent_verify_blocks_missing_downloaded_infohash() -> None:
+    stage = ptcli_cli._source_torrent_verify_stage({"result": {"path": "/tmp/U2-60635.torrent", "metadata_readable": True}}, "a" * 40)
+
+    assert stage["ok"] is False
+    assert stage["message"] == "Downloaded source torrent infohash is unavailable for source tracker metadata verification."
+    assert stage["result"] == {
+        "verified": False,
+        "expected_hash": "a" * 40,
+        "actual_hash": None,
+        "blockers": [f"source torrent infohash unavailable: expected {'a' * 40}"],
+    }
+
+
 def test_json_capture_moves_stdout_to_logs() -> None:
     def noisy_payload():
         print("noisy tracker log")
