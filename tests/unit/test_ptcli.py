@@ -5326,7 +5326,34 @@ def test_pipeline_closure_preserves_torrent_file_evidence() -> None:
     assert closure["source"]["source_torrent"] == source_torrent
     assert closure["target"]["uploaded_torrent"] == uploaded_torrent
     assert evidence["source"]["source_torrent"] == source_torrent
+    assert evidence["source"]["torrent_file_evidence"] is False
     assert evidence["target"]["uploaded_torrent"] == uploaded_torrent
+    assert evidence["target"]["uploaded_torrent_file_evidence"] is False
+
+
+def test_pipeline_evidence_marks_complete_torrent_file_evidence() -> None:
+    source_torrent = {"path": "/tmp/U2-60635.torrent", "exists": True, "size_bytes": 8, "sha1": "c" * 40, "torrent_hash": "a" * 40, "metadata_readable": True}
+    uploaded_torrent = {"path": "/tmp/MTEAM-999.torrent", "exists": True, "size_bytes": 9, "sha1": "d" * 40, "torrent_hash": "b" * 40, "metadata_readable": True}
+    closure = {
+        "source": {
+            "ready": True,
+            "downloaded": True,
+            "source_torrent": source_torrent,
+        },
+        "target": {
+            "prepared": True,
+            "uploaded": True,
+            "downloaded": True,
+            "injected": True,
+            "seeding": True,
+            "uploaded_torrent": uploaded_torrent,
+        },
+    }
+
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    assert evidence["source"]["torrent_file_evidence"] is True
+    assert evidence["target"]["uploaded_torrent_file_evidence"] is True
 
 
 def test_pipeline_closure_requires_existing_source_torrent_file_evidence() -> None:
@@ -8990,6 +9017,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert payload["closure"]["source"]["downloaded"] is True
     assert payload["closure"]["source"]["injected"] is True
     assert payload["closure"]["source"]["complete"] is True
+    assert payload["evidence"]["source"]["torrent_file_evidence"] is True
+    assert payload["evidence"]["target"]["uploaded_torrent_file_evidence"] is True
     assert payload["closure_audit"]["ready"] is True
     assert payload["closure_audit"]["missing"] == []
     audit_items = {item["name"]: item for item in payload["closure_audit"]["items"]}
@@ -9032,6 +9061,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "uploaded": {"timeout": 900.0, "interval": 20.0},
     }
     assert summary_payload["artifacts"]["source_torrent_file"].endswith("U2-60635.torrent")
+    assert summary_payload["artifacts"]["source_torrent_file_evidence"] is True
     assert summary_payload["artifacts"]["source_torrent_hash"] == source_hash
     assert summary_payload["artifacts"]["source_save_path"] == "/downloads"
     assert summary_payload["artifacts"]["source_qbit_category"] == "SOURCE"
@@ -9044,6 +9074,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["target_torrent_file"] == str(torrent_file)
     assert summary_payload["artifacts"]["target_package_dir"]
     assert summary_payload["artifacts"]["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
+    assert summary_payload["artifacts"]["uploaded_torrent_file_evidence"] is True
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     assert summary_payload["artifacts"]["uploaded_torrent_hash"] == uploaded_hash
     assert summary_payload["artifacts"]["injected_torrent_hash"] == uploaded_hash

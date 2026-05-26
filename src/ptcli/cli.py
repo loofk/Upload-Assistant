@@ -719,6 +719,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
     for key in (
         "source_torrent_hash",
         "source_torrent_file",
+        "source_torrent_file_evidence",
         "source_save_path",
         "source_qbit_category",
         "source_qbit_tags",
@@ -742,6 +743,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
     for key in (
         "uploaded_torrent_id",
         "uploaded_torrent_hash",
+        "uploaded_torrent_file_evidence",
         "injected_torrent_hash",
         "injection_visible_in_client",
         "injection_verified",
@@ -796,6 +798,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
         "available_stages": pipeline_resume.get("available_stages") or [str(command.get("stage")) for command in commands if isinstance(command, dict)],
         "artifacts": {
             "source_torrent_file": bool(artifacts.get("source_torrent_file")),
+            "source_torrent_file_evidence": bool(artifacts.get("source_torrent_file_evidence")),
             "source_torrent_hash": bool(artifacts.get("source_torrent_hash")),
             "source_save_path": bool(artifacts.get("source_save_path")),
             "source_qbit_category": bool(artifacts.get("source_qbit_category")),
@@ -810,6 +813,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
+            "uploaded_torrent_file_evidence": bool(artifacts.get("uploaded_torrent_file_evidence")),
             "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
             "injected_torrent_hash": bool(artifacts.get("injected_torrent_hash")),
             "injection_visible_in_client": bool(artifacts.get("injection_visible_in_client")),
@@ -948,6 +952,7 @@ def _source_artifact_evidence_key(artifact_key: str) -> str:
     return {
         "source_torrent_hash": "torrent_hash",
         "source_torrent_file": "source_torrent_path",
+        "source_torrent_file_evidence": "torrent_file_evidence",
         "source_qbit_category": "source_qbit_category",
         "source_qbit_tags": "source_qbit_tags",
         "source_paused": "source_paused",
@@ -976,6 +981,7 @@ def _target_artifact_evidence_key(artifact_key: str) -> str:
         "target_hash_consistent": "hash_consistent",
         "target_duplicate_clean": "duplicate_clean",
         "target_rule_obligations": "rule_obligations",
+        "uploaded_torrent_file_evidence": "uploaded_torrent_file_evidence",
     }.get(artifact_key, artifact_key)
 
 
@@ -4379,6 +4385,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         source_result = source_download.get("result")
         if isinstance(source_result, dict):
             artifacts["source_torrent_file"] = source_result.get("path")
+            artifacts["source_torrent_file_evidence"] = _torrent_file_evidence_complete(source_result)
     if isinstance(inject_source, dict):
         inject_result = inject_source.get("result")
         if isinstance(inject_result, dict):
@@ -4416,6 +4423,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
             downloaded_torrent = upload_result.get("downloaded_torrent")
             if isinstance(downloaded_torrent, dict):
                 artifacts["uploaded_torrent_file"] = downloaded_torrent.get("path")
+                artifacts["uploaded_torrent_file_evidence"] = _torrent_file_evidence_complete(downloaded_torrent)
     if "fresh_duplicate_check" not in artifacts and isinstance(stages, list):
         target_dupe_check = _find_stage(stages, "target-dupe-check")
         dupe_result = target_dupe_check.get("result") if isinstance(target_dupe_check, dict) else None
@@ -5060,6 +5068,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
         "source": {
             "ready": bool(source.get("ready")),
             "downloaded": bool(source.get("downloaded")),
+            "torrent_file_evidence": _torrent_file_evidence_complete(source.get("source_torrent")),
             "injected": bool(source.get("injected")),
             "complete": bool(source.get("complete")),
             "matched": bool(source.get("matched")),
@@ -5091,6 +5100,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "prepared": bool(target.get("prepared")),
             "uploaded": bool(target.get("uploaded")),
             "downloaded": bool(target.get("downloaded")),
+            "uploaded_torrent_file_evidence": _torrent_file_evidence_complete(target.get("uploaded_torrent")),
             "injected": bool(target.get("injected")),
             "seeding": target_seeding,
             "hash_consistent": bool(target.get("hash_consistent")),
@@ -5318,6 +5328,21 @@ def _torrent_file_present(value: Any) -> bool:
     if value.get("size_bytes") == 0:
         return False
     return value.get("metadata_readable") is not False
+
+
+def _torrent_file_evidence_complete(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if not (value.get("path") or value.get("torrent_path")):
+        return False
+    if value.get("exists") is not True:
+        return False
+    if not isinstance(value.get("size_bytes"), int) or value["size_bytes"] <= 0:
+        return False
+    sha1 = value.get("sha1")
+    if not isinstance(sha1, str) or len(sha1.strip()) != 40:
+        return False
+    return bool(_torrent_hash_from_result(value)) and value.get("metadata_readable") is True
 
 
 def _match_stage_has_match(stage: dict[str, Any] | None) -> bool:
