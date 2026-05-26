@@ -10475,6 +10475,48 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert command_argv["retorrent-resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "retorrent"]
 
 
+def test_target_upload_retry_command_uses_inferred_uploaded_save_path(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            package["package_dir"],
+            "--torrent-file",
+            str(torrent_file),
+            "--execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--write-summary",
+            "--json",
+        ]
+    )
+
+    summary_file = ptcli_cli._write_target_upload_summary({"status": "blocked", "uploaded_torrent_id": "999"}, preflight, args, package["package_dir"])
+
+    summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+    commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
+    assert summary_payload["artifacts"]["uploaded_save_path"]["path"] == "/downloads/Example"
+    assert "--uploaded-save-path /downloads/Example" in commands["target-upload-retry"]
+    assert "/downloads/Example" in command_argv["target-upload-retry"]
+
+
 def test_target_upload_retorrent_resume_uses_package_source_identity_after_rename(tmp_path) -> None:
     source_info = {
         "tracker": "u2",

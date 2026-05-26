@@ -1257,13 +1257,15 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
 
 
 def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.Namespace, artifacts: dict[str, Any]) -> list[dict[str, Any]]:
-    commands = [
-        _ptcli_command_entry("target-upload-retry", _target_upload_retry_args(args)),
-    ]
+    commands: list[dict[str, Any]] = []
     package_artifact = artifacts.get("package_dir")
     uploaded_torrent_artifact = artifacts.get("uploaded_torrent_file")
     uploaded_torrent_id = artifacts.get("uploaded_torrent_id")
     uploaded_save_path_artifact = artifacts.get("uploaded_save_path")
+    retry_args = _target_upload_retry_args(args)
+    if not args.uploaded_save_path and (uploaded_save_path := _artifact_path(uploaded_save_path_artifact)):
+        retry_args.extend(["--uploaded-save-path", uploaded_save_path])
+    commands.append(_ptcli_command_entry("target-upload-retry", retry_args))
     if isinstance(package_artifact, dict) and uploaded_torrent_id and not (isinstance(uploaded_torrent_artifact, dict) and uploaded_torrent_artifact.get("path")):
         download_args = [
             "target-upload",
