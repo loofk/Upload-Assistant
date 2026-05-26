@@ -25,6 +25,7 @@ NEXUSPHP_MTEAM_SOURCE_TRACKERS: Final[frozenset[str]] = frozenset(
     {
         "AUDIENCES",
         "CHD",
+        "HDS",
         "HDSKY",
         "HHAN",
         "OB",
@@ -58,6 +59,19 @@ REFERENCE_FLOW_PROFILES: Final[dict[tuple[str, str], FlowProfile]] = {
 def _generic_nexusphp_mteam_profile(source_tracker: str, target_tracker: str) -> FlowProfile | None:
     if target_tracker != "MTEAM" or source_tracker not in NEXUSPHP_MTEAM_SOURCE_TRACKERS:
         return None
+    if source_tracker == "HDS":
+        return FlowProfile(
+            source_tracker=source_tracker,
+            target_tracker=target_tracker,
+            source_kind="xbtit",
+            target_kind="mteam_api",
+            status="source-enabled",
+            notes=(
+                "Uses HD-Space torrent-details plus cookie-authenticated download.php source download.",
+                "Uses MTEAM API as target.",
+                "Site-specific source and target rules still require explicit review before execution.",
+            ),
+        )
     return FlowProfile(
         source_tracker=source_tracker,
         target_tracker=target_tracker,

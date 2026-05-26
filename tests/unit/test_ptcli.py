@@ -195,14 +195,16 @@ def test_sites_json_exposes_capability_matrix(capsys) -> None:
     assert payload["capabilities"]["U2"]["source_download"] is True
     assert payload["capabilities"]["U2"]["full_live_closure_to_mteam"] is True
     assert payload["capabilities"]["HDS"]["source_info"] is True
-    assert payload["capabilities"]["HDS"]["source_download"] is False
-    assert payload["capabilities"]["HDS"]["full_live_closure_to_mteam"] is False
+    assert payload["capabilities"]["HDS"]["source_download"] is True
+    assert payload["capabilities"]["HDS"]["full_live_closure_to_mteam"] is True
     assert payload["capabilities"]["MTEAM"]["target_upload"] is True
     assert "U2" in payload["full_live_closure_sources"]
-    assert "HDS" not in payload["full_live_closure_sources"]
+    assert "HDS" in payload["full_live_closure_sources"]
     u2_flow = next(flow for flow in payload["flows"] if flow["source_tracker"] == "U2")
     assert u2_flow["target_tracker"] == "MTEAM"
     assert u2_flow["full_live_closure"] is True
+    hds_flow = next(flow for flow in payload["flows"] if flow["source_tracker"] == "HDS")
+    assert hds_flow["full_live_closure"] is True
 
 
 def test_help_surfaces_short_live_closure_commands() -> None:
@@ -1692,6 +1694,7 @@ def test_source_module_registers_enabled_chinese_source_adapters() -> None:
         assert tracker in ptcli_source.GENERIC_DETAILS_BASE_URLS
     assert set(ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES) == set()
     assert set(ptcli_source.TTG_DOWNLOAD_BASE_URLS) == {"TTG"}
+    assert set(ptcli_source.COOKIE_DOWNLOAD_URLS) == {"HDS"}
 
 
 @pytest.mark.asyncio
@@ -1959,6 +1962,40 @@ async def test_ttg_source_download_uses_ptcli_native_downloader(monkeypatch, tmp
     )
 
     assert path == tmp_path / "out" / "TTG-789.torrent"
+    assert path.read_bytes() == b"d4:infod"
+
+
+@pytest.mark.asyncio
+async def test_hds_source_download_uses_cookie_download(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "HDS.txt").write_text("uid=1; pass=secret;", encoding="utf-8")
+
+    class FakeResponse:
+        content = b"d4:infod"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            assert kwargs["cookies"] == {"uid": "1", "pass": "secret"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url):
+            assert url == "https://hd-space.org/download.php?id=456"
+            return FakeResponse()
+
+    monkeypatch.setattr(ptcli_source.httpx, "AsyncClient", FakeClient)
+
+    path = await ptcli_source.download_source_torrent({}, "HDS", "456", str(tmp_path / "out"), base_dir=str(tmp_path))
+
+    assert path == tmp_path / "out" / "HDS-456.torrent"
     assert path.read_bytes() == b"d4:infod"
 
 
@@ -4980,6 +5017,27 @@ def test_flow_check_ready_for_ttg_to_mteam_uses_announce_url(tmp_path) -> None:
     assert payload["ready"] is True
     assert any(check["name"] == "TTG.passkey" and check["ok"] is True for check in payload["checks"])
     assert any(check["name"] == "TTG.cookie" and check["ok"] is True for check in payload["checks"])
+    assert any(check["name"] == "reference_flow" and check["ok"] is True for check in payload["checks"])
+
+
+def test_flow_check_ready_for_hds_to_mteam_uses_cookie_only(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "HDS.txt").write_text("uid=1;", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {
+            "HDS": {},
+            "MTEAM": {"api_key": "mteam-api"},
+        },
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+
+    payload = build_flow_check(config, "HDS", "123", "MTEAM", "default", base_dir=str(tmp_path))
+
+    assert payload["ready"] is True
+    assert not any(check["name"] == "HDS.passkey" for check in payload["checks"])
+    assert any(check["name"] == "HDS.cookie" and check["ok"] is True for check in payload["checks"])
     assert any(check["name"] == "reference_flow" and check["ok"] is True for check in payload["checks"])
 
 

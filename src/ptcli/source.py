@@ -47,6 +47,10 @@ TTG_DOWNLOAD_BASE_URLS: dict[str, str] = {
     "TTG": "https://totheglory.im",
 }
 
+COOKIE_DOWNLOAD_URLS: dict[str, str] = {
+    "HDS": "https://hd-space.org/download.php?id={torrent_id}",
+}
+
 GENERIC_DETAILS_BASE_URLS: dict[str, str] = {
     "AUDIENCES": "https://audiences.me",
     "CHD": "https://ptchdbits.co",
@@ -177,6 +181,10 @@ async def download_source_torrent(config: dict[str, Any], tracker: str, source_i
 
     if source_tracker in TTG_DOWNLOAD_BASE_URLS:
         await _download_ttg_torrent(config, source_tracker, torrent_id, destination, base_dir)
+        return _validate_downloaded_torrent(destination)
+
+    if source_tracker in COOKIE_DOWNLOAD_URLS:
+        await _download_cookie_torrent(source_tracker, torrent_id, destination, base_dir)
         return _validate_downloaded_torrent(destination)
 
     if source_tracker in NEXUS_DOWNLOAD_BASE_URLS:
@@ -360,6 +368,23 @@ async def _download_ttg_torrent(config: dict[str, Any], tracker: str, torrent_id
     cookie_exists = await asyncio.to_thread(os.path.exists, cookiefile)
     cookies = await _load_cookie_file(cookiefile) if cookie_exists else {}
     download_url = f"{TTG_DOWNLOAD_BASE_URLS[tracker]}/dl/{torrent_id}/{passkey}"
+
+    async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
+        response = await client.get(download_url)
+    response.raise_for_status()
+    await asyncio.to_thread(_assert_torrent_bytes, response.content)
+    async with aiofiles.open(destination, "wb") as torrent_file:
+        await torrent_file.write(response.content)
+
+
+async def _download_cookie_torrent(tracker: str, torrent_id: str, destination: Path, base_dir: str | None) -> None:
+    meta = create_source_meta(base_dir)
+    cookiefile = os.path.join(meta["base_dir"], "data", "cookies", f"{tracker}.txt")
+    cookie_exists = await asyncio.to_thread(os.path.exists, cookiefile)
+    if not cookie_exists:
+        raise ValueError(f"{tracker} cookie file is required for source torrent download.")
+    cookies = await _load_cookie_file(cookiefile)
+    download_url = COOKIE_DOWNLOAD_URLS[tracker].format(torrent_id=torrent_id)
 
     async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
         response = await client.get(download_url)

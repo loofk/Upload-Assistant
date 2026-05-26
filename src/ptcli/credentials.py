@@ -59,8 +59,9 @@ def _source_checks(config: dict[str, Any], source_tracker: str, base_dir: str | 
     tracker_config = config.get("TRACKERS", {}).get(source_tracker, {})
     checks: list[CheckItem] = []
     if source_tracker in NEXUSPHP_MTEAM_SOURCE_TRACKERS:
-        passkey = _source_passkey(tracker_config, source_tracker)
-        checks.append(CheckItem(name=f"{source_tracker}.passkey", ok=bool(passkey), message="Passkey configured." if passkey else "Passkey missing."))
+        if source_tracker != "HDS":
+            passkey = _source_passkey(tracker_config, source_tracker)
+            checks.append(CheckItem(name=f"{source_tracker}.passkey", ok=bool(passkey), message="Passkey configured." if passkey else "Passkey missing."))
         resolved_base_dir = os.path.abspath(base_dir or os.getcwd())
         cookiefile = os.path.join(resolved_base_dir, "data", "cookies", f"{source_tracker}.txt")
         checks.append(CheckItem(name=f"{source_tracker}.cookie", ok=os.path.exists(cookiefile), message=f"Cookie file: {cookiefile}"))
