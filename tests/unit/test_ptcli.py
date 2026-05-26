@@ -3891,6 +3891,37 @@ def test_target_upload_result_requires_uploaded_wait_match_evidence() -> None:
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True, wait_uploaded_complete=True) is False
 
 
+def test_target_upload_result_rejects_uploaded_wait_query_mismatch_without_verification() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
+        "uploaded_wait": {
+            "complete": True,
+            "query": {"torrent_hash": "a" * 40, "content_path": "/downloads/Name"},
+            "matches": [{"hash": "b" * 40, "content_path": "/downloads/Other"}],
+        },
+    }
+
+    assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True, wait_uploaded_complete=True) is False
+    assert ptcli_cli._target_upload_result_blockers(payload) == [
+        "uploaded_torrent_hash: inconsistent target torrent hashes (injected_torrent=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, uploaded_wait_query=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, uploaded_wait_match=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)",
+        "uploaded_wait: qBittorrent completion wait matched torrents, but not the requested hash.",
+        "uploaded_wait: qBittorrent completion wait matched torrents, but not the requested content path.",
+    ]
+
+
+def test_wait_result_completed_rejects_query_path_mismatch_without_verification() -> None:
+    wait_result = {
+        "complete": True,
+        "query": {"torrent_hash": "a" * 40, "content_path": "/downloads/Name"},
+        "matches": [{"hash": "a" * 40, "content_path": "/downloads/Other"}],
+    }
+
+    assert ptcli_cli._wait_result_completed(wait_result) is False
+    assert ptcli_cli._wait_completion_verification_blockers(wait_result) == ["qBittorrent completion wait matched torrents, but not the requested content path."]
+
+
 def test_target_upload_summary_requires_uploaded_wait_match_evidence() -> None:
     payload = {
         "status": "uploaded",
@@ -4664,7 +4695,7 @@ def test_pipeline_closure_reports_source_hash_inconsistency() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"torrent_hash": "a" * 40}},
         {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
-        {"stage": "wait-complete", "ok": True, "result": {"complete": True, "query": {"torrent_hash": "a" * 40}, "matches": [{"hash": "b" * 40}]}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True, "query": {"torrent_hash": "b" * 40}, "matches": [{"hash": "b" * 40}]}},
         {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
         {"stage": "source-content-verify", "ok": True, "result": {"verified": True, "matched_hashes": ["a" * 40]}},
         {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},

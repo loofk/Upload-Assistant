@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -3284,6 +3285,8 @@ def _wait_completion_verification_blockers(wait_result: dict[str, Any]) -> list[
             blockers.append("qBittorrent completion wait matched torrents, but not the requested hash.")
         if verification.get("requested_content_path_matched") is False:
             blockers.append("qBittorrent completion wait matched torrents, but not the requested content path.")
+    elif _wait_result_request_mismatch(wait_result):
+        blockers.extend(_wait_result_request_mismatch_blockers(wait_result))
     if not blockers:
         blockers.append("qBittorrent completion wait did not include matched torrent evidence.")
     return blockers
@@ -4545,6 +4548,8 @@ def _wait_result_completed(wait_result: Any) -> bool:
             return False
         if verification.get("requested_content_path_matched") is False:
             return False
+    elif _wait_result_request_mismatch(wait_result):
+        return False
     matches = wait_result.get("matches")
     if isinstance(matches, list):
         return any(_match_has_evidence(match) for match in matches)
@@ -4554,6 +4559,48 @@ def _wait_result_completed(wait_result: Any) -> bool:
             return int(matched_count) > 0
         except (TypeError, ValueError):
             return False
+    return False
+
+
+def _wait_result_request_mismatch(wait_result: dict[str, Any]) -> bool:
+    query = wait_result.get("query")
+    matches = wait_result.get("matches")
+    if not isinstance(query, dict) or not isinstance(matches, list):
+        return False
+    requested_hash = _normalize_torrent_hash(query.get("torrent_hash"))
+    if requested_hash and not any(_normalize_torrent_hash(match.get("hash") or match.get("torrent_hash") or match.get("torrenthash")) == requested_hash for match in matches if isinstance(match, dict)):
+        return True
+    requested_path = query.get("content_path")
+    return bool(requested_path) and not any(_match_path_matches_request(match, str(requested_path)) for match in matches if isinstance(match, dict))
+
+
+def _wait_result_request_mismatch_blockers(wait_result: dict[str, Any]) -> list[str]:
+    query = wait_result.get("query")
+    if not isinstance(query, dict):
+        return []
+    blockers: list[str] = []
+    if query.get("torrent_hash"):
+        requested_hash = _normalize_torrent_hash(query.get("torrent_hash"))
+        matches = wait_result.get("matches")
+        if requested_hash and isinstance(matches, list) and not any(_normalize_torrent_hash(match.get("hash") or match.get("torrent_hash") or match.get("torrenthash")) == requested_hash for match in matches if isinstance(match, dict)):
+            blockers.append("qBittorrent completion wait matched torrents, but not the requested hash.")
+    if query.get("content_path"):
+        requested_path = str(query["content_path"])
+        matches = wait_result.get("matches")
+        if isinstance(matches, list) and not any(_match_path_matches_request(match, requested_path) for match in matches if isinstance(match, dict)):
+            blockers.append("qBittorrent completion wait matched torrents, but not the requested content path.")
+    return blockers
+
+
+def _match_path_matches_request(match: dict[str, Any], requested_path: str) -> bool:
+    normalized_request = os.path.normpath(requested_path)
+    for key in ("content_path", "save_path", "path"):
+        value = match.get(key)
+        if not value:
+            continue
+        normalized_value = os.path.normpath(str(value))
+        if normalized_value == normalized_request or normalized_value.startswith(f"{normalized_request}{os.sep}"):
+            return True
     return False
 
 
