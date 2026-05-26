@@ -10146,6 +10146,8 @@ def test_mteam_upload_preflight_reports_torrent_safety_metadata(tmp_path) -> Non
     assert torrent_summary["announce"] == "https://fake.tracker"
     assert torrent_summary["source_flag"] == "MTEAM"
     assert torrent_summary["comment_length"] == 0
+    assert torrent_summary["extra_top_level_fields"] == []
+    assert torrent_summary["announce_list_present"] is False
     assert torrent_summary["mteam_safe"] is True
 
 
@@ -10175,6 +10177,36 @@ def test_mteam_upload_preflight_blocks_unsafe_target_torrent(tmp_path) -> None:
     assert preflight["status"] == "blocked"
     assert preflight["upload_payload"]["torrent_file"]["metadata_readable"] is True
     assert preflight["upload_payload"]["torrent_file"]["mteam_safe"] is False
+    assert any("--sanitize-target-torrent" in blocker for blocker in preflight["blockers"])
+
+
+def test_mteam_upload_preflight_blocks_extra_torrent_metadata(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    stages = mteam_ready_stages()
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    safe_torrent = Path(make_mteam_safe_torrent(tmp_path, "unsafe-extra"))
+    torrent = Torrent.read(str(safe_torrent), validate=False)
+    torrent.metainfo["announce-list"] = [["https://source.example/passkey/announce"]]
+    torrent.metainfo["publisher-url"] = "https://source.example/details.php?id=1"
+    torrent.write(str(safe_torrent), overwrite=True)
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(safe_torrent))
+
+    torrent_summary = preflight["upload_payload"]["torrent_file"]
+    assert preflight["status"] == "blocked"
+    assert torrent_summary["mteam_safe"] is False
+    assert torrent_summary["announce_list_present"] is True
+    assert torrent_summary["extra_top_level_fields"] == ["announce-list", "publisher-url"]
     assert any("--sanitize-target-torrent" in blocker for blocker in preflight["blockers"])
 
 

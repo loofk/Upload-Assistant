@@ -27,6 +27,7 @@ REQUIRED_MTEAM_PACKAGE_FILES = {
 MTEAM_PACKAGE_MANIFEST_FILENAME = "mteam-package-manifest.json"
 MTEAM_UPLOAD_ANNOUNCE = "https://fake.tracker"
 MTEAM_SOURCE_FLAG = "MTEAM"
+MTEAM_UPLOAD_TORRENT_ALLOWED_TOP_LEVEL_FIELDS = frozenset({"announce", "comment", "creation date", "created by", "encoding", "info"})
 MTEAM_STANDARD_ID_TO_RESOLUTION = {
     "1": "1080p",
     "2": "1080i",
@@ -1225,6 +1226,9 @@ def _torrent_metadata_summary(path: Path) -> dict[str, Any]:
     announce = torrent.metainfo.get("announce")
     comment = torrent.metainfo.get("comment")
     source_flag = torrent.metainfo.get("info", {}).get("source")
+    extra_top_level_fields = sorted(str(key) for key in torrent.metainfo if key not in MTEAM_UPLOAD_TORRENT_ALLOWED_TOP_LEVEL_FIELDS)
+    announce_list_present = "announce-list" in torrent.metainfo
+    mteam_safe = announce == MTEAM_UPLOAD_ANNOUNCE and source_flag == MTEAM_SOURCE_FLAG and not comment and not extra_top_level_fields and not announce_list_present
     return {
         "metadata_readable": True,
         "torrent_hash": str(torrent.infohash),
@@ -1232,7 +1236,9 @@ def _torrent_metadata_summary(path: Path) -> dict[str, Any]:
         "announce": announce,
         "comment_length": len(str(comment or "")),
         "source_flag": source_flag,
-        "mteam_safe": announce == MTEAM_UPLOAD_ANNOUNCE and source_flag == MTEAM_SOURCE_FLAG and not comment,
+        "extra_top_level_fields": extra_top_level_fields,
+        "announce_list_present": announce_list_present,
+        "mteam_safe": mteam_safe,
     }
 
 

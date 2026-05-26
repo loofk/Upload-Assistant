@@ -92,7 +92,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downlo
 - upload gate ready。
 - rule review package 内的每个 source/target obligation 都有规则 URL、确认状态和非空人工审查范围。
 - 描述材料、名称、简介、分类和标准字段可用。
-- torrent announce/source/comment 符合 MTEAM-safe 元数据门禁。
+- torrent announce/source/comment 符合 MTEAM-safe 元数据门禁，且没有残留 `announce-list` 或其他非预期顶层字段。
 - 已显式传入 `--confirm-upload`。
 
 上传成功后会下载 MTEAM 新种并注入 qBittorrent。`summary` 和 `evidence` 会记录 `uploaded_torrent_id`、`uploaded_torrent_hash`、`uploaded_torrent_path`、`injection_verified` 和 `uploaded_wait`。
