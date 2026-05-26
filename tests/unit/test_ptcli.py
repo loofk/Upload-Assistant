@@ -3461,11 +3461,11 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
                                     "any_complete": True,
                                     "requested_hash_matched": False,
                                     "requested_content_path_matched": None,
-                                    "observed_hashes": ["f" * 40],
-                                    "observed_content_paths": ["/downloads/Other"],
-                                    "observed_save_paths": ["/downloads"],
-                                    "observed_states": ["uploading"],
-                                    "observed_progress": [1.0],
+                                    "observed_hashes": ["f" * 40, "e" * 40],
+                                    "observed_content_paths": ["/downloads/Other", "/downloads/Second"],
+                                    "observed_save_paths": ["/downloads", "/downloads2"],
+                                    "observed_states": ["uploading", "stalledUP"],
+                                    "observed_progress": [1.0, 0.5],
                                 },
                                 "blockers": ["qBittorrent matched torrents, but none matched requested hash bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb."],
                             }
@@ -3499,16 +3499,22 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
     assert "export PTCLI_QBIT_WAIT_SOURCE_REQUESTED_TIMEOUT=3600\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_REQUESTED_INTERVAL=30\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_REQUESTED_HASH_MATCHED=0\n" in out
-    assert f"export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_HASHES={'f' * 40}\n" in out
-    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_CONTENT_PATHS=/downloads/Other\n" in out
-    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_SAVE_PATHS=/downloads\n" in out
-    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_STATES=uploading\n" in out
-    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_PROGRESS=1.0\n" in out
+    assert f"export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_HASHES={'f' * 40},{'e' * 40}\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_CONTENT_PATHS=/downloads/Other,/downloads/Second\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_SAVE_PATHS=/downloads,/downloads2\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_STATES=uploading,stalledUP\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_PROGRESS=1.0,0.5\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_ANY_COMPLETE=1\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_RETRY_RECOMMENDED=1\n" in out
     assert f"export PTCLI_QBIT_WAIT_SOURCE_SUGGESTED_HASH={'f' * 40}\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_SUGGESTED_CONTENT_PATH=/downloads/Expected\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_SUGGESTED_SAVE_PATH=/downloads\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_CANDIDATE_COUNT=2\n" in out
+    assert f"export PTCLI_QBIT_WAIT_SOURCE_FIRST_CANDIDATE_HASH={'f' * 40}\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_FIRST_CANDIDATE_CONTENT_PATH=/downloads/Other\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_FIRST_CANDIDATE_SAVE_PATH=/downloads\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_FIRST_CANDIDATE_STATE=uploading\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_FIRST_CANDIDATE_PROGRESS=1.0\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_RETRY_REASON='source qBittorrent wait matched a different torrent/content than requested_hash.'\n" in out
 
 

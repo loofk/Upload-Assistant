@@ -5841,16 +5841,30 @@ def _summary_check_qbit_retry_shell_fields(qbit_wait_retry_hints: dict[str, Any]
     fields: dict[str, Any] = {}
     for scope, prefix in (("source", "PTCLI_QBIT_WAIT_SOURCE"), ("uploaded", "PTCLI_QBIT_WAIT_UPLOADED")):
         hint = qbit_wait_retry_hints.get(scope) if isinstance(qbit_wait_retry_hints.get(scope), dict) else {}
+        first_candidate = _first_qbit_wait_candidate(hint)
         fields.update(
             {
                 f"{prefix}_RETRY_RECOMMENDED": _shell_bool(hint.get("retry_recommended")) if "retry_recommended" in hint else None,
                 f"{prefix}_SUGGESTED_HASH": hint.get("suggested_torrent_hash"),
                 f"{prefix}_SUGGESTED_CONTENT_PATH": hint.get("suggested_content_path"),
                 f"{prefix}_SUGGESTED_SAVE_PATH": hint.get("suggested_save_path"),
+                f"{prefix}_OBSERVED_CANDIDATE_COUNT": hint.get("observed_candidate_count"),
+                f"{prefix}_FIRST_CANDIDATE_HASH": first_candidate.get("hash"),
+                f"{prefix}_FIRST_CANDIDATE_CONTENT_PATH": first_candidate.get("content_path"),
+                f"{prefix}_FIRST_CANDIDATE_SAVE_PATH": first_candidate.get("save_path"),
+                f"{prefix}_FIRST_CANDIDATE_STATE": first_candidate.get("state"),
+                f"{prefix}_FIRST_CANDIDATE_PROGRESS": first_candidate.get("progress"),
                 f"{prefix}_RETRY_REASON": hint.get("reason"),
             }
         )
     return fields
+
+
+def _first_qbit_wait_candidate(hint: dict[str, Any]) -> dict[str, Any]:
+    candidates = hint.get("observed_candidates")
+    if not isinstance(candidates, list) or not candidates or not isinstance(candidates[0], dict):
+        return {}
+    return candidates[0]
 
 
 def _summary_check_run_next_command(payload: dict[str, Any]) -> int:
