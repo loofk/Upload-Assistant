@@ -5629,6 +5629,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else {}
     closure_source = closure_status.get("source") if isinstance(closure_status.get("source"), dict) else {}
     closure_target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
+    qbit_wait_diagnostics = payload.get("qbit_wait_diagnostics") if isinstance(payload.get("qbit_wait_diagnostics"), dict) else {}
     fields = {
         "PTCLI_SUMMARY_STATUS": payload.get("status"),
         "PTCLI_AUTOMATION_ACTION": payload.get("automation_action"),
@@ -5681,9 +5682,45 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_LIVE_SAFE_TO_ATTEMPT": _shell_bool(payload.get("live_safe_to_attempt")),
         "PTCLI_SUMMARY_FILE": payload.get("summary_file"),
     }
+    fields.update(_summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics))
     for key, value in fields.items():
         print(f"export {key}={shlex.quote('' if value is None else str(value))}")
     return 0
+
+
+def _summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for scope, prefix in (("source", "PTCLI_QBIT_WAIT_SOURCE"), ("uploaded", "PTCLI_QBIT_WAIT_UPLOADED")):
+        diagnostics = qbit_wait_diagnostics.get(scope) if isinstance(qbit_wait_diagnostics.get(scope), dict) else {}
+        fields.update(
+            {
+                f"{prefix}_COMPLETE": _shell_bool(diagnostics.get("complete")) if "complete" in diagnostics else None,
+                f"{prefix}_REQUEST_MISMATCH": _shell_bool(diagnostics.get("request_mismatch")) if "request_mismatch" in diagnostics else None,
+                f"{prefix}_REQUESTED_HASH": diagnostics.get("requested_hash"),
+                f"{prefix}_REQUESTED_CONTENT_PATH": diagnostics.get("requested_content_path"),
+                f"{prefix}_REQUESTED_SAVE_PATH": diagnostics.get("requested_save_path"),
+                f"{prefix}_REQUESTED_TIMEOUT": diagnostics.get("requested_timeout"),
+                f"{prefix}_REQUESTED_INTERVAL": diagnostics.get("requested_interval"),
+                f"{prefix}_REQUESTED_HASH_MATCHED": _shell_bool(diagnostics.get("requested_hash_matched")) if diagnostics.get("requested_hash_matched") is not None else None,
+                f"{prefix}_REQUESTED_CONTENT_PATH_MATCHED": _shell_bool(diagnostics.get("requested_content_path_matched")) if diagnostics.get("requested_content_path_matched") is not None else None,
+                f"{prefix}_MATCHED_COUNT": diagnostics.get("matched_count"),
+                f"{prefix}_COMPLETE_COUNT": diagnostics.get("complete_count"),
+                f"{prefix}_ANY_COMPLETE": _shell_bool(diagnostics.get("any_complete")) if diagnostics.get("any_complete") is not None else None,
+                f"{prefix}_OBSERVED_HASHES": _shell_join_list(diagnostics.get("observed_hashes")),
+                f"{prefix}_OBSERVED_CONTENT_PATHS": _shell_join_list(diagnostics.get("observed_content_paths")),
+                f"{prefix}_OBSERVED_SAVE_PATHS": _shell_join_list(diagnostics.get("observed_save_paths")),
+                f"{prefix}_OBSERVED_STATES": _shell_join_list(diagnostics.get("observed_states")),
+                f"{prefix}_OBSERVED_PROGRESS": _shell_join_list(diagnostics.get("observed_progress")),
+                f"{prefix}_BLOCKERS": ",".join(_string_list(diagnostics.get("blockers"))),
+            }
+        )
+    return fields
+
+
+def _shell_join_list(value: Any) -> str:
+    if not isinstance(value, list):
+        return ""
+    return ",".join(str(item) for item in value if isinstance(item, (str, int, float, bool)))
 
 
 def _summary_check_run_next_command(payload: dict[str, Any]) -> int:

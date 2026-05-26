@@ -3438,10 +3438,20 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
                         "qbit_closure": {
                             "wait": {
                                 "complete": False,
+                                "query": {"torrent_hash": "b" * 40, "content_path": "/downloads/Expected", "save_path": "/downloads", "timeout": 3600, "interval": 30},
                                 "completion_verification": {
+                                    "matched_count": 1,
+                                    "complete_count": 1,
+                                    "any_complete": True,
                                     "requested_hash_matched": False,
                                     "requested_content_path_matched": None,
+                                    "observed_hashes": ["f" * 40],
+                                    "observed_content_paths": ["/downloads/Other"],
+                                    "observed_save_paths": ["/downloads"],
+                                    "observed_states": ["uploading"],
+                                    "observed_progress": [1.0],
                                 },
+                                "blockers": ["qBittorrent matched torrents, but none matched requested hash bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb."],
                             }
                         }
                     }
@@ -3467,6 +3477,18 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
     assert "export PTCLI_QBIT_WAIT_MISMATCHES=source.requested_hash\n" in out
     assert "export PTCLI_CLOSURE_STATUS_QBIT_WAIT_MISMATCH=1\n" in out
     assert "export PTCLI_CLOSURE_STATUS_QBIT_WAIT_MISMATCHES=source.requested_hash\n" in out
+    assert f"export PTCLI_QBIT_WAIT_SOURCE_REQUESTED_HASH={'b' * 40}\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_REQUESTED_CONTENT_PATH=/downloads/Expected\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_REQUESTED_SAVE_PATH=/downloads\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_REQUESTED_TIMEOUT=3600\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_REQUESTED_INTERVAL=30\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_REQUESTED_HASH_MATCHED=0\n" in out
+    assert f"export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_HASHES={'f' * 40}\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_CONTENT_PATHS=/downloads/Other\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_SAVE_PATHS=/downloads\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_STATES=uploading\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_PROGRESS=1.0\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_ANY_COMPLETE=1\n" in out
 
 
 def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatch, capsys) -> None:
