@@ -912,6 +912,8 @@ async def test_retorrent_execute_defaults_to_export_target_torrent(monkeypatch) 
     assert payload["ready"] is True
     assert captured_args["args"].export_target_torrent is True
     assert captured_args["args"].target_torrent_file is None
+    assert captured_args["args"].uploaded_output_dir == "./tmp/uploaded"
+    assert payload["output_options"]["uploaded_output_dir"] == "./tmp/uploaded"
 
 
 @pytest.mark.asyncio

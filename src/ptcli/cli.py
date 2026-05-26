@@ -300,7 +300,7 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--write-payload", action="store_true", help="Write mteam-upload-payload.json during upload preflight.")
     retorrent.add_argument("--confirm-upload", action="store_true", help="Required with --execute to confirm manual rule review and live upload intent.")
     retorrent.add_argument("--download-uploaded-torrent", action="store_true", help="After target upload succeeds, download the generated MTEAM torrent file. Enabled automatically by --execute.")
-    retorrent.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to the package directory.")
+    retorrent.add_argument("--uploaded-output-dir", help="Directory for --download-uploaded-torrent. Defaults to ./tmp/uploaded during retorrent --execute.")
     retorrent.add_argument("--uploaded-torrent-id", help="Existing MTEAM torrent id to download and inject during --execute without re-submitting the upload.")
     retorrent.add_argument("--uploaded-torrent-file", help="Reuse an already downloaded MTEAM uploaded .torrent during --execute.")
     retorrent.add_argument("--inject-uploaded-torrent", action="store_true", help="Add the downloaded MTEAM torrent to qBittorrent after upload. Enabled automatically by --execute.")
@@ -882,7 +882,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         confirm_upload=args.confirm_upload,
         write_payload=args.write_payload,
         download_uploaded_torrent=True,
-        uploaded_output_dir=args.uploaded_output_dir,
+        uploaded_output_dir=args.uploaded_output_dir or "./tmp/uploaded",
         uploaded_torrent_id=args.uploaded_torrent_id,
         uploaded_torrent_file=args.uploaded_torrent_file,
         inject_uploaded_torrent=True,
