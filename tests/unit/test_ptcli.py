@@ -3441,6 +3441,13 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert 'export PTCLI_FIRST_RUNNABLE_COMMAND_ARGV=\'["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]\'\n' in out
     assert "export PTCLI_FIRST_RUNNABLE_COMMAND_SOURCE=resume_commands\n" in out
     assert "export PTCLI_FIRST_RUNNABLE_COMMAND_SUBCOMMAND=pipeline\n" in out
+    assert "export PTCLI_REJECTED_COMMAND_COUNT=1\n" in out
+    assert "export PTCLI_REJECTED_COMMAND_BLOCKERS='ptcli subcommand inspect is not in the summary-check auto-run allowlist'\n" in out
+    assert "export PTCLI_FIRST_REJECTED_STAGE=inspect-client\n" in out
+    assert "export PTCLI_FIRST_REJECTED_COMMAND='python3 ptcli.py inspect --client default --json'\n" in out
+    assert "export PTCLI_FIRST_REJECTED_COMMAND_SOURCE=resume_commands\n" in out
+    assert "export PTCLI_FIRST_REJECTED_COMMAND_SUBCOMMAND=inspect\n" in out
+    assert "export PTCLI_FIRST_REJECTED_COMMAND_BLOCKER='ptcli subcommand inspect is not in the summary-check auto-run allowlist'\n" in out
 
 
 def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) -> None:
@@ -3631,6 +3638,9 @@ def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) ->
     assert payload["first_runnable_command_argv"] == ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]
     assert payload["first_runnable_command_source"] == "resume_commands"
     assert payload["first_runnable_command_subcommand"] == "pipeline"
+    assert payload["rejected_command_count"] == 0
+    assert payload["rejected_command_blockers"] == []
+    assert payload["first_rejected_stage"] is None
     assert payload["candidate_commands"] == [
         {
             "stage": "resume-target-upload",
@@ -3694,6 +3704,13 @@ def test_summary_check_exposes_unsupported_next_command_metadata(tmp_path, capsy
     assert payload["first_runnable_command_argv"] is None
     assert payload["first_runnable_command_source"] is None
     assert payload["first_runnable_command_subcommand"] is None
+    assert payload["rejected_command_count"] == 1
+    assert payload["rejected_command_blockers"] == ["ptcli subcommand inspect is not in the summary-check auto-run allowlist"]
+    assert payload["first_rejected_stage"] == "resume-target-upload"
+    assert payload["first_rejected_command"] == "python3 ptcli.py inspect --client default --json"
+    assert payload["first_rejected_command_source"] == "resume_commands"
+    assert payload["first_rejected_command_subcommand"] == "inspect"
+    assert payload["first_rejected_command_blocker"] == "ptcli subcommand inspect is not in the summary-check auto-run allowlist"
     assert payload["automation_reason"] == "Next command is present but is not allowed for automatic execution: ptcli subcommand inspect is not in the summary-check auto-run allowlist."
 
 

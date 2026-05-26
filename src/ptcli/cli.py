@@ -1961,6 +1961,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     next_command_metadata = _summary_next_command_metadata(next_command_argv)
     candidate_commands = payload.get("candidate_commands") if isinstance(payload.get("candidate_commands"), list) else _summary_candidate_commands(payload)
     first_runnable_command = _first_runnable_candidate_command(candidate_commands)
+    rejected_command_summary = _rejected_candidate_command_summary(candidate_commands)
     next_command_placeholder = bool(next_command_metadata["placeholder"])
     next_command_ready = bool(next_command) and not next_command_placeholder
     next_command_run_allowed = bool(next_command_ready and next_command_metadata["run_allowed"])
@@ -2004,6 +2005,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         "first_runnable_command_argv": first_runnable_command.get("argv"),
         "first_runnable_command_source": first_runnable_command.get("source"),
         "first_runnable_command_subcommand": first_runnable_command.get("subcommand"),
+        **rejected_command_summary,
         "should_execute_next_command": automation_action == "run_next_command",
         "automation_exit_code": 0 if status == "ok" else 1,
     }
@@ -2243,6 +2245,21 @@ def _first_runnable_candidate_command(candidate_commands: list[Any]) -> dict[str
         if isinstance(command, dict) and command.get("run_allowed") is True:
             return command
     return {}
+
+
+def _rejected_candidate_command_summary(candidate_commands: list[Any]) -> dict[str, Any]:
+    rejected = [command for command in candidate_commands if isinstance(command, dict) and command.get("run_allowed") is not True]
+    first_rejected = rejected[0] if rejected else {}
+    blockers = list(dict.fromkeys(command["run_blocker"] for command in rejected if isinstance(command.get("run_blocker"), str) and command.get("run_blocker")))
+    return {
+        "rejected_command_count": len(rejected),
+        "rejected_command_blockers": blockers,
+        "first_rejected_stage": first_rejected.get("stage"),
+        "first_rejected_command": first_rejected.get("command"),
+        "first_rejected_command_source": first_rejected.get("source"),
+        "first_rejected_command_subcommand": first_rejected.get("subcommand"),
+        "first_rejected_command_blocker": first_rejected.get("run_blocker"),
+    }
 
 
 def _summary_command_argv(payload: dict[str, Any], stage: str | None, command: str) -> list[str] | None:
@@ -5783,6 +5800,13 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_FIRST_RUNNABLE_COMMAND_ARGV": json.dumps(payload.get("first_runnable_command_argv"), ensure_ascii=False) if payload.get("first_runnable_command_argv") else None,
         "PTCLI_FIRST_RUNNABLE_COMMAND_SOURCE": payload.get("first_runnable_command_source"),
         "PTCLI_FIRST_RUNNABLE_COMMAND_SUBCOMMAND": payload.get("first_runnable_command_subcommand"),
+        "PTCLI_REJECTED_COMMAND_COUNT": payload.get("rejected_command_count"),
+        "PTCLI_REJECTED_COMMAND_BLOCKERS": ",".join(_string_list(payload.get("rejected_command_blockers"))),
+        "PTCLI_FIRST_REJECTED_STAGE": payload.get("first_rejected_stage"),
+        "PTCLI_FIRST_REJECTED_COMMAND": payload.get("first_rejected_command"),
+        "PTCLI_FIRST_REJECTED_COMMAND_SOURCE": payload.get("first_rejected_command_source"),
+        "PTCLI_FIRST_REJECTED_COMMAND_SUBCOMMAND": payload.get("first_rejected_command_subcommand"),
+        "PTCLI_FIRST_REJECTED_COMMAND_BLOCKER": payload.get("first_rejected_command_blocker"),
         "PTCLI_SHOULD_EXECUTE_NEXT_COMMAND": _shell_bool(payload.get("should_execute_next_command")),
         "PTCLI_NEXT_COMMAND_READY": _shell_bool(payload.get("next_command_ready")),
         "PTCLI_QBIT_WAIT_MISMATCH": _shell_bool(payload.get("qbit_wait_mismatch")),
