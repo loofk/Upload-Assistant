@@ -2379,6 +2379,7 @@ def _qbit_injection_evidence(injected_torrent: Any) -> dict[str, Any] | None:
         "tags",
         "paused",
         "skip_checking",
+        "visible_in_client",
         "verified_in_client",
         "verification_attempts",
         "client_verification",

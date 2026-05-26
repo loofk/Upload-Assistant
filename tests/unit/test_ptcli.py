@@ -4082,12 +4082,13 @@ def test_pipeline_closure_requires_target_injection_client_verification() -> Non
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": False},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": False},
             },
         },
     ]
 
     closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+    evidence = ptcli_cli._pipeline_evidence(closure)
 
     assert closure["complete"] is False
     assert closure["blockers"] == ["target.injected"]
@@ -4095,6 +4096,8 @@ def test_pipeline_closure_requires_target_injection_client_verification() -> Non
     assert closure["target"]["injection_verified"] is False
     assert closure["target"]["injected_torrent_hash"] == "b" * 40
     assert closure["target"]["uploaded_torrent_hash"] == "b" * 40
+    assert evidence["target"]["qbit_closure"]["injection"]["visible_in_client"] is True
+    assert evidence["target"]["qbit_closure"]["injection"]["verified_in_client"] is False
 
 
 def test_pipeline_closure_rejects_target_injection_without_client_visibility() -> None:
@@ -4437,6 +4440,7 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
                 "client": "qbittorrent",
                 "hash": "a" * 40,
                 "save_path": "/downloads",
+                "visible_in_client": True,
                 "verified_in_client": True,
                 "verification_attempts": 2,
             },
@@ -4459,6 +4463,7 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
                 "save_path": "/downloads/Name",
                 "category": "MTEAM",
                 "tags": "retorrent",
+                "visible_in_client": True,
                 "verified_in_client": True,
                 "verification_attempts": 3,
             },
@@ -4482,6 +4487,7 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
     assert "source_wait" in evidence["source"]
     assert evidence["source"]["qbit_closure"]["injection"]["hash"] == "a" * 40
     assert evidence["source"]["qbit_closure"]["injection"]["save_path"] == "/downloads"
+    assert evidence["source"]["qbit_closure"]["injection"]["visible_in_client"] is True
     assert evidence["source"]["qbit_closure"]["injection"]["verification_attempts"] == 2
     assert evidence["source"]["qbit_closure"]["wait"]["complete"] is True
     assert evidence["source"]["qbit_closure"]["wait"]["query"]["torrent_hash"] == "a" * 40
@@ -4496,6 +4502,7 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
     assert evidence["target"]["qbit_closure"]["injection"]["hash"] == "b" * 40
     assert evidence["target"]["qbit_closure"]["injection"]["category"] == "MTEAM"
     assert evidence["target"]["qbit_closure"]["injection"]["tags"] == "retorrent"
+    assert evidence["target"]["qbit_closure"]["injection"]["visible_in_client"] is True
     assert evidence["target"]["qbit_closure"]["wait"]["complete"] is True
     assert evidence["target"]["qbit_closure"]["wait"]["query"]["torrent_hash"] == "b" * 40
 
