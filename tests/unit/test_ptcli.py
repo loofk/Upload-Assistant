@@ -471,6 +471,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "source_paused": True,
                     "hash_consistent": True,
                     "injected_torrent_hash": "a" * 40,
+                    "qbit_closure": {"injection": {"visible_in_client": True}},
                     "injection_verified": True,
                     "source_wait_evidence": True,
                     "content_path": "/downloads/Name",
@@ -480,6 +481,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "uploaded_torrent_id": "999",
                     "uploaded_torrent_hash": "b" * 40,
                     "injected_torrent_hash": "b" * 40,
+                    "qbit_closure": {"injection": {"visible_in_client": True}},
                     "injection_verified": True,
                     "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
                     "uploaded_save_path": "/downloads/Name",
@@ -601,11 +603,13 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "source_paused": True,
         "source_hash_consistent": True,
         "source_injected_torrent_hash": "a" * 40,
+        "source_injection_visible_in_client": True,
         "source_injection_verified": True,
         "source_wait_evidence": True,
         "uploaded_torrent_id": "999",
         "uploaded_torrent_hash": "b" * 40,
         "injected_torrent_hash": "b" * 40,
+        "injection_visible_in_client": True,
         "injection_verified": True,
         "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
         "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
@@ -632,12 +636,14 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["source_paused"] is True
     assert payload["resume_state"]["artifacts"]["source_hash_consistent"] is True
     assert payload["resume_state"]["artifacts"]["source_injected_torrent_hash"] is True
+    assert payload["resume_state"]["artifacts"]["source_injection_visible_in_client"] is True
     assert payload["resume_state"]["artifacts"]["source_injection_verified"] is True
     assert payload["resume_state"]["artifacts"]["source_wait_evidence"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_torrent_hash"] is True
     assert payload["resume_state"]["artifacts"]["injected_torrent_hash"] is True
+    assert payload["resume_state"]["artifacts"]["injection_visible_in_client"] is True
     assert payload["resume_state"]["artifacts"]["injection_verified"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_save_path"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_qbit_category"] is True
@@ -834,6 +840,7 @@ async def test_retorrent_execute_reuses_package_for_uploaded_torrent_file_resume
                 "source_wait_evidence": True,
                 "uploaded_torrent_hash": "b" * 40,
                 "injected_torrent_hash": "b" * 40,
+                "injection_visible_in_client": True,
                 "injection_verified": True,
                 "uploaded_wait_evidence": True,
             },
@@ -1076,7 +1083,14 @@ def test_retorrent_execute_blockers_require_uploaded_wait_evidence() -> None:
         pipeline_result,
         closure,
         True,
-        {"source_wait_evidence": True, "uploaded_wait_evidence": False, "uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_verified": True},
+        {
+            "source_wait_evidence": True,
+            "uploaded_wait_evidence": False,
+            "uploaded_torrent_hash": "b" * 40,
+            "injected_torrent_hash": "b" * 40,
+            "injection_visible_in_client": True,
+            "injection_verified": True,
+        },
     )
 
     assert blockers == ["target.uploaded_wait_evidence"]
@@ -1090,7 +1104,7 @@ def test_retorrent_execute_blockers_require_source_wait_evidence() -> None:
         pipeline_result,
         closure,
         True,
-        {"uploaded_wait_evidence": True, "uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_verified": True},
+        {"uploaded_wait_evidence": True, "uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_visible_in_client": True, "injection_verified": True},
     )
 
     assert blockers == ["source.wait_evidence"]
@@ -1107,7 +1121,7 @@ def test_retorrent_execute_blockers_require_uploaded_injection_artifacts() -> No
         {"source_wait_evidence": True, "uploaded_wait_evidence": True},
     )
 
-    assert blockers == ["target.uploaded_torrent_hash", "target.injected_torrent_hash", "target.injection_verified"]
+    assert blockers == ["target.uploaded_torrent_hash", "target.injected_torrent_hash", "target.injection_visible_in_client", "target.injection_verified"]
 
 
 def test_retorrent_execute_blockers_require_closure_audit_ready() -> None:
@@ -1123,7 +1137,14 @@ def test_retorrent_execute_blockers_require_closure_audit_ready() -> None:
         pipeline_result,
         closure,
         True,
-        {"source_wait_evidence": True, "uploaded_wait_evidence": True, "uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_verified": True},
+        {
+            "source_wait_evidence": True,
+            "uploaded_wait_evidence": True,
+            "uploaded_torrent_hash": "b" * 40,
+            "injected_torrent_hash": "b" * 40,
+            "injection_visible_in_client": True,
+            "injection_verified": True,
+        },
     )
 
     assert blockers == ["target.uploaded_wait_evidence"]
@@ -1157,7 +1178,14 @@ def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:
         pipeline_result,
         closure,
         True,
-        {"source_wait_evidence": True, "uploaded_wait_evidence": True, "uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_verified": True},
+        {
+            "source_wait_evidence": True,
+            "uploaded_wait_evidence": True,
+            "uploaded_torrent_hash": "b" * 40,
+            "injected_torrent_hash": "b" * 40,
+            "injection_visible_in_client": True,
+            "injection_verified": True,
+        },
     )
 
     assert blockers == ["qBittorrent wait mismatch: uploaded.requested_content_path"]
@@ -1176,7 +1204,13 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_audit_is_incomplet
             "closure_audit": {"ready": False, "missing": ["target.uploaded_wait_evidence"]},
             "evidence": {
                 "source": {"source_wait_evidence": True},
-                "target": {"uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_verified": True, "uploaded_wait_evidence": True},
+                "target": {
+                    "uploaded_torrent_hash": "b" * 40,
+                    "injected_torrent_hash": "b" * 40,
+                    "qbit_closure": {"injection": {"visible_in_client": True}},
+                    "injection_verified": True,
+                    "uploaded_wait_evidence": True,
+                },
             },
             "stages": [{"stage": "target-upload", "ok": True}],
         }
@@ -1228,6 +1262,7 @@ async def test_retorrent_execute_blocks_when_pipeline_qbit_wait_mismatches(monke
                     "injection_verified": True,
                     "uploaded_wait_evidence": True,
                     "qbit_closure": {
+                        "injection": {"visible_in_client": True},
                         "wait": {
                             "complete": True,
                             "completion_verification": {
@@ -1289,11 +1324,12 @@ def test_retorrent_execute_blockers_require_source_injection_artifacts_for_downl
             "uploaded_wait_evidence": True,
             "uploaded_torrent_hash": "b" * 40,
             "injected_torrent_hash": "b" * 40,
+            "injection_visible_in_client": True,
             "injection_verified": True,
         },
     )
 
-    assert blockers == ["source.torrent_hash", "source.injected_torrent_hash", "source.injection_verified"]
+    assert blockers == ["source.torrent_hash", "source.injected_torrent_hash", "source.injection_visible_in_client", "source.injection_verified"]
 
 
 def test_retorrent_execute_next_actions_explain_wait_evidence_blockers() -> None:

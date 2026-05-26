@@ -609,6 +609,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         "source_paused",
         "source_hash_consistent",
         "source_injected_torrent_hash",
+        "source_injection_visible_in_client",
         "source_injection_verified",
         "source_wait_evidence",
     ):
@@ -618,10 +619,15 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         value = evidence_source.get(source_key) or closure_source.get(source_key) or summary_source.get(source_key)
         if _artifact_value_present(value):
             merged[key] = value
+    if "source_injection_visible_in_client" not in merged:
+        source_injection = evidence_source.get("qbit_closure", {}).get("injection") if isinstance(evidence_source.get("qbit_closure"), dict) else None
+        if isinstance(source_injection, dict):
+            merged["source_injection_visible_in_client"] = _injected_torrent_visible(source_injection)
     for key in (
         "uploaded_torrent_id",
         "uploaded_torrent_hash",
         "injected_torrent_hash",
+        "injection_visible_in_client",
         "injection_verified",
         "uploaded_torrent_path",
         "uploaded_save_path",
@@ -640,6 +646,10 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         value = evidence_target.get(target_key) or closure_target.get(target_key) or summary_target.get(target_key)
         if _artifact_value_present(value):
             merged[key] = value
+    if "injection_visible_in_client" not in merged:
+        target_injection = evidence_target.get("qbit_closure", {}).get("injection") if isinstance(evidence_target.get("qbit_closure"), dict) else None
+        if isinstance(target_injection, dict):
+            merged["injection_visible_in_client"] = _injected_torrent_visible(target_injection)
     if not merged.get("uploaded_torrent_file") and merged.get("uploaded_torrent_path"):
         merged["uploaded_torrent_file"] = merged["uploaded_torrent_path"]
     return merged
@@ -677,6 +687,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "source_paused": "source_paused" in artifacts,
             "source_hash_consistent": bool(artifacts.get("source_hash_consistent")),
             "source_injected_torrent_hash": bool(artifacts.get("source_injected_torrent_hash")),
+            "source_injection_visible_in_client": bool(artifacts.get("source_injection_visible_in_client")),
             "source_injection_verified": bool(artifacts.get("source_injection_verified")),
             "source_wait_evidence": bool(artifacts.get("source_wait_evidence")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
@@ -685,6 +696,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
             "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
             "injected_torrent_hash": bool(artifacts.get("injected_torrent_hash")),
+            "injection_visible_in_client": bool(artifacts.get("injection_visible_in_client")),
             "injection_verified": bool(artifacts.get("injection_verified")),
             "uploaded_save_path": bool(artifacts.get("uploaded_save_path")),
             "uploaded_qbit_category": bool(artifacts.get("uploaded_qbit_category")),
@@ -734,6 +746,8 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
                 blockers.append("source.torrent_hash")
             if artifact_values.get("source_injected_torrent_hash") is None:
                 blockers.append("source.injected_torrent_hash")
+            if artifact_values.get("source_injection_visible_in_client") is not True:
+                blockers.append("source.injection_visible_in_client")
             if artifact_values.get("source_injection_verified") is not True:
                 blockers.append("source.injection_verified")
         if artifact_values.get("uploaded_wait_evidence") is not True:
@@ -742,6 +756,8 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
             blockers.append("target.uploaded_torrent_hash")
         if artifact_values.get("injected_torrent_hash") is None:
             blockers.append("target.injected_torrent_hash")
+        if artifact_values.get("injection_visible_in_client") is not True:
+            blockers.append("target.injection_visible_in_client")
         if artifact_values.get("injection_verified") is not True:
             blockers.append("target.injection_verified")
     if pipeline_result.get("status") not in {None, "ok", "complete"}:
@@ -758,6 +774,7 @@ def _source_artifact_evidence_key(artifact_key: str) -> str:
         "source_paused": "source_paused",
         "source_hash_consistent": "hash_consistent",
         "source_injected_torrent_hash": "injected_torrent_hash",
+        "source_injection_visible_in_client": "source_injection_visible_in_client",
         "source_injection_verified": "injection_verified",
     }.get(artifact_key, artifact_key)
 
@@ -823,11 +840,11 @@ def _retorrent_execute_qbit_mismatch_actions(pipeline_result: dict[str, Any]) ->
 def _retorrent_execute_blocker_next_action(blocker: str) -> str:
     if blocker == "source.wait_evidence":
         return "Re-run the source qBittorrent completion wait with --wait-complete, or provide a verified completed --path before target upload."
-    if blocker in {"source.torrent_hash", "source.injected_torrent_hash", "source.injection_verified"}:
+    if blocker in {"source.torrent_hash", "source.injected_torrent_hash", "source.injection_visible_in_client", "source.injection_verified"}:
         return "Re-run the source side with --download-source or --source-torrent-file plus --inject-source and --wait-complete so qBittorrent source injection evidence is recorded."
     if blocker == "target.uploaded_wait_evidence":
         return "Re-run the uploaded MTEAM torrent follow-up with --inject-uploaded-torrent and --wait-uploaded-complete until qBittorrent reports matched seeding evidence."
-    if blocker in {"target.uploaded_torrent_hash", "target.injected_torrent_hash", "target.injection_verified"}:
+    if blocker in {"target.uploaded_torrent_hash", "target.injected_torrent_hash", "target.injection_visible_in_client", "target.injection_verified"}:
         return "Re-run the uploaded MTEAM torrent follow-up with --inject-uploaded-torrent so qBittorrent visibility and exact uploaded torrent hash evidence are recorded."
     if blocker == "target.injected":
         return "Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path."
@@ -3925,6 +3942,7 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
         or "source.wait_evidence" in blocker_names
         or "source.torrent_hash" in blocker_names
         or "source.injected_torrent_hash" in blocker_names
+        or "source.injection_visible_in_client" in blocker_names
         or "source.injection_verified" in blocker_names
     ):
         preferred_stages.append("resume-source-torrent")
@@ -3939,6 +3957,7 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
         or "target.uploaded_wait_evidence" in blocker_names
         or "target.uploaded_torrent_hash" in blocker_names
         or "target.injected_torrent_hash" in blocker_names
+        or "target.injection_visible_in_client" in blocker_names
         or "target.injection_verified" in blocker_names
     ):
         preferred_stages.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
