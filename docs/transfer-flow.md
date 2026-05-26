@@ -107,7 +107,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --uploaded-torrent-file ./tmp/uploaded/MTEAM-999.torrent --inject-uploaded-torrent --uploaded-save-path "/downloads/content" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --wait-uploaded-complete --write-summary --json
 ```
 
-`retorrent --execute` 和 `pipeline --write-summary` 会在 `ptcli-run-summary.json` 中写入 `resume_commands`，优先使用这些命令续跑。盒子脚本可用 `summary-check --print-next-command` 只取下一条安全命令，用 `summary-check --print-shell` 输出 `PTCLI_AUTOMATION_ACTION`、`PTCLI_NEXT_COMMAND`、`PTCLI_AUTOMATION_EXIT_CODE` 等 shell 变量，或用 `summary-check --run-next-command` 直接执行下一条受限的 `ptcli.py` 续跑命令。
+`retorrent --execute` 和 `pipeline --write-summary` 会在 `ptcli-run-summary.json` 中写入 `resume_commands`，优先使用这些命令续跑。盒子脚本可用 `summary-check --json` 读取 `flow_diagnostics` 和 `credential_requirements`，用 `summary-check --print-next-command` 只取下一条安全命令，用 `summary-check --print-shell` 输出 `PTCLI_AUTOMATION_ACTION`、`PTCLI_NEXT_COMMAND`、`PTCLI_AUTOMATION_EXIT_CODE` 等 shell 变量，或用 `summary-check --run-next-command` 直接执行下一条受限的 `ptcli.py` 续跑命令。
 
 `ptcli-run-summary.json` 顶层的 `flow_check` 和 `summary.flow` 会保留源站详情/下载适配器、目标站上传适配器和去重后的凭据要求，便于恢复脚本在重试前检查配置是否仍然满足当前 flow。
 

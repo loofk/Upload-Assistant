@@ -2955,6 +2955,20 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
                 "ready": False,
                 "complete": False,
                 "blockers": ["target.uploaded"],
+                "flow_check": {
+                    "ready": True,
+                    "source_tracker": "U2",
+                    "source_torrent_id": "60635",
+                    "target_trackers": ["MTEAM"],
+                    "source_capability": {
+                        "tracker": "U2",
+                        "source_info_adapter": "generic_details_cookie",
+                        "source_download_adapter": "nexusphp_passkey",
+                        "credential_requirements": ["TRACKERS.U2.passkey", "data/cookies/U2.txt"],
+                    },
+                    "target_capabilities": [{"tracker": "MTEAM", "target_upload_adapter": "mteam_api", "credential_requirements": ["TRACKERS.MTEAM.api_key"]}],
+                    "credential_requirements": ["TRACKERS.U2.passkey", "data/cookies/U2.txt", "TRACKERS.MTEAM.api_key"],
+                },
                 "resume_commands": [
                     {
                         "stage": "resume-target-upload",
@@ -3109,6 +3123,20 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                 "ready": False,
                 "complete": False,
                 "blockers": ["target.uploaded"],
+                "flow_check": {
+                    "ready": True,
+                    "source_tracker": "U2",
+                    "source_torrent_id": "60635",
+                    "target_trackers": ["MTEAM"],
+                    "source_capability": {
+                        "tracker": "U2",
+                        "source_info_adapter": "generic_details_cookie",
+                        "source_download_adapter": "nexusphp_passkey",
+                        "credential_requirements": ["TRACKERS.U2.passkey", "data/cookies/U2.txt"],
+                    },
+                    "target_capabilities": [{"tracker": "MTEAM", "target_upload_adapter": "mteam_api", "credential_requirements": ["TRACKERS.MTEAM.api_key"]}],
+                    "credential_requirements": ["TRACKERS.U2.passkey", "data/cookies/U2.txt", "TRACKERS.MTEAM.api_key"],
+                },
                 "resume_commands": [
                     {
                         "stage": "resume-target-upload",
@@ -3227,6 +3255,20 @@ def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatc
 
 
 def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) -> None:
+    flow_check = {
+        "ready": True,
+        "source_tracker": "U2",
+        "source_torrent_id": "60635",
+        "target_trackers": ["MTEAM"],
+        "source_capability": {
+            "tracker": "U2",
+            "source_info_adapter": "generic_details_cookie",
+            "source_download_adapter": "nexusphp_passkey",
+            "credential_requirements": ["TRACKERS.U2.passkey", "data/cookies/U2.txt"],
+        },
+        "target_capabilities": [{"tracker": "MTEAM", "target_upload_adapter": "mteam_api", "credential_requirements": ["TRACKERS.MTEAM.api_key"]}],
+        "credential_requirements": ["TRACKERS.U2.passkey", "data/cookies/U2.txt", "TRACKERS.MTEAM.api_key"],
+    }
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
         json.dumps(
@@ -3236,6 +3278,7 @@ def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) ->
                 "ready": False,
                 "complete": False,
                 "blockers": ["target.uploaded"],
+                "flow_check": flow_check,
                 "resume_commands": [
                     {
                         "stage": "resume-target-upload",
@@ -3264,6 +3307,9 @@ def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) ->
     assert payload["next_stage"] == "resume-target-upload"
     assert payload["next_command"] == "python3 ptcli.py pipeline --upload-target"
     assert payload["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]
+    assert payload["flow_diagnostics"]["present"] is True
+    assert payload["flow_diagnostics"]["source_capability"]["source_download_adapter"] == "nexusphp_passkey"
+    assert payload["credential_requirements"] == ["TRACKERS.U2.passkey", "data/cookies/U2.txt", "TRACKERS.MTEAM.api_key"]
 
 
 def test_summary_check_run_next_command_rejects_non_ptcli_command(tmp_path, monkeypatch, capsys) -> None:

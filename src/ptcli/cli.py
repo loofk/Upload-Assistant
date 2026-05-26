@@ -1638,6 +1638,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     kind = str(payload.get("kind") or "unknown")
     qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(payload)
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
+    flow_diagnostics = _summary_flow_diagnostics(payload)
     return {
         "schema_version": schema_version,
         "expected_schema_version": SUMMARY_SCHEMA_VERSION,
@@ -1645,9 +1646,36 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "kind": kind,
         "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
         "kind_supported": kind in SUPPORTED_SUMMARY_KINDS,
+        "flow_diagnostics": flow_diagnostics,
+        "credential_requirements": flow_diagnostics.get("credential_requirements", []),
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
+    }
+
+
+def _summary_flow_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
+    flow = payload.get("flow_check")
+    if not isinstance(flow, dict):
+        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        flow = summary.get("flow")
+    if not isinstance(flow, dict):
+        return {
+            "present": False,
+            "ready": None,
+            "source_capability": None,
+            "target_capabilities": [],
+            "credential_requirements": [],
+        }
+    return {
+        "present": True,
+        "ready": flow.get("ready") if isinstance(flow.get("ready"), bool) else None,
+        "source_tracker": flow.get("source_tracker"),
+        "source_torrent_id": flow.get("source_torrent_id"),
+        "target_trackers": flow.get("target_trackers") if isinstance(flow.get("target_trackers"), list) else [],
+        "source_capability": flow.get("source_capability") if isinstance(flow.get("source_capability"), dict) else None,
+        "target_capabilities": flow.get("target_capabilities") if isinstance(flow.get("target_capabilities"), list) else [],
+        "credential_requirements": _string_list(flow.get("credential_requirements")),
     }
 
 
