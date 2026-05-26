@@ -3250,6 +3250,8 @@ def _target_upload_result_blockers(result: dict[str, Any]) -> list[str]:
     _extend_unique_string(blockers, _uploaded_torrent_hash_consistency_blockers(result))
     injected_torrent = result.get("injected_torrent")
     if isinstance(injected_torrent, dict):
+        if not _injected_torrent_visible(injected_torrent):
+            _append_unique_string(blockers, "injected_torrent: qBittorrent did not list the injected torrent after add.")
         _extend_unique_string(blockers, [f"injected_torrent: {blocker}" for blocker in _client_verification_blockers(injected_torrent.get("client_verification"))])
     _extend_unique_string(blockers, _nested_blockers(result.get("uploaded_wait"), "uploaded_wait"))
     uploaded_wait = result.get("uploaded_wait")
@@ -4498,7 +4500,7 @@ def _injected_torrent_visible(injected_torrent: Any) -> bool:
     client_matches = injected_torrent.get("client_matches")
     if isinstance(client_matches, list):
         return bool(client_matches)
-    return bool(injected_torrent.get("verified_in_client"))
+    return False
 
 
 def _source_injection_verified(stage: dict[str, Any] | None) -> bool:

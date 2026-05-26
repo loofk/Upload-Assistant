@@ -3603,13 +3603,24 @@ def test_target_upload_result_requires_uploaded_torrent_client_verification() ->
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
 
 
+def test_target_upload_result_requires_uploaded_torrent_visibility_evidence() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+    }
+
+    assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
+    assert "injected_torrent: qBittorrent did not list the injected torrent after add." in ptcli_cli._target_upload_result_blockers(payload)
+
+
 def test_target_upload_result_requires_uploaded_torrent_client_metadata_match() -> None:
     payload = {
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
         "injected_torrent": {
             "hash": "a" * 40,
-            "verified_in_client": True,
+            "visible_in_client": True, "verified_in_client": True,
             "client_verification": {
                 "visible": True,
                 "save_path_matched": True,
@@ -3626,7 +3637,7 @@ def test_target_upload_result_accepts_completed_uploaded_torrent_injection() -> 
     payload = {
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
     }
 
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is True
@@ -3638,7 +3649,7 @@ def test_target_upload_result_requires_uploaded_torrent_hash_consistency() -> No
         "submitted_torrent_hash": "a" * 40,
         "uploaded_torrent_hash": "a" * 40,
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "torrent_hash": "b" * 40},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
     }
 
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
@@ -3649,7 +3660,7 @@ def test_target_upload_result_checks_uploaded_wait_match_hash_consistency() -> N
         "status": "uploaded",
         "uploaded_torrent_hash": "a" * 40,
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "torrent_hash": "a" * 40},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
         "uploaded_wait": {
             "complete": True,
             "query": {"torrent_hash": "a" * 40, "content_path": "/downloads/Name"},
@@ -3672,7 +3683,7 @@ def test_uploaded_injection_preserves_upload_response_hash_for_consistency_check
             "uploaded_torrent_hash": "a" * 40,
             "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "torrent_hash": "a" * 40},
         },
-        {"hash": "b" * 40, "verified_in_client": True},
+        {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
     )
 
     blockers = ptcli_cli._uploaded_torrent_hash_consistency_blockers(payload)
@@ -3687,7 +3698,7 @@ def test_target_upload_result_requires_uploaded_torrent_completion_when_requeste
     payload = {
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
         "uploaded_wait": {"complete": False, "matches": []},
     }
 
@@ -3715,7 +3726,7 @@ def test_target_upload_summary_blocks_missing_rule_obligations() -> None:
     payload = {
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
         "uploaded_wait": {"complete": True, "matches": [{"hash": "a" * 40}]},
     }
 
@@ -3747,7 +3758,7 @@ def test_target_upload_summary_surfaces_downloaded_torrent_file_evidence_blocker
     payload = {
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "exists": False},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
     }
 
     summary = ptcli_cli._target_upload_summary(payload, {"status": "ready", "blockers": [], "rule_obligation_review": {"ready": True, "blockers": []}})
@@ -3760,7 +3771,7 @@ def test_target_upload_result_requires_downloaded_torrent_file_evidence_when_ava
     payload = {
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "exists": False},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
     }
 
     assert ptcli_cli._target_upload_result_ready(payload, execute=True, download_uploaded=True, inject_uploaded=True) is False
@@ -3773,7 +3784,7 @@ def test_uploaded_torrent_followup_requires_readable_metadata(tmp_path) -> None:
         {
             "status": "uploaded",
             "downloaded_torrent": {"path": str(uploaded_torrent)},
-            "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+            "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
         }
     )
 
@@ -3794,7 +3805,7 @@ def test_target_upload_summary_surfaces_client_metadata_mismatch() -> None:
             "save_path": "/downloads/Name",
             "category": "MTEAM",
             "tags": "retorrent",
-            "verified_in_client": True,
+            "visible_in_client": True, "verified_in_client": True,
             "verification_attempts": 3,
             "client_verification": {
                 "visible": True,
@@ -3826,7 +3837,7 @@ def test_target_upload_summary_surfaces_uploaded_torrent_hash_mismatch() -> None
         "submitted_torrent_hash": "a" * 40,
         "uploaded_torrent_hash": "a" * 40,
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "torrent_hash": "b" * 40},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
         "uploaded_wait": {"complete": True, "query": {"torrent_hash": "a" * 40}, "matches": [{"hash": "a" * 40}]},
     }
 
@@ -3842,7 +3853,7 @@ def test_target_upload_result_accepts_completed_uploaded_torrent_wait() -> None:
     payload = {
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
         "uploaded_wait": {"complete": True, "matches": [{"hash": "a" * 40}]},
     }
 
@@ -3853,7 +3864,7 @@ def test_target_upload_result_requires_uploaded_wait_match_evidence() -> None:
     payload = {
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
         "uploaded_wait": {"complete": True, "matches": []},
     }
 
@@ -3864,7 +3875,7 @@ def test_target_upload_summary_requires_uploaded_wait_match_evidence() -> None:
     payload = {
         "status": "uploaded",
         "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
         "uploaded_wait": {"complete": True, "matches": []},
     }
 
@@ -3909,7 +3920,7 @@ def test_target_upload_blockers_report_uploaded_wait_request_mismatch() -> None:
         {
             "status": "uploaded",
             "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-            "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+            "injected_torrent": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True},
             "uploaded_wait": {
                 "complete": True,
                 "matches": [{"hash": "a" * 40, "content_path": "/downloads/Other"}],
@@ -4158,7 +4169,7 @@ def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4193,7 +4204,7 @@ def test_pipeline_closure_rejects_unverified_existing_qbit_match() -> None:
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "c" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "c" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "c" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "c" * 40}]},
             },
         },
@@ -4227,7 +4238,7 @@ def test_pipeline_closure_rejects_match_when_source_wait_failed() -> None:
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4247,7 +4258,7 @@ def test_pipeline_closure_preserves_torrent_file_evidence() -> None:
     uploaded_torrent = {"path": "/tmp/MTEAM-999.torrent", "exists": True, "size_bytes": 9, "sha1": "d" * 40}
     stages = [
         {"stage": "source-download", "ok": True, "result": source_torrent},
-        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True, "matches": [{"hash": "a" * 40, "content_path": "/downloads/Name"}]}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
         {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
@@ -4259,7 +4270,7 @@ def test_pipeline_closure_preserves_torrent_file_evidence() -> None:
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": uploaded_torrent,
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
             },
         },
     ]
@@ -4276,7 +4287,7 @@ def test_pipeline_closure_preserves_torrent_file_evidence() -> None:
 def test_pipeline_closure_requires_existing_source_torrent_file_evidence() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent", "exists": False}},
-        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
         {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
@@ -4288,7 +4299,7 @@ def test_pipeline_closure_requires_existing_source_torrent_file_evidence() -> No
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4304,7 +4315,7 @@ def test_pipeline_closure_requires_existing_source_torrent_file_evidence() -> No
 def test_pipeline_closure_requires_existing_uploaded_torrent_file_evidence() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent"}},
-        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
         {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
@@ -4316,7 +4327,7 @@ def test_pipeline_closure_requires_existing_uploaded_torrent_file_evidence() -> 
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "exists": False},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4432,7 +4443,7 @@ def test_pipeline_closure_requires_uploaded_torrent_completion_when_waited() -> 
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": False, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4450,7 +4461,7 @@ def test_pipeline_closure_requires_uploaded_torrent_completion_when_waited() -> 
 def test_pipeline_closure_requires_source_wait_match_evidence() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"torrent_path": "/tmp/U2-60635.torrent"}},
-        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True, "matches": []}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
         {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
@@ -4461,7 +4472,7 @@ def test_pipeline_closure_requires_source_wait_match_evidence() -> None:
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4488,7 +4499,7 @@ def test_pipeline_closure_requires_uploaded_wait_match_evidence() -> None:
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": []},
             },
         },
@@ -4518,7 +4529,7 @@ def test_pipeline_closure_requires_uploaded_torrent_hash_consistency() -> None:
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "c" * 40},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "query": {"torrent_hash": "b" * 40}, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4549,7 +4560,7 @@ def test_pipeline_closure_requires_clean_target_duplicate_check() -> None:
                 "fresh_duplicate_check": {"searched": True, "count": 1, "dupes": [{"name": "Existing"}]},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "b" * 40},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "query": {"torrent_hash": "b" * 40}, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4584,7 +4595,7 @@ def test_pipeline_closure_requires_target_rule_obligations() -> None:
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "b" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "b" * 40},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "query": {"torrent_hash": "b" * 40}, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4613,7 +4624,7 @@ def test_pipeline_closure_requires_source_injection_client_verification() -> Non
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4632,7 +4643,7 @@ def test_pipeline_closure_requires_source_injection_client_verification() -> Non
 def test_pipeline_closure_reports_source_hash_inconsistency() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"torrent_hash": "a" * 40}},
-        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True, "query": {"torrent_hash": "a" * 40}, "matches": [{"hash": "b" * 40}]}},
         {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
         {"stage": "source-content-verify", "ok": True, "result": {"verified": True, "matched_hashes": ["a" * 40]}},
@@ -4645,7 +4656,7 @@ def test_pipeline_closure_reports_source_hash_inconsistency() -> None:
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "uploaded_torrent_hash": "c" * 40,
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "c" * 40},
-                "injected_torrent": {"hash": "c" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "c" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "query": {"torrent_hash": "c" * 40}, "matches": [{"hash": "c" * 40}]},
             },
         },
@@ -4663,7 +4674,7 @@ def test_pipeline_closure_reports_source_hash_inconsistency() -> None:
 def test_pipeline_closure_requires_source_wait_completion() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"torrent_path": "/tmp/U2-60635.torrent"}},
-        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": False, "matches": []}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
         {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
@@ -4674,7 +4685,7 @@ def test_pipeline_closure_requires_source_wait_completion() -> None:
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4811,7 +4822,7 @@ def test_pipeline_closure_audit_requires_injection_visibility() -> None:
 def test_pipeline_evidence_reports_resume_sources() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent", "reused": True}},
-        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": True}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True, "matches": [{"hash": "a" * 40, "content_path": "/downloads/Name"}]}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
         {"stage": "target-prepare", "ok": True, "result": {"package_dir": "/tmp/package", "reused": True, "rule_review": mteam_clean_rule_review()}},
@@ -4822,7 +4833,7 @@ def test_pipeline_evidence_reports_resume_sources() -> None:
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "reused": True},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4855,7 +4866,7 @@ def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -4883,7 +4894,7 @@ def test_pipeline_closure_rejects_empty_qbit_match_evidence() -> None:
                 "status": "uploaded",
                 "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                 "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
-                "injected_torrent": {"hash": "b" * 40, "verified_in_client": True},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
                 "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
             },
         },
@@ -6614,7 +6625,7 @@ async def test_pipeline_inject_source_runs_after_download(monkeypatch, tmp_path)
             "tags": tags,
             "paused": paused,
             "hash": source_hash,
-            "verified_in_client": True,
+            "visible_in_client": True, "verified_in_client": True,
         }
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
@@ -6679,7 +6690,7 @@ async def test_pipeline_inject_source_reuses_existing_source_torrent(monkeypatch
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, category, tags, paused)
-        return {"client": "qbittorrent", "torrent_path": torrent_path, "save_path": save_path, "hash": source_hash, "verified_in_client": True}
+        return {"client": "qbittorrent", "torrent_path": torrent_path, "save_path": save_path, "hash": source_hash, "visible_in_client": True, "verified_in_client": True}
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
@@ -6804,7 +6815,7 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
-        return {"client": "qbittorrent", "save_path": save_path, "verified_in_client": True}
+        return {"client": "qbittorrent", "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, timeout, interval)
@@ -6880,7 +6891,7 @@ async def test_pipeline_wait_complete_requires_matched_source_evidence(monkeypat
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
-        return {"client": "qbittorrent", "save_path": save_path, "hash": source_hash, "verified_in_client": True}
+        return {"client": "qbittorrent", "save_path": save_path, "hash": source_hash, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, timeout, interval)
@@ -6960,7 +6971,7 @@ async def test_pipeline_wait_complete_prefers_injected_hash(monkeypatch, tmp_pat
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
-        return {"client": "qbittorrent", "save_path": save_path, "hash": injected_hash, "verified_in_client": True}
+        return {"client": "qbittorrent", "save_path": save_path, "hash": injected_hash, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, content_path, timeout, interval)
@@ -7248,7 +7259,7 @@ async def test_pipeline_blocks_source_injection_hash_mismatch(monkeypatch, tmp_p
     async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (torrent_path, category, tags, paused)
         wrong_hash = "f" * 40 if source_hash != "f" * 40 else "e" * 40
-        return {"client": client_name, "hash": wrong_hash, "save_path": save_path, "verified_in_client": True}
+        return {"client": client_name, "hash": wrong_hash, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(*_args, **_kwargs):
         raise AssertionError("source wait must not run when injected source hash mismatches downloaded source torrent")
@@ -7317,7 +7328,7 @@ async def test_pipeline_infers_content_path_from_completed_qbit_match(monkeypatc
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
-        return {"client": "qbittorrent", "save_path": save_path, "hash": source_hash, "verified_in_client": True}
+        return {"client": "qbittorrent", "save_path": save_path, "hash": source_hash, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, content_path, torrent_hash, timeout, interval)
@@ -7709,7 +7720,7 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
             "category": category,
             "tags": tags,
             "paused": paused,
-            "verified_in_client": True,
+            "visible_in_client": True, "verified_in_client": True,
         }
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
@@ -7809,7 +7820,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         return source_torrent
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
-        return {"hash": source_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "verified_in_client": True}
+        return {"hash": source_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "visible_in_client": True, "verified_in_client": True}
 
     wait_calls = []
 
@@ -7832,7 +7843,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
 
     async def fake_inject_uploaded_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         assert uploaded_hash is not None
-        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "verified_in_client": True}
+        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "visible_in_client": True, "verified_in_client": True}
 
     calls = {"inject": 0}
 
@@ -8207,7 +8218,7 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
             "category": category,
             "tags": tags,
             "paused": paused,
-            "verified_in_client": True,
+            "visible_in_client": True, "verified_in_client": True,
         }
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
@@ -8326,7 +8337,7 @@ async def test_pipeline_exports_matched_torrent_for_target_upload(monkeypatch, t
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         _ = (torrent_path, category, tags, paused)
-        return {"hash": uploaded_hash, "save_path": save_path, "verified_in_client": True}
+        return {"hash": uploaded_hash, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
         return {"client": client_name, "complete": True, "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval}, "matches": [{"hash": torrent_hash, "content_path": content_path}]}
@@ -8485,7 +8496,7 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
         return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
-        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "verified_in_client": True}
+        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
         return {
@@ -8666,7 +8677,7 @@ async def test_pipeline_reuses_uploaded_torrent_id_for_target_injection(monkeypa
         return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
-        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "verified_in_client": True}
+        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
         return {
@@ -8770,7 +8781,7 @@ async def test_pipeline_target_execute_enables_uploaded_torrent_followup(monkeyp
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         _ = (torrent_path, category, tags, paused)
-        return {"hash": uploaded_hash, "save_path": save_path, "verified_in_client": True}
+        return {"hash": uploaded_hash, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
         return {"client": client_name, "complete": True, "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval}, "matches": [{"hash": torrent_hash, "content_path": content_path}]}
@@ -9293,7 +9304,7 @@ async def test_pipeline_sanitizes_manual_target_torrent_for_upload(monkeypatch, 
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         _ = (torrent_path, category, tags, paused)
-        return {"hash": uploaded_hash, "save_path": save_path, "verified_in_client": True}
+        return {"hash": uploaded_hash, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
         return {"client": client_name, "complete": True, "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval}, "matches": [{"hash": torrent_hash, "content_path": content_path}]}
@@ -9396,7 +9407,7 @@ async def test_pipeline_target_execute_auto_exports_and_sanitizes_target_torrent
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         _ = (torrent_path, category, tags, paused)
-        return {"hash": uploaded_hash, "save_path": save_path, "verified_in_client": True}
+        return {"hash": uploaded_hash, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
         return {"client": client_name, "complete": True, "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval}, "matches": [{"hash": torrent_hash, "content_path": content_path}]}
@@ -9485,8 +9496,8 @@ async def test_pipeline_target_execute_auto_downloads_injects_and_waits_source(m
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
         _ = (category, tags, paused)
         if torrent_path == str(source_torrent):
-            return {"hash": source_hash, "torrent_path": torrent_path, "save_path": save_path, "verified_in_client": True}
-        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "verified_in_client": True}
+            return {"hash": source_hash, "torrent_path": torrent_path, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
+        return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (timeout, interval)
@@ -10720,7 +10731,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
             "category": category,
             "tags": tags,
             "paused": paused,
-            "verified_in_client": True,
+            "visible_in_client": True, "verified_in_client": True,
         }
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
@@ -11389,7 +11400,7 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
             "category": category,
             "tags": tags,
             "paused": paused,
-            "verified_in_client": True,
+            "visible_in_client": True, "verified_in_client": True,
         }
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
@@ -11518,7 +11529,7 @@ async def test_target_upload_wait_uses_hash_from_reused_uploaded_torrent_file(mo
             "category": category,
             "tags": tags,
             "paused": paused,
-            "verified_in_client": True,
+            "visible_in_client": True, "verified_in_client": True,
         }
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
