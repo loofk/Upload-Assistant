@@ -8167,7 +8167,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert str(torrent_file) in resume_commands["resume-target-upload"]
     assert str(tmp_path / "MTEAM-999.torrent") in resume_commands["resume-uploaded-torrent"]
     assert resume_argv["resume-target-upload"][:3] == ["python3", "ptcli.py", "pipeline"]
-    assert resume_argv["resume-uploaded-torrent"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert resume_argv["resume-uploaded-torrent"][:3] == ["python3", "ptcli.py", "pipeline"]
+    assert "--upload-target" in resume_argv["resume-uploaded-torrent"]
     assert str(tmp_path / "MTEAM-999.torrent") in resume_argv["resume-uploaded-torrent"]
     assert shlex.quote(summary_payload["artifacts"]["target_package_dir"]) in resume_commands["resume-target-upload"]
     assert summary_payload["artifacts"]["uploaded_save_path"] == "/downloads"
@@ -8188,7 +8189,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "--uploaded-wait-timeout 900" in resume_commands["resume-uploaded-torrent"]
     assert "--uploaded-wait-interval 20" in resume_commands["resume-uploaded-torrent"]
     assert config_arg in resume_commands["resume-uploaded-torrent"]
-    assert base_dir_arg not in resume_commands["resume-uploaded-torrent"]
+    assert base_dir_arg in resume_commands["resume-uploaded-torrent"]
     assert summary_output_arg in resume_commands["resume-uploaded-torrent"]
     assert any(stage["stage"] == "target-upload" and stage["ok"] is True for stage in summary_payload["stages"])
 
@@ -8290,7 +8291,7 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     assert payload["resume_state"]["complete"] is False
     assert payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
     assert payload["resume_state"]["next_command"] == payload_resume_commands["resume-uploaded-torrent-download"]
-    assert payload["resume_state"]["next_command_argv"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert payload["resume_state"]["next_command_argv"][:3] == ["python3", "ptcli.py", "pipeline"]
     summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
     assert summary_payload["output_options"]["uploaded_output_dir"] == uploaded_output_dir
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
@@ -8304,15 +8305,17 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is False
     assert "--uploaded-torrent-id 999" in resume_commands["resume-uploaded-torrent-download"]
-    assert resume_argv["resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert resume_argv["resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "pipeline"]
+    assert "--upload-target" in resume_argv["resume-uploaded-torrent-download"]
     assert "999" in resume_argv["resume-uploaded-torrent-download"]
-    assert "--download-uploaded-torrent" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--download-uploaded-torrent" not in resume_commands["resume-uploaded-torrent-download"]
     assert f"--uploaded-output-dir {shlex.quote(uploaded_output_dir)}" in resume_commands["resume-uploaded-torrent-download"]
-    assert "--inject-uploaded-torrent" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--inject-uploaded-torrent" not in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-save-path /downloads/Name" in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-category MTEAM" in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-tags retorrent" in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-paused" in resume_commands["resume-uploaded-torrent-download"]
+    assert "--wait-uploaded-complete" not in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-wait-timeout 900" in resume_commands["resume-uploaded-torrent-download"]
     assert "--uploaded-wait-interval 20" in resume_commands["resume-uploaded-torrent-download"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in resume_commands["resume-uploaded-torrent-download"]
