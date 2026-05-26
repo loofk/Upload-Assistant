@@ -2130,6 +2130,14 @@ def test_pipeline_exit_code_returns_zero_for_ready_action() -> None:
     assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": True}) == 0
 
 
+def test_pipeline_exit_code_requires_complete_live_closure() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--upload-target", "--target-execute", "--json"])
+
+    assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": True, "complete": False}) == 1
+    assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": True, "complete": True}) == 0
+
+
 def test_pipeline_next_actions_reports_stage_blockers() -> None:
     parser = build_parser()
     args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--inject-source", "--json"])

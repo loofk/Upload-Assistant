@@ -2694,6 +2694,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     ready = all(stage.get("ok", False) for stage in stages)
     blockers = _pipeline_stage_blockers(stages) if _pipeline_has_action(args) and not ready else []
     closure = _pipeline_closure(stages, effective_content_path, effective_source_torrent_hash, effective_target_torrent_file)
+    if live_target_upload and closure.get("complete") is not True:
+        _extend_unique_string(blockers, _string_list(closure.get("blockers")))
     evidence = _pipeline_evidence(closure)
     closure_audit = _pipeline_closure_audit(closure, evidence)
     summary = _pipeline_run_summary(stages, ready, blockers, closure, evidence)
@@ -5127,6 +5129,8 @@ def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, downl
 def _pipeline_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:
     if not _pipeline_has_action(args):
         return 0
+    if getattr(args, "target_execute", False) and payload.get("complete") is not True:
+        return 1
     if payload.get("status") == "ok" and payload.get("ready") is True:
         return 0
     return 1
