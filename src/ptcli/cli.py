@@ -4234,6 +4234,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     target_hash_consistent = not _uploaded_torrent_hash_consistency_blockers(target_upload_result)
     injected_target_hash = _torrent_hash_from_result(injected_torrent)
     uploaded_target_hash = target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None
+    downloaded_target_hash = _torrent_hash_from_result(downloaded_torrent)
     existing_source_ready = source_matched and source_content_verified and not _wait_stage_attempt_failed(wait_complete)
     source = {
         "ready": (source_downloaded and source_injected and source_complete) or existing_source_ready,
@@ -4272,7 +4273,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "uploaded_qbit_category": injected_torrent.get("category") if isinstance(injected_torrent, dict) else None,
         "uploaded_qbit_tags": injected_torrent.get("tags") if isinstance(injected_torrent, dict) else None,
         "uploaded_paused": bool(injected_torrent.get("paused")) if isinstance(injected_torrent, dict) else False,
-        "uploaded_torrent_hash": uploaded_target_hash or injected_target_hash,
+        "uploaded_torrent_hash": uploaded_target_hash or injected_target_hash or downloaded_target_hash,
         "uploaded_torrent_id": _uploaded_torrent_id_from_result(target_upload_result),
         "injected_torrent_hash": injected_target_hash,
         "uploaded_torrent": downloaded_torrent if isinstance(downloaded_torrent, dict) else None,

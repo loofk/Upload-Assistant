@@ -96,7 +96,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downlo
 - 源站若暴露 infohash，下载到本地的源种必须能读出 infohash 并与源站元数据一致。
 - 已显式传入 `--confirm-upload`。
 
-源站种子和上传成功后的 MTEAM 新种都会在注入 qBittorrent 后做同一类可见性验证。`summary`、`evidence` 和 `closure_audit` 会记录 `uploaded_torrent_id`、`uploaded_torrent_hash`、`uploaded_torrent_path`、独立的 qBittorrent 可见性证据、`injection_verified` 和 `uploaded_wait`；只有 `visible_in_client`、`client_verification.visible` 或实际 `client_matches` 能证明注入种子已出现在 qBittorrent 列表中。
+源站种子和上传成功后的 MTEAM 新种都会在注入 qBittorrent 后做同一类可见性验证。`summary`、`evidence` 和 `closure_audit` 会记录 `uploaded_torrent_id`、`uploaded_torrent_hash`、`uploaded_torrent_path`、独立的 qBittorrent 可见性证据、`injection_verified` 和 `uploaded_wait`；如果 MTEAM API 没返回 hash，但已下载的新种文件能读出 infohash，也会作为 `uploaded_torrent_hash` 暴露，便于后续恢复和审计。只有 `visible_in_client`、`client_verification.visible` 或实际 `client_matches` 能证明注入种子已出现在 qBittorrent 列表中。
 qBittorrent 等待完成证据还必须匹配请求的 torrent hash 和内容路径；即使缺少 `completion_verification`，也会用 `query` 与 `matches` 复核，避免把别的已完成任务当作本次转种闭环。
 
 ## 恢复路径
