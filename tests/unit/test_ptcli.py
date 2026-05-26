@@ -1460,6 +1460,10 @@ def test_retorrent_execute_next_actions_surface_qbit_wait_mismatches() -> None:
 
     assert actions[0].startswith("Resolve the source qBittorrent wait mismatch")
     assert actions[1].startswith("Resolve the uploaded qBittorrent wait mismatch")
+    assert f"hash={'f' * 40}" in actions[0]
+    assert "path=/downloads/Other" in actions[0]
+    assert f"hash={'a' * 40}" in actions[1]
+    assert "path=/downloads/Wrong" in actions[1]
     assert any("--wait-complete" in action for action in actions)
     assert any("--wait-uploaded-complete" in action for action in actions)
 

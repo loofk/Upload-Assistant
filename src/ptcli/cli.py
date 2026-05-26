@@ -836,16 +836,33 @@ def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: l
 def _retorrent_execute_qbit_mismatch_actions(pipeline_result: dict[str, Any]) -> list[str]:
     diagnostics = _summary_qbit_wait_diagnostics(pipeline_result)
     mismatches = set(_summary_qbit_wait_mismatches(diagnostics))
+    retry_hints = _summary_qbit_wait_retry_hints(diagnostics)
     actions: list[str] = []
     if any(mismatch.startswith("source.") for mismatch in mismatches):
-        actions.append(
-            "Resolve the source qBittorrent wait mismatch before rerunning: inspect qbit_wait_diagnostics for observed hashes/paths and retry with the matching source torrent or content path."
-        )
+        actions.append(_qbit_wait_retry_action("source", retry_hints.get("source")))
     if any(mismatch.startswith("uploaded.") for mismatch in mismatches):
-        actions.append(
-            "Resolve the uploaded qBittorrent wait mismatch before rerunning: inspect qbit_wait_diagnostics for observed hashes/paths and retry with the downloaded target-site torrent and matching uploaded save path."
-        )
+        actions.append(_qbit_wait_retry_action("uploaded", retry_hints.get("uploaded")))
     return actions
+
+
+def _qbit_wait_retry_action(scope: str, hint: Any) -> str:
+    target = "source" if scope == "source" else "uploaded"
+    fallback = (
+        "Resolve the source qBittorrent wait mismatch before rerunning: inspect qbit_wait_diagnostics for observed hashes/paths and retry with the matching source torrent or content path."
+        if target == "source"
+        else "Resolve the uploaded qBittorrent wait mismatch before rerunning: inspect qbit_wait_diagnostics for observed hashes/paths and retry with the downloaded target-site torrent and matching uploaded save path."
+    )
+    if not isinstance(hint, dict) or not hint.get("retry_recommended"):
+        return fallback
+    details = []
+    if hint.get("suggested_torrent_hash"):
+        details.append(f"hash={hint['suggested_torrent_hash']}")
+    if hint.get("suggested_content_path"):
+        details.append(f"path={hint['suggested_content_path']}")
+    if hint.get("suggested_save_path"):
+        details.append(f"save_path={hint['suggested_save_path']}")
+    suffix = f" Suggested retry values from qBittorrent: {', '.join(details)}." if details else ""
+    return f"{fallback}{suffix}"
 
 
 def _retorrent_execute_blocker_next_action(blocker: str) -> str:
@@ -1809,7 +1826,7 @@ def _summary_qbit_wait_retry_hints(qbit_wait_diagnostics: dict[str, Any]) -> dic
         observed_hash = _first_string(diagnostics.get("observed_hashes"))
         observed_content_path = _first_string(diagnostics.get("observed_content_paths"))
         observed_save_path = _first_string(diagnostics.get("observed_save_paths"))
-        suggested_hash = observed_hash if diagnostics.get("requested_hash_matched") is False else diagnostics.get("requested_hash")
+        suggested_hash = observed_hash if diagnostics.get("requested_hash_matched") is False or not diagnostics.get("requested_hash") else diagnostics.get("requested_hash")
         suggested_content_path = observed_content_path if diagnostics.get("requested_content_path_matched") is False or not diagnostics.get("requested_content_path") else diagnostics.get("requested_content_path")
         hints[str(scope)] = {
             "retry_recommended": request_mismatch,
