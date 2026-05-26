@@ -107,7 +107,13 @@ qBittorrent 等待完成证据还必须匹配请求的 torrent hash 和内容路
 python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --uploaded-torrent-id 999 --download-uploaded-torrent --uploaded-output-dir ./tmp/uploaded --inject-uploaded-torrent --uploaded-save-path "/downloads/content" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --wait-uploaded-complete --write-summary --json
 
 python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --uploaded-torrent-file ./tmp/uploaded/MTEAM-999.torrent --inject-uploaded-torrent --uploaded-save-path "/downloads/content" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --wait-uploaded-complete --write-summary --json
+
+python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --package-dir ./tmp/target/U2-60635-to-MTEAM --upload-target --uploaded-torrent-id 999 --uploaded-output-dir ./tmp/uploaded --uploaded-save-path "/downloads/content" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
+
+python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --package-dir ./tmp/target/U2-60635-to-MTEAM --upload-target --uploaded-torrent-file ./tmp/uploaded/MTEAM-999.torrent --uploaded-save-path "/downloads/content" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --json
 ```
+
+`pipeline --package-dir ... --upload-target --uploaded-torrent-id/--uploaded-torrent-file` 会按恢复语义自动开启上传后新种的下载（仅 ID 场景）、注入和等待完成；若准备包里能推导内容路径，可以不额外传 `--uploaded-save-path`。
 
 `retorrent --execute` 和 `pipeline --write-summary` 会在 `ptcli-run-summary.json` 中写入 `resume_commands`，优先使用这些命令续跑。盒子脚本可用 `summary-check --json` 读取 `flow_diagnostics` 和 `credential_requirements`，用 `summary-check --print-next-command` 只取下一条安全命令，用 `summary-check --print-shell` 输出 `PTCLI_AUTOMATION_ACTION`、`PTCLI_NEXT_COMMAND`、`PTCLI_AUTOMATION_EXIT_CODE` 等 shell 变量，或用 `summary-check --run-next-command` 直接执行下一条受限的 `ptcli.py` 续跑命令。带 `<id>` 这类占位符的命令会返回 `automation_action=fill_command_placeholders`，不会被自动执行。
 

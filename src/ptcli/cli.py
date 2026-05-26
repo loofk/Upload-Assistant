@@ -2538,12 +2538,13 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     requested_actions = _pipeline_requested_actions(args)
     live_target_upload = bool(args.upload_target and args.target_execute)
     package_upload_resume = _package_upload_resume_requested(args)
+    uploaded_followup_resume = bool(args.upload_target and package_upload_resume)
     package_source_info = _source_info_from_existing_target_package(args.package_dir) if package_upload_resume and args.package_dir else None
     runtime_check_requested = bool(getattr(args, "check_runtime", False) or live_target_upload)
     source_download_requested = bool(args.download_source or (live_target_upload and not args.content_path and not args.source_torrent_file))
     source_injection_requested = bool(args.inject_source or (live_target_upload and not args.content_path))
     source_wait_requested = bool(args.wait_complete or (live_target_upload and (source_injection_requested or args.content_path)))
-    if live_target_upload:
+    if live_target_upload or uploaded_followup_resume:
         if not args.uploaded_torrent_file:
             args.download_uploaded_torrent = True
         args.inject_uploaded_torrent = True
