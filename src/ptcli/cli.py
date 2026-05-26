@@ -2817,8 +2817,12 @@ def _source_ready_for_live_target_upload(stages: list[dict[str, Any]]) -> bool:
     match = _find_stage(stages, "match")
     source_content_verify = _find_stage(stages, "source-content-verify")
     source_downloaded_flow_ready = _stage_completed(source_download) and _source_injection_verified(inject_source) and _source_wait_completed(wait_complete)
-    existing_content_ready = _match_stage_has_match(match) and _source_content_verified(source_content_verify)
+    existing_content_ready = _match_stage_has_match(match) and _source_content_verified(source_content_verify) and not _wait_stage_attempt_failed(wait_complete)
     return source_downloaded_flow_ready or existing_content_ready
+
+
+def _wait_stage_attempt_failed(stage: dict[str, Any] | None) -> bool:
+    return bool(stage and not stage.get("skipped") and not _source_wait_completed(stage))
 
 
 def _target_duplicate_ready_for_live_upload(stages: list[dict[str, Any]]) -> bool:
@@ -4050,8 +4054,9 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     target_hash_consistent = not _uploaded_torrent_hash_consistency_blockers(target_upload_result)
     injected_target_hash = _torrent_hash_from_result(injected_torrent)
     uploaded_target_hash = target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None
+    existing_source_ready = source_matched and source_content_verified and not _wait_stage_attempt_failed(wait_complete)
     source = {
-        "ready": (source_downloaded and source_injected and source_complete) or (source_matched and source_content_verified),
+        "ready": (source_downloaded and source_injected and source_complete) or existing_source_ready,
         "downloaded": source_downloaded,
         "injected": source_injected,
         "injection_verified": source_injected,
