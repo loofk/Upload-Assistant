@@ -48,6 +48,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - `rule-check --json` 暴露 `rule_obligations[].review_scope.required_confirmations`，供 agent 在 live 前逐项提示人工确认。
 - `flow-check --json` 暴露 `source_capability`、`target_capabilities` 和去重后的 `credential_requirements`，供盒子脚本在 live 前检查配置缺口。
 - `pipeline` 和 `retorrent --execute` 返回 `closure`、`evidence`、`artifacts`、`resume_commands`、`resume_state`、`next_actions`。
+- `pipeline --write-summary` 会在 `ptcli-run-summary.json` 顶层写入 `flow_check`，并在 `summary.flow` 中保留源站/目标站适配器和凭据要求。
 - 带执行动作的命令未闭环时返回 `status: blocked`、顶层 blockers 和非 0 退出码。
 - `--write-summary` 会写出 `ptcli-run-summary.json`，其中 `resume_state.next_stage` / `resume_state.next_command` 可供 agent 或脚本直接续跑。
 - `summary-check --print-next-command` 可只输出下一条安全续跑命令；`summary-check --print-shell` 可输出 `PTCLI_*` shell 变量；`summary-check --run-next-command` 可直接执行下一条受限的 `ptcli.py` 续跑命令。

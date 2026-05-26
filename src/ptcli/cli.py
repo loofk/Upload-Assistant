@@ -2802,7 +2802,9 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     closure_audit = _pipeline_closure_audit(closure, evidence)
     if live_target_upload:
         _extend_unique_string(blockers, _closure_audit_blockers(closure_audit))
+    flow_check_summary = _pipeline_flow_check_summary(stages)
     summary = _pipeline_run_summary(stages, ready, blockers, closure, evidence)
+    summary["flow"] = flow_check_summary
     summary["requested_actions"] = requested_actions
     summary["effective_actions"] = effective_actions
     summary["requested_source_id"] = args.source_id
@@ -2833,6 +2835,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "closure": closure,
         "closure_audit": closure_audit,
         "evidence": evidence,
+        "flow_check": flow_check_summary,
         "summary": summary,
         "next_actions": _pipeline_next_actions(args, blockers, closure),
         "stages": stages,
@@ -3366,6 +3369,24 @@ def _pipeline_run_summary(stages: list[dict[str, Any]], ready: bool, blockers: l
     }
 
 
+def _pipeline_flow_check_summary(stages: list[dict[str, Any]]) -> dict[str, Any] | None:
+    flow_stage = _find_stage(stages, "flow-check")
+    if not isinstance(flow_stage, dict):
+        return None
+    result = flow_stage.get("result")
+    if not isinstance(result, dict):
+        return None
+    return {
+        "ready": bool(result.get("ready")),
+        "source_tracker": result.get("source_tracker"),
+        "source_torrent_id": result.get("source_torrent_id"),
+        "target_trackers": result.get("target_trackers"),
+        "source_capability": result.get("source_capability"),
+        "target_capabilities": result.get("target_capabilities"),
+        "credential_requirements": result.get("credential_requirements"),
+    }
+
+
 def _pipeline_requested_actions(args: argparse.Namespace) -> dict[str, bool]:
     return {
         "download_source": bool(args.download_source),
@@ -3637,6 +3658,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "effective_actions": payload.get("effective_actions", {}),
         "closure": payload.get("closure"),
         "closure_audit": payload.get("closure_audit"),
+        "flow_check": payload.get("flow_check"),
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),
         "next_actions": payload.get("next_actions", []),

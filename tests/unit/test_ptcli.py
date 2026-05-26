@@ -3981,8 +3981,23 @@ def test_pipeline_stage_blockers_include_source_followup_details() -> None:
 
 
 def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
+    flow_check = {
+        "ready": True,
+        "source_tracker": "U2",
+        "source_torrent_id": "60635",
+        "target_trackers": ["MTEAM"],
+        "source_capability": {
+            "tracker": "U2",
+            "source_info_adapter": "generic_details_cookie",
+            "source_download_adapter": "nexusphp_passkey",
+            "credential_requirements": ["TRACKERS.U2.passkey", "data/cookies/U2.txt"],
+        },
+        "target_capabilities": [{"tracker": "MTEAM", "target_upload_adapter": "mteam_api", "credential_requirements": ["TRACKERS.MTEAM.api_key"]}],
+        "credential_requirements": ["TRACKERS.U2.passkey", "data/cookies/U2.txt", "TRACKERS.MTEAM.api_key"],
+        "checks": [],
+    }
     stages = [
-        {"stage": "flow-check", "ok": True, "result": {"ready": True, "checks": []}},
+        {"stage": "flow-check", "ok": True, "result": flow_check},
         {
             "stage": "rule-check",
             "ok": True,
@@ -4045,6 +4060,15 @@ def test_pipeline_run_summary_reports_stage_statuses_for_automation() -> None:
     assert summary["compliance"]["policy_checks"] == "tracker_adapters"
     assert summary["compliance"]["rule_obligations"]["acknowledged_count"] == 2
     assert "requires manual source/target rule review" in summary["compliance"]["disclaimer"]
+    assert ptcli_cli._pipeline_flow_check_summary(stages) == {
+        "ready": True,
+        "source_tracker": "U2",
+        "source_torrent_id": "60635",
+        "target_trackers": ["MTEAM"],
+        "source_capability": flow_check["source_capability"],
+        "target_capabilities": flow_check["target_capabilities"],
+        "credential_requirements": flow_check["credential_requirements"],
+    }
     assert summary["resume"]["used"] is False
     assert summary["source"]["mode"] == "matched"
 
@@ -7529,7 +7553,11 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["closure"]["blockers"] == ["target.uploaded", "target.downloaded", "target.injected"]
     assert summary_payload["requested_actions"] == payload["requested_actions"]
     assert summary_payload["effective_actions"] == payload["effective_actions"]
+    assert payload["flow_check"]["source_capability"]["source_download_adapter"] == "nexusphp_passkey"
+    assert payload["flow_check"]["credential_requirements"] == ["TRACKERS.U2.passkey", "data/cookies/U2.txt", "TRACKERS.MTEAM.api_key"]
+    assert summary_payload["flow_check"] == payload["flow_check"]
     assert summary_payload["summary"]["ready"] is True
+    assert summary_payload["summary"]["flow"] == payload["flow_check"]
     assert summary_payload["summary"]["requested_source_id"] == source_url
     assert summary_payload["summary"]["source_torrent_id"] == "60635"
     assert summary_payload["summary"]["target"]["ready"] is False
