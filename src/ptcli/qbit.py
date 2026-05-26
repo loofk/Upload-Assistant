@@ -189,7 +189,8 @@ class QbitReadOnlyService:
             "paused": paused,
             "skip_checking": skip_checking,
             "verification_attempts": verification_attempts,
-            "verified_in_client": bool(client_matches),
+            "visible_in_client": bool(client_matches),
+            "verified_in_client": _added_torrent_verification_ready(client_verification),
             "client_verification": client_verification,
             "client_matches": summaries_to_dicts(client_matches),
         }

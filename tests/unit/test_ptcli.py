@@ -11273,7 +11273,8 @@ async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None
 
     assert result["save_path"] == "/downloads"
     assert result["hash"] == torrent.infohash
-    assert result["verified_in_client"] is True
+    assert result["visible_in_client"] is True
+    assert result["verified_in_client"] is False
     assert result["verification_attempts"] == 1
     assert result["client_verification"]["visible"] is True
     assert result["client_verification"]["hash_matched"] is True
@@ -11309,6 +11310,7 @@ async def test_qbit_service_waits_for_added_torrent_visibility(tmp_path) -> None
     )
 
     assert result["verified_in_client"] is True
+    assert result["visible_in_client"] is True
     assert result["verification_attempts"] == 3
     assert result["client_matches"][0]["hash"] == torrent.infohash
 
@@ -11330,6 +11332,8 @@ async def test_qbit_service_reports_client_verification_for_requested_metadata(t
         tags="retorrent",
     )
 
+    assert result["verified_in_client"] is True
+    assert result["visible_in_client"] is True
     assert result["client_verification"]["visible"] is True
     assert result["client_verification"]["hash_matched"] is True
     assert result["client_verification"]["save_path_matched"] is True
@@ -11358,6 +11362,7 @@ async def test_qbit_service_waits_for_requested_metadata_verification(tmp_path) 
     )
 
     assert result["verified_in_client"] is True
+    assert result["visible_in_client"] is True
     assert result["verification_attempts"] == 3
     assert result["client_verification"]["visible"] is True
     assert result["client_verification"]["hash_matched"] is True
@@ -11382,7 +11387,8 @@ async def test_qbit_service_rejects_visible_wrong_hash_after_add(tmp_path) -> No
         verify_timeout=0,
     )
 
-    assert result["verified_in_client"] is True
+    assert result["visible_in_client"] is True
+    assert result["verified_in_client"] is False
     assert result["client_verification"]["visible"] is True
     assert result["client_verification"]["hash_matched"] is False
     assert result["client_verification"]["requested"]["hash"] == torrent.infohash
