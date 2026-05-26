@@ -1829,7 +1829,18 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
     ready = bool(payload.get("ready"))
     live_safe = bool(payload.get("live_safe_to_attempt"))
     artifact_status = _summary_artifact_status(resume_state)
-    required = ("flow_check_ready", "rule_check_ready", "rules_acknowledged", "target_rule_obligations", "target_package_preflight_ready")
+    required = (
+        "flow_check_ready",
+        "rule_check_ready",
+        "rules_acknowledged",
+        "live_upload_confirmation",
+        "target_rule_obligations",
+        "target_package_preflight_ready",
+        "download_uploaded_torrent",
+        "inject_uploaded_torrent",
+        "effective_uploaded_save_path",
+        "wait_uploaded_complete",
+    )
     missing_audit = _missing_required_summary_artifacts(artifact_status, required) if ready and live_safe else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
@@ -2086,8 +2097,12 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
             "flow_check_ready": bool(artifacts.get("flow_check_ready")),
             "rule_check_ready": bool(artifacts.get("rule_check_ready")),
             "rules_acknowledged": bool(artifacts.get("rules_acknowledged")),
+            "live_upload_confirmation": bool(artifacts.get("live_upload_confirmation")),
             "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
             "target_package_preflight_ready": bool(artifacts.get("target_package_preflight_ready")),
+            "download_uploaded_torrent": bool(artifacts.get("download_uploaded_torrent")),
+            "inject_uploaded_torrent": bool(artifacts.get("inject_uploaded_torrent")),
+            "wait_uploaded_complete": bool(artifacts.get("wait_uploaded_complete")),
         },
         "failed_check_names": [str(check.get("name")) for check in failed_checks if isinstance(check, dict)],
     }
@@ -2135,6 +2150,7 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
     target_rule_obligations = compliance.get("target_rule_obligation_review")
     if not isinstance(target_rule_obligations, dict):
         target_rule_obligations = package_preflight.get("rule_obligation_review") if isinstance(package_preflight.get("rule_obligation_review"), dict) else None
+    checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
     return {
         "content_path": _path_artifact(args.content_path),
         "source_torrent_file": _path_artifact(args.source_torrent_file),
@@ -2146,10 +2162,18 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
         "flow_check_ready": bool(flow_check.get("ready")),
         "rule_check_ready": bool(rule_check.get("ready")),
         "rules_acknowledged": bool(compliance.get("rules_acknowledged")),
+        "live_upload_confirmation": _doctor_check_ok(checks, "live_upload_confirmation"),
         "rule_obligations": compliance.get("rule_obligations") if isinstance(compliance.get("rule_obligations"), dict) else None,
         "target_rule_obligations": target_rule_obligations,
         "target_package_preflight_ready": package_preflight.get("status") == "ready" if package_preflight else False,
+        "download_uploaded_torrent": _doctor_check_ok(checks, "download_uploaded_torrent"),
+        "inject_uploaded_torrent": _doctor_check_ok(checks, "inject_uploaded_torrent"),
+        "wait_uploaded_complete": _doctor_check_ok(checks, "wait_uploaded_complete"),
     }
+
+
+def _doctor_check_ok(checks: list[Any], name: str) -> bool:
+    return any(isinstance(check, dict) and check.get("name") == name and check.get("ok") is True for check in checks)
 
 
 def _path_artifact(path: str | None) -> dict[str, Any] | None:

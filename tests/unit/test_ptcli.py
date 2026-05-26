@@ -3409,8 +3409,13 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
                         "flow_check_ready": True,
                         "rule_check_ready": True,
                         "rules_acknowledged": True,
+                        "live_upload_confirmation": True,
                         "target_rule_obligations": True,
                         "target_package_preflight_ready": True,
+                        "download_uploaded_torrent": True,
+                        "inject_uploaded_torrent": True,
+                        "effective_uploaded_save_path": True,
+                        "wait_uploaded_complete": True,
                     },
                 },
             }
@@ -5688,9 +5693,13 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert summary_payload["artifacts"]["flow_check_ready"] is True
     assert summary_payload["artifacts"]["rule_check_ready"] is True
     assert summary_payload["artifacts"]["rules_acknowledged"] is True
+    assert summary_payload["artifacts"]["live_upload_confirmation"] is True
     assert summary_payload["artifacts"]["rule_obligations"]["ready"] is True
     assert summary_payload["artifacts"]["target_rule_obligations"]["ready"] is True
     assert summary_payload["artifacts"]["target_package_preflight_ready"] is True
+    assert summary_payload["artifacts"]["download_uploaded_torrent"] is True
+    assert summary_payload["artifacts"]["inject_uploaded_torrent"] is True
+    assert summary_payload["artifacts"]["wait_uploaded_complete"] is True
     assert summary_payload["compliance"]["ready"] is True
     assert summary_payload["compliance"]["site_specific_rules_encoded"] is False
     assert summary_payload["failed_check_names"] == []
@@ -5731,8 +5740,12 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert summary_payload["resume_state"]["artifacts"]["flow_check_ready"] is True
     assert summary_payload["resume_state"]["artifacts"]["rule_check_ready"] is True
     assert summary_payload["resume_state"]["artifacts"]["rules_acknowledged"] is True
+    assert summary_payload["resume_state"]["artifacts"]["live_upload_confirmation"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_rule_obligations"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_package_preflight_ready"] is True
+    assert summary_payload["resume_state"]["artifacts"]["download_uploaded_torrent"] is True
+    assert summary_payload["resume_state"]["artifacts"]["inject_uploaded_torrent"] is True
+    assert summary_payload["resume_state"]["artifacts"]["wait_uploaded_complete"] is True
 
 
 def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, capsys) -> None:
@@ -5811,6 +5824,9 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["inputs"]["uploaded_torrent_id"] == "999"
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
+    assert summary_payload["artifacts"]["download_uploaded_torrent"] is True
+    assert summary_payload["artifacts"]["inject_uploaded_torrent"] is True
+    assert summary_payload["artifacts"]["wait_uploaded_complete"] is True
     assert "--connect-qbit" in commands["doctor-live-probes"]
     assert "--probe-source" in commands["doctor-live-probes"]
     assert "--probe-target" in commands["doctor-live-probes"]
@@ -5831,6 +5847,9 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     assert str(tmp_path / "summary") in command_argv["resume-uploaded-torrent-download"]
     assert "999" in summary_payload["resume_state"]["next_command_argv"]
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_id"] is True
+    assert summary_payload["resume_state"]["artifacts"]["download_uploaded_torrent"] is True
+    assert summary_payload["resume_state"]["artifacts"]["inject_uploaded_torrent"] is True
+    assert summary_payload["resume_state"]["artifacts"]["wait_uploaded_complete"] is True
 
 
 def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path, capsys) -> None:
@@ -5910,6 +5929,9 @@ def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path,
     assert summary_payload["inputs"]["uploaded_torrent_file"] == str(uploaded_torrent)
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["path"] == str(uploaded_torrent)
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["is_file"] is True
+    assert summary_payload["artifacts"]["download_uploaded_torrent"] is True
+    assert summary_payload["artifacts"]["inject_uploaded_torrent"] is True
+    assert summary_payload["artifacts"]["wait_uploaded_complete"] is True
     assert "pipeline-live" not in commands
     assert "--uploaded-torrent-file" in commands["resume-uploaded-torrent"]
     assert str(uploaded_torrent) in commands["resume-uploaded-torrent"]
@@ -5928,6 +5950,9 @@ def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path,
     assert str(tmp_path / "summary") in command_argv["resume-uploaded-torrent"]
     assert str(uploaded_torrent) in command_argv["resume-uploaded-torrent"]
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
+    assert summary_payload["resume_state"]["artifacts"]["download_uploaded_torrent"] is True
+    assert summary_payload["resume_state"]["artifacts"]["inject_uploaded_torrent"] is True
+    assert summary_payload["resume_state"]["artifacts"]["wait_uploaded_complete"] is True
 
 
 def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> None:
