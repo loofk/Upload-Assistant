@@ -46,6 +46,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - 关键命令支持 `--json`。
 - `sites --json` 暴露每个站点的 `source_info`、`source_info_adapter`、`source_download`、`source_download_adapter`、`credential_requirements`、`target_upload`、`full_live_closure_to_mteam` 能力。
 - `rule-check --json` 暴露 `rule_obligations[].review_scope.required_confirmations`，供 agent 在 live 前逐项提示人工确认。
+- `flow-check --json` 暴露 `source_capability`、`target_capabilities` 和去重后的 `credential_requirements`，供盒子脚本在 live 前检查配置缺口。
 - `pipeline` 和 `retorrent --execute` 返回 `closure`、`evidence`、`artifacts`、`resume_commands`、`resume_state`、`next_actions`。
 - 带执行动作的命令未闭环时返回 `status: blocked`、顶层 blockers 和非 0 退出码。
 - `--write-summary` 会写出 `ptcli-run-summary.json`，其中 `resume_state.next_stage` / `resume_state.next_command` 可供 agent 或脚本直接续跑。

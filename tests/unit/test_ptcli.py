@@ -4991,6 +4991,20 @@ def test_flow_check_ready_for_u2_to_mteam(tmp_path) -> None:
     assert payload["requested_source_id"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["input_source_id"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["source_torrent_id"] == "60635"
+    assert payload["source_capability"] == {
+        "tracker": "U2",
+        "source_info_adapter": "generic_details_cookie",
+        "source_download_adapter": "nexusphp_passkey",
+        "credential_requirements": ["TRACKERS.U2.passkey", "data/cookies/U2.txt"],
+    }
+    assert payload["target_capabilities"] == [
+        {
+            "tracker": "MTEAM",
+            "target_upload_adapter": "mteam_api",
+            "credential_requirements": ["TRACKERS.MTEAM.api_key"],
+        }
+    ]
+    assert payload["credential_requirements"] == ["TRACKERS.U2.passkey", "data/cookies/U2.txt", "TRACKERS.MTEAM.api_key"]
 
 
 def test_flow_check_ready_for_enabled_chinese_nexus_source(tmp_path) -> None:
@@ -5055,6 +5069,8 @@ def test_flow_check_ready_for_hds_to_mteam_uses_cookie_only(tmp_path) -> None:
     assert not any(check["name"] == "HDS.passkey" for check in payload["checks"])
     assert any(check["name"] == "HDS.cookie" and check["ok"] is True for check in payload["checks"])
     assert any(check["name"] == "reference_flow" and check["ok"] is True for check in payload["checks"])
+    assert payload["source_capability"]["source_download_adapter"] == "cookie_download"
+    assert payload["credential_requirements"] == ["data/cookies/HDS.txt", "TRACKERS.MTEAM.api_key"]
 
 
 def test_flow_check_reports_missing_cookie(tmp_path) -> None:
