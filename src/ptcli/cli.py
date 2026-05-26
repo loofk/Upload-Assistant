@@ -1247,6 +1247,7 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
         "schema_version": 1,
         "kind": "ptcli.target_upload.summary",
         "summary_file": str(destination),
+        "automation_handoff": _summary_automation_handoff(str(destination)),
         "client": args.client,
         "qbit_options": _target_upload_qbit_options(args),
         "output_options": _target_upload_output_options(args),
@@ -2182,6 +2183,18 @@ def _write_doctor_summary(payload: dict[str, Any], args: argparse.Namespace, out
     return str(destination)
 
 
+def _summary_automation_handoff(summary_file: str) -> dict[str, dict[str, Any]]:
+    base = ["python3", "ptcli.py", "summary-check", "--summary-file", summary_file]
+    commands = {
+        "json": [*base, "--json"],
+        "print_next_command": [*base, "--print-next-command"],
+        "print_next_argv": [*base, "--print-next-argv"],
+        "print_shell": [*base, "--print-shell"],
+        "run_next_command": [*base, "--run-next-command"],
+    }
+    return {name: {"command": shlex.join(argv), "argv": argv} for name, argv in commands.items()}
+
+
 def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, summary_file: str) -> dict[str, Any]:
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
     failed_checks = [check for check in checks if isinstance(check, dict) and not check.get("ok")]
@@ -2191,6 +2204,7 @@ def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, s
         "schema_version": 1,
         "kind": "ptcli.doctor.live_readiness",
         "summary_file": summary_file,
+        "automation_handoff": _summary_automation_handoff(summary_file),
         "status": payload.get("status"),
         "mode": _doctor_summary_mode(args),
         "target_mode": _doctor_summary_mode(args),
@@ -3827,6 +3841,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "schema_version": 1,
         "kind": "ptcli.pipeline.run_summary",
         "summary_file": str(destination),
+        "automation_handoff": _summary_automation_handoff(str(destination)),
         "status": payload.get("status"),
         "source_tracker": payload.get("source_tracker"),
         "requested_source_id": payload.get("requested_source_id"),

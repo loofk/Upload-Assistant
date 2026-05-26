@@ -6380,6 +6380,9 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["schema_version"] == 1
     assert summary_payload["kind"] == "ptcli.doctor.live_readiness"
+    assert summary_payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(tmp_path / "summary" / "ptcli-doctor-summary.json"), "--json"]
+    assert summary_payload["automation_handoff"]["print_next_argv"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(tmp_path / "summary" / "ptcli-doctor-summary.json"), "--print-next-argv"]
+    assert summary_payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(tmp_path / "summary" / "ptcli-doctor-summary.json"), "--run-next-command"])
     assert summary_payload["mode"] == "live_upload"
     assert summary_payload["target_mode"] == "live_upload"
     assert summary_payload["artifacts"]["content_path"]["exists"] is True
@@ -8156,6 +8159,9 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["schema_version"] == 1
     assert summary_payload["kind"] == "ptcli.pipeline.run_summary"
     assert summary_payload["summary_file"] == str(summary_path)
+    assert summary_payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
+    assert summary_payload["automation_handoff"]["print_shell"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--print-shell"]
+    assert summary_payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--run-next-command"])
     assert summary_payload["stages"] == payload["stages"]
     assert summary_payload["artifacts"]["summary_file"] == str(summary_path)
     assert summary_payload["artifacts"]["target_package_dir"] == target_stage["result"]["package_dir"]
@@ -11324,6 +11330,9 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["schema_version"] == 1
     assert summary_payload["kind"] == "ptcli.target_upload.summary"
     assert summary_payload["summary_file"] == str(summary_path)
+    assert summary_payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
+    assert summary_payload["automation_handoff"]["print_next_command"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--print-next-command"]
+    assert summary_payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--run-next-command"])
     assert summary_payload["client"] == "default"
     assert summary_payload["qbit_options"] == {"uploaded": {"category": "MTEAM", "tags": "retorrent", "paused": True}}
     assert summary_payload["output_options"] == {"uploaded_output_dir": None, "summary_output_dir": str(tmp_path / "summary")}
