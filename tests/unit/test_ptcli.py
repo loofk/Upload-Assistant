@@ -2468,6 +2468,7 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
                 "ready": True,
                 "complete": True,
                 "blockers": [],
+                "evidence": {"source": {"mode": "matched"}, "target": {"mode": "live_upload"}},
                 "closure_audit": {"ready": True, "missing": [], "items": [{"name": "target.uploaded_wait_evidence", "scope": "target", "ok": True}]},
                 "resume_state": {
                     "next_stage": None,
@@ -2506,6 +2507,9 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     assert payload["live_safe_to_attempt"] is True
     assert payload["missing_artifacts"] == []
     assert payload["missing_closure_audit"] == []
+    assert payload["closure_modes"] == {"source": "matched", "target": "live_upload"}
+    assert payload["source_mode"] == "matched"
+    assert payload["target_mode"] == "live_upload"
 
 
 def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -> None:
@@ -2981,6 +2985,7 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
                 "ready": False,
                 "complete": False,
                 "blockers": ["target.uploaded"],
+                "summary": {"source": {"mode": "downloaded"}, "target": {"mode": "prepared"}},
                 "flow_check": {
                     "ready": True,
                     "source_tracker": "U2",
@@ -3149,6 +3154,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                 "ready": False,
                 "complete": False,
                 "blockers": ["target.uploaded"],
+                "summary": {"source": {"mode": "downloaded"}, "target": {"mode": "prepared"}},
                 "flow_check": {
                     "ready": True,
                     "source_tracker": "U2",
@@ -3193,6 +3199,8 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=0\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCHES=''\n" in out
+    assert "export PTCLI_SOURCE_MODE=downloaded\n" in out
+    assert "export PTCLI_TARGET_MODE=prepared\n" in out
     assert "export PTCLI_NEXT_COMMAND='python3 ptcli.py pipeline --upload-target'\n" in out
 
 

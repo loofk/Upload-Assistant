@@ -1640,6 +1640,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(payload)
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
     flow_diagnostics = _summary_flow_diagnostics(payload)
+    closure_modes = _summary_closure_modes(payload)
     return {
         "schema_version": schema_version,
         "expected_schema_version": SUMMARY_SCHEMA_VERSION,
@@ -1652,6 +1653,9 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
+        "closure_modes": closure_modes,
+        "source_mode": closure_modes.get("source"),
+        "target_mode": closure_modes.get("target"),
     }
 
 
@@ -1678,6 +1682,25 @@ def _summary_flow_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "target_capabilities": flow.get("target_capabilities") if isinstance(flow.get("target_capabilities"), list) else [],
         "credential_requirements": _string_list(flow.get("credential_requirements")),
     }
+
+
+def _summary_closure_modes(payload: dict[str, Any]) -> dict[str, str | None]:
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    evidence_source = evidence.get("source") if isinstance(evidence.get("source"), dict) else {}
+    evidence_target = evidence.get("target") if isinstance(evidence.get("target"), dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    summary_source = summary.get("source") if isinstance(summary.get("source"), dict) else {}
+    summary_target = summary.get("target") if isinstance(summary.get("target"), dict) else {}
+    return {
+        "source": _string_or_none(evidence_source.get("mode")) or _string_or_none(summary_source.get("mode")),
+        "target": _string_or_none(evidence_target.get("mode")) or _string_or_none(summary_target.get("mode")),
+    }
+
+
+def _string_or_none(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
 
 
 def _summary_qbit_wait_mismatches(qbit_wait_diagnostics: dict[str, Any]) -> list[str]:
@@ -5342,6 +5365,8 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_NEXT_COMMAND_READY": _shell_bool(payload.get("next_command_ready")),
         "PTCLI_QBIT_WAIT_MISMATCH": _shell_bool(payload.get("qbit_wait_mismatch")),
         "PTCLI_QBIT_WAIT_MISMATCHES": ",".join(_string_list(payload.get("qbit_wait_mismatches"))),
+        "PTCLI_SOURCE_MODE": payload.get("source_mode"),
+        "PTCLI_TARGET_MODE": payload.get("target_mode"),
         "PTCLI_COMPLETE": _shell_bool(payload.get("complete")),
         "PTCLI_LIVE_SAFE_TO_ATTEMPT": _shell_bool(payload.get("live_safe_to_attempt")),
         "PTCLI_SUMMARY_FILE": payload.get("summary_file"),

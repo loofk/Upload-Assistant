@@ -51,7 +51,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - `pipeline --write-summary` 会在 `ptcli-run-summary.json` 顶层写入 `flow_check`，并在 `summary.flow` 中保留源站/目标站适配器和凭据要求。
 - 带执行动作的命令未闭环时返回 `status: blocked`、顶层 blockers 和非 0 退出码。
 - `--write-summary` 会写出 `ptcli-run-summary.json`，其中 `resume_state.next_stage` / `resume_state.next_command` 可供 agent 或脚本直接续跑。
-- `summary-check --json` 会暴露 `flow_diagnostics` 和 `credential_requirements`；`--print-next-command` 可只输出下一条安全续跑命令；`--print-shell` 可输出 `PTCLI_*` shell 变量；`--run-next-command` 可直接执行下一条受限的 `ptcli.py` 续跑命令。
+- `summary-check --json` 会暴露 `flow_diagnostics`、`credential_requirements`、`source_mode` 和 `target_mode`；`--print-next-command` 可只输出下一条安全续跑命令；`--print-shell` 可输出 `PTCLI_*` shell 变量（含 `PTCLI_SOURCE_MODE` / `PTCLI_TARGET_MODE`）；`--run-next-command` 可直接执行下一条受限的 `ptcli.py` 续跑命令。
 - `doctor --check-runtime`、`pipeline --target-execute`、`retorrent --execute` 和需要 qBittorrent 注入的 `target-upload` 会检查 focused ptcli 运行时依赖，legacy Web UI/Discord 依赖不是默认要求。
 
 ## 配置要求
