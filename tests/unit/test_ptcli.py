@@ -3394,6 +3394,38 @@ def test_target_upload_summary_surfaces_followup_blockers() -> None:
     assert "uploaded_wait: qBittorrent did not report the uploaded target torrent as complete." in summary["blockers"]
 
 
+def test_target_upload_summary_blocks_missing_rule_obligations() -> None:
+    payload = {
+        "status": "uploaded",
+        "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+        "injected_torrent": {"hash": "a" * 40, "verified_in_client": True},
+        "uploaded_wait": {"complete": True, "matches": [{"hash": "a" * 40}]},
+    }
+
+    summary = ptcli_cli._target_upload_summary(
+        payload,
+        {
+            "status": "ready",
+            "blockers": [],
+            "rule_obligation_review": {"ready": False, "missing": ["source_download_and_retorrent", "mteam_upload_and_seed"]},
+        },
+    )
+
+    assert summary["ready"] is False
+    assert summary["rule_obligations"]["ready"] is False
+    assert "target rule obligations are not ready: missing source_download_and_retorrent, mteam_upload_and_seed." in summary["blockers"]
+
+
+def test_target_upload_resume_state_requires_ready_rule_obligations() -> None:
+    resume_state = ptcli_cli._target_upload_resume_state(
+        {"ready": True, "blockers": []},
+        {"target_rule_obligations": {"ready": False, "missing": ["mteam_upload_and_seed"]}},
+        [],
+    )
+
+    assert resume_state["artifacts"]["target_rule_obligations"] is False
+
+
 def test_target_upload_summary_surfaces_downloaded_torrent_file_evidence_blockers() -> None:
     payload = {
         "status": "uploaded",

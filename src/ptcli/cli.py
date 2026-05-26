@@ -693,7 +693,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "uploaded_wait_evidence": bool(artifacts.get("uploaded_wait_evidence")),
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
-            "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
+            "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
         },
         "blockers": [str(blocker) for blocker in blockers],
     }
@@ -1436,7 +1436,7 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
             "uploaded_wait_evidence": bool(artifacts.get("uploaded_wait_evidence")),
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
-            "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
+            "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
         },
         "blockers": _string_list(summary.get("blockers")),
     }
@@ -1954,6 +1954,12 @@ def _missing_required_summary_artifacts(artifact_status: dict[str, Any], require
     return [name for name in required if artifacts.get(name) is not True]
 
 
+def _rule_obligations_artifact_ready(value: Any) -> bool:
+    if isinstance(value, dict):
+        return value.get("ready") is True
+    return bool(value)
+
+
 def _write_doctor_summary(payload: dict[str, Any], args: argparse.Namespace, output_dir: str | None) -> str:
     destination_dir = Path(output_dir).expanduser() if output_dir else Path("./tmp/retorrent-runs").expanduser()
     destination_dir.mkdir(parents=True, exist_ok=True)
@@ -2278,6 +2284,8 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
     blockers = _target_upload_result_blockers(result)
     uploaded_torrent_hash = _uploaded_torrent_hash_from_result(result)
     duplicate_check = result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else _duplicate_check_from_target_package(preflight)
+    rule_obligations = preflight.get("rule_obligation_review", {})
+    _extend_unique_string(blockers, _target_rule_obligation_blockers(rule_obligations))
     qbit_closure = {
         "injection": _qbit_injection_evidence(injected_torrent),
         "wait": _qbit_wait_evidence(uploaded_wait),
@@ -2304,8 +2312,22 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "fresh_duplicate_check": duplicate_check,
         "hash_consistent": not _uploaded_torrent_hash_consistency_blockers(result),
         "duplicate_clean": _fresh_duplicate_check_clean(duplicate_check),
-        "rule_obligations": preflight.get("rule_obligation_review", {}),
+        "rule_obligations": rule_obligations,
     }
+
+
+def _target_rule_obligation_blockers(rule_obligations: Any) -> list[str]:
+    if not isinstance(rule_obligations, dict):
+        return ["target rule obligations are missing from MTEAM preflight."]
+    if rule_obligations.get("ready") is True:
+        return []
+    missing = rule_obligations.get("missing")
+    if isinstance(missing, list) and missing:
+        return [f"target rule obligations are not ready: missing {', '.join(str(item) for item in missing)}."]
+    blockers = _string_list(rule_obligations.get("blockers"))
+    if blockers:
+        return [f"target rule obligations are not ready: {blocker}" for blocker in blockers]
+    return ["target rule obligations are not ready."]
 
 
 def _qbit_injection_evidence(injected_torrent: Any) -> dict[str, Any] | None:
@@ -3795,7 +3817,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "uploaded_wait_evidence": bool(artifacts.get("uploaded_wait_evidence")),
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
-            "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
+            "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
         },
         "blockers": blockers,
     }
