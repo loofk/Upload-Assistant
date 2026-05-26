@@ -2426,6 +2426,8 @@ def _summary_automation_handoff(summary_file: str) -> dict[str, dict[str, Any]]:
         "json": [*base, "--json"],
         "print_next_command": [*base, "--print-next-command"],
         "print_next_argv": [*base, "--print-next-argv"],
+        "print_first_runnable_command": [*base, "--print-first-runnable-command"],
+        "print_first_runnable_argv": [*base, "--print-first-runnable-argv"],
         "print_shell": [*base, "--print-shell"],
         "run_next_command": [*base, "--run-next-command"],
     }

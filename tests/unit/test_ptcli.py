@@ -2558,6 +2558,8 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     assert payload["automation_reason"] == "Summary is complete and no follow-up command is required."
     assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--json"]
     assert payload["automation_handoff"]["print_next_argv"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--print-next-argv"]
+    assert payload["automation_handoff"]["print_first_runnable_command"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--print-first-runnable-command"]
+    assert payload["automation_handoff"]["print_first_runnable_argv"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--print-first-runnable-argv"]
     assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--run-next-command"])
     assert payload["next_command_ready"] is False
     assert payload["next_command_run_allowed"] is False
@@ -4228,6 +4230,7 @@ def test_summary_check_missing_file_includes_automation_handoff(tmp_path, capsys
     payload = json.loads(capsys.readouterr().out)
     assert payload["automation_action"] == "provide_summary"
     assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--json"]
+    assert payload["automation_handoff"]["print_first_runnable_argv"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--print-first-runnable-argv"]
     assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--run-next-command"])
 
 
