@@ -1247,6 +1247,7 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
         "uploaded_torrent_id": _uploaded_torrent_id_from_result(result) or args.uploaded_torrent_id,
         "uploaded_torrent_hash": _uploaded_torrent_hash_from_result(result),
         "uploaded_torrent_file": _path_artifact(uploaded_torrent_path),
+        "injection_visible_in_client": _injected_torrent_visible(result.get("injected_torrent")),
         "injection_verified": _injected_torrent_verified(result.get("injected_torrent")),
         "injected_torrent_hash": _torrent_hash_from_result(result.get("injected_torrent")),
         "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or args.uploaded_save_path or package_content_path),
@@ -1443,6 +1444,7 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(_path_artifact_exists(artifacts.get("uploaded_torrent_file"))),
             "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
+            "injection_visible_in_client": bool(artifacts.get("injection_visible_in_client")),
             "injection_verified": bool(artifacts.get("injection_verified")),
             "injected_torrent_hash": bool(artifacts.get("injected_torrent_hash")),
             "uploaded_save_path": bool(_path_artifact_exists(artifacts.get("uploaded_save_path"))),
@@ -3606,6 +3608,9 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         artifacts["source_injected_torrent_hash"] = evidence_source.get("injected_torrent_hash")
     if _artifact_value_present(evidence_source.get("injection_verified")):
         artifacts["source_injection_verified"] = evidence_source.get("injection_verified")
+    source_injection = evidence_source.get("qbit_closure", {}).get("injection") if isinstance(evidence_source.get("qbit_closure"), dict) else None
+    if isinstance(source_injection, dict):
+        artifacts["source_injection_visible_in_client"] = _injected_torrent_visible(source_injection)
     if _wait_result_completed(evidence_source.get("source_wait")):
         artifacts["source_wait_evidence"] = True
     if _artifact_value_present(evidence_target.get("hash_consistent")):
@@ -3626,6 +3631,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
             artifacts["source_qbit_tags"] = inject_result.get("tags")
             artifacts["source_paused"] = bool(inject_result.get("paused"))
             artifacts["source_injected_torrent_hash"] = _torrent_hash_from_result(inject_result)
+            artifacts["source_injection_visible_in_client"] = _injected_torrent_visible(inject_result)
             artifacts["source_injection_verified"] = _injected_torrent_verified(inject_result)
     if isinstance(target_prepare, dict):
         prepare_result = target_prepare.get("result")
@@ -3638,6 +3644,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
             artifacts["uploaded_torrent_id"] = _uploaded_torrent_id_from_result(upload_result)
             artifacts["uploaded_torrent_hash"] = _uploaded_torrent_hash_from_result(upload_result)
             artifacts["injected_torrent_hash"] = _torrent_hash_from_result(upload_result.get("injected_torrent"))
+            artifacts["injection_visible_in_client"] = _injected_torrent_visible(upload_result.get("injected_torrent"))
             artifacts["injection_verified"] = _injected_torrent_verified(upload_result.get("injected_torrent"))
             if _wait_result_completed(upload_result.get("uploaded_wait")):
                 artifacts["uploaded_wait_evidence"] = True
@@ -3861,6 +3868,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "source_paused": "source_paused" in artifacts,
             "source_hash_consistent": bool(artifacts.get("source_hash_consistent")),
             "source_injected_torrent_hash": bool(artifacts.get("source_injected_torrent_hash")),
+            "source_injection_visible_in_client": bool(artifacts.get("source_injection_visible_in_client")),
             "source_injection_verified": bool(artifacts.get("source_injection_verified")),
             "source_wait_evidence": bool(artifacts.get("source_wait_evidence")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
@@ -3869,6 +3877,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
             "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
             "injected_torrent_hash": bool(artifacts.get("injected_torrent_hash")),
+            "injection_visible_in_client": bool(artifacts.get("injection_visible_in_client")),
             "injection_verified": bool(artifacts.get("injection_verified")),
             "uploaded_save_path": bool(artifacts.get("uploaded_save_path")),
             "uploaded_qbit_category": bool(artifacts.get("uploaded_qbit_category")),
@@ -4345,6 +4354,20 @@ def _injected_torrent_verified(injected_torrent: Any) -> bool:
         return bool(injected_torrent.get("verified_in_client"))
     client_verification = injected_torrent.get("client_verification")
     return isinstance(client_verification, dict) and bool(client_verification.get("visible"))
+
+
+def _injected_torrent_visible(injected_torrent: Any) -> bool:
+    if not isinstance(injected_torrent, dict):
+        return False
+    if "visible_in_client" in injected_torrent:
+        return bool(injected_torrent.get("visible_in_client"))
+    client_verification = injected_torrent.get("client_verification")
+    if isinstance(client_verification, dict) and "visible" in client_verification:
+        return bool(client_verification.get("visible"))
+    client_matches = injected_torrent.get("client_matches")
+    if isinstance(client_matches, list):
+        return bool(client_matches)
+    return bool(injected_torrent.get("verified_in_client"))
 
 
 def _source_injection_verified(stage: dict[str, Any] | None) -> bool:

@@ -7589,6 +7589,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["source_paused"] is True
     assert summary_payload["artifacts"]["source_hash_consistent"] is True
     assert summary_payload["artifacts"]["source_injected_torrent_hash"] == source_hash
+    assert summary_payload["artifacts"]["source_injection_visible_in_client"] is True
     assert summary_payload["artifacts"]["source_injection_verified"] is True
     assert summary_payload["artifacts"]["target_torrent_file"] == str(torrent_file)
     assert summary_payload["artifacts"]["target_package_dir"]
@@ -7596,6 +7597,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     assert summary_payload["artifacts"]["uploaded_torrent_hash"] == uploaded_hash
     assert summary_payload["artifacts"]["injected_torrent_hash"] == uploaded_hash
+    assert summary_payload["artifacts"]["injection_visible_in_client"] is True
     assert summary_payload["artifacts"]["injection_verified"] is True
     assert summary_payload["artifacts"]["uploaded_qbit_category"] == "MTEAM"
     assert summary_payload["artifacts"]["uploaded_qbit_tags"] == "retorrent"
@@ -7623,6 +7625,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "source_paused": True,
         "source_hash_consistent": True,
         "source_injected_torrent_hash": True,
+        "source_injection_visible_in_client": True,
         "source_injection_verified": True,
         "source_wait_evidence": True,
         "target_package_dir": True,
@@ -7631,6 +7634,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "uploaded_torrent_file": True,
         "uploaded_torrent_hash": True,
         "injected_torrent_hash": True,
+        "injection_visible_in_client": True,
         "injection_verified": True,
         "uploaded_save_path": True,
         "uploaded_qbit_category": True,
@@ -10437,6 +10441,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["is_file"] is True
     assert summary_payload["artifacts"]["uploaded_torrent_hash"] == uploaded_hash
     assert summary_payload["artifacts"]["injected_torrent_hash"] == uploaded_hash
+    assert summary_payload["artifacts"]["injection_visible_in_client"] is True
     assert summary_payload["artifacts"]["injection_verified"] is True
     assert summary_payload["artifacts"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
     assert summary_payload["artifacts"]["uploaded_wait_evidence"] is True
@@ -10450,6 +10455,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is True
     assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_hash"] is True
     assert summary_payload["resume_state"]["artifacts"]["injected_torrent_hash"] is True
+    assert summary_payload["resume_state"]["artifacts"]["injection_visible_in_client"] is True
     assert summary_payload["resume_state"]["artifacts"]["injection_verified"] is True
     assert summary_payload["resume_state"]["artifacts"]["uploaded_wait_evidence"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_hash_consistent"] is True
