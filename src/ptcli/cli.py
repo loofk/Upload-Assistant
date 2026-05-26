@@ -3445,6 +3445,7 @@ def _pipeline_flow_check_summary(stages: list[dict[str, Any]]) -> dict[str, Any]
 def _pipeline_requested_actions(args: argparse.Namespace) -> dict[str, bool]:
     return {
         "download_source": bool(args.download_source),
+        "source_torrent_file": bool(args.source_torrent_file),
         "inject_source": bool(args.inject_source),
         "wait_complete": bool(args.wait_complete),
         "check_dupes": bool(args.check_dupes),

@@ -6909,6 +6909,8 @@ async def test_pipeline_inject_source_reuses_existing_source_torrent(monkeypatch
     assert len(download_stage["result"]["sha1"]) == 40
     assert inject_stage["ok"] is True
     assert inject_stage["result"]["torrent_path"] == str(source_torrent)
+    assert payload["requested_actions"]["source_torrent_file"] is True
+    assert payload["requested_actions"]["download_source"] is False
 
 
 @pytest.mark.asyncio
