@@ -1654,6 +1654,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     kind = str(payload.get("kind") or "unknown")
     qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(payload)
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
+    qbit_wait_retry_hints = _summary_qbit_wait_retry_hints(qbit_wait_diagnostics)
     flow_diagnostics = _summary_flow_diagnostics(payload)
     closure_modes = _summary_closure_modes(payload)
     closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload)
@@ -1669,6 +1670,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
+        "qbit_wait_retry_hints": qbit_wait_retry_hints,
         "closure_modes": closure_modes,
         "closure_status": closure_status,
         "source_mode": closure_modes.get("source"),
@@ -1739,6 +1741,7 @@ def _qbit_wait_summary_fields(payload: dict[str, Any]) -> dict[str, Any]:
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
+        "qbit_wait_retry_hints": _summary_qbit_wait_retry_hints(qbit_wait_diagnostics),
     }
 
 
@@ -1795,6 +1798,46 @@ def _summary_qbit_wait_from(container: dict[str, Any], fallback_key: str) -> dic
         "observed_progress": verification.get("observed_progress", []),
         "blockers": _string_list(wait_result.get("blockers")),
     }
+
+
+def _summary_qbit_wait_retry_hints(qbit_wait_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    hints: dict[str, Any] = {}
+    for scope, diagnostics in qbit_wait_diagnostics.items():
+        if not isinstance(diagnostics, dict):
+            continue
+        request_mismatch = diagnostics.get("request_mismatch") is True
+        observed_hash = _first_string(diagnostics.get("observed_hashes"))
+        observed_content_path = _first_string(diagnostics.get("observed_content_paths"))
+        observed_save_path = _first_string(diagnostics.get("observed_save_paths"))
+        suggested_hash = observed_hash if diagnostics.get("requested_hash_matched") is False else diagnostics.get("requested_hash")
+        suggested_content_path = observed_content_path if diagnostics.get("requested_content_path_matched") is False or not diagnostics.get("requested_content_path") else diagnostics.get("requested_content_path")
+        hints[str(scope)] = {
+            "retry_recommended": request_mismatch,
+            "suggested_torrent_hash": suggested_hash,
+            "suggested_content_path": suggested_content_path,
+            "suggested_save_path": observed_save_path or diagnostics.get("requested_save_path"),
+            "reason": _qbit_wait_retry_reason(str(scope), diagnostics) if request_mismatch else None,
+        }
+    return hints
+
+
+def _qbit_wait_retry_reason(scope: str, diagnostics: dict[str, Any]) -> str:
+    mismatches: list[str] = []
+    if diagnostics.get("requested_hash_matched") is False:
+        mismatches.append("requested_hash")
+    if diagnostics.get("requested_content_path_matched") is False:
+        mismatches.append("requested_content_path")
+    suffix = ", ".join(mismatches) if mismatches else "requested wait query"
+    return f"{scope} qBittorrent wait matched a different torrent/content than {suffix}."
+
+
+def _first_string(value: Any) -> str | None:
+    if not isinstance(value, list):
+        return None
+    for item in value:
+        if isinstance(item, str) and item:
+            return item
+    return None
 
 
 def _closure_status_summary(payload: dict[str, Any]) -> dict[str, Any]:
@@ -5630,6 +5673,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     closure_source = closure_status.get("source") if isinstance(closure_status.get("source"), dict) else {}
     closure_target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
     qbit_wait_diagnostics = payload.get("qbit_wait_diagnostics") if isinstance(payload.get("qbit_wait_diagnostics"), dict) else {}
+    qbit_wait_retry_hints = payload.get("qbit_wait_retry_hints") if isinstance(payload.get("qbit_wait_retry_hints"), dict) else {}
     fields = {
         "PTCLI_SUMMARY_STATUS": payload.get("status"),
         "PTCLI_AUTOMATION_ACTION": payload.get("automation_action"),
@@ -5683,6 +5727,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_SUMMARY_FILE": payload.get("summary_file"),
     }
     fields.update(_summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics))
+    fields.update(_summary_check_qbit_retry_shell_fields(qbit_wait_retry_hints))
     for key, value in fields.items():
         print(f"export {key}={shlex.quote('' if value is None else str(value))}")
     return 0
@@ -5721,6 +5766,22 @@ def _shell_join_list(value: Any) -> str:
     if not isinstance(value, list):
         return ""
     return ",".join(str(item) for item in value if isinstance(item, (str, int, float, bool)))
+
+
+def _summary_check_qbit_retry_shell_fields(qbit_wait_retry_hints: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for scope, prefix in (("source", "PTCLI_QBIT_WAIT_SOURCE"), ("uploaded", "PTCLI_QBIT_WAIT_UPLOADED")):
+        hint = qbit_wait_retry_hints.get(scope) if isinstance(qbit_wait_retry_hints.get(scope), dict) else {}
+        fields.update(
+            {
+                f"{prefix}_RETRY_RECOMMENDED": _shell_bool(hint.get("retry_recommended")) if "retry_recommended" in hint else None,
+                f"{prefix}_SUGGESTED_HASH": hint.get("suggested_torrent_hash"),
+                f"{prefix}_SUGGESTED_CONTENT_PATH": hint.get("suggested_content_path"),
+                f"{prefix}_SUGGESTED_SAVE_PATH": hint.get("suggested_save_path"),
+                f"{prefix}_RETRY_REASON": hint.get("reason"),
+            }
+        )
+    return fields
 
 
 def _summary_check_run_next_command(payload: dict[str, Any]) -> int:
