@@ -1041,6 +1041,18 @@ def test_retorrent_execute_blockers_promote_pipeline_stage_details() -> None:
     ]
 
 
+def test_retorrent_resume_state_infers_pipeline_complete_from_closure() -> None:
+    resume_state = ptcli_cli._retorrent_execute_resume_state(
+        {"closure": {"complete": True, "blockers": []}},
+        {},
+        [],
+        [],
+    )
+
+    assert resume_state["complete"] is True
+    assert resume_state["pipeline_complete"] is True
+
+
 def test_retorrent_execute_blockers_require_uploaded_wait_evidence() -> None:
     pipeline_result = {"status": "ok", "ready": True, "summary": {"blockers": []}}
     closure = {"complete": True, "blockers": []}

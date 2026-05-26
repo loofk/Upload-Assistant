@@ -662,7 +662,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
         next_command_argv = _resume_state_next_command_argv({"stage": next_stage, "command": next_command}, commands)
     return {
         "complete": complete,
-        "pipeline_complete": bool(pipeline_resume.get("complete")),
+        "pipeline_complete": _retorrent_pipeline_complete(pipeline_result, pipeline_resume),
         "resume_available": bool(pipeline_resume.get("resume_available") or commands),
         "next_stage": next_stage,
         "next_command": next_command,
@@ -697,6 +697,15 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
         },
         "blockers": [str(blocker) for blocker in blockers],
     }
+
+
+def _retorrent_pipeline_complete(pipeline_result: dict[str, Any], pipeline_resume: dict[str, Any]) -> bool:
+    if "complete" in pipeline_resume:
+        return pipeline_resume.get("complete") is True
+    if "complete" in pipeline_result:
+        return pipeline_result.get("complete") is True
+    closure = pipeline_result.get("closure") if isinstance(pipeline_result.get("closure"), dict) else None
+    return bool(isinstance(closure, dict) and closure.get("complete") is True)
 
 
 def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[str, Any] | None, ready: bool, artifacts: dict[str, Any] | None = None) -> list[str]:
