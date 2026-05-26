@@ -2645,6 +2645,7 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     assert payload["automation_handoff"]["print_first_runnable_command"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--print-first-runnable-command"]
     assert payload["automation_handoff"]["print_first_runnable_argv"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--print-first-runnable-argv"]
     assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--run-next-command"])
+    assert payload["automation_handoff"]["run_first_runnable_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--run-first-runnable-command"])
     assert payload["next_command_ready"] is False
     assert payload["next_command_run_allowed"] is False
     assert payload["next_command_subcommand"] is None
@@ -3765,6 +3766,88 @@ def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatc
 
     assert code == 7
     assert calls == [([ptcli_cli.sys.executable, str(ptcli_cli._ptcli_script_path()), "pipeline", "--upload-target", "--package-dir", "/tmp/with space"], False)]
+    assert capsys.readouterr().out == ""
+
+
+def test_summary_check_run_first_runnable_command_executes_allowlisted_candidate(tmp_path, monkeypatch, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [
+                    {"stage": "inspect-client", "command": "python3 ptcli.py inspect --client default --json"},
+                    {
+                        "stage": "resume-target-upload",
+                        "command": "python3 ptcli.py pipeline --upload-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
+                    },
+                ],
+                "resume_state": {
+                    "next_stage": "inspect-client",
+                    "next_command": "python3 ptcli.py inspect --client default --json",
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_run(argv, check):
+        calls.append((argv, check))
+        return argparse.Namespace(returncode=9)
+
+    monkeypatch.setattr(ptcli_cli.subprocess, "run", fake_run)
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--run-first-runnable-command"])
+
+    assert code == 9
+    assert calls == [([ptcli_cli.sys.executable, str(ptcli_cli._ptcli_script_path()), "pipeline", "--upload-target", "--package-dir", "/tmp/with space"], False)]
+    assert capsys.readouterr().out == ""
+
+
+def test_summary_check_run_first_runnable_command_fails_without_candidate(tmp_path, monkeypatch, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [{"stage": "inspect-client", "command": "python3 ptcli.py inspect --client default --json"}],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_run(*_args, **_kwargs):
+        pytest.fail("unexpected subprocess call")
+
+    monkeypatch.setattr(ptcli_cli.subprocess, "run", fail_run)
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--run-first-runnable-command"])
+
+    assert code == 1
     assert capsys.readouterr().out == ""
 
 

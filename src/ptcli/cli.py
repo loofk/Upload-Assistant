@@ -198,6 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
     summary_output.add_argument("--print-first-runnable-argv", action="store_true", help="Print only the first allowlisted candidate argv as JSON; exits 0 when complete or runnable, 1 when blocked without a runnable candidate.")
     summary_output.add_argument("--print-shell", action="store_true", help="Print shell export lines for automation wrappers; inspect PTCLI_AUTOMATION_EXIT_CODE for the verdict.")
     summary_output.add_argument("--run-next-command", action="store_true", help="Run the next resumable ptcli.py command without invoking a shell; exits with the child command status.")
+    summary_output.add_argument("--run-first-runnable-command", action="store_true", help="Run the first allowlisted candidate ptcli.py command without invoking a shell; exits with the child command status.")
     summary_check.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     pipeline = subparsers.add_parser(
@@ -2507,6 +2508,7 @@ def _summary_automation_handoff(summary_file: str) -> dict[str, dict[str, Any]]:
         "print_first_runnable_argv": [*base, "--print-first-runnable-argv"],
         "print_shell": [*base, "--print-shell"],
         "run_next_command": [*base, "--run-next-command"],
+        "run_first_runnable_command": [*base, "--run-first-runnable-command"],
     }
     return {name: {"command": shlex.join(argv), "argv": argv} for name, argv in commands.items()}
 
@@ -5858,6 +5860,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _summary_check_print_shell(payload)
             if args.run_next_command:
                 return _summary_check_run_next_command(payload)
+            if args.run_first_runnable_command:
+                return _summary_check_run_first_runnable_command(payload)
             _print_payload(payload, json_output)
             return 0 if payload.get("status") == "ok" else 1
 
@@ -6075,6 +6079,15 @@ def _summary_check_run_next_command(payload: dict[str, Any]) -> int:
         return 2
     completed = subprocess.run(argv, check=False)  # noqa: S603 - argv is restricted to generated ptcli.py commands.
     return int(completed.returncode)
+
+
+def _summary_check_run_first_runnable_command(payload: dict[str, Any]) -> int:
+    command = payload.get("first_runnable_command")
+    argv = _summary_next_command_argv(payload.get("first_runnable_command_argv")) if command else None
+    if command and argv:
+        completed = subprocess.run(argv, check=False)  # noqa: S603 - argv is restricted to allowlisted generated ptcli.py commands.
+        return int(completed.returncode)
+    return 0 if payload.get("status") == "ok" else 1
 
 
 def _summary_next_command_metadata(argv: list[str] | None) -> dict[str, Any]:
