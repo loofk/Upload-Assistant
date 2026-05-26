@@ -1960,6 +1960,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     next_command_argv = _summary_next_command_raw_argv(payload.get("next_command_argv")) if payload.get("next_command_argv") else _summary_next_command_raw_argv(str(next_command)) if next_command else None
     next_command_metadata = _summary_next_command_metadata(next_command_argv)
     candidate_commands = payload.get("candidate_commands") if isinstance(payload.get("candidate_commands"), list) else _summary_candidate_commands(payload)
+    first_runnable_command = _first_runnable_candidate_command(candidate_commands)
     next_command_placeholder = bool(next_command_metadata["placeholder"])
     next_command_ready = bool(next_command) and not next_command_placeholder
     next_command_run_allowed = bool(next_command_ready and next_command_metadata["run_allowed"])
@@ -1998,6 +1999,11 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         "candidate_commands": candidate_commands,
         "candidate_command_count": len(candidate_commands),
         "runnable_command_count": sum(1 for command in candidate_commands if isinstance(command, dict) and command.get("run_allowed") is True),
+        "first_runnable_stage": first_runnable_command.get("stage"),
+        "first_runnable_command": first_runnable_command.get("command"),
+        "first_runnable_command_argv": first_runnable_command.get("argv"),
+        "first_runnable_command_source": first_runnable_command.get("source"),
+        "first_runnable_command_subcommand": first_runnable_command.get("subcommand"),
         "should_execute_next_command": automation_action == "run_next_command",
         "automation_exit_code": 0 if status == "ok" else 1,
     }
@@ -2230,6 +2236,13 @@ def _summary_candidate_commands(payload: dict[str, Any]) -> list[dict[str, Any]]
             "placeholder": metadata["placeholder"],
         })
     return candidates
+
+
+def _first_runnable_candidate_command(candidate_commands: list[Any]) -> dict[str, Any]:
+    for command in candidate_commands:
+        if isinstance(command, dict) and command.get("run_allowed") is True:
+            return command
+    return {}
 
 
 def _summary_command_argv(payload: dict[str, Any], stage: str | None, command: str) -> list[str] | None:
@@ -5765,6 +5778,11 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_NEXT_COMMAND_RUN_BLOCKER": payload.get("next_command_run_blocker"),
         "PTCLI_CANDIDATE_COMMAND_COUNT": payload.get("candidate_command_count"),
         "PTCLI_RUNNABLE_COMMAND_COUNT": payload.get("runnable_command_count"),
+        "PTCLI_FIRST_RUNNABLE_STAGE": payload.get("first_runnable_stage"),
+        "PTCLI_FIRST_RUNNABLE_COMMAND": payload.get("first_runnable_command"),
+        "PTCLI_FIRST_RUNNABLE_COMMAND_ARGV": json.dumps(payload.get("first_runnable_command_argv"), ensure_ascii=False) if payload.get("first_runnable_command_argv") else None,
+        "PTCLI_FIRST_RUNNABLE_COMMAND_SOURCE": payload.get("first_runnable_command_source"),
+        "PTCLI_FIRST_RUNNABLE_COMMAND_SUBCOMMAND": payload.get("first_runnable_command_subcommand"),
         "PTCLI_SHOULD_EXECUTE_NEXT_COMMAND": _shell_bool(payload.get("should_execute_next_command")),
         "PTCLI_NEXT_COMMAND_READY": _shell_bool(payload.get("next_command_ready")),
         "PTCLI_QBIT_WAIT_MISMATCH": _shell_bool(payload.get("qbit_wait_mismatch")),

@@ -3436,6 +3436,11 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_NEXT_COMMAND_RUN_BLOCKER=''\n" in out
     assert "export PTCLI_CANDIDATE_COMMAND_COUNT=2\n" in out
     assert "export PTCLI_RUNNABLE_COMMAND_COUNT=1\n" in out
+    assert "export PTCLI_FIRST_RUNNABLE_STAGE=resume-target-upload\n" in out
+    assert "export PTCLI_FIRST_RUNNABLE_COMMAND='python3 ptcli.py pipeline --upload-target'\n" in out
+    assert 'export PTCLI_FIRST_RUNNABLE_COMMAND_ARGV=\'["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]\'\n' in out
+    assert "export PTCLI_FIRST_RUNNABLE_COMMAND_SOURCE=resume_commands\n" in out
+    assert "export PTCLI_FIRST_RUNNABLE_COMMAND_SUBCOMMAND=pipeline\n" in out
 
 
 def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) -> None:
@@ -3621,6 +3626,11 @@ def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) ->
     assert payload["next_command_run_blocker"] is None
     assert payload["candidate_command_count"] == 1
     assert payload["runnable_command_count"] == 1
+    assert payload["first_runnable_stage"] == "resume-target-upload"
+    assert payload["first_runnable_command"] == "python3 ptcli.py pipeline --upload-target"
+    assert payload["first_runnable_command_argv"] == ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]
+    assert payload["first_runnable_command_source"] == "resume_commands"
+    assert payload["first_runnable_command_subcommand"] == "pipeline"
     assert payload["candidate_commands"] == [
         {
             "stage": "resume-target-upload",
@@ -3679,6 +3689,11 @@ def test_summary_check_exposes_unsupported_next_command_metadata(tmp_path, capsy
     assert payload["candidate_commands"][0]["run_allowed"] is False
     assert payload["candidate_commands"][0]["run_blocker"] == "ptcli subcommand inspect is not in the summary-check auto-run allowlist"
     assert payload["should_execute_next_command"] is False
+    assert payload["first_runnable_stage"] is None
+    assert payload["first_runnable_command"] is None
+    assert payload["first_runnable_command_argv"] is None
+    assert payload["first_runnable_command_source"] is None
+    assert payload["first_runnable_command_subcommand"] is None
     assert payload["automation_reason"] == "Next command is present but is not allowed for automatic execution: ptcli subcommand inspect is not in the summary-check auto-run allowlist."
 
 
