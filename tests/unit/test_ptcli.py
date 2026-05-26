@@ -3062,7 +3062,8 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
                         "stage": "resume-target-upload",
                         "command": "python3 ptcli.py pipeline --upload-target",
                         "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
-                    }
+                    },
+                    {"stage": "inspect-client", "command": "python3 ptcli.py inspect --client default --json"},
                 ],
                 "resume_state": {
                     "next_stage": None,
@@ -3221,7 +3222,8 @@ def test_summary_check_print_next_argv_outputs_safe_command_argv(tmp_path, capsy
                         "stage": "resume-target-upload",
                         "command": "python3 ptcli.py pipeline --upload-target",
                         "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
-                    }
+                    },
+                    {"stage": "inspect-client", "command": "python3 ptcli.py inspect --client default --json"},
                 ],
                 "resume_state": {
                     "artifacts": {
@@ -3343,7 +3345,8 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                         "stage": "resume-target-upload",
                         "command": "python3 ptcli.py pipeline --upload-target",
                         "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
-                    }
+                    },
+                    {"stage": "inspect-client", "command": "python3 ptcli.py inspect --client default --json"},
                 ],
                 "resume_state": {
                     "artifacts": {
@@ -3384,6 +3387,8 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_NEXT_COMMAND_SUBCOMMAND=pipeline\n" in out
     assert "export PTCLI_NEXT_COMMAND_RUN_ALLOWED=1\n" in out
     assert "export PTCLI_NEXT_COMMAND_RUN_BLOCKER=''\n" in out
+    assert "export PTCLI_CANDIDATE_COMMAND_COUNT=2\n" in out
+    assert "export PTCLI_RUNNABLE_COMMAND_COUNT=1\n" in out
 
 
 def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) -> None:
@@ -3532,6 +3537,20 @@ def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) ->
     assert payload["next_command_subcommand"] == "pipeline"
     assert payload["next_command_run_allowed"] is True
     assert payload["next_command_run_blocker"] is None
+    assert payload["candidate_command_count"] == 1
+    assert payload["runnable_command_count"] == 1
+    assert payload["candidate_commands"] == [
+        {
+            "stage": "resume-target-upload",
+            "command": "python3 ptcli.py pipeline --upload-target",
+            "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
+            "source": "resume_commands",
+            "subcommand": "pipeline",
+            "run_allowed": True,
+            "run_blocker": None,
+            "placeholder": False,
+        }
+    ]
     assert payload["flow_diagnostics"]["present"] is True
     assert payload["flow_diagnostics"]["source_capability"]["source_download_adapter"] == "nexusphp_passkey"
     assert payload["credential_requirements"] == ["TRACKERS.U2.passkey", "data/cookies/U2.txt", "TRACKERS.MTEAM.api_key"]
@@ -3570,6 +3589,13 @@ def test_summary_check_exposes_unsupported_next_command_metadata(tmp_path, capsy
     assert payload["next_command_run_allowed"] is False
     assert payload["next_command_subcommand"] == "inspect"
     assert payload["next_command_run_blocker"] == "ptcli subcommand inspect is not in the summary-check auto-run allowlist"
+    assert payload["candidate_command_count"] == 1
+    assert payload["runnable_command_count"] == 0
+    assert payload["candidate_commands"][0]["stage"] == "resume-target-upload"
+    assert payload["candidate_commands"][0]["source"] == "resume_commands"
+    assert payload["candidate_commands"][0]["subcommand"] == "inspect"
+    assert payload["candidate_commands"][0]["run_allowed"] is False
+    assert payload["candidate_commands"][0]["run_blocker"] == "ptcli subcommand inspect is not in the summary-check auto-run allowlist"
     assert payload["should_execute_next_command"] is False
     assert payload["automation_reason"] == "Next command is present but is not allowed for automatic execution: ptcli subcommand inspect is not in the summary-check auto-run allowlist."
 

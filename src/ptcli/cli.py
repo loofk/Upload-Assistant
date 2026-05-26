@@ -1782,6 +1782,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     next_command = payload.get("next_command")
     next_command_argv = _summary_next_command_raw_argv(payload.get("next_command_argv")) if payload.get("next_command_argv") else _summary_next_command_raw_argv(str(next_command)) if next_command else None
     next_command_metadata = _summary_next_command_metadata(next_command_argv)
+    candidate_commands = payload.get("candidate_commands") if isinstance(payload.get("candidate_commands"), list) else _summary_candidate_commands(payload)
     next_command_placeholder = bool(next_command_metadata["placeholder"])
     next_command_ready = bool(next_command) and not next_command_placeholder
     next_command_run_allowed = bool(next_command_ready and next_command_metadata["run_allowed"])
@@ -1816,6 +1817,9 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         "next_command_subcommand": next_command_metadata["subcommand"],
         "next_command_run_blocker": next_command_metadata["run_blocker"],
         "next_command_source": payload.get("next_command_source"),
+        "candidate_commands": candidate_commands,
+        "candidate_command_count": len(candidate_commands),
+        "runnable_command_count": sum(1 for command in candidate_commands if command["run_allowed"]),
         "should_execute_next_command": automation_action == "run_next_command",
         "automation_exit_code": 0 if status == "ok" else 1,
     }
@@ -1889,6 +1893,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
         "next_command_source": next_command.get("source"),
+        "candidate_commands": _summary_candidate_commands(payload),
         **diagnostics,
         **artifact_status,
         **closure_audit_status,
@@ -1929,6 +1934,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
         "next_command_source": next_command.get("source"),
+        "candidate_commands": _summary_candidate_commands(payload),
         **diagnostics,
         **artifact_status,
     })
@@ -1968,6 +1974,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
         "next_command_source": next_command.get("source"),
+        "candidate_commands": _summary_candidate_commands(payload),
         **_summary_check_diagnostics(payload),
         **artifact_status,
     })
@@ -1996,6 +2003,27 @@ def _summary_command_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(value, list):
             commands.extend({**command, "_summary_command_source": key} for command in value if isinstance(command, dict))
     return commands
+
+
+def _summary_candidate_commands(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for command_entry in _summary_command_entries(payload):
+        command = command_entry.get("command")
+        if not command:
+            continue
+        argv = _argv_list(command_entry.get("argv")) or _summary_next_command_raw_argv(str(command))
+        metadata = _summary_next_command_metadata(argv)
+        candidates.append({
+            "stage": command_entry.get("stage"),
+            "command": str(command),
+            "argv": argv,
+            "source": command_entry.get("_summary_command_source"),
+            "subcommand": metadata["subcommand"],
+            "run_allowed": metadata["run_allowed"],
+            "run_blocker": metadata["run_blocker"],
+            "placeholder": metadata["placeholder"],
+        })
+    return candidates
 
 
 def _summary_command_argv(payload: dict[str, Any], stage: str | None, command: str) -> list[str] | None:
@@ -5506,6 +5534,8 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_NEXT_COMMAND_SUBCOMMAND": payload.get("next_command_subcommand"),
         "PTCLI_NEXT_COMMAND_RUN_ALLOWED": _shell_bool(payload.get("next_command_run_allowed")),
         "PTCLI_NEXT_COMMAND_RUN_BLOCKER": payload.get("next_command_run_blocker"),
+        "PTCLI_CANDIDATE_COMMAND_COUNT": payload.get("candidate_command_count"),
+        "PTCLI_RUNNABLE_COMMAND_COUNT": payload.get("runnable_command_count"),
         "PTCLI_SHOULD_EXECUTE_NEXT_COMMAND": _shell_bool(payload.get("should_execute_next_command")),
         "PTCLI_NEXT_COMMAND_READY": _shell_bool(payload.get("next_command_ready")),
         "PTCLI_QBIT_WAIT_MISMATCH": _shell_bool(payload.get("qbit_wait_mismatch")),
