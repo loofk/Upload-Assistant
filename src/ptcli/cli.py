@@ -3229,6 +3229,8 @@ def _source_inject_result_blockers(result: dict[str, Any]) -> list[str]:
     blockers = _string_list(result.get("blockers"))
     if result.get("verified_in_client") is False:
         _append_unique_string(blockers, "qBittorrent did not verify the injected source torrent in the client list.")
+    if not _injected_torrent_visible(result):
+        _append_unique_string(blockers, "qBittorrent did not list the injected source torrent after add.")
     _extend_unique_string(blockers, _client_verification_blockers(result.get("client_verification")))
     return blockers
 
@@ -4482,6 +4484,8 @@ def _injected_torrent_verified(injected_torrent: Any) -> bool:
     if not isinstance(injected_torrent, dict) or injected_torrent.get("blockers"):
         return False
     if _client_verification_blockers(injected_torrent.get("client_verification")):
+        return False
+    if not _injected_torrent_visible(injected_torrent):
         return False
     if "verified_in_client" in injected_torrent:
         return bool(injected_torrent.get("verified_in_client"))

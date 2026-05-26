@@ -3614,6 +3614,13 @@ def test_target_upload_result_requires_uploaded_torrent_visibility_evidence() ->
     assert "injected_torrent: qBittorrent did not list the injected torrent after add." in ptcli_cli._target_upload_result_blockers(payload)
 
 
+def test_source_inject_result_requires_visibility_evidence() -> None:
+    result = {"hash": "a" * 40, "verified_in_client": True}
+
+    assert ptcli_cli._source_inject_result_blockers(result) == ["qBittorrent did not list the injected source torrent after add."]
+    assert ptcli_cli._injected_torrent_verified(result) is False
+
+
 def test_target_upload_result_requires_uploaded_torrent_client_metadata_match() -> None:
     payload = {
         "status": "uploaded",
