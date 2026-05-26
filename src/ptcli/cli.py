@@ -713,6 +713,7 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
     summary = pipeline_result.get("summary") if isinstance(pipeline_result.get("summary"), dict) else {}
     _extend_unique_string(blockers, _string_list(summary.get("blockers")))
     _extend_unique_string(blockers, _summary_closure_audit_status(pipeline_result)["missing_closure_audit"])
+    _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(_summary_check_diagnostics(pipeline_result)))
     if not ready:
         blockers.append("pipeline did not report ready.")
     if ready and closure is not None and closure.get("complete") is True:

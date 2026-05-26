@@ -1102,6 +1102,40 @@ def test_retorrent_execute_blockers_require_closure_audit_ready() -> None:
     assert blockers == ["target.uploaded_wait_evidence"]
 
 
+def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:
+    pipeline_result = {
+        "status": "ok",
+        "ready": True,
+        "summary": {"blockers": []},
+        "evidence": {
+            "target": {
+                "qbit_closure": {
+                    "wait": {
+                        "complete": True,
+                        "completion_verification": {
+                            "matched_count": 1,
+                            "complete_count": 1,
+                            "any_complete": True,
+                            "requested_hash_matched": True,
+                            "requested_content_path_matched": False,
+                        },
+                    }
+                }
+            }
+        },
+    }
+    closure = {"complete": True, "blockers": []}
+
+    blockers = ptcli_cli._retorrent_execute_blockers(
+        pipeline_result,
+        closure,
+        True,
+        {"source_wait_evidence": True, "uploaded_wait_evidence": True, "uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": "b" * 40, "injection_verified": True},
+    )
+
+    assert blockers == ["qBittorrent wait mismatch: uploaded.requested_content_path"]
+
+
 @pytest.mark.asyncio
 async def test_retorrent_execute_blocks_when_pipeline_closure_audit_is_incomplete(monkeypatch, tmp_path) -> None:
     torrent_file = tmp_path / "target.torrent"
@@ -1147,6 +1181,72 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_audit_is_incomplet
     assert payload["status"] == "blocked"
     assert payload["complete"] is False
     assert payload["blockers"] == ["target.uploaded_wait_evidence"]
+
+
+@pytest.mark.asyncio
+async def test_retorrent_execute_blocks_when_pipeline_qbit_wait_mismatches(monkeypatch, tmp_path) -> None:
+    torrent_file = tmp_path / "target.torrent"
+    torrent_file.write_bytes(b"d4:infod")
+
+    async def fake_pipeline_payload(_args):
+        return {
+            "status": "ok",
+            "ready": True,
+            "closure": {"complete": True, "blockers": []},
+            "evidence": {
+                "source": {"source_wait_evidence": True},
+                "target": {
+                    "uploaded_torrent_hash": "b" * 40,
+                    "injected_torrent_hash": "b" * 40,
+                    "injection_verified": True,
+                    "uploaded_wait_evidence": True,
+                    "qbit_closure": {
+                        "wait": {
+                            "complete": True,
+                            "completion_verification": {
+                                "matched_count": 1,
+                                "complete_count": 1,
+                                "any_complete": True,
+                                "requested_hash_matched": False,
+                                "requested_content_path_matched": True,
+                                "observed_hashes": ["f" * 40],
+                            },
+                        }
+                    },
+                },
+            },
+            "stages": [{"stage": "target-upload", "ok": True}],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--path",
+            "/downloads/Name",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    assert payload["status"] == "blocked"
+    assert payload["complete"] is False
+    assert payload["qbit_wait_mismatch"] is True
+    assert payload["blockers"] == ["qBittorrent wait mismatch: uploaded.requested_hash"]
+    assert payload["next_actions"][0].startswith("Resolve the uploaded qBittorrent wait mismatch")
 
 
 def test_retorrent_execute_blockers_require_source_injection_artifacts_for_downloaded_mode() -> None:
