@@ -657,6 +657,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["qbit_wait_mismatches"] == []
     assert payload["next_actions"] == ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
     assert payload["ready"] is True
+    assert payload["closure_status"]["complete"] is True
+    assert payload["closure_status"]["target"]["ready"] is True
+    assert payload["closure_status"]["target"]["rule_obligations_ready"] is True
     assert payload["closure"]["source"]["complete"] is True
     assert payload["closure"]["target"]["injected"] is True
     assert payload["closure_audit"]["ready"] is True
@@ -8480,6 +8483,15 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["complete"] is True
     assert summary_payload["closure_audit"]["ready"] is True
     assert summary_payload["closure_audit"]["missing"] == []
+    assert summary_payload["closure_status"]["complete"] is False
+    assert summary_payload["closure_status"]["closure_complete"] is True
+    assert summary_payload["closure_status"]["pipeline_status"] == "blocked"
+    assert summary_payload["closure_status"]["pipeline_blockers"] == summary_payload["blockers"]
+    assert summary_payload["closure_status"]["source"]["ready"] is True
+    assert summary_payload["closure_status"]["source"]["hash_consistent"] is True
+    assert summary_payload["closure_status"]["target"]["ready"] is True
+    assert summary_payload["closure_status"]["target"]["rule_obligations_ready"] is True
+    assert summary_payload["closure_status"]["target"]["uploaded_wait_evidence"] is True
     assert summary_payload["summary"]["closure_audit"]["ready"] is True
     assert summary_payload["config"] == str(tmp_path / "config.py")
     assert summary_payload["base_dir"] == str(tmp_path)

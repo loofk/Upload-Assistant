@@ -565,6 +565,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
     qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(pipeline_result)
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
+    closure_status = pipeline_result.get("closure_status") if isinstance(pipeline_result.get("closure_status"), dict) else _closure_status_summary(pipeline_result)
     resume_commands = pipeline_result.get("resume_commands", [])
     resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands)
     summary_file = pipeline_result.get("summary_file")
@@ -579,6 +580,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "pipeline": pipeline_result,
         "closure": closure,
         "closure_audit": closure_audit,
+        "closure_status": closure_status,
         "evidence": evidence,
         "summary": summary,
         "summary_file": summary_file,
@@ -1793,6 +1795,70 @@ def _summary_qbit_wait_from(container: dict[str, Any], fallback_key: str) -> dic
     }
 
 
+def _closure_status_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    closure = payload.get("closure") if isinstance(payload.get("closure"), dict) else {}
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    closure_source = closure.get("source") if isinstance(closure.get("source"), dict) else {}
+    closure_target = closure.get("target") if isinstance(closure.get("target"), dict) else {}
+    evidence_source = evidence.get("source") if isinstance(evidence.get("source"), dict) else {}
+    evidence_target = evidence.get("target") if isinstance(evidence.get("target"), dict) else {}
+    if isinstance(payload.get("closure_audit"), dict):
+        closure_audit = payload["closure_audit"]
+    elif closure or evidence:
+        closure_audit = _pipeline_closure_audit(closure, evidence)
+    else:
+        closure_audit = {}
+    qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(payload)
+    qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
+    blockers = _string_list(payload.get("blockers"))
+    closure_blockers = _string_list(closure.get("blockers"))
+    audit_missing = _string_list(closure_audit.get("missing")) if isinstance(closure_audit, dict) else []
+    ready = bool(payload.get("ready"))
+    closure_complete = bool(closure.get("complete"))
+    audit_ready = bool(closure_audit.get("ready")) if isinstance(closure_audit, dict) else False
+    payload_complete = bool(payload.get("complete")) if "complete" in payload else closure_complete
+    complete = payload_complete and ready and closure_complete and audit_ready and not blockers and not qbit_wait_mismatches
+    return {
+        "complete": complete,
+        "ready": ready,
+        "pipeline_status": payload.get("status"),
+        "pipeline_blockers": blockers,
+        "closure_complete": closure_complete,
+        "closure_blockers": closure_blockers,
+        "audit_ready": audit_ready,
+        "audit_missing": audit_missing,
+        "qbit_wait_mismatch": bool(qbit_wait_mismatches),
+        "qbit_wait_mismatches": qbit_wait_mismatches,
+        "source": {
+            "ready": bool(closure_source.get("ready") or evidence_source.get("ready")),
+            "mode": evidence_source.get("mode"),
+            "hash_consistent": bool(closure_source.get("hash_consistent") or evidence_source.get("hash_consistent")),
+            "wait_evidence": _wait_result_completed(closure_source.get("source_wait")) or bool(evidence_source.get("source_wait_evidence")),
+            "injection_verified": bool(closure_source.get("injection_verified") or evidence_source.get("injection_verified")),
+        },
+        "target": {
+            "ready": bool(
+                evidence_target.get("ready")
+                or (
+                    closure_target.get("prepared")
+                    and closure_target.get("uploaded")
+                    and closure_target.get("downloaded")
+                    and closure_target.get("injected")
+                    and closure_target.get("seeding")
+                )
+            ),
+            "mode": evidence_target.get("mode"),
+            "hash_consistent": bool(closure_target.get("hash_consistent") or evidence_target.get("hash_consistent")),
+            "duplicate_clean": bool(closure_target.get("duplicate_clean") or evidence_target.get("duplicate_clean")),
+            "rule_obligations_ready": _rule_obligations_artifact_ready(
+                closure_target.get("rule_obligations") if isinstance(closure_target.get("rule_obligations"), dict) else evidence_target.get("rule_obligations")
+            ),
+            "uploaded_wait_evidence": _wait_result_completed(closure_target.get("uploaded_wait")) or bool(evidence_target.get("uploaded_wait_evidence")),
+            "injection_verified": bool(closure_target.get("injection_verified") or evidence_target.get("injection_verified")),
+        },
+    }
+
+
 def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     status = str(payload.get("status") or "blocked")
     blockers = _string_list(payload.get("blockers"))
@@ -1901,8 +1967,10 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit], *[f"closure audit missing: {name}" for name in missing_closure_audit]]
     _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(diagnostics))
     next_command = _summary_next_command(payload, resume_state, _pipeline_summary_preferred_stages([*missing_audit, *missing_closure_audit]))
+    check_status = "ok" if complete and ready and not blockers else "blocked"
+    closure_status = _closure_status_summary({**payload, "status": check_status, "blockers": blockers})
     return _summary_check_result({
-        "status": "ok" if complete and ready and not blockers else "blocked",
+        "status": check_status,
         "kind": payload.get("kind"),
         "summary_file": summary_file,
         "automation_handoff": _summary_automation_handoff(summary_file),
@@ -1910,6 +1978,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "complete": complete,
         "live_safe_to_attempt": complete and ready and not blockers,
         "blockers": blockers,
+        "closure_status": closure_status,
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
@@ -3047,6 +3116,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "stages": stages,
     }
     payload.update(_qbit_wait_summary_fields(payload))
+    payload["closure_status"] = _closure_status_summary(payload)
     if getattr(args, "write_summary", False):
         summary_file = _write_run_summary(payload, args.summary_output_dir)
         payload["summary_file"] = summary_file
@@ -3887,6 +3957,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "effective_actions": payload.get("effective_actions", {}),
         "closure": payload.get("closure"),
         "closure_audit": payload.get("closure_audit"),
+        "closure_status": payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload),
         "flow_check": payload.get("flow_check"),
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),

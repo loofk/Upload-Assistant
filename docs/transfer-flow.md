@@ -101,6 +101,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downlo
 所有本地 `.torrent` 文件证据都会同时暴露 `hash`、`torrent_hash` 和 `infohash`（同一个 infohash 值），让脚本可以用统一的 `hash` 字段把下载的种子文件、qBittorrent 注入结果和等待结果串起来。
 qBittorrent 等待完成证据还必须匹配请求的 torrent hash 和内容路径；即使缺少 `completion_verification`，也会用 `query` 与 `matches` 复核，避免把别的已完成任务当作本次转种闭环。
 `qbit_wait_diagnostics` 会同时暴露请求的 hash、内容路径、保存路径、等待参数，以及 qBittorrent 实际观察到的 hash、内容路径、保存路径、状态和进度，便于自动化脚本在 mismatch 时选择正确的恢复参数。
+`closure_status` 是面向调度器的机器可读摘要，会把 pipeline 状态、closure blockers、closure audit 缺口、qBittorrent wait mismatch，以及 source/target 两侧的 ready/hash/rule/wait 关键布尔值收敛到一个入口。
 单独运行 `target-upload --write-summary` 时，`summary.mode` 也会使用与 pipeline 一致的目标侧模式：`live_upload`、`resumed_uploaded_id`、`resumed_uploaded_torrent`、`prepared` 或 `blocked`。
 
 ## 恢复路径
