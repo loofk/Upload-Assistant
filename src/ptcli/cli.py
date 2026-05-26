@@ -1226,7 +1226,7 @@ def _uploaded_torrent_id_reuse_blockers(args: argparse.Namespace, *, inferred_up
 
 
 def _maybe_write_target_upload_summary(args: argparse.Namespace, result: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
-    summary = _target_upload_summary(result, preflight)
+    summary = _target_upload_summary(result, preflight, args)
     qbit_wait_fields = _qbit_wait_summary_fields({"summary": summary, "result": result})
     if not getattr(args, "write_summary", False):
         return {**result, **qbit_wait_fields}
@@ -1238,7 +1238,7 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
     destination_dir = Path(output_dir).expanduser()
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / "ptcli-target-upload-summary.json"
-    summary = _target_upload_summary(result, preflight)
+    summary = _target_upload_summary(result, preflight, args)
     artifacts = _target_upload_summary_artifacts(result, preflight, args, str(destination))
     recommended_commands = _target_upload_recommended_commands(summary, args, artifacts)
     payload = {
@@ -1693,7 +1693,7 @@ def _summary_closure_modes(payload: dict[str, Any]) -> dict[str, str | None]:
     summary_target = summary.get("target") if isinstance(summary.get("target"), dict) else {}
     return {
         "source": _string_or_none(evidence_source.get("mode")) or _string_or_none(summary_source.get("mode")),
-        "target": _string_or_none(evidence_target.get("mode")) or _string_or_none(summary_target.get("mode")),
+        "target": _string_or_none(evidence_target.get("mode")) or _string_or_none(summary_target.get("mode")) or _string_or_none(summary.get("mode")),
     }
 
 
@@ -2437,7 +2437,7 @@ def _extend_command_path(command: list[str], option: str, artifact: Any) -> None
         command.extend([option, str(artifact["path"])])
 
 
-def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) -> dict[str, Any]:
+def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any], args: argparse.Namespace | None = None) -> dict[str, Any]:
     downloaded_torrent = result.get("downloaded_torrent")
     injected_torrent = result.get("injected_torrent")
     uploaded_wait = result.get("uploaded_wait")
@@ -2452,6 +2452,7 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
     }
     return {
         "status": result.get("status"),
+        "mode": _target_upload_summary_mode(result, preflight, args),
         "ready": result.get("status") in {"ready", "uploaded"} and not blockers,
         "uploaded": result.get("status") == "uploaded",
         "uploaded_torrent_id": _uploaded_torrent_id_from_result(result),
@@ -2474,6 +2475,28 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any]) ->
         "duplicate_clean": _fresh_duplicate_check_clean(duplicate_check),
         "rule_obligations": rule_obligations,
     }
+
+
+def _target_upload_summary_mode(result: dict[str, Any], preflight: dict[str, Any], args: argparse.Namespace | None = None) -> str:
+    if args is not None:
+        if getattr(args, "uploaded_torrent_file", None):
+            return "resumed_uploaded_torrent"
+        if getattr(args, "uploaded_torrent_id", None):
+            return "resumed_uploaded_id"
+        if getattr(args, "execute", False) and result.get("status") == "uploaded":
+            return "live_upload"
+    downloaded_torrent = result.get("downloaded_torrent")
+    if isinstance(downloaded_torrent, dict) and downloaded_torrent.get("reused"):
+        return "resumed_uploaded_torrent"
+    if result.get("uploaded_torrent_id") and result.get("status") == "uploaded" and not result.get("submitted_torrent_hash"):
+        return "resumed_uploaded_id"
+    if result.get("status") == "uploaded":
+        return "live_upload"
+    if result.get("status") == "ready" or preflight.get("status") == "ready":
+        return "prepared"
+    if result.get("status") == "blocked":
+        return "blocked"
+    return "missing"
 
 
 def _target_rule_obligation_blockers(rule_obligations: Any) -> list[str]:

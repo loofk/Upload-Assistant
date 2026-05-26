@@ -2878,6 +2878,7 @@ def test_summary_check_blocks_ready_target_upload_qbit_wait_mismatch(tmp_path, c
                 "kind": "ptcli.target_upload.summary",
                 "summary": {
                     "ready": True,
+                    "mode": "resumed_uploaded_torrent",
                     "blockers": [],
                     "uploaded_wait": {
                         "complete": True,
@@ -2920,6 +2921,7 @@ def test_summary_check_blocks_ready_target_upload_qbit_wait_mismatch(tmp_path, c
     assert payload["status"] == "blocked"
     assert payload["automation_action"] == "resolve_qbit_wait_mismatch"
     assert payload["qbit_wait_mismatches"] == ["uploaded.requested_hash"]
+    assert payload["target_mode"] == "resumed_uploaded_torrent"
     assert "qBittorrent wait mismatch: uploaded.requested_hash" in payload["blockers"]
     assert payload["next_stage"] == "resume-uploaded-torrent"
 
@@ -11025,6 +11027,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["qbit_options"] == {"uploaded": {"category": "MTEAM", "tags": "retorrent", "paused": True}}
     assert summary_payload["output_options"] == {"uploaded_output_dir": None, "summary_output_dir": str(tmp_path / "summary")}
     assert summary_payload["wait_options"] == {"uploaded": {"timeout": 42.0, "interval": 3.0}}
+    assert summary_payload["summary"]["mode"] == "live_upload"
     assert summary_payload["summary"]["uploaded"] is True
     assert summary_payload["summary"]["injected"] is True
     assert summary_payload["summary"]["injection_verified"] is True
@@ -11268,6 +11271,7 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     summary_file = ptcli_cli._write_target_upload_summary({"status": "uploaded", "uploaded_torrent_id": "999"}, preflight, args, package["package_dir"])
 
     summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+    assert summary_payload["summary"]["mode"] == "live_upload"
     assert summary_payload["summary"]["uploaded_torrent_id"] == "999"
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
@@ -11532,6 +11536,7 @@ async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_p
     summary_payload = json.loads((Path(package["package_dir"]) / "ptcli-target-upload-summary.json").read_text(encoding="utf-8"))
     assert summary_payload["output_options"] == {"uploaded_output_dir": "uploaded", "summary_output_dir": None}
     assert summary_payload["wait_options"] == {"uploaded": {"timeout": 600.0, "interval": 15.0}}
+    assert summary_payload["summary"]["mode"] == "resumed_uploaded_id"
 
 
 @pytest.mark.asyncio
@@ -11582,6 +11587,7 @@ async def test_target_upload_download_only_records_uploaded_torrent_file_evidenc
     assert result["downloaded_torrent"]["torrent_hash"] == Torrent.read(uploaded_path, validate=False).infohash
     assert result["summary"]["uploaded_torrent"]["exists"] is True
     assert result["summary"]["uploaded_torrent_hash"] == result["downloaded_torrent"]["torrent_hash"]
+    assert result["summary"]["mode"] == "resumed_uploaded_id"
 
 
 @pytest.mark.asyncio
@@ -11662,6 +11668,7 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
     assert result["uploaded_torrent_hash"] == uploaded_hash
     assert result["injected_torrent"]["save_path"] == "/downloads/Example"
     assert result["summary"]["uploaded_save_path"] == "/downloads/Example"
+    assert result["summary"]["mode"] == "resumed_uploaded_torrent"
     assert result["summary"]["downloaded"] is True
     assert result["summary"]["uploaded_torrent"]["path"] == str(uploaded_torrent)
     assert result["summary"]["uploaded_torrent"]["exists"] is True
