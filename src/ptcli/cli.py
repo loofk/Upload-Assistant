@@ -1977,6 +1977,7 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
             "source.wait_evidence",
             "source.torrent_hash",
             "source.injected_torrent_hash",
+            "source.injection_visible_in_client",
             "source.injection_verified",
         )
     ):
@@ -1995,6 +1996,7 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
             "target.hash_consistent",
             "target.uploaded_torrent_hash",
             "target.injected_torrent_hash",
+            "target.injection_visible_in_client",
             "target.injection_verified",
             "target.uploaded_wait_evidence",
         )
@@ -4429,6 +4431,12 @@ def _pipeline_closure_audit(closure: dict[str, Any] | None, evidence: dict[str, 
             scope="source",
             evidence_keys=["closure.source.injected_torrent_hash", "evidence.source.injected_torrent_hash"],
         )
+        add(
+            "source.injection_visible_in_client",
+            _injected_torrent_visible(closure_source.get("injected_torrent")) or _injected_torrent_visible(evidence_source.get("qbit_closure", {}).get("injection") if isinstance(evidence_source.get("qbit_closure"), dict) else None),
+            scope="source",
+            evidence_keys=["closure.source.injected_torrent", "evidence.source.qbit_closure.injection"],
+        )
         add("source.injection_verified", closure_source.get("injection_verified") or evidence_source.get("injection_verified"), scope="source", evidence_keys=["closure.source.injection_verified", "evidence.source.injection_verified"])
 
     add("target.prepared", closure_target.get("prepared") or evidence_target.get("prepared"), scope="target", evidence_keys=["closure.target.prepared", "evidence.target.prepared"])
@@ -4442,6 +4450,14 @@ def _pipeline_closure_audit(closure: dict[str, Any] | None, evidence: dict[str, 
     add("target.rule_obligations", isinstance(target_rules, dict) and target_rules.get("ready"), scope="target", evidence_keys=["closure.target.rule_obligations", "evidence.target.rule_obligations"])
     add("target.uploaded_torrent_hash", closure_target.get("uploaded_torrent_hash") or evidence_target.get("uploaded_torrent_hash"), scope="target", evidence_keys=["closure.target.uploaded_torrent_hash", "evidence.target.uploaded_torrent_hash"])
     add("target.injected_torrent_hash", closure_target.get("injected_torrent_hash") or evidence_target.get("injected_torrent_hash"), scope="target", evidence_keys=["closure.target.injected_torrent_hash", "evidence.target.injected_torrent_hash"])
+    target_injection_evidence = evidence_target.get("qbit_closure", {}).get("injection") if isinstance(evidence_target.get("qbit_closure"), dict) else None
+    if closure_target.get("injected") or closure_target.get("injected_torrent_hash") or isinstance(target_injection_evidence, dict):
+        add(
+            "target.injection_visible_in_client",
+            _injected_torrent_visible(closure_target.get("injected_torrent")) or _injected_torrent_visible(target_injection_evidence),
+            scope="target",
+            evidence_keys=["closure.target.injected_torrent", "evidence.target.qbit_closure.injection"],
+        )
     add("target.injection_verified", closure_target.get("injection_verified") or evidence_target.get("injection_verified"), scope="target", evidence_keys=["closure.target.injection_verified", "evidence.target.injection_verified"])
     add("target.uploaded_wait_evidence", _wait_result_completed(closure_target.get("uploaded_wait")) or bool(evidence_target.get("uploaded_wait_evidence")), scope="target", evidence_keys=["closure.target.uploaded_wait", "evidence.target.uploaded_wait_evidence"])
 

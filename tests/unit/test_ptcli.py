@@ -4770,6 +4770,44 @@ def test_pipeline_evidence_reports_source_injection_verification() -> None:
     assert evidence["target"]["qbit_closure"]["wait"]["query"]["torrent_hash"] == "b" * 40
 
 
+def test_pipeline_closure_audit_requires_injection_visibility() -> None:
+    closure = {
+        "source": {
+            "ready": True,
+            "downloaded": True,
+            "injected": True,
+            "injection_verified": True,
+            "injected_torrent": {"hash": "a" * 40, "verified_in_client": False, "visible_in_client": False},
+            "injected_torrent_hash": "a" * 40,
+            "hash_consistent": True,
+            "torrent_hash": "a" * 40,
+            "source_wait": {"complete": True, "matches": [{"hash": "a" * 40}]},
+        },
+        "target": {
+            "prepared": True,
+            "uploaded": True,
+            "downloaded": True,
+            "injected": True,
+            "injection_verified": True,
+            "injected_torrent": {"hash": "b" * 40, "verified_in_client": False, "visible_in_client": False},
+            "seeding": True,
+            "hash_consistent": True,
+            "duplicate_clean": True,
+            "rule_obligations": {"ready": True},
+            "uploaded_torrent_hash": "b" * 40,
+            "injected_torrent_hash": "b" * 40,
+            "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
+        },
+    }
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    audit = ptcli_cli._pipeline_closure_audit(closure, evidence)
+
+    assert audit["ready"] is False
+    assert "source.injection_visible_in_client" in audit["missing"]
+    assert "target.injection_visible_in_client" in audit["missing"]
+
+
 def test_pipeline_evidence_reports_resume_sources() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent", "reused": True}},
