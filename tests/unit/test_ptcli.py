@@ -700,6 +700,27 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "target_rule_obligations": {"ready": True, "count": 2, "missing": []},
     }
     assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
+    assert payload["candidate_command_count"] == 1
+    assert payload["runnable_command_count"] == 1
+    assert payload["candidate_commands"] == [
+        {
+            "stage": "resume-uploaded-torrent-download",
+            "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999",
+            "argv": ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-id", "999"],
+            "source": "resume_commands",
+            "subcommand": "target-upload",
+            "run_allowed": True,
+            "run_blocker": None,
+            "placeholder": False,
+        }
+    ]
+    assert payload["first_runnable_stage"] == "resume-uploaded-torrent-download"
+    assert payload["first_runnable_command"] == "python3 ptcli.py target-upload --uploaded-torrent-id 999"
+    assert payload["first_runnable_command_argv"] == ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-id", "999"]
+    assert payload["first_runnable_command_source"] == "resume_commands"
+    assert payload["first_runnable_command_subcommand"] == "target-upload"
+    assert payload["rejected_command_count"] == 0
+    assert payload["rejected_command_blockers"] == []
     assert payload["resume_state"]["complete"] is True
     assert payload["resume_state"]["pipeline_complete"] is True
     assert payload["resume_state"]["next_stage"] is None

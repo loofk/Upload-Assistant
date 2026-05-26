@@ -570,6 +570,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     closure_status = pipeline_result.get("closure_status") if isinstance(pipeline_result.get("closure_status"), dict) else _closure_status_summary(pipeline_result)
     resume_commands = pipeline_result.get("resume_commands", [])
     resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands)
+    resume_command_audit = _resume_command_audit_fields(resume_commands, resume_state.get("next_command"), resume_state.get("next_command_argv"))
     summary_file = pipeline_result.get("summary_file")
     return {
         "status": "complete" if not blockers else "blocked",
@@ -596,6 +597,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "next_stage": resume_state.get("next_stage"),
         "next_command": resume_state.get("next_command"),
         "next_command_argv": resume_state.get("next_command_argv"),
+        **resume_command_audit,
         "ready": ready,
         "complete": not blockers,
         "blockers": blockers,
@@ -721,6 +723,28 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
         },
         "blockers": [str(blocker) for blocker in blockers],
+    }
+
+
+def _resume_command_audit_fields(resume_commands: Any, next_command: Any, next_command_argv: Any) -> dict[str, Any]:
+    commands = resume_commands if isinstance(resume_commands, list) else []
+    candidate_commands = _summary_candidate_commands({"resume_commands": commands})
+    first_runnable_command = _first_runnable_candidate_command(candidate_commands)
+    next_argv = _summary_next_command_raw_argv(next_command_argv) if next_command_argv else _summary_next_command_raw_argv(str(next_command)) if next_command else None
+    next_metadata = _summary_next_command_metadata(next_argv)
+    return {
+        "next_command_subcommand": next_metadata["subcommand"],
+        "next_command_run_allowed": bool(next_command and next_metadata["run_allowed"]),
+        "next_command_run_blocker": next_metadata["run_blocker"],
+        "candidate_commands": candidate_commands,
+        "candidate_command_count": len(candidate_commands),
+        "runnable_command_count": sum(1 for command in candidate_commands if isinstance(command, dict) and command.get("run_allowed") is True),
+        "first_runnable_stage": first_runnable_command.get("stage"),
+        "first_runnable_command": first_runnable_command.get("command"),
+        "first_runnable_command_argv": first_runnable_command.get("argv"),
+        "first_runnable_command_source": first_runnable_command.get("source"),
+        "first_runnable_command_subcommand": first_runnable_command.get("subcommand"),
+        **_rejected_candidate_command_summary(candidate_commands),
     }
 
 
