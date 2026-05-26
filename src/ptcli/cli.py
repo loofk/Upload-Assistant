@@ -4368,6 +4368,18 @@ def _source_hash_consistent(
     return len(concrete_hashes) <= 1
 
 
+def _target_evidence_mode(target: dict[str, Any]) -> str:
+    if target.get("uploaded_torrent_reused"):
+        return "resumed_uploaded_torrent"
+    if target.get("package_reused") and target.get("uploaded_torrent_id"):
+        return "resumed_uploaded_id"
+    if target.get("uploaded"):
+        return "live_upload"
+    if target.get("prepared"):
+        return "prepared"
+    return "missing"
+
+
 def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
     source = closure.get("source") if isinstance(closure.get("source"), dict) else {}
     target = closure.get("target") if isinstance(closure.get("target"), dict) else {}
@@ -4412,6 +4424,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
         },
         "target": {
             "ready": bool(target.get("prepared") and target.get("uploaded") and target.get("downloaded") and target.get("injected") and target_seeding),
+            "mode": _target_evidence_mode(target),
             "prepared": bool(target.get("prepared")),
             "uploaded": bool(target.get("uploaded")),
             "downloaded": bool(target.get("downloaded")),

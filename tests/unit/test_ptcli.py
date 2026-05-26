@@ -5028,7 +5028,9 @@ def test_pipeline_evidence_reports_resume_sources() -> None:
     assert evidence["source"]["source_torrent_reused"] is True
     assert evidence["target"]["package_reused"] is True
     assert evidence["target"]["uploaded_torrent_reused"] is True
+    assert evidence["target"]["mode"] == "resumed_uploaded_torrent"
     assert summary["resume"]["used"] is True
+    assert summary["target"]["mode"] == "resumed_uploaded_torrent"
 
 
 def test_pipeline_closure_blocks_existing_path_without_qbit_match() -> None:
@@ -8744,6 +8746,7 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
     assert payload["closure"]["target"]["fresh_duplicate_check"]["source"] == "target_package_upload_gate"
     assert payload["evidence"]["resume"]["target_package"] is True
     assert payload["evidence"]["resume"]["uploaded_torrent_file"] is True
+    assert payload["evidence"]["target"]["mode"] == "resumed_uploaded_torrent"
     assert payload["evidence"]["target"]["duplicate_clean"] is True
     assert payload["requested_actions"]["uploaded_torrent_file"] is True
     assert payload["requested_actions"]["uploaded_torrent_id"] is False
@@ -8933,6 +8936,8 @@ async def test_pipeline_reuses_uploaded_torrent_id_for_target_injection(monkeypa
     assert payload["closure"]["target"]["injected"] is True
     assert payload["closure"]["target"]["seeding"] is True
     assert payload["artifacts"]["uploaded_torrent_id"] == "999"
+    assert payload["evidence"]["target"]["mode"] == "resumed_uploaded_id"
+    assert payload["summary"]["target"]["mode"] == "resumed_uploaded_id"
     assert payload["requested_actions"]["uploaded_torrent_id"] is True
     assert payload["requested_actions"]["uploaded_torrent_file"] is False
     assert payload["effective_actions"]["download_uploaded_torrent"] is True
@@ -9031,6 +9036,8 @@ async def test_pipeline_target_execute_enables_uploaded_torrent_followup(monkeyp
     assert payload["closure"]["target"]["downloaded"] is True
     assert payload["closure"]["target"]["injected"] is True
     assert payload["closure"]["target"]["seeding"] is True
+    assert payload["evidence"]["target"]["mode"] == "live_upload"
+    assert payload["summary"]["target"]["mode"] == "live_upload"
 
 
 @pytest.mark.asyncio
