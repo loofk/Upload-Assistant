@@ -1656,6 +1656,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
     flow_diagnostics = _summary_flow_diagnostics(payload)
     closure_modes = _summary_closure_modes(payload)
+    closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload)
     return {
         "schema_version": schema_version,
         "expected_schema_version": SUMMARY_SCHEMA_VERSION,
@@ -1669,6 +1670,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
         "closure_modes": closure_modes,
+        "closure_status": closure_status,
         "source_mode": closure_modes.get("source"),
         "target_mode": closure_modes.get("target"),
     }
@@ -1978,13 +1980,13 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "complete": complete,
         "live_safe_to_attempt": complete and ready and not blockers,
         "blockers": blockers,
-        "closure_status": closure_status,
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
         "next_command_source": next_command.get("source"),
         "candidate_commands": _summary_candidate_commands(payload),
         **diagnostics,
+        "closure_status": closure_status,
         **artifact_status,
         **closure_audit_status,
     })
@@ -5624,6 +5626,9 @@ def _summary_check_print_next_argv(payload: dict[str, Any]) -> int:
 
 def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     flow_diagnostics = payload.get("flow_diagnostics") if isinstance(payload.get("flow_diagnostics"), dict) else {}
+    closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else {}
+    closure_source = closure_status.get("source") if isinstance(closure_status.get("source"), dict) else {}
+    closure_target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
     fields = {
         "PTCLI_SUMMARY_STATUS": payload.get("status"),
         "PTCLI_AUTOMATION_ACTION": payload.get("automation_action"),
@@ -5650,6 +5655,26 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_NEXT_COMMAND_READY": _shell_bool(payload.get("next_command_ready")),
         "PTCLI_QBIT_WAIT_MISMATCH": _shell_bool(payload.get("qbit_wait_mismatch")),
         "PTCLI_QBIT_WAIT_MISMATCHES": ",".join(_string_list(payload.get("qbit_wait_mismatches"))),
+        "PTCLI_CLOSURE_STATUS_COMPLETE": _shell_bool(closure_status.get("complete")) if "complete" in closure_status else None,
+        "PTCLI_CLOSURE_STATUS_READY": _shell_bool(closure_status.get("ready")) if "ready" in closure_status else None,
+        "PTCLI_CLOSURE_STATUS_PIPELINE_STATUS": closure_status.get("pipeline_status"),
+        "PTCLI_CLOSURE_STATUS_PIPELINE_BLOCKERS": ",".join(_string_list(closure_status.get("pipeline_blockers"))),
+        "PTCLI_CLOSURE_STATUS_CLOSURE_COMPLETE": _shell_bool(closure_status.get("closure_complete")) if "closure_complete" in closure_status else None,
+        "PTCLI_CLOSURE_STATUS_CLOSURE_BLOCKERS": ",".join(_string_list(closure_status.get("closure_blockers"))),
+        "PTCLI_CLOSURE_STATUS_AUDIT_READY": _shell_bool(closure_status.get("audit_ready")) if "audit_ready" in closure_status else None,
+        "PTCLI_CLOSURE_STATUS_AUDIT_MISSING": ",".join(_string_list(closure_status.get("audit_missing"))),
+        "PTCLI_CLOSURE_STATUS_QBIT_WAIT_MISMATCH": _shell_bool(closure_status.get("qbit_wait_mismatch")) if "qbit_wait_mismatch" in closure_status else None,
+        "PTCLI_CLOSURE_STATUS_QBIT_WAIT_MISMATCHES": ",".join(_string_list(closure_status.get("qbit_wait_mismatches"))),
+        "PTCLI_CLOSURE_SOURCE_READY": _shell_bool(closure_source.get("ready")) if "ready" in closure_source else None,
+        "PTCLI_CLOSURE_SOURCE_HASH_CONSISTENT": _shell_bool(closure_source.get("hash_consistent")) if "hash_consistent" in closure_source else None,
+        "PTCLI_CLOSURE_SOURCE_WAIT_EVIDENCE": _shell_bool(closure_source.get("wait_evidence")) if "wait_evidence" in closure_source else None,
+        "PTCLI_CLOSURE_SOURCE_INJECTION_VERIFIED": _shell_bool(closure_source.get("injection_verified")) if "injection_verified" in closure_source else None,
+        "PTCLI_CLOSURE_TARGET_READY": _shell_bool(closure_target.get("ready")) if "ready" in closure_target else None,
+        "PTCLI_CLOSURE_TARGET_HASH_CONSISTENT": _shell_bool(closure_target.get("hash_consistent")) if "hash_consistent" in closure_target else None,
+        "PTCLI_CLOSURE_TARGET_DUPLICATE_CLEAN": _shell_bool(closure_target.get("duplicate_clean")) if "duplicate_clean" in closure_target else None,
+        "PTCLI_CLOSURE_TARGET_RULE_OBLIGATIONS_READY": _shell_bool(closure_target.get("rule_obligations_ready")) if "rule_obligations_ready" in closure_target else None,
+        "PTCLI_CLOSURE_TARGET_UPLOADED_WAIT_EVIDENCE": _shell_bool(closure_target.get("uploaded_wait_evidence")) if "uploaded_wait_evidence" in closure_target else None,
+        "PTCLI_CLOSURE_TARGET_INJECTION_VERIFIED": _shell_bool(closure_target.get("injection_verified")) if "injection_verified" in closure_target else None,
         "PTCLI_SOURCE_MODE": payload.get("source_mode"),
         "PTCLI_TARGET_MODE": payload.get("target_mode"),
         "PTCLI_COMPLETE": _shell_bool(payload.get("complete")),

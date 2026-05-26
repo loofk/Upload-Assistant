@@ -3402,6 +3402,15 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=0\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCHES=''\n" in out
+    assert "export PTCLI_CLOSURE_STATUS_COMPLETE=0\n" in out
+    assert "export PTCLI_CLOSURE_STATUS_READY=0\n" in out
+    assert "export PTCLI_CLOSURE_STATUS_PIPELINE_STATUS=blocked\n" in out
+    assert "export PTCLI_CLOSURE_STATUS_PIPELINE_BLOCKERS=target.uploaded\n" in out
+    assert "export PTCLI_CLOSURE_STATUS_CLOSURE_COMPLETE=0\n" in out
+    assert "export PTCLI_CLOSURE_STATUS_AUDIT_READY=0\n" in out
+    assert "export PTCLI_CLOSURE_STATUS_QBIT_WAIT_MISMATCH=0\n" in out
+    assert "export PTCLI_CLOSURE_SOURCE_READY=0\n" in out
+    assert "export PTCLI_CLOSURE_TARGET_READY=0\n" in out
     assert "export PTCLI_SOURCE_MODE=downloaded\n" in out
     assert "export PTCLI_TARGET_MODE=prepared\n" in out
     assert "export PTCLI_NEXT_COMMAND='python3 ptcli.py pipeline --upload-target'\n" in out
@@ -3456,6 +3465,8 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
     assert "export PTCLI_CREDENTIAL_REQUIREMENTS=''\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCHES=source.requested_hash\n" in out
+    assert "export PTCLI_CLOSURE_STATUS_QBIT_WAIT_MISMATCH=1\n" in out
+    assert "export PTCLI_CLOSURE_STATUS_QBIT_WAIT_MISMATCHES=source.requested_hash\n" in out
 
 
 def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatch, capsys) -> None:
