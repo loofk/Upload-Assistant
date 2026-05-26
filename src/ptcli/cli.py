@@ -925,6 +925,8 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
         if artifact_values.get("source_wait_evidence") is not True:
             blockers.append("source.wait_evidence")
         if _source_injection_audit_required(pipeline_result, closure):
+            if artifact_values.get("source_torrent_file_evidence") is not True:
+                blockers.append("source.torrent_file_evidence")
             if artifact_values.get("source_torrent_hash") is None:
                 blockers.append("source.torrent_hash")
             if artifact_values.get("source_injected_torrent_hash") is None:
@@ -935,6 +937,8 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
                 blockers.append("source.injection_verified")
         if artifact_values.get("uploaded_wait_evidence") is not True:
             blockers.append("target.uploaded_wait_evidence")
+        if artifact_values.get("uploaded_torrent_file_evidence") is not True:
+            blockers.append("target.uploaded_torrent_file_evidence")
         if artifact_values.get("uploaded_torrent_hash") is None:
             blockers.append("target.uploaded_torrent_hash")
         if artifact_values.get("injected_torrent_hash") is None:
@@ -1042,10 +1046,14 @@ def _qbit_wait_retry_action(scope: str, hint: Any) -> str:
 def _retorrent_execute_blocker_next_action(blocker: str) -> str:
     if blocker == "source.wait_evidence":
         return "Re-run the source qBittorrent completion wait with --wait-complete, or provide a verified completed --path before target upload."
+    if blocker == "source.torrent_file_evidence":
+        return "Re-run the source side with --download-source or provide --source-torrent-file so the downloaded source .torrent has exists/size/sha1/infohash evidence."
     if blocker in {"source.torrent_hash", "source.injected_torrent_hash", "source.injection_visible_in_client", "source.injection_verified"}:
         return "Re-run the source side with --download-source or --source-torrent-file plus --inject-source and --wait-complete so qBittorrent source injection evidence is recorded."
     if blocker == "target.uploaded_wait_evidence":
         return "Re-run the uploaded MTEAM torrent follow-up with --inject-uploaded-torrent and --wait-uploaded-complete until qBittorrent reports matched seeding evidence."
+    if blocker == "target.uploaded_torrent_file_evidence":
+        return "Re-run the uploaded MTEAM torrent follow-up with --download-uploaded-torrent so the generated target .torrent has exists/size/sha1/infohash evidence."
     if blocker in {"target.uploaded_torrent_hash", "target.injected_torrent_hash", "target.injection_visible_in_client", "target.injection_verified"}:
         return "Re-run the uploaded MTEAM torrent follow-up with --inject-uploaded-torrent so qBittorrent visibility and exact uploaded torrent hash evidence are recorded."
     if blocker == "target.injected":
