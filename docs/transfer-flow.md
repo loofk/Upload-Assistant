@@ -116,6 +116,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --package-dir .
 ```
 
 `pipeline --package-dir ... --upload-target --uploaded-torrent-id/--uploaded-torrent-file` 会按恢复语义自动开启上传后新种的下载（仅 ID 场景）、注入和等待完成；若准备包里能推导内容路径，可以不额外传 `--uploaded-save-path`。
+`target-upload --write-summary` 生成的上传后恢复命令会保留 `--config`、summary 输出目录、qBittorrent 分类/标签和等待参数，避免盒子续跑时退回默认配置。
 
 `retorrent --dry-run` 计划模板、`retorrent --execute` 和 `pipeline --write-summary` 写出的 `resume_commands` 都优先使用这些命令续跑。pipeline summary 里的上传后新种恢复命令会回到 `pipeline --package-dir ... --upload-target --uploaded-torrent-id/--uploaded-torrent-file`，并携带源站、目标站、config、base-dir、QB 标签和等待参数，便于盒子脚本保持同一个高层闭环上下文。盒子脚本可用 `summary-check --json` 读取 `flow_diagnostics`、`credential_requirements`、`source_mode`、`target_mode` 和 `automation_reason`，用 `summary-check --print-next-command` 只取下一条安全命令，用 `summary-check --print-shell` 输出 `PTCLI_AUTOMATION_ACTION`、`PTCLI_AUTOMATION_REASON`、`PTCLI_NEXT_COMMAND`、`PTCLI_AUTOMATION_EXIT_CODE`、`PTCLI_SOURCE_MODE`、`PTCLI_TARGET_MODE` 等 shell 变量，或用 `summary-check --run-next-command` 直接执行下一条受限的 `ptcli.py` 续跑命令。带 `<id>` 这类占位符的命令会返回 `automation_action=fill_command_placeholders`，不会被自动执行。
 `summary-check --run-next-command` 的受限执行白名单只包含 `pipeline`、`target-upload` 和 `doctor`，因此 `inspect` 等只读命令即使出现在推荐命令里也不会被自动执行。

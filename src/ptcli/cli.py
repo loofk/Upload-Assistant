@@ -1313,6 +1313,8 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             "--write-summary",
             "--json",
         ]
+        if args.config:
+            download_args.extend(["--config", args.config])
         if args.uploaded_output_dir:
             download_args.extend(["--uploaded-output-dir", args.uploaded_output_dir])
         if args.summary_output_dir:
@@ -1344,6 +1346,8 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             "--write-summary",
             "--json",
         ]
+        if args.config:
+            resume_args.extend(["--config", args.config])
         if isinstance(uploaded_save_path_artifact, dict) and uploaded_save_path_artifact.get("path"):
             resume_args.extend(["--uploaded-save-path", str(uploaded_save_path_artifact["path"])])
         if args.summary_output_dir:

@@ -11143,6 +11143,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert str(tmp_path / "MTEAM-999.torrent") in commands["resume-uploaded-torrent"]
     assert str(tmp_path / "MTEAM-999.torrent") in command_argv["resume-uploaded-torrent"]
     assert "--client default" in commands["resume-uploaded-torrent"]
+    assert "--config config.py" in commands["resume-uploaded-torrent"]
+    assert "config.py" in command_argv["resume-uploaded-torrent"]
     assert "--uploaded-save-path /downloads/Example" in commands["resume-uploaded-torrent"]
     assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent"]
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent"]
@@ -11155,6 +11157,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert "--from U2" in commands["retorrent-resume-uploaded-torrent"]
     assert "--source-id 60635" in commands["retorrent-resume-uploaded-torrent"]
     assert "--client default" in commands["retorrent-resume-uploaded-torrent"]
+    assert "--config config.py" in commands["retorrent-resume-uploaded-torrent"]
     assert "--uploaded-save-path /downloads/Example" in commands["retorrent-resume-uploaded-torrent"]
     assert "--uploaded-wait-timeout 42" in commands["retorrent-resume-uploaded-torrent"]
     assert "--uploaded-wait-interval 3" in commands["retorrent-resume-uploaded-torrent"]
@@ -11297,6 +11300,8 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     args = parser.parse_args(
         [
             "target-upload",
+            "--config",
+            str(tmp_path / "custom-config.py"),
             "--package-dir",
             package["package_dir"],
             "--torrent-file",
@@ -11336,7 +11341,9 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert summary_payload["artifacts"]["uploaded_save_path"]["path"] == "/mnt/seedbox/Example"
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert "--uploaded-torrent-id 999" in commands["resume-uploaded-torrent-download"]
+    assert f"--config {shlex.quote(str(tmp_path / 'custom-config.py'))}" in commands["resume-uploaded-torrent-download"]
     assert command_argv["resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "target-upload"]
+    assert str(tmp_path / "custom-config.py") in command_argv["resume-uploaded-torrent-download"]
     assert "999" in command_argv["resume-uploaded-torrent-download"]
     assert "--download-uploaded-torrent" in commands["resume-uploaded-torrent-download"]
     assert "--inject-uploaded-torrent" in commands["resume-uploaded-torrent-download"]
@@ -11346,6 +11353,7 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert "--uploaded-paused" in commands["resume-uploaded-torrent-download"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-torrent-id 999" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert f"--config {shlex.quote(str(tmp_path / 'custom-config.py'))}" in commands["retorrent-resume-uploaded-torrent-download"]
     assert "--download-uploaded-torrent" in commands["retorrent-resume-uploaded-torrent-download"]
     assert "--from U2" in commands["retorrent-resume-uploaded-torrent-download"]
     assert "--source-id 60635" in commands["retorrent-resume-uploaded-torrent-download"]
