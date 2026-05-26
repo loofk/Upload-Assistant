@@ -567,6 +567,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
     resume_commands = pipeline_result.get("resume_commands", [])
     resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands)
+    summary_file = pipeline_result.get("summary_file")
     return {
         "status": "complete" if not blockers else "blocked",
         "plan": plan_payload,
@@ -580,7 +581,8 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "closure_audit": closure_audit,
         "evidence": evidence,
         "summary": summary,
-        "summary_file": pipeline_result.get("summary_file"),
+        "summary_file": summary_file,
+        "automation_handoff": pipeline_result.get("automation_handoff") if isinstance(pipeline_result.get("automation_handoff"), dict) else _summary_automation_handoff(str(summary_file)) if summary_file else None,
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
@@ -1033,7 +1035,7 @@ async def doctor_payload(args: argparse.Namespace) -> dict[str, Any]:
         payload = extend_doctor_check(payload, live_checks, target_execute=args.target_execute)
     if getattr(args, "write_summary", False):
         summary_file = _write_doctor_summary(payload, args, args.summary_output_dir or args.package_dir)
-        payload = {**payload, "summary_file": summary_file}
+        payload = {**payload, "summary_file": summary_file, "automation_handoff": _summary_automation_handoff(summary_file)}
     return payload
 
 
@@ -1233,7 +1235,7 @@ def _maybe_write_target_upload_summary(args: argparse.Namespace, result: dict[st
     if not getattr(args, "write_summary", False):
         return {**result, **qbit_wait_fields}
     summary_file = _write_target_upload_summary(result, preflight, args, args.summary_output_dir or args.package_dir)
-    return {**result, "summary": summary, "summary_file": summary_file, **qbit_wait_fields}
+    return {**result, "summary": summary, "summary_file": summary_file, "automation_handoff": _summary_automation_handoff(summary_file), **qbit_wait_fields}
 
 
 def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, Any], args: argparse.Namespace, output_dir: str) -> str:
@@ -3038,6 +3040,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     if getattr(args, "write_summary", False):
         summary_file = _write_run_summary(payload, args.summary_output_dir)
         payload["summary_file"] = summary_file
+        payload["automation_handoff"] = _summary_automation_handoff(summary_file)
         summary["summary_file"] = summary_file
     artifacts = _run_summary_artifacts(payload, str(payload.get("summary_file") or ""))
     payload["artifacts"] = artifacts

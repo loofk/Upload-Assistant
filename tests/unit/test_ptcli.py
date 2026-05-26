@@ -665,6 +665,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["evidence"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert payload["summary"]["status"] == "complete"
     assert payload["summary_file"].endswith("ptcli-run-summary.json")
+    assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--json"]
+    assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--run-next-command"])
     assert payload["artifacts"] == {
         "source_torrent_hash": "a" * 40,
         "source_torrent_file": "/tmp/U2-60635.torrent",
@@ -6709,6 +6711,9 @@ def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> No
     out = capsys.readouterr().out
     assert '"summary_file"' in out
     summary_path = summary_dir / "ptcli-doctor-summary.json"
+    result_payload = json.loads(out)
+    assert result_payload["summary_file"] == str(summary_path)
+    assert result_payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 1
     assert payload["kind"] == "ptcli.doctor.live_readiness"
@@ -8455,6 +8460,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert wait_calls[-1]["content_path"] == "/downloads"
     assert wait_calls[-1]["timeout"] == 900.0
     assert wait_calls[-1]["interval"] == 20.0
+    assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--json"]
+    assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--run-next-command"])
     summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
     assert summary_payload["complete"] is True
     assert summary_payload["closure_audit"]["ready"] is True
@@ -11343,6 +11350,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert result["qbit_wait_diagnostics"]["uploaded"]["complete"] is True
     summary_path = Path(result["summary_file"])
     assert summary_path == tmp_path / "summary" / "ptcli-target-upload-summary.json"
+    assert result["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
+    assert result["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--run-next-command"])
     summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
     assert summary_payload["schema_version"] == 1
     assert summary_payload["kind"] == "ptcli.target_upload.summary"
