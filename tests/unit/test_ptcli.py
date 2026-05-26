@@ -2236,6 +2236,13 @@ def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> 
     assert payload["next_command_ready"] is False
     assert payload["next_command_placeholder"] is True
     assert payload["should_execute_next_command"] is False
+    assert payload["next_command_run_allowed"] is False
+    assert payload["next_command_run_blocker"] == "next command contains placeholders"
+    assert payload["automation_action"] == "fill_command_placeholders"
+    assert payload["automation_reason"] == "Next command contains placeholders and requires manual values before execution."
+    assert payload["automation_exit_code"] == 1
+    assert payload["candidate_command_count"] == 1
+    assert payload["runnable_command_count"] == 0
     assert payload["recommended_commands"][0]["stage"] == "resume-source-torrent"
     assert payload["recommended_commands"][0]["argv"][:3] == ["python3", "ptcli.py", "pipeline"]
     assert "--source-torrent-file" in payload["next_command_argv"]
@@ -2304,6 +2311,13 @@ def test_source_download_generates_ready_qbit_handoff(monkeypatch, capsys, tmp_p
     assert payload["next_command_ready"] is True
     assert payload["next_command_placeholder"] is False
     assert payload["should_execute_next_command"] is True
+    assert payload["next_command_run_allowed"] is True
+    assert payload["next_command_run_blocker"] is None
+    assert payload["automation_action"] == "run_next_command"
+    assert payload["automation_reason"] == "Next generated ptcli command is ready to run for stage resume-source-torrent."
+    assert payload["automation_exit_code"] == 1
+    assert payload["candidate_command_count"] == 1
+    assert payload["runnable_command_count"] == 1
     assert payload["next_command_argv"] == [
         "python3",
         "ptcli.py",
@@ -2364,6 +2378,11 @@ def test_source_download_blocks_unreadable_torrent_metadata(monkeypatch, capsys,
     assert payload["source_torrent"]["metadata_readable"] is False
     assert payload["source_torrent_verification"]["blockers"] == ["source torrent metadata is not readable"]
     assert payload["blockers"] == ["source-torrent-verify: source torrent metadata is not readable"]
+    assert payload["automation_action"] == "resolve_blockers"
+    assert payload["automation_reason"] == "Resolve blockers before automation can continue: source-torrent-verify: source torrent metadata is not readable"
+    assert payload["automation_exit_code"] == 1
+    assert payload["should_execute_next_command"] is False
+    assert payload["candidate_command_count"] == 1
 
 
 def test_source_download_verifies_downloaded_torrent_hash(monkeypatch, capsys, tmp_path) -> None:

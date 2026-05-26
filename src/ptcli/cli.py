@@ -447,10 +447,12 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
     source_torrent = _torrent_file_evidence(output_path, require_metadata=True)
     source_torrent_verification = _source_torrent_verify_stage({"result": source_torrent}, source.get("torrenthash"))
     qbit_handoff = _source_download_qbit_handoff(args, source_torrent["path"], target_trackers)
+    recommended_commands = [qbit_handoff["command"]]
     if not source_torrent_verification.get("ok"):
         verification = source_torrent_verification.get("result", {})
         verification_blockers = verification.get("blockers") if isinstance(verification, dict) else None
         blockers = [f"source-torrent-verify: {blocker}" for blocker in verification_blockers] if isinstance(verification_blockers, list) else ["source-torrent-verify: Downloaded source torrent infohash does not match source tracker metadata."]
+        handoff_fields = _source_download_handoff_fields("blocked", blockers, qbit_handoff, recommended_commands)
         return {
             "status": "blocked",
             "tracker": source_tracker,
@@ -461,10 +463,12 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
             "source_torrent": source_torrent,
             "source_torrent_verification": verification,
             "qbit_handoff": qbit_handoff,
-            "recommended_commands": [qbit_handoff["command"]],
+            "recommended_commands": recommended_commands,
+            **handoff_fields,
             "path": source_torrent["path"],
             "blockers": blockers,
         }
+    handoff_fields = _source_download_handoff_fields("ok", [], qbit_handoff, recommended_commands)
     return {
         "status": "ok",
         "tracker": source_tracker,
@@ -475,14 +479,34 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
         "source_torrent": source_torrent,
         "source_torrent_verification": source_torrent_verification["result"],
         "qbit_handoff": qbit_handoff,
-        "recommended_commands": [qbit_handoff["command"]],
-        "next_stage": qbit_handoff["stage"],
-        "next_command": qbit_handoff["command"]["command"],
-        "next_command_argv": qbit_handoff["command"]["argv"],
-        "next_command_ready": qbit_handoff["ready"],
-        "next_command_placeholder": not qbit_handoff["ready"],
-        "should_execute_next_command": qbit_handoff["ready"],
+        "recommended_commands": recommended_commands,
+        **handoff_fields,
         "path": source_torrent["path"],
+    }
+
+
+def _source_download_handoff_fields(status: str, blockers: list[str], qbit_handoff: dict[str, Any], recommended_commands: list[dict[str, Any]]) -> dict[str, Any]:
+    next_command = qbit_handoff["command"]["command"]
+    next_command_argv = qbit_handoff["command"]["argv"]
+    command_audit = _resume_command_audit_fields(recommended_commands, next_command, next_command_argv)
+    if status != "ok":
+        automation_action = "resolve_blockers"
+    elif command_audit.get("next_command_placeholder"):
+        automation_action = "fill_command_placeholders"
+    elif command_audit.get("next_command_run_allowed"):
+        automation_action = "run_next_command"
+    else:
+        automation_action = "unsupported_next_command"
+    payload = {"status": status, "blockers": blockers, "next_stage": qbit_handoff["stage"]}
+    return {
+        "next_stage": qbit_handoff["stage"],
+        "next_command": next_command,
+        "next_command_argv": next_command_argv,
+        **command_audit,
+        "automation_action": automation_action,
+        "automation_reason": _summary_automation_reason(payload, automation_action, blockers, next_command_run_blocker=command_audit.get("next_command_run_blocker")),
+        "automation_exit_code": 1,
+        "should_execute_next_command": automation_action == "run_next_command",
     }
 
 
