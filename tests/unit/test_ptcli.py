@@ -3353,6 +3353,114 @@ def test_summary_check_print_next_argv_fails_without_safe_argv(tmp_path, capsys)
     assert capsys.readouterr().out == ""
 
 
+def test_summary_check_print_first_runnable_command_outputs_allowlisted_candidate(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [
+                    {"stage": "inspect-client", "command": "python3 ptcli.py inspect --client default --json"},
+                    {
+                        "stage": "resume-target-upload",
+                        "command": "python3 ptcli.py pipeline --upload-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
+                    },
+                ],
+                "resume_state": {
+                    "next_stage": "inspect-client",
+                    "next_command": "python3 ptcli.py inspect --client default --json",
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-first-runnable-command"])
+
+    assert code == 0
+    assert capsys.readouterr().out == "python3 ptcli.py pipeline --upload-target\n"
+
+
+def test_summary_check_print_first_runnable_argv_outputs_allowlisted_candidate(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [
+                    {"stage": "inspect-client", "command": "python3 ptcli.py inspect --client default --json"},
+                    {
+                        "stage": "resume-target-upload",
+                        "command": "python3 ptcli.py pipeline --upload-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
+                    },
+                ],
+                "resume_state": {
+                    "next_stage": "inspect-client",
+                    "next_command": "python3 ptcli.py inspect --client default --json",
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-first-runnable-argv"])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out) == ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]
+
+
+def test_summary_check_print_first_runnable_argv_fails_without_runnable_candidate(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [{"stage": "inspect-client", "command": "python3 ptcli.py inspect --client default --json"}],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-first-runnable-argv"])
+
+    assert code == 1
+    assert capsys.readouterr().out == ""
+
+
 def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(

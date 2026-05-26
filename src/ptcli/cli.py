@@ -194,6 +194,8 @@ def build_parser() -> argparse.ArgumentParser:
     summary_output = summary_check.add_mutually_exclusive_group()
     summary_output.add_argument("--print-next-command", action="store_true", help="Print only the next resumable command; exits 0 when complete or command-ready, 1 when blocked without a command.")
     summary_output.add_argument("--print-next-argv", action="store_true", help="Print only the next safe resumable command argv as JSON; exits 0 when complete or argv-ready, 1 when blocked without argv.")
+    summary_output.add_argument("--print-first-runnable-command", action="store_true", help="Print only the first allowlisted candidate command; exits 0 when complete or runnable, 1 when blocked without a runnable candidate.")
+    summary_output.add_argument("--print-first-runnable-argv", action="store_true", help="Print only the first allowlisted candidate argv as JSON; exits 0 when complete or runnable, 1 when blocked without a runnable candidate.")
     summary_output.add_argument("--print-shell", action="store_true", help="Print shell export lines for automation wrappers; inspect PTCLI_AUTOMATION_EXIT_CODE for the verdict.")
     summary_output.add_argument("--run-next-command", action="store_true", help="Run the next resumable ptcli.py command without invoking a shell; exits with the child command status.")
     summary_check.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
@@ -5718,6 +5720,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _summary_check_print_next_command(payload)
             if args.print_next_argv:
                 return _summary_check_print_next_argv(payload)
+            if args.print_first_runnable_command:
+                return _summary_check_print_first_runnable_command(payload)
+            if args.print_first_runnable_argv:
+                return _summary_check_print_first_runnable_argv(payload)
             if args.print_shell:
                 return _summary_check_print_shell(payload)
             if args.run_next_command:
@@ -5761,6 +5767,22 @@ def _summary_check_print_next_command(payload: dict[str, Any]) -> int:
 def _summary_check_print_next_argv(payload: dict[str, Any]) -> int:
     argv = payload.get("next_command_argv")
     if payload.get("should_execute_next_command") and argv:
+        print(json.dumps(argv, ensure_ascii=False))
+        return 0
+    return 0 if payload.get("status") == "ok" else 1
+
+
+def _summary_check_print_first_runnable_command(payload: dict[str, Any]) -> int:
+    command = payload.get("first_runnable_command")
+    if command:
+        print(str(command))
+        return 0
+    return 0 if payload.get("status") == "ok" else 1
+
+
+def _summary_check_print_first_runnable_argv(payload: dict[str, Any]) -> int:
+    argv = payload.get("first_runnable_command_argv")
+    if argv:
         print(json.dumps(argv, ensure_ascii=False))
         return 0
     return 0 if payload.get("status") == "ok" else 1
