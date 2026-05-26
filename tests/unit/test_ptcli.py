@@ -148,6 +148,16 @@ def make_mteam_safe_torrent(tmp_path, name: str = "upload") -> str:
     return create_mteam_upload_torrent_candidate(str(source_torrent), str(tmp_path / "exported"))["path"]
 
 
+def write_valid_torrent(torrent_path: Path, content_path: Path) -> str:
+    content_path.parent.mkdir(parents=True, exist_ok=True)
+    content_path.write_bytes(b"content")
+    torrent = Torrent(path=str(content_path), trackers=["https://source.example/passkey/announce"])
+    torrent.generate()
+    torrent_path.parent.mkdir(parents=True, exist_ok=True)
+    torrent.write(str(torrent_path), overwrite=True)
+    return str(torrent.infohash)
+
+
 def mteam_ready_stages() -> list[dict]:
     return [
         {"stage": "rule-check", "ok": True, "result": build_rule_check("U2", ["MTEAM"], accept_rules=True)},
@@ -1969,18 +1979,18 @@ def test_source_download_blocks_unsupported_tracker_before_config(monkeypatch, c
 
 def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> None:
     source_url = "https://u2.dmhy.org/details.php?id=60635&hit=1"
+    expected_torrent_path = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(expected_torrent_path, tmp_path / "source-content" / "Name.mkv")
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = (_config, base_dir)
-        return source_info_from_tuple(tracker, extract_torrent_id(source_id), (1, 2, "Name", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, extract_torrent_id(source_id), (1, 2, "Name", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
         _ = (tracker, base_dir)
         assert source_id == source_url
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        assert output_dir == "source-out"
+        return expected_torrent_path
 
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
@@ -2014,11 +2024,38 @@ def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> 
     assert payload["path"] == payload["source_torrent"]["path"]
     assert payload["source_torrent"]["path"].endswith("source-out/U2-60635.torrent")
     assert payload["source_torrent"]["exists"] is True
-    assert payload["source_torrent"]["size_bytes"] == len(b"d4:infod")
+    assert payload["source_torrent"]["metadata_readable"] is True
+    assert payload["source_torrent"]["torrent_hash"] == source_hash
     assert len(payload["source_torrent"]["sha1"]) == 40
-    assert payload["source_torrent_verification"]["expected_hash"] == "a" * 40
-    assert payload["source_torrent_verification"]["actual_hash"] is None
-    assert payload["source_torrent_verification"]["verified"] is False
+    assert payload["source_torrent_verification"]["expected_hash"] == source_hash
+    assert payload["source_torrent_verification"]["actual_hash"] == source_hash
+    assert payload["source_torrent_verification"]["verified"] is True
+
+
+def test_source_download_blocks_unreadable_torrent_metadata(monkeypatch, capsys, tmp_path) -> None:
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (_config, base_dir)
+        return source_info_from_tuple(tracker, extract_torrent_id(source_id), (1, 2, "Name", "a" * 40, "desc"), {})
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (_config, tracker, source_id, output_dir, base_dir)
+        torrent_path = tmp_path / "source-out" / "U2-60635.torrent"
+        torrent_path.parent.mkdir(parents=True, exist_ok=True)
+        torrent_path.write_bytes(b"d4:infod")
+        return torrent_path
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+
+    code = main(["source-download", "--tracker", "U2", "--source-id", "60635", "--to", "MTEAM", "--output-dir", "source-out", "--accept-rules", "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["source_torrent"]["metadata_readable"] is False
+    assert payload["source_torrent_verification"]["blockers"] == ["source torrent metadata is not readable"]
+    assert payload["blockers"] == ["source-torrent-verify: source torrent metadata is not readable"]
 
 
 def test_source_download_verifies_downloaded_torrent_hash(monkeypatch, capsys, tmp_path) -> None:
@@ -6081,18 +6118,17 @@ async def test_pipeline_download_source_runs_after_prereqs(monkeypatch, tmp_path
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        _ = (tracker, source_id, output_dir, base_dir)
+        return source_torrent
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
@@ -6122,7 +6158,8 @@ async def test_pipeline_download_source_runs_after_prereqs(monkeypatch, tmp_path
     assert download_stage["ok"] is True
     assert download_stage["result"]["path"].endswith("source-out/U2-60635.torrent")
     assert download_stage["result"]["exists"] is True
-    assert download_stage["result"]["size_bytes"] == len(b"d4:infod")
+    assert download_stage["result"]["metadata_readable"] is True
+    assert download_stage["result"]["torrent_hash"] == source_hash
     assert len(download_stage["result"]["sha1"]) == 40
 
 
@@ -6136,18 +6173,17 @@ async def test_pipeline_inject_source_requires_save_path(monkeypatch, tmp_path) 
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        _ = (tracker, source_id, output_dir, base_dir)
+        return source_torrent
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
@@ -6173,18 +6209,17 @@ async def test_pipeline_inject_source_runs_after_download(monkeypatch, tmp_path)
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        _ = (tracker, source_id, output_dir, base_dir)
+        return source_torrent
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name)
@@ -6195,6 +6230,7 @@ async def test_pipeline_inject_source_runs_after_download(monkeypatch, tmp_path)
             "category": category,
             "tags": tags,
             "paused": paused,
+            "hash": source_hash,
             "verified_in_client": True,
         }
 
@@ -6248,19 +6284,19 @@ async def test_pipeline_inject_source_reuses_existing_source_torrent(monkeypatch
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
     source_torrent = tmp_path / "U2-60635.torrent"
-    source_torrent.write_bytes(b"d4:infod")
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(*_args, **_kwargs):
         raise AssertionError("source download must not run when --source-torrent-file is provided")
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, category, tags, paused)
-        return {"client": "qbittorrent", "torrent_path": torrent_path, "save_path": save_path, "hash": "a" * 40, "verified_in_client": True}
+        return {"client": "qbittorrent", "torrent_path": torrent_path, "save_path": save_path, "hash": source_hash, "verified_in_client": True}
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
@@ -6295,7 +6331,8 @@ async def test_pipeline_inject_source_reuses_existing_source_torrent(monkeypatch
     assert download_stage["result"]["reused"] is True
     assert download_stage["result"]["path"] == str(source_torrent)
     assert download_stage["result"]["exists"] is True
-    assert download_stage["result"]["size_bytes"] == len(b"d4:infod")
+    assert download_stage["result"]["metadata_readable"] is True
+    assert download_stage["result"]["torrent_hash"] == source_hash
     assert len(download_stage["result"]["sha1"]) == 40
     assert inject_stage["ok"] is True
     assert inject_stage["result"]["torrent_path"] == str(source_torrent)
@@ -6311,22 +6348,21 @@ async def test_pipeline_inject_source_requires_client_verification(monkeypatch, 
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        _ = (tracker, source_id, output_dir, base_dir)
+        return source_torrent
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, save_path, category, tags, paused)
-        return {"client": "qbittorrent", "hash": "a" * 40, "verified_in_client": False}
+        return {"client": "qbittorrent", "hash": source_hash, "verified_in_client": False}
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
@@ -6372,18 +6408,16 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
-    source_hash = "b" * 40
+    source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
         return source_info_from_tuple(tracker, source_id, (1, 2, "Name", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        _ = (tracker, source_id, output_dir, base_dir)
+        return source_torrent
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
@@ -6450,18 +6484,16 @@ async def test_pipeline_wait_complete_requires_matched_source_evidence(monkeypat
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
-    source_hash = "b" * 40
+    source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
         return source_info_from_tuple(tracker, source_id, (1, 2, "Name", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        _ = (tracker, source_id, output_dir, base_dir)
+        return source_torrent
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
@@ -6531,19 +6563,17 @@ async def test_pipeline_wait_complete_prefers_injected_hash(monkeypatch, tmp_pat
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
-    metadata_hash = "a" * 40
-    injected_hash = "c" * 40
+    source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
+    metadata_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
+    injected_hash = metadata_hash
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
         return source_info_from_tuple(tracker, source_id, (1, 2, "Name", metadata_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        _ = (tracker, source_id, output_dir, base_dir)
+        return source_torrent
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
@@ -6605,7 +6635,7 @@ async def test_pipeline_wait_complete_uses_hash_from_real_injected_torrent(monke
         return source_info_from_tuple(tracker, source_id, (1, 2, "Name", None, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
+        _ = (tracker, source_id, output_dir, base_dir)
         content = tmp_path / "source-content.mkv"
         content.write_bytes(b"content")
         torrent_path = tmp_path / output_dir / "U2-60635.torrent"
@@ -6677,7 +6707,7 @@ async def test_pipeline_wait_complete_uses_hash_from_downloaded_source_torrent(m
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
         nonlocal expected_hash
-        _ = (tracker, source_id, base_dir)
+        _ = (tracker, source_id, output_dir, base_dir)
         content = tmp_path / "source-content.mkv"
         content.write_bytes(b"content")
         torrent_path = tmp_path / output_dir / "U2-60635.torrent"
@@ -6748,7 +6778,7 @@ async def test_pipeline_blocks_source_injection_when_downloaded_torrent_hash_mis
         return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
+        _ = (tracker, source_id, output_dir, base_dir)
         content = tmp_path / "source-content.mkv"
         content.write_bytes(b"content")
         torrent_path = tmp_path / output_dir / "U2-60635.torrent"
@@ -6821,7 +6851,7 @@ async def test_pipeline_blocks_source_injection_hash_mismatch(monkeypatch, tmp_p
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
         nonlocal source_hash
-        _ = (tracker, source_id, base_dir)
+        _ = (tracker, source_id, output_dir, base_dir)
         content = tmp_path / "source-content.mkv"
         content.write_bytes(b"content")
         torrent_path = tmp_path / output_dir / "U2-60635.torrent"
@@ -6890,32 +6920,31 @@ async def test_pipeline_infers_content_path_from_completed_qbit_match(monkeypatc
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        _ = (tracker, source_id, output_dir, base_dir)
+        return source_torrent
 
     async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
         _ = (config, client_name, torrent_path, category, tags, paused)
-        return {"client": "qbittorrent", "save_path": save_path, "verified_in_client": True}
+        return {"client": "qbittorrent", "save_path": save_path, "hash": source_hash, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, content_path, torrent_hash, timeout, interval)
-        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}
+        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": source_hash}]}
 
     async def fake_search_mteam_duplicates(_config, source_info):
         return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
 
     async def fake_match_with_config(_config, _client_name, content_path):
-        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": source_hash}]}
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
@@ -7377,35 +7406,34 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
+    source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     uploaded_hash = "d" * 40
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        _ = (tracker, source_id, output_dir, base_dir)
+        return source_torrent
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
-        return {"hash": "a" * 40, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "verified_in_client": True}
+        return {"hash": source_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "verified_in_client": True}
 
     wait_calls = []
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = config
         wait_calls.append({"client_name": client_name, "content_path": content_path, "torrent_hash": torrent_hash, "timeout": timeout, "interval": interval})
-        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": content_path or "/downloads/Name", "hash": torrent_hash or "a" * 40}]}
+        return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": content_path or "/downloads/Name", "hash": torrent_hash or source_hash}]}
 
     async def fake_search_mteam_duplicates(_config, source_info):
         return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
 
     async def fake_match_with_config(_config, _client_name, content_path):
-        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": source_hash}]}
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
         uploaded_path = tmp_path / "MTEAM-999.torrent"
@@ -7525,13 +7553,13 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "uploaded": {"timeout": 900.0, "interval": 20.0},
     }
     assert summary_payload["artifacts"]["source_torrent_file"].endswith("U2-60635.torrent")
-    assert summary_payload["artifacts"]["source_torrent_hash"] == "a" * 40
+    assert summary_payload["artifacts"]["source_torrent_hash"] == source_hash
     assert summary_payload["artifacts"]["source_save_path"] == "/downloads"
     assert summary_payload["artifacts"]["source_qbit_category"] == "SOURCE"
     assert summary_payload["artifacts"]["source_qbit_tags"] == "source-tag"
     assert summary_payload["artifacts"]["source_paused"] is True
     assert summary_payload["artifacts"]["source_hash_consistent"] is True
-    assert summary_payload["artifacts"]["source_injected_torrent_hash"] == "a" * 40
+    assert summary_payload["artifacts"]["source_injected_torrent_hash"] == source_hash
     assert summary_payload["artifacts"]["source_injection_verified"] is True
     assert summary_payload["artifacts"]["target_torrent_file"] == str(torrent_file)
     assert summary_payload["artifacts"]["target_package_dir"]
@@ -7762,22 +7790,21 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
+    source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
     uploaded_hash = "e" * 40
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"), {})
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", source_hash, "desc"), {})
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
-        _ = (tracker, source_id, base_dir)
-        torrent_path = tmp_path / output_dir / "U2-60635.torrent"
-        torrent_path.parent.mkdir(parents=True, exist_ok=True)
-        torrent_path.write_bytes(b"d4:infod")
-        return torrent_path
+        _ = (tracker, source_id, output_dir, base_dir)
+        return source_torrent
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
-        injected_hash = uploaded_hash if "MTEAM" in str(torrent_path) else "a" * 40
+        injected_hash = uploaded_hash if "MTEAM" in str(torrent_path) else source_hash
         return {
             "hash": injected_hash,
             "torrent_path": torrent_path,
@@ -7790,14 +7817,14 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
 
     async def fake_wait_complete_with_config(config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (config, client_name, content_path, torrent_hash, timeout, interval)
-        matched_hash = uploaded_hash if torrent_hash == uploaded_hash else "a" * 40
+        matched_hash = uploaded_hash if torrent_hash == uploaded_hash else source_hash
         return {"client": "qbittorrent", "complete": True, "matches": [{"content_path": "/downloads/Name", "hash": matched_hash}]}
 
     async def fake_search_mteam_duplicates(_config, source_info):
         return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
 
     async def fake_match_with_config(_config, _client_name, content_path):
-        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": source_hash}]}
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
         uploaded_path = tmp_path / "MTEAM-999.torrent"
@@ -9052,7 +9079,7 @@ async def test_pipeline_target_execute_auto_downloads_injects_and_waits_source(m
     exported_torrent = tmp_path / "exported" / "matched.torrent"
     sanitized_torrent = tmp_path / "exported" / "matched.mteam-upload.torrent"
     uploaded_torrent = tmp_path / "uploaded" / "MTEAM-999.torrent"
-    source_hash = "a" * 40
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     uploaded_hash = "b" * 40
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
@@ -9062,8 +9089,6 @@ async def test_pipeline_target_execute_auto_downloads_injects_and_waits_source(m
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
         _ = (tracker, source_id, output_dir, base_dir)
-        source_torrent.parent.mkdir(parents=True, exist_ok=True)
-        source_torrent.write_bytes(b"d4:infod")
         return source_torrent
 
     async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):

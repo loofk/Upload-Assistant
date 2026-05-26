@@ -427,7 +427,7 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
             "blockers": ["source-info: Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data."],
         }
     output_path = await download_source_torrent(config, source_tracker, args.source_id, args.output_dir, base_dir=args.base_dir)
-    source_torrent = _torrent_file_evidence(output_path)
+    source_torrent = _torrent_file_evidence(output_path, require_metadata=True)
     source_torrent_verification = _source_torrent_verify_stage({"result": source_torrent}, source.get("torrenthash"))
     if not source_torrent_verification.get("ok"):
         verification = source_torrent_verification.get("result", {})
@@ -2512,7 +2512,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             source_download_result = await _pipeline_stage(
                 "source-download",
                 lambda: download_source_torrent(config, source_tracker, source_torrent_id, args.output_dir, base_dir=args.base_dir),
-                lambda path: _torrent_file_evidence(path),
+                lambda path: _torrent_file_evidence(path, require_metadata=True),
             )
             stages.append(source_download_result)
             source_verify_stage = _source_torrent_verify_stage(source_download_result, effective_source_torrent_hash)
@@ -2904,7 +2904,7 @@ def _existing_target_prepare_blockers(package: dict[str, Any]) -> list[str]:
 
 
 async def _existing_source_torrent_payload(source_torrent_file: str) -> dict[str, Any]:
-    return await asyncio.to_thread(_validate_existing_torrent_file, source_torrent_file, "Source")
+    return await asyncio.to_thread(_validate_existing_torrent_file, source_torrent_file, "Source", True)
 
 
 async def _existing_uploaded_torrent_payload(uploaded_torrent_file: str) -> dict[str, Any]:
@@ -2916,7 +2916,7 @@ async def _existing_uploaded_torrent_payload(uploaded_torrent_file: str) -> dict
     }
 
 
-def _validate_existing_torrent_file(torrent_file: str, label: str) -> dict[str, Any]:
+def _validate_existing_torrent_file(torrent_file: str, label: str, require_metadata: bool = False) -> dict[str, Any]:
     path = Path(torrent_file).expanduser()
     if not path.exists():
         raise ValueError(f"{label} torrent file not found: {path}")
@@ -2926,12 +2926,12 @@ def _validate_existing_torrent_file(torrent_file: str, label: str) -> dict[str, 
         if torrent_file.read(1) != b"d":
             raise ValueError(f"{label} torrent file does not look like a .torrent file.")
     return {
-        **_torrent_file_evidence(path),
+        **_torrent_file_evidence(path, require_metadata=require_metadata),
         "reused": True,
     }
 
 
-def _torrent_file_evidence(torrent_file: str | Path) -> dict[str, Any]:
+def _torrent_file_evidence(torrent_file: str | Path, *, require_metadata: bool = False) -> dict[str, Any]:
     path = Path(torrent_file).expanduser()
     payload: dict[str, Any] = {
         "path": str(path),
@@ -2949,6 +2949,9 @@ def _torrent_file_evidence(torrent_file: str | Path) -> dict[str, Any]:
         if infohash:
             payload["torrent_hash"] = infohash
             payload["infohash"] = infohash
+            payload["metadata_readable"] = True
+        elif require_metadata:
+            payload["metadata_readable"] = False
     return payload
 
 
@@ -2963,6 +2966,18 @@ def _source_torrent_verify_stage(source_download_stage: dict[str, Any], expected
     result = source_download_stage.get("result") if isinstance(source_download_stage, dict) else None
     actual_hash = _torrent_hash_from_result(result)
     expected = _normalize_torrent_hash(expected_hash)
+    if isinstance(result, dict) and result.get("metadata_readable") is False:
+        return {
+            "stage": "source-torrent-verify",
+            "ok": False,
+            "message": "Downloaded source torrent metadata is not readable.",
+            "result": {
+                "verified": False,
+                "expected_hash": expected,
+                "actual_hash": actual_hash,
+                "blockers": ["source torrent metadata is not readable"],
+            },
+        }
     if expected and actual_hash and expected != actual_hash:
         return {
             "stage": "source-torrent-verify",
