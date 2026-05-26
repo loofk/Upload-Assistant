@@ -3259,6 +3259,9 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_AUTOMATION_ACTION=run_next_command\n" in out
     assert "export PTCLI_AUTOMATION_REASON='Next generated ptcli command is ready to run for stage resume-target-upload.'\n" in out
     assert "export PTCLI_AUTOMATION_EXIT_CODE=1\n" in out
+    assert "export PTCLI_BLOCKERS=target.uploaded\n" in out
+    assert "export PTCLI_MISSING_ARTIFACTS=''\n" in out
+    assert "export PTCLI_MISSING_CLOSURE_AUDIT=''\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=0\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCHES=''\n" in out
@@ -3308,6 +3311,8 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
     assert "export PTCLI_AUTOMATION_ACTION=resolve_qbit_wait_mismatch\n" in out
     assert "export PTCLI_AUTOMATION_REASON='qBittorrent wait evidence mismatched the requested torrent/content: source.requested_hash.'\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=0\n" in out
+    assert "export PTCLI_BLOCKERS='source.wait_evidence,qBittorrent wait mismatch: source.requested_hash'\n" in out
+    assert "export PTCLI_MISSING_ARTIFACTS=source_wait_evidence\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCHES=source.requested_hash\n" in out
 
