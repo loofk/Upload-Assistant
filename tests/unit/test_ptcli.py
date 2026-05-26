@@ -11928,6 +11928,7 @@ async def test_target_upload_download_only_records_uploaded_torrent_file_evidenc
     assert result["downloaded_torrent"]["exists"] is True
     assert result["downloaded_torrent"]["size_bytes"] > 0
     assert len(result["downloaded_torrent"]["sha1"]) == 40
+    assert result["downloaded_torrent"]["hash"] == Torrent.read(uploaded_path, validate=False).infohash
     assert result["downloaded_torrent"]["torrent_hash"] == Torrent.read(uploaded_path, validate=False).infohash
     assert result["summary"]["uploaded_torrent"]["exists"] is True
     assert result["summary"]["uploaded_torrent_hash"] == result["downloaded_torrent"]["torrent_hash"]
@@ -12230,6 +12231,7 @@ def test_torrent_file_evidence_includes_infohash(tmp_path) -> None:
     assert evidence["exists"] is True
     assert evidence["size_bytes"] > 0
     assert len(evidence["sha1"]) == 40
+    assert evidence["hash"] == torrent.infohash
     assert evidence["torrent_hash"] == torrent.infohash
     assert evidence["infohash"] == torrent.infohash
 

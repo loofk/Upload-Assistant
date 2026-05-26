@@ -3213,6 +3213,7 @@ def _torrent_file_evidence(torrent_file: str | Path, *, require_metadata: bool =
         )
         infohash = _torrent_file_infohash(path)
         if infohash:
+            payload["hash"] = infohash
             payload["torrent_hash"] = infohash
             payload["infohash"] = infohash
             payload["metadata_readable"] = True
