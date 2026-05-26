@@ -373,20 +373,23 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
     resume_uploaded = commands["resume-uploaded-torrent"]
     assert "--uploaded-torrent-file ./tmp/uploaded/MTEAM-<id>.torrent" in resume_uploaded
     assert "--inject-uploaded-torrent" in resume_uploaded
-    assert "--uploaded-save-path" not in resume_uploaded
+    assert '--uploaded-save-path "/downloads/Example"' in resume_uploaded
     assert "--wait-uploaded-complete" in resume_uploaded
     assert "--uploaded-qbit-category MTEAM" in resume_uploaded
     assert command_argv["resume-uploaded-torrent"][:3] == ["python3", "ptcli.py", "target-upload"]
     assert "./tmp/uploaded/MTEAM-<id>.torrent" in command_argv["resume-uploaded-torrent"]
+    assert "/downloads/Example" in command_argv["resume-uploaded-torrent"]
     assert "--uploaded-qbit-tags retorrent" in resume_uploaded
 
     resume_uploaded_download = commands["resume-uploaded-torrent-download"]
     assert "--uploaded-torrent-id <id>" in resume_uploaded_download
     assert "--download-uploaded-torrent" in resume_uploaded_download
     assert "--inject-uploaded-torrent" in resume_uploaded_download
+    assert '--uploaded-save-path "/downloads/Example"' in resume_uploaded_download
     assert "--wait-uploaded-complete" in resume_uploaded_download
     assert "--uploaded-qbit-category MTEAM" in resume_uploaded_download
     assert "--uploaded-qbit-tags retorrent" in resume_uploaded_download
+    assert "/downloads/Example" in command_argv["resume-uploaded-torrent-download"]
 
     retorrent_resume_uploaded = commands["retorrent-resume-uploaded-torrent"]
     assert "--package-dir ./tmp/target/U2-60635-to-MTEAM" in retorrent_resume_uploaded
