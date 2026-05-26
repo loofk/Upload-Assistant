@@ -45,7 +45,10 @@ python3 ptcli.py sites --json
 重点字段：
 
 - `capabilities.<TRACKER>.source_info`
+- `capabilities.<TRACKER>.source_info_adapter`
 - `capabilities.<TRACKER>.source_download`
+- `capabilities.<TRACKER>.source_download_adapter`
+- `capabilities.<TRACKER>.credential_requirements`
 - `capabilities.<TRACKER>.target_upload`
 - `capabilities.<TRACKER>.full_live_closure_to_mteam`
 - `full_live_closure_sources`

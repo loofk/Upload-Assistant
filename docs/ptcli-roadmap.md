@@ -72,11 +72,11 @@ python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --ac
 
 当前已完成：
 
-- `sites`: 输出 allowlist。
+- `sites`: 输出 allowlist、能力矩阵、源站详情/下载适配器类型和所需凭据提示。
 - `rules`: 输出站点规则审查 profile，不臆造具体规则。
-- `source-info`: 首批支持 `U2` / `CHD` / `MTEAM` 的源站详情读取。
-- `source-download`: 首批支持 `U2` / `CHD` / `MTEAM` 的源种下载。
-- `flow-check`: 本地检查 U2/CHD → MTEAM 参考流所需配置、cookie 和 qBittorrent client。
+- `source-info`: 支持 allowlist 内已启用的中文源站详情读取，MTEAM 走 API，其余已启用源站优先走 cookie 详情页解析。
+- `source-download`: 支持 allowlist 内已启用的中文源站源种下载，包括 NexusPHP passkey 下载、TTG announce/passkey 下载、HDS cookie 下载和 MTEAM API 下载。
+- `flow-check`: 本地检查已启用 source → MTEAM 流所需配置、cookie/API key 和 qBittorrent client。
 - `doctor`: live 前 checklist，检查 flow/config/cookie/qBittorrent、路径、目标站准备包、MTEAM upload gate、确认参数和后续下载/注入/等待条件；`--target-execute` 会自动按 live pipeline 默认 follow-up 检查上传后新种下载、注入和等待，未达到 ready 或 `live_safe_to_attempt=false` 会返回非 0；`--connect-qbit` 会真实连接 qBittorrent 并读取一个任务作为盒子连通性探针；`--probe-source/--probe-target` 会显式探测源站详情读取和 MTEAM 查重 API。
 - `pipeline`: 串联 `flow-check`、`source-info`、可选 `source-download`、可选 `inject-source`、可选 `wait-complete`、可选 `match`、可选 `target-dupe-check`、可选 `target-prepare`、可选 `target-torrent-export` 和可选 `target-upload`；普通 dry-run 默认不下载、不注入、不等待、不上传；任何源站下载/注入或目标上传执行动作都需要 `--accept-rules` 通过规则 gate；`--upload-target --target-execute` 会自动补齐 live 闭环所需的源种下载/注入/等待、目标 torrent 导出/净化、MTEAM 上传后新种下载/注入/等待；当未显式传 `--path` 时，可从完成的 QB match 结果推导后续内容路径；`--export-target-torrent` 可从匹配 QB 任务导出 `.torrent`，再生成清理过 announce/comment 且带 MTEAM source flag 的上传候选种子；`summary.compliance` 会为 AI/自动化消费者说明规则确认状态和当前仍需人工审阅站规的边界。
 - `target-prepare`: 目前生成 MTEAM dry-run preview、meta draft、field mapping、description draft 和 upload gate 文件，不调用上传接口。

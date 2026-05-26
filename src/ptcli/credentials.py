@@ -7,9 +7,9 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from src.ptcli.config import resolve_client_config
-from src.ptcli.flows import NEXUSPHP_MTEAM_SOURCE_TRACKERS, get_flow_profiles
+from src.ptcli.flows import MTEAM_SOURCE_FLOW_TRACKERS, get_flow_profiles
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list, unsupported_trackers
-from src.ptcli.source import extract_torrent_id
+from src.ptcli.source import extract_torrent_id, source_download_adapter
 
 
 @dataclass(frozen=True)
@@ -58,8 +58,9 @@ def build_flow_check(config: dict[str, Any], source_tracker_raw: str, source_id_
 def _source_checks(config: dict[str, Any], source_tracker: str, base_dir: str | None) -> list[CheckItem]:
     tracker_config = config.get("TRACKERS", {}).get(source_tracker, {})
     checks: list[CheckItem] = []
-    if source_tracker in NEXUSPHP_MTEAM_SOURCE_TRACKERS:
-        if source_tracker != "HDS":
+    download_adapter = source_download_adapter(source_tracker)
+    if source_tracker in MTEAM_SOURCE_FLOW_TRACKERS:
+        if download_adapter in {"nexusphp_passkey", "ttg_passkey"}:
             passkey = _source_passkey(tracker_config, source_tracker)
             checks.append(CheckItem(name=f"{source_tracker}.passkey", ok=bool(passkey), message="Passkey configured." if passkey else "Passkey missing."))
         resolved_base_dir = os.path.abspath(base_dir or os.getcwd())

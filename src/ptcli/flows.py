@@ -21,7 +21,7 @@ class FlowProfile:
         return payload
 
 
-NEXUSPHP_MTEAM_SOURCE_TRACKERS: Final[frozenset[str]] = frozenset(
+MTEAM_SOURCE_FLOW_TRACKERS: Final[frozenset[str]] = frozenset(
     {
         "AUDIENCES",
         "CHD",
@@ -57,7 +57,7 @@ REFERENCE_FLOW_PROFILES: Final[dict[tuple[str, str], FlowProfile]] = {
 
 
 def _generic_nexusphp_mteam_profile(source_tracker: str, target_tracker: str) -> FlowProfile | None:
-    if target_tracker != "MTEAM" or source_tracker not in NEXUSPHP_MTEAM_SOURCE_TRACKERS:
+    if target_tracker != "MTEAM" or source_tracker not in MTEAM_SOURCE_FLOW_TRACKERS:
         return None
     if source_tracker == "HDS":
         return FlowProfile(

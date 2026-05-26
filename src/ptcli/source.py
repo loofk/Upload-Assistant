@@ -65,6 +65,47 @@ GENERIC_DETAILS_BASE_URLS: dict[str, str] = {
 }
 
 
+def source_info_adapter(tracker: str) -> str | None:
+    source_tracker = normalize_tracker(tracker)
+    if source_tracker in MTEAM_API_TRACKERS:
+        return "mteam_api"
+    if source_tracker in GENERIC_DETAILS_BASE_URLS:
+        return "generic_details_cookie"
+    if source_tracker in SOURCE_TRACKER_CLASSES:
+        return "tracker_class"
+    return None
+
+
+def source_download_adapter(tracker: str) -> str | None:
+    source_tracker = normalize_tracker(tracker)
+    if source_tracker in MTEAM_API_TRACKERS:
+        return "mteam_api"
+    if source_tracker in DIRECT_DOWNLOAD_TRACKER_CLASSES:
+        return "tracker_class"
+    if source_tracker in TTG_DOWNLOAD_BASE_URLS:
+        return "ttg_passkey"
+    if source_tracker in COOKIE_DOWNLOAD_URLS:
+        return "cookie_download"
+    if source_tracker in NEXUS_DOWNLOAD_BASE_URLS:
+        return "nexusphp_passkey"
+    return None
+
+
+def source_credential_requirements(tracker: str) -> list[str]:
+    source_tracker = normalize_tracker(tracker)
+    if source_tracker in MTEAM_API_TRACKERS:
+        return [f"TRACKERS.{source_tracker}.api_key"]
+    if source_tracker in COOKIE_DOWNLOAD_URLS:
+        return [f"data/cookies/{source_tracker}.txt"]
+    if source_tracker in TTG_DOWNLOAD_BASE_URLS:
+        return [f"TRACKERS.{source_tracker}.announce_url or TRACKERS.{source_tracker}.passkey", f"data/cookies/{source_tracker}.txt"]
+    if source_tracker in NEXUS_DOWNLOAD_BASE_URLS:
+        return [f"TRACKERS.{source_tracker}.passkey", f"data/cookies/{source_tracker}.txt"]
+    if source_tracker in GENERIC_DETAILS_BASE_URLS:
+        return [f"data/cookies/{source_tracker}.txt"]
+    return []
+
+
 @dataclass(frozen=True)
 class SourceTorrentInfo:
     tracker: str

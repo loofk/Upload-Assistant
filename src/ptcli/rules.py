@@ -12,7 +12,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any, Final
 
-from src.ptcli.flows import NEXUSPHP_MTEAM_SOURCE_TRACKERS, get_flow_profiles
+from src.ptcli.flows import MTEAM_SOURCE_FLOW_TRACKERS, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS
 
 
@@ -66,7 +66,7 @@ _TARGET_REVIEW_ITEMS: Final[tuple[str, ...]] = (
     "The uploader will seed the uploaded torrent according to the target tracker requirements.",
 )
 
-_ENABLED_AUTOMATION_TRACKERS: Final[set[str]] = {*NEXUSPHP_MTEAM_SOURCE_TRACKERS, "MTEAM"}
+_ENABLED_AUTOMATION_TRACKERS: Final[set[str]] = {*MTEAM_SOURCE_FLOW_TRACKERS, "MTEAM"}
 
 
 def get_rule_profile(tracker: str) -> RuleProfile:

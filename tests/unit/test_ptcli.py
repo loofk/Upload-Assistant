@@ -192,11 +192,21 @@ def test_sites_json_exposes_capability_matrix(capsys) -> None:
     assert payload["status"] == "ok"
     assert "MTEAM" in payload["sites"]
     assert payload["capabilities"]["U2"]["source_info"] is True
+    assert payload["capabilities"]["U2"]["source_info_adapter"] == "generic_details_cookie"
     assert payload["capabilities"]["U2"]["source_download"] is True
+    assert payload["capabilities"]["U2"]["source_download_adapter"] == "nexusphp_passkey"
+    assert payload["capabilities"]["U2"]["credential_requirements"] == ["TRACKERS.U2.passkey", "data/cookies/U2.txt"]
     assert payload["capabilities"]["U2"]["full_live_closure_to_mteam"] is True
     assert payload["capabilities"]["HDS"]["source_info"] is True
+    assert payload["capabilities"]["HDS"]["source_info_adapter"] == "generic_details_cookie"
     assert payload["capabilities"]["HDS"]["source_download"] is True
+    assert payload["capabilities"]["HDS"]["source_download_adapter"] == "cookie_download"
+    assert payload["capabilities"]["HDS"]["credential_requirements"] == ["data/cookies/HDS.txt"]
     assert payload["capabilities"]["HDS"]["full_live_closure_to_mteam"] is True
+    assert payload["capabilities"]["TTG"]["source_download_adapter"] == "ttg_passkey"
+    assert payload["capabilities"]["MTEAM"]["source_info_adapter"] == "mteam_api"
+    assert payload["capabilities"]["MTEAM"]["source_download_adapter"] == "mteam_api"
+    assert payload["capabilities"]["MTEAM"]["credential_requirements"] == ["TRACKERS.MTEAM.api_key"]
     assert payload["capabilities"]["MTEAM"]["target_upload"] is True
     assert "U2" in payload["full_live_closure_sources"]
     assert "HDS" in payload["full_live_closure_sources"]
@@ -1695,6 +1705,12 @@ def test_source_module_registers_enabled_chinese_source_adapters() -> None:
     assert set(ptcli_source.DIRECT_DOWNLOAD_TRACKER_CLASSES) == set()
     assert set(ptcli_source.TTG_DOWNLOAD_BASE_URLS) == {"TTG"}
     assert set(ptcli_source.COOKIE_DOWNLOAD_URLS) == {"HDS"}
+    assert ptcli_source.source_download_adapter("U2") == "nexusphp_passkey"
+    assert ptcli_source.source_download_adapter("HDS") == "cookie_download"
+    assert ptcli_source.source_download_adapter("TTG") == "ttg_passkey"
+    assert ptcli_source.source_download_adapter("MTEAM") == "mteam_api"
+    assert ptcli_source.source_download_adapter("unsupported") is None
+    assert ptcli_source.source_credential_requirements("HDS") == ["data/cookies/HDS.txt"]
 
 
 @pytest.mark.asyncio

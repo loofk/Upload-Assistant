@@ -22,7 +22,7 @@ from torf import Torrent
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check, build_runtime_dependency_check, extend_doctor_check
-from src.ptcli.flows import NEXUSPHP_MTEAM_SOURCE_TRACKERS, flow_profiles_to_dicts, get_flow_profiles
+from src.ptcli.flows import MTEAM_SOURCE_FLOW_TRACKERS, flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import build_rule_check, get_rule_profiles, rule_profiles_to_dicts
@@ -37,6 +37,9 @@ from src.ptcli.source import (
     download_source_torrent,
     extract_torrent_id,
     fetch_source_info,
+    source_credential_requirements,
+    source_download_adapter,
+    source_info_adapter,
     source_info_has_signal,
 )
 from src.ptcli.target import (
@@ -925,13 +928,16 @@ def build_sites_payload() -> dict[str, Any]:
         (set(NEXUS_DOWNLOAD_BASE_URLS) | set(DIRECT_DOWNLOAD_TRACKER_CLASSES) | set(TTG_DOWNLOAD_BASE_URLS) | set(COOKIE_DOWNLOAD_URLS) | set(MTEAM_API_TRACKERS))
         & set(CHINESE_PT_TRACKERS)
     )
-    mteam_flow_sources = sorted(NEXUSPHP_MTEAM_SOURCE_TRACKERS & set(CHINESE_PT_TRACKERS))
+    mteam_flow_sources = sorted(MTEAM_SOURCE_FLOW_TRACKERS & set(CHINESE_PT_TRACKERS))
     full_live_sources = sorted(set(source_download_trackers) & set(mteam_flow_sources))
     target_upload_trackers = ["MTEAM"] if "MTEAM" in CHINESE_PT_TRACKERS else []
     capabilities = {
         tracker: {
             "source_info": tracker in source_info_trackers,
+            "source_info_adapter": source_info_adapter(tracker),
             "source_download": tracker in source_download_trackers,
+            "source_download_adapter": source_download_adapter(tracker),
+            "credential_requirements": source_credential_requirements(tracker),
             "mteam_source_flow": tracker in mteam_flow_sources,
             "full_live_closure_to_mteam": tracker in full_live_sources,
             "target_upload": tracker in target_upload_trackers,
