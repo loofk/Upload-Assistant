@@ -2152,7 +2152,23 @@ def test_pipeline_exit_code_requires_complete_live_closure() -> None:
     args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--upload-target", "--target-execute", "--json"])
 
     assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": True, "complete": False}) == 1
-    assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": True, "complete": True}) == 0
+    assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": True, "complete": True, "closure_audit": {"ready": True, "missing": []}}) == 0
+
+
+def test_pipeline_exit_code_requires_live_closure_audit_ready() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--upload-target", "--target-execute", "--json"])
+
+    assert ptcli_cli._pipeline_exit_code(args, {"status": "ok", "ready": True, "complete": True, "closure_audit": {"ready": False, "missing": ["source.wait_evidence"]}}) == 1
+
+
+def test_pipeline_run_summary_blocks_live_closure_audit_missing() -> None:
+    blockers: list[str] = []
+    closure_audit = {"ready": False, "missing": ["source.wait_evidence", "target.uploaded_wait_evidence"]}
+
+    ptcli_cli._extend_unique_string(blockers, ptcli_cli._closure_audit_blockers(closure_audit))
+
+    assert blockers == ["closure audit missing: source.wait_evidence", "closure audit missing: target.uploaded_wait_evidence"]
 
 
 def test_pipeline_next_actions_reports_stage_blockers() -> None:

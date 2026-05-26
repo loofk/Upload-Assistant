@@ -2734,6 +2734,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         _extend_unique_string(blockers, _string_list(closure.get("blockers")))
     evidence = _pipeline_evidence(closure)
     closure_audit = _pipeline_closure_audit(closure, evidence)
+    if live_target_upload:
+        _extend_unique_string(blockers, _closure_audit_blockers(closure_audit))
     summary = _pipeline_run_summary(stages, ready, blockers, closure, evidence)
     summary["requested_actions"] = requested_actions
     summary["effective_actions"] = effective_actions
@@ -4312,6 +4314,12 @@ def _pipeline_closure_audit(closure: dict[str, Any] | None, evidence: dict[str, 
     }
 
 
+def _closure_audit_blockers(closure_audit: Any) -> list[str]:
+    if not isinstance(closure_audit, dict):
+        return ["closure audit missing: closure_audit"]
+    return [f"closure audit missing: {name}" for name in _string_list(closure_audit.get("missing"))]
+
+
 def _injected_torrent_verified(injected_torrent: Any) -> bool:
     if not isinstance(injected_torrent, dict) or injected_torrent.get("blockers"):
         return False
@@ -5170,6 +5178,8 @@ def _target_upload_result_ready(payload: dict[str, Any], *, execute: bool, downl
 def _pipeline_exit_code(args: argparse.Namespace, payload: dict[str, Any]) -> int:
     if not _pipeline_has_action(args):
         return 0
+    if getattr(args, "target_execute", False) and _closure_audit_blockers(payload.get("closure_audit")):
+        return 1
     if getattr(args, "target_execute", False) and payload.get("complete") is not True:
         return 1
     if payload.get("status") == "ok" and payload.get("ready") is True:
