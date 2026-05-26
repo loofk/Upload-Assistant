@@ -1751,11 +1751,15 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     status = str(payload.get("status") or "blocked")
     blockers = _string_list(payload.get("blockers"))
     next_command = payload.get("next_command")
-    next_command_ready = bool(next_command)
+    next_command_argv = _summary_next_command_raw_argv(payload.get("next_command_argv")) if payload.get("next_command_argv") else _summary_next_command_raw_argv(str(next_command)) if next_command else None
+    next_command_placeholder = _argv_has_placeholder(next_command_argv)
+    next_command_ready = bool(next_command) and not next_command_placeholder
     if status == "ok":
         automation_action = "complete"
     elif payload.get("qbit_wait_mismatch"):
         automation_action = "resolve_qbit_wait_mismatch"
+    elif next_command_placeholder:
+        automation_action = "fill_command_placeholders"
     elif next_command_ready:
         automation_action = "run_next_command"
     elif payload.get("schema_version_ok") is False or payload.get("kind_supported") is False:
@@ -1772,6 +1776,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         **payload,
         "automation_action": automation_action,
         "next_command_ready": next_command_ready,
+        "next_command_placeholder": next_command_placeholder,
         "should_execute_next_command": automation_action == "run_next_command",
         "automation_exit_code": 0 if status == "ok" else 1,
     }
@@ -5331,18 +5336,12 @@ def _summary_check_run_next_command(payload: dict[str, Any]) -> int:
 
 
 def _summary_next_command_argv(command: Any) -> list[str] | None:
-    if isinstance(command, list):
-        argv = _argv_list(command)
-        if argv is None:
-            return None
-    elif isinstance(command, str):
-        try:
-            argv = shlex.split(command)
-        except ValueError:
-            return None
-    else:
+    argv = _summary_next_command_raw_argv(command)
+    if argv is None:
         return None
     if len(argv) < 3:
+        return None
+    if _argv_has_placeholder(argv):
         return None
     interpreter = Path(argv[0]).name
     script = Path(argv[1]).name
@@ -5351,6 +5350,21 @@ def _summary_next_command_argv(command: Any) -> list[str] | None:
     argv[0] = sys.executable
     argv[1] = str(_ptcli_script_path())
     return argv
+
+
+def _argv_has_placeholder(argv: list[str] | None) -> bool:
+    return any("<" in arg or ">" in arg for arg in argv or [])
+
+
+def _summary_next_command_raw_argv(command: Any) -> list[str] | None:
+    if isinstance(command, list):
+        return _argv_list(command)
+    if isinstance(command, str):
+        try:
+            return shlex.split(command)
+        except ValueError:
+            return None
+    return None
 
 
 def _ptcli_script_path() -> Path:

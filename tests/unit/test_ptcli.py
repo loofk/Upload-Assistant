@@ -3361,6 +3361,89 @@ def test_summary_check_run_next_command_rejects_non_ptcli_command(tmp_path, monk
     assert "Refusing to run unsupported summary next_command" in captured.err
 
 
+def test_summary_check_marks_placeholder_next_command_not_ready(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [
+                    {
+                        "stage": "resume-uploaded-torrent-download",
+                        "command": "python3 ptcli.py target-upload --uploaded-torrent-id <id>",
+                        "argv": ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-id", "<id>"],
+                    }
+                ],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["automation_action"] == "fill_command_placeholders"
+    assert payload["next_command_ready"] is False
+    assert payload["next_command_placeholder"] is True
+    assert payload["should_execute_next_command"] is False
+
+
+def test_summary_check_run_next_command_rejects_placeholder_argv(tmp_path, monkeypatch, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [
+                    {
+                        "stage": "resume-uploaded-torrent-download",
+                        "command": "python3 ptcli.py target-upload --uploaded-torrent-id <id>",
+                        "argv": ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-id", "<id>"],
+                    }
+                ],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_run(*_args, **_kwargs):
+        pytest.fail("unexpected subprocess call")
+
+    monkeypatch.setattr(ptcli_cli.subprocess, "run", fail_run)
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--run-next-command"])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.out == ""
+    assert captured.err == ""
+
+
 def test_summary_check_run_next_command_is_noop_when_complete(tmp_path, monkeypatch, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
