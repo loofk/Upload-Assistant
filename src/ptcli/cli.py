@@ -5474,6 +5474,7 @@ def _summary_check_print_next_command(payload: dict[str, Any]) -> int:
 
 
 def _summary_check_print_shell(payload: dict[str, Any]) -> int:
+    flow_diagnostics = payload.get("flow_diagnostics") if isinstance(payload.get("flow_diagnostics"), dict) else {}
     fields = {
         "PTCLI_SUMMARY_STATUS": payload.get("status"),
         "PTCLI_AUTOMATION_ACTION": payload.get("automation_action"),
@@ -5482,6 +5483,11 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_BLOCKERS": ",".join(_string_list(payload.get("blockers"))),
         "PTCLI_MISSING_ARTIFACTS": ",".join(_string_list(payload.get("missing_artifacts"))),
         "PTCLI_MISSING_CLOSURE_AUDIT": ",".join(_string_list(payload.get("missing_closure_audit"))),
+        "PTCLI_FLOW_READY": _shell_bool(flow_diagnostics.get("ready")) if flow_diagnostics.get("ready") is not None else None,
+        "PTCLI_FLOW_SOURCE_TRACKER": flow_diagnostics.get("source_tracker"),
+        "PTCLI_FLOW_SOURCE_ID": flow_diagnostics.get("source_torrent_id"),
+        "PTCLI_FLOW_TARGET_TRACKERS": ",".join(_string_list(flow_diagnostics.get("target_trackers"))),
+        "PTCLI_CREDENTIAL_REQUIREMENTS": ",".join(_string_list(payload.get("credential_requirements"))),
         "PTCLI_NEXT_STAGE": payload.get("next_stage"),
         "PTCLI_NEXT_COMMAND": payload.get("next_command"),
         "PTCLI_NEXT_COMMAND_ARGV": json.dumps(payload.get("next_command_argv"), ensure_ascii=False) if payload.get("next_command_argv") else None,
