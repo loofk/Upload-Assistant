@@ -55,6 +55,7 @@ from src.ptcli.target import (
 
 SUMMARY_SCHEMA_VERSION = 1
 SUPPORTED_SUMMARY_KINDS = ("ptcli.pipeline.run_summary", "ptcli.target_upload.summary", "ptcli.doctor.live_readiness")
+SUMMARY_CHECK_RUN_COMMANDS = {"pipeline", "target-upload", "doctor"}
 
 
 @dataclass(frozen=True)
@@ -5463,6 +5464,8 @@ def _summary_next_command_argv(command: Any) -> list[str] | None:
     interpreter = Path(argv[0]).name
     script = Path(argv[1]).name
     if interpreter not in {"python", "python3"} or script != "ptcli.py":
+        return None
+    if argv[2] not in SUMMARY_CHECK_RUN_COMMANDS:
         return None
     argv[0] = sys.executable
     argv[1] = str(_ptcli_script_path())
