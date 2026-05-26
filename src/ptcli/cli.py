@@ -2121,6 +2121,7 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
         return commands
 
     commands.append(_ptcli_command_entry("doctor-live-probes", _doctor_retry_args(args, force_probes=True)))
+    uploaded_save_path = args.uploaded_save_path or _artifact_path(artifacts.get("effective_uploaded_save_path"))
 
     if args.uploaded_torrent_file and args.package_dir:
         uploaded_resume_args = [
@@ -2140,8 +2141,8 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
             uploaded_resume_args.extend(["--config", args.config])
         if args.summary_output_dir:
             uploaded_resume_args.extend(["--summary-output-dir", args.summary_output_dir])
-        if args.uploaded_save_path:
-            uploaded_resume_args.extend(["--uploaded-save-path", args.uploaded_save_path])
+        if uploaded_save_path:
+            uploaded_resume_args.extend(["--uploaded-save-path", uploaded_save_path])
         if args.uploaded_qbit_category:
             uploaded_resume_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
         if args.uploaded_qbit_tags:
@@ -2171,8 +2172,8 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
             uploaded_resume_args.extend(["--config", args.config])
         if args.summary_output_dir:
             uploaded_resume_args.extend(["--summary-output-dir", args.summary_output_dir])
-        if args.uploaded_save_path:
-            uploaded_resume_args.extend(["--uploaded-save-path", args.uploaded_save_path])
+        if uploaded_save_path:
+            uploaded_resume_args.extend(["--uploaded-save-path", uploaded_save_path])
         if args.uploaded_qbit_category:
             uploaded_resume_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
         if args.uploaded_qbit_tags:
@@ -2216,8 +2217,8 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
     _extend_command_path(pipeline_args, "--source-torrent-file", artifacts.get("source_torrent_file"))
     _extend_command_path(pipeline_args, "--package-dir", artifacts.get("package_dir"))
     _extend_command_path(pipeline_args, "--target-torrent-file", artifacts.get("target_torrent_file"))
-    if args.uploaded_save_path:
-        pipeline_args.extend(["--uploaded-save-path", args.uploaded_save_path])
+    if uploaded_save_path:
+        pipeline_args.extend(["--uploaded-save-path", uploaded_save_path])
     if args.uploaded_qbit_category:
         pipeline_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
     if args.uploaded_qbit_tags:
@@ -2227,6 +2228,12 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
     _append_uploaded_wait_options(pipeline_args, args)
     commands.append(_ptcli_command_entry("pipeline-live", pipeline_args))
     return commands
+
+
+def _artifact_path(artifact: Any) -> str | None:
+    if isinstance(artifact, dict) and artifact.get("path"):
+        return str(artifact["path"])
+    return None
 
 
 def _doctor_retry_command(args: argparse.Namespace, *, force_probes: bool = False) -> str:

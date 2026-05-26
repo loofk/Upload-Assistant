@@ -4938,6 +4938,53 @@ def test_doctor_summary_artifacts_include_effective_uploaded_save_path(tmp_path)
     assert resume_state["artifacts"]["effective_uploaded_save_path"] is True
 
 
+def test_doctor_resume_commands_use_effective_uploaded_save_path(tmp_path) -> None:
+    content_path = tmp_path / "downloads" / "Name"
+    content_path.mkdir(parents=True)
+    package_dir = tmp_path / "target" / "U2-60635-to-MTEAM"
+    package_dir.mkdir(parents=True)
+    args = argparse.Namespace(
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        config=None,
+        base_dir=None,
+        content_path=None,
+        source_torrent_file=None,
+        package_dir=str(package_dir),
+        target_torrent_file=None,
+        uploaded_torrent_id="999",
+        uploaded_torrent_file=None,
+        uploaded_save_path=None,
+        uploaded_qbit_category="MTEAM",
+        uploaded_qbit_tags="retorrent",
+        uploaded_paused=False,
+        uploaded_wait_timeout=42.0,
+        uploaded_wait_interval=3.0,
+        client="default",
+        accept_rules=True,
+        target_execute=True,
+        confirm_upload=True,
+        download_uploaded_torrent=True,
+        inject_uploaded_torrent=True,
+        wait_uploaded_complete=True,
+        write_summary=True,
+        summary_output_dir=None,
+        connect_qbit=False,
+        probe_source=False,
+        probe_target=False,
+        check_runtime=False,
+    )
+    artifacts = {"effective_uploaded_save_path": ptcli_cli._path_artifact(str(content_path))}
+
+    commands = {command["stage"]: command for command in ptcli_cli._doctor_recommended_commands({"live_safe_to_attempt": True}, args, artifacts)}
+    resume_command = commands["resume-uploaded-torrent-download"]["command"]
+    resume_argv = commands["resume-uploaded-torrent-download"]["argv"]
+
+    assert f"--uploaded-save-path {shlex.quote(str(content_path))}" in resume_command
+    assert str(content_path) in resume_argv
+
+
 def test_doctor_blocks_live_upload_without_rule_obligations(tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
