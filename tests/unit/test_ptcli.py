@@ -2816,16 +2816,21 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
                         "qbit_closure": {
                             "wait": {
                                 "complete": False,
+                                "query": {"torrent_hash": "b" * 40, "content_path": "/downloads/Expected", "save_path": "/downloads", "timeout": 3600, "interval": 30},
                                 "matched_count": 1,
                                 "completion_verification": {
                                     "matched_count": 1,
                                     "complete_count": 1,
                                     "any_complete": True,
+                                    "all_matches_complete": True,
+                                    "seeding_state_count": 1,
                                     "requested_hash_matched": False,
                                     "requested_content_path_matched": None,
                                     "observed_hashes": ["f" * 40],
                                     "observed_content_paths": ["/downloads/Other"],
                                     "observed_save_paths": ["/downloads"],
+                                    "observed_states": ["uploading"],
+                                    "observed_progress": [1.0],
                                 },
                                 "blockers": ["qBittorrent matched torrents, but none matched requested hash bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb."],
                             }
@@ -2860,11 +2865,20 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
     assert payload["qbit_wait_mismatches"] == ["source.requested_hash"]
     diagnostics = payload["qbit_wait_diagnostics"]["source"]
     assert diagnostics["request_mismatch"] is True
+    assert diagnostics["requested_hash"] == "b" * 40
+    assert diagnostics["requested_content_path"] == "/downloads/Expected"
+    assert diagnostics["requested_save_path"] == "/downloads"
+    assert diagnostics["requested_timeout"] == 3600
+    assert diagnostics["requested_interval"] == 30
     assert diagnostics["any_complete"] is True
+    assert diagnostics["all_matches_complete"] is True
+    assert diagnostics["seeding_state_count"] == 1
     assert diagnostics["complete_count"] == 1
     assert diagnostics["requested_hash_matched"] is False
     assert diagnostics["observed_hashes"] == ["f" * 40]
     assert diagnostics["observed_content_paths"] == ["/downloads/Other"]
+    assert diagnostics["observed_states"] == ["uploading"]
+    assert diagnostics["observed_progress"] == [1.0]
 
 
 def test_summary_check_blocks_complete_pipeline_qbit_wait_mismatch(tmp_path, capsys) -> None:
@@ -11788,6 +11802,8 @@ def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path) -> None:
     diagnostics = summary_payload["qbit_wait_diagnostics"]["uploaded"]
     assert diagnostics["complete"] is True
     assert diagnostics["request_mismatch"] is True
+    assert diagnostics["requested_hash"] == "b" * 40
+    assert diagnostics["requested_content_path"] == "/downloads/Example"
     assert diagnostics["requested_hash_matched"] is True
     assert diagnostics["requested_content_path_matched"] is False
     assert diagnostics["observed_hashes"] == ["b" * 40]

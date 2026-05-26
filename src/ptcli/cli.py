@@ -1765,20 +1765,30 @@ def _summary_qbit_wait_from(container: dict[str, Any], fallback_key: str) -> dic
     wait_result = qbit_closure.get("wait") if isinstance(qbit_closure.get("wait"), dict) else container.get(fallback_key)
     if not isinstance(wait_result, dict):
         return None
+    query = wait_result.get("query") if isinstance(wait_result.get("query"), dict) else {}
     verification = wait_result.get("completion_verification") if isinstance(wait_result.get("completion_verification"), dict) else {}
     requested_hash_matched = verification.get("requested_hash_matched")
     requested_content_path_matched = verification.get("requested_content_path_matched")
     return {
         "complete": bool(wait_result.get("complete")),
+        "requested_hash": _normalize_torrent_hash(query.get("torrent_hash")),
+        "requested_content_path": query.get("content_path"),
+        "requested_save_path": query.get("save_path"),
+        "requested_timeout": query.get("timeout"),
+        "requested_interval": query.get("interval"),
         "matched_count": verification.get("matched_count", wait_result.get("matched_count")),
         "complete_count": verification.get("complete_count"),
         "any_complete": verification.get("any_complete"),
+        "all_matches_complete": verification.get("all_matches_complete"),
+        "seeding_state_count": verification.get("seeding_state_count"),
         "requested_hash_matched": requested_hash_matched,
         "requested_content_path_matched": requested_content_path_matched,
         "request_mismatch": requested_hash_matched is False or requested_content_path_matched is False,
         "observed_hashes": verification.get("observed_hashes", []),
         "observed_content_paths": verification.get("observed_content_paths", []),
         "observed_save_paths": verification.get("observed_save_paths", []),
+        "observed_states": verification.get("observed_states", []),
+        "observed_progress": verification.get("observed_progress", []),
         "blockers": _string_list(wait_result.get("blockers")),
     }
 
