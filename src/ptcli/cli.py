@@ -1692,8 +1692,8 @@ def _summary_closure_modes(payload: dict[str, Any]) -> dict[str, str | None]:
     summary_source = summary.get("source") if isinstance(summary.get("source"), dict) else {}
     summary_target = summary.get("target") if isinstance(summary.get("target"), dict) else {}
     return {
-        "source": _string_or_none(evidence_source.get("mode")) or _string_or_none(summary_source.get("mode")),
-        "target": _string_or_none(evidence_target.get("mode")) or _string_or_none(summary_target.get("mode")) or _string_or_none(summary.get("mode")),
+        "source": _string_or_none(evidence_source.get("mode")) or _string_or_none(summary_source.get("mode")) or _string_or_none(payload.get("source_mode")),
+        "target": _string_or_none(evidence_target.get("mode")) or _string_or_none(summary_target.get("mode")) or _string_or_none(summary.get("mode")) or _string_or_none(payload.get("target_mode")) or _string_or_none(payload.get("mode")),
     }
 
 
@@ -2119,6 +2119,8 @@ def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, s
         "kind": "ptcli.doctor.live_readiness",
         "summary_file": summary_file,
         "status": payload.get("status"),
+        "mode": _doctor_summary_mode(args),
+        "target_mode": _doctor_summary_mode(args),
         "ready": payload.get("ready"),
         "live_safe_to_attempt": payload.get("live_safe_to_attempt"),
         "source_tracker": normalize_tracker(args.source_tracker),
@@ -2209,6 +2211,18 @@ def _doctor_summary_inputs(args: argparse.Namespace) -> dict[str, Any]:
         "probe_target": bool(args.probe_target),
         "check_runtime": bool(args.check_runtime),
     }
+
+
+def _doctor_summary_mode(args: argparse.Namespace) -> str:
+    if args.uploaded_torrent_file:
+        return "resumed_uploaded_torrent"
+    if args.uploaded_torrent_id:
+        return "resumed_uploaded_id"
+    if args.target_execute:
+        return "live_upload"
+    if args.package_dir:
+        return "prepared"
+    return "readiness_check"
 
 
 def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any], effective_uploaded_save_path: Any = None) -> dict[str, Any]:

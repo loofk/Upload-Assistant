@@ -53,6 +53,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - `--write-summary` 会写出 `ptcli-run-summary.json`，其中 `resume_state.next_stage` / `resume_state.next_command` 可供 agent 或脚本直接续跑。
 - `summary-check --json` 会暴露 `flow_diagnostics`、`credential_requirements`、`source_mode` 和 `target_mode`；`--print-next-command` 可只输出下一条安全续跑命令；`--print-shell` 可输出 `PTCLI_*` shell 变量（含 `PTCLI_SOURCE_MODE` / `PTCLI_TARGET_MODE`）；`--run-next-command` 可直接执行下一条受限的 `ptcli.py` 续跑命令。
 - `target-upload --write-summary` 的 `summary.mode` 会标明本轮目标侧是 live 上传、按新种 ID 恢复、本地新种文件恢复、仅准备完成或被阻断。
+- `doctor --write-summary` 会写出 `mode` / `target_mode`，区分 live 上传检查、按新种 ID 恢复检查、本地新种文件恢复检查和普通 readiness check。
 - `doctor --check-runtime`、`pipeline --target-execute`、`retorrent --execute` 和需要 qBittorrent 注入的 `target-upload` 会检查 focused ptcli 运行时依赖，legacy Web UI/Discord 依赖不是默认要求。
 
 ## 配置要求

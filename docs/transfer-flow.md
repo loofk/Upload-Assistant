@@ -69,6 +69,7 @@ python3 ptcli.py doctor --from U2 --source-id 60635 --to MTEAM --check-runtime -
 ```
 
 `doctor` 可检查配置、cookie、PTCLI runtime 依赖、qBittorrent 连接、源站详情读取、MTEAM 查重 API、目标准备包、目标 torrent 文件和上传后新种 follow-up 条件。内嵌的 `flow_check` 会暴露 `source_capability`、`target_capabilities` 和 `credential_requirements`，便于自动化脚本定位缺哪个站点凭据。带 `--target-execute` 时会按 live pipeline 语义检查上传后下载、注入、等待条件。
+`doctor --write-summary` 会写出 `mode` / `target_mode`，让脚本直接区分当前检查的是 `live_upload`、`resumed_uploaded_id`、`resumed_uploaded_torrent`、`prepared` 还是普通 `readiness_check`。
 
 ### 源站下载与 qBittorrent 等待
 

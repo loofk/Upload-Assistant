@@ -3616,6 +3616,8 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
             {
                 "schema_version": 1,
                 "kind": "ptcli.doctor.live_readiness",
+                "mode": "live_upload",
+                "target_mode": "live_upload",
                 "ready": True,
                 "live_safe_to_attempt": True,
                 "failed_check_names": [],
@@ -3648,6 +3650,8 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
     assert payload["status"] == "ok"
     assert payload["live_safe_to_attempt"] is True
     assert payload["next_stage"] == "pipeline-live"
+    assert payload["target_mode"] == "live_upload"
+    assert payload["closure_modes"]["target"] == "live_upload"
 
 
 def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> None:
@@ -6087,6 +6091,8 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["schema_version"] == 1
     assert summary_payload["kind"] == "ptcli.doctor.live_readiness"
+    assert summary_payload["mode"] == "live_upload"
+    assert summary_payload["target_mode"] == "live_upload"
     assert summary_payload["artifacts"]["content_path"]["exists"] is True
     assert summary_payload["artifacts"]["package_dir"]["is_dir"] is True
     assert summary_payload["artifacts"]["target_torrent_file"]["is_file"] is True
@@ -6223,6 +6229,8 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["inputs"]["uploaded_torrent_id"] == "999"
+    assert summary_payload["mode"] == "resumed_uploaded_id"
+    assert summary_payload["target_mode"] == "resumed_uploaded_id"
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     assert summary_payload["artifacts"]["download_uploaded_torrent"] is True
     assert summary_payload["artifacts"]["inject_uploaded_torrent"] is True
@@ -6327,6 +6335,8 @@ def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path,
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["inputs"]["uploaded_torrent_file"] == str(uploaded_torrent)
+    assert summary_payload["mode"] == "resumed_uploaded_torrent"
+    assert summary_payload["target_mode"] == "resumed_uploaded_torrent"
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["path"] == str(uploaded_torrent)
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["is_file"] is True
     assert summary_payload["artifacts"]["download_uploaded_torrent"] is True
@@ -6394,6 +6404,8 @@ def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> No
     assert payload["schema_version"] == 1
     assert payload["kind"] == "ptcli.doctor.live_readiness"
     assert payload["summary_file"] == str(summary_path)
+    assert payload["mode"] == "readiness_check"
+    assert payload["target_mode"] == "readiness_check"
     assert payload["requested_source_id"] == source_url
     assert payload["input_source_id"] == source_url
     assert payload["source_torrent_id"] == "60635"
