@@ -3456,6 +3456,7 @@ def _pipeline_requested_actions(args: argparse.Namespace) -> dict[str, bool]:
         "check_runtime": bool(getattr(args, "check_runtime", False)),
         "download_uploaded_torrent": bool(args.download_uploaded_torrent),
         "uploaded_torrent_id": bool(args.uploaded_torrent_id),
+        "uploaded_torrent_file": bool(args.uploaded_torrent_file),
         "inject_uploaded_torrent": bool(args.inject_uploaded_torrent),
         "wait_uploaded_complete": bool(args.wait_uploaded_complete),
         "write_summary": bool(args.write_summary),

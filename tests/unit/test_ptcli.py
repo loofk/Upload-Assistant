@@ -8743,6 +8743,8 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
     assert payload["evidence"]["resume"]["target_package"] is True
     assert payload["evidence"]["resume"]["uploaded_torrent_file"] is True
     assert payload["evidence"]["target"]["duplicate_clean"] is True
+    assert payload["requested_actions"]["uploaded_torrent_file"] is True
+    assert payload["requested_actions"]["uploaded_torrent_id"] is False
     assert payload["effective_actions"]["inject_uploaded_torrent"] is True
     assert payload["effective_actions"]["wait_uploaded_complete"] is True
     assert payload["summary"]["resume"]["used"] is True
@@ -8929,6 +8931,8 @@ async def test_pipeline_reuses_uploaded_torrent_id_for_target_injection(monkeypa
     assert payload["closure"]["target"]["injected"] is True
     assert payload["closure"]["target"]["seeding"] is True
     assert payload["artifacts"]["uploaded_torrent_id"] == "999"
+    assert payload["requested_actions"]["uploaded_torrent_id"] is True
+    assert payload["requested_actions"]["uploaded_torrent_file"] is False
     assert payload["effective_actions"]["download_uploaded_torrent"] is True
     assert payload["effective_actions"]["inject_uploaded_torrent"] is True
     assert payload["effective_actions"]["wait_uploaded_complete"] is True
