@@ -567,10 +567,20 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
     qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(pipeline_result)
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
+    qbit_wait_retry_hints = _summary_qbit_wait_retry_hints(qbit_wait_diagnostics)
     closure_status = pipeline_result.get("closure_status") if isinstance(pipeline_result.get("closure_status"), dict) else _closure_status_summary(pipeline_result)
     resume_commands = pipeline_result.get("resume_commands", [])
     resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands)
     resume_command_audit = _resume_command_audit_fields(resume_commands, resume_state.get("next_command"), resume_state.get("next_command_argv"))
+    automation_fields = _retorrent_automation_fields(
+        status="complete" if not blockers else "blocked",
+        blockers=blockers,
+        qbit_wait_mismatch=bool(qbit_wait_mismatches),
+        qbit_wait_mismatches=qbit_wait_mismatches,
+        qbit_wait_retry_hints=qbit_wait_retry_hints,
+        resume_state=resume_state,
+        resume_command_audit=resume_command_audit,
+    )
     summary_file = pipeline_result.get("summary_file")
     return {
         "status": "complete" if not blockers else "blocked",
@@ -591,6 +601,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
+        "qbit_wait_retry_hints": qbit_wait_retry_hints,
         "artifacts": artifacts,
         "resume_commands": resume_commands,
         "resume_state": resume_state,
@@ -601,6 +612,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "ready": ready,
         "complete": not blockers,
         "blockers": blockers,
+        **automation_fields,
         "next_actions": next_actions,
     }
 
@@ -734,6 +746,8 @@ def _resume_command_audit_fields(resume_commands: Any, next_command: Any, next_c
     next_metadata = _summary_next_command_metadata(next_argv)
     return {
         "next_command_subcommand": next_metadata["subcommand"],
+        "next_command_ready": bool(next_command) and not bool(next_metadata["placeholder"]),
+        "next_command_placeholder": bool(next_metadata["placeholder"]),
         "next_command_run_allowed": bool(next_command and next_metadata["run_allowed"]),
         "next_command_run_blocker": next_metadata["run_blocker"],
         "candidate_commands": candidate_commands,
@@ -745,6 +759,45 @@ def _resume_command_audit_fields(resume_commands: Any, next_command: Any, next_c
         "first_runnable_command_source": first_runnable_command.get("source"),
         "first_runnable_command_subcommand": first_runnable_command.get("subcommand"),
         **_rejected_candidate_command_summary(candidate_commands),
+    }
+
+
+def _retorrent_automation_fields(
+    *,
+    status: str,
+    blockers: list[str],
+    qbit_wait_mismatch: bool,
+    qbit_wait_mismatches: list[str],
+    qbit_wait_retry_hints: dict[str, Any],
+    resume_state: dict[str, Any],
+    resume_command_audit: dict[str, Any],
+) -> dict[str, Any]:
+    next_command = resume_state.get("next_command")
+    payload = {
+        "status": "ok" if status == "complete" else "blocked",
+        "blockers": blockers,
+        "qbit_wait_mismatch": qbit_wait_mismatch,
+        "qbit_wait_mismatches": qbit_wait_mismatches,
+        "qbit_wait_retry_hints": qbit_wait_retry_hints,
+        "next_stage": resume_state.get("next_stage"),
+    }
+    if status == "complete":
+        automation_action = "complete"
+    elif qbit_wait_mismatch:
+        automation_action = "resolve_qbit_wait_mismatch"
+    elif resume_command_audit.get("next_command_placeholder"):
+        automation_action = "fill_command_placeholders"
+    elif next_command and resume_command_audit.get("next_command_run_allowed"):
+        automation_action = "run_next_command"
+    elif next_command and resume_command_audit.get("next_command_ready"):
+        automation_action = "unsupported_next_command"
+    else:
+        automation_action = "resolve_blockers"
+    return {
+        "automation_action": automation_action,
+        "automation_reason": _summary_automation_reason(payload, automation_action, blockers, next_command_run_blocker=resume_command_audit.get("next_command_run_blocker")),
+        "automation_exit_code": 0 if status == "complete" else 1,
+        "should_execute_next_command": automation_action == "run_next_command",
     }
 
 

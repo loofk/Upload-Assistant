@@ -655,6 +655,11 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["qbit_wait_diagnostics"] == {}
     assert payload["qbit_wait_mismatch"] is False
     assert payload["qbit_wait_mismatches"] == []
+    assert payload["qbit_wait_retry_hints"] == {}
+    assert payload["automation_action"] == "complete"
+    assert payload["automation_reason"] == "Summary is complete and no follow-up command is required."
+    assert payload["automation_exit_code"] == 0
+    assert payload["should_execute_next_command"] is False
     assert payload["next_actions"] == ["Retorrent closure is complete; verify the target tracker page and qBittorrent seeding state."]
     assert payload["ready"] is True
     assert payload["closure_status"]["complete"] is True
@@ -702,6 +707,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
     assert payload["candidate_command_count"] == 1
     assert payload["runnable_command_count"] == 1
+    assert payload["next_command_ready"] is False
+    assert payload["next_command_placeholder"] is False
+    assert payload["next_command_run_allowed"] is False
     assert payload["candidate_commands"] == [
         {
             "stage": "resume-uploaded-torrent-download",
@@ -1136,6 +1144,15 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
     assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
     assert payload["next_command_argv"] == ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"]
     assert payload["resume_state"]["blockers"] == ["target.injected", "pipeline did not report ready."]
+    assert payload["candidate_command_count"] == 1
+    assert payload["runnable_command_count"] == 1
+    assert payload["next_command_ready"] is True
+    assert payload["next_command_placeholder"] is False
+    assert payload["next_command_run_allowed"] is True
+    assert payload["automation_action"] == "run_next_command"
+    assert payload["automation_reason"] == "Next generated ptcli command is ready to run for stage resume-uploaded-torrent."
+    assert payload["automation_exit_code"] == 1
+    assert payload["should_execute_next_command"] is True
 
 
 def test_retorrent_execute_blockers_promote_pipeline_stage_details() -> None:
@@ -1406,6 +1423,11 @@ async def test_retorrent_execute_blocks_when_pipeline_qbit_wait_mismatches(monke
     assert payload["qbit_wait_mismatch"] is True
     assert payload["blockers"] == ["qBittorrent wait mismatch: uploaded.requested_hash"]
     assert payload["next_actions"][0].startswith("Resolve the uploaded qBittorrent wait mismatch")
+    assert payload["qbit_wait_retry_hints"]["uploaded"]["retry_recommended"] is True
+    assert payload["automation_action"] == "resolve_qbit_wait_mismatch"
+    assert payload["automation_reason"].startswith("qBittorrent wait evidence mismatched the requested torrent/content: uploaded.requested_hash.")
+    assert payload["automation_exit_code"] == 1
+    assert payload["should_execute_next_command"] is False
 
 
 def test_retorrent_execute_blockers_require_source_injection_artifacts_for_downloaded_mode() -> None:
