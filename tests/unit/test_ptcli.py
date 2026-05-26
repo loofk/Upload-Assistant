@@ -3206,6 +3206,113 @@ def test_summary_check_print_next_command_fails_without_resumable_command(tmp_pa
     assert capsys.readouterr().out == ""
 
 
+def test_summary_check_print_next_argv_outputs_safe_command_argv(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [
+                    {
+                        "stage": "resume-target-upload",
+                        "command": "python3 ptcli.py pipeline --upload-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"],
+                    }
+                ],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
+                        "injection_verified": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-next-argv"])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out) == ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]
+
+
+def test_summary_check_print_next_argv_is_quiet_when_complete(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
+                        "injection_verified": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                        "uploaded_wait_evidence": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-next-argv"])
+
+    assert code == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_summary_check_print_next_argv_fails_without_safe_argv(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.uploaded"],
+                "resume_commands": [{"stage": "resume-target-upload", "command": "python3 ptcli.py inspect --client default --json"}],
+                "resume_state": {
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-next-argv"])
+
+    assert code == 1
+    assert capsys.readouterr().out == ""
+
+
 def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
