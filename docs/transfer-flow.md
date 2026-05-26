@@ -18,7 +18,7 @@
 python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json
 ```
 
-`retorrent --execute` 会编排完整 pipeline：
+`retorrent --execute` 会编排完整 pipeline；`retorrent --dry-run` 输出的 `retorrent-execute` 模板也会显式包含上传后新种下载、注入和等待完成这三个 follow-up flag，便于审计完整闭环意图：
 
 1. 检查源站、目标站、规则确认和本地配置。
 2. 读取源站详情。

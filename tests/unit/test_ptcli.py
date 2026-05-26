@@ -339,6 +339,7 @@ def test_retorrent_plan_accepts_reference_flow_without_reference_blocker(capsys)
     assert "--execute --accept-rules --confirm-upload" in out
     assert "--download-uploaded-torrent" in out
     assert "--inject-uploaded-torrent" in out
+    assert "--wait-uploaded-complete" in out
     assert "--uploaded-qbit-category MTEAM" in out
     assert "--write-summary" in out
 
@@ -434,6 +435,12 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
     assert "--inject-uploaded-torrent" in retorrent_resume_download
     assert '--uploaded-save-path "/downloads/Example"' in retorrent_resume_download
     assert command_argv["retorrent-resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "retorrent"]
+
+    retorrent_execute = commands["retorrent-execute"]
+    assert "--download-uploaded-torrent" in retorrent_execute
+    assert "--inject-uploaded-torrent" in retorrent_execute
+    assert "--wait-uploaded-complete" in retorrent_execute
+    assert command_argv["retorrent-execute"][:3] == ["python3", "ptcli.py", "retorrent"]
 
 
 def test_retorrent_execute_blocked_returns_nonzero(capsys, tmp_path) -> None:
