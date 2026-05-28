@@ -718,6 +718,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "client": args.client,
         "output_options": pipeline_result.get("output_options") if isinstance(pipeline_result.get("output_options"), dict) else _pipeline_output_options(pipeline_args),
         "wait_options": pipeline_result.get("wait_options") if isinstance(pipeline_result.get("wait_options"), dict) else _pipeline_wait_options(pipeline_args),
+        "material_options": pipeline_result.get("material_options") if isinstance(pipeline_result.get("material_options"), dict) else _pipeline_material_options(pipeline_args),
         "pipeline": pipeline_result,
         "closure": closure,
         "closure_audit": closure_audit,
@@ -3569,6 +3570,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         "qbit_options": _pipeline_qbit_options(args),
         "output_options": _pipeline_output_options(args),
         "wait_options": _pipeline_wait_options(args),
+        "material_options": _pipeline_material_options(args),
         "path": effective_content_path,
         "requested_path": args.content_path,
         "source_save_path": args.save_path,
@@ -4407,6 +4409,22 @@ def _pipeline_wait_options(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _pipeline_material_options(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "metadata_file": getattr(args, "metadata_file", None),
+        "imdb_id": getattr(args, "imdb_id", None),
+        "tmdb_id": getattr(args, "tmdb_id", None),
+        "douban_id": getattr(args, "douban_id", None),
+        "douban_url": getattr(args, "douban_url", None),
+        "mediainfo_file": getattr(args, "mediainfo_file", None),
+        "bdinfo_file": getattr(args, "bdinfo_file", None),
+        "screenshot_files": list(getattr(args, "screenshot_file", []) or []),
+        "screenshot_count": getattr(args, "screenshot_count", None),
+        "image_host": getattr(args, "image_host", None),
+        "image_host_file": getattr(args, "image_host_file", None),
+    }
+
+
 def _pipeline_stage_status(stage: dict[str, Any]) -> dict[str, Any]:
     return {
         "stage": str(stage.get("stage") or "unknown"),
@@ -4582,6 +4600,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "qbit_options": payload.get("qbit_options"),
         "output_options": payload.get("output_options"),
         "wait_options": payload.get("wait_options"),
+        "material_options": payload.get("material_options"),
         "path": payload.get("path"),
         "source_save_path": payload.get("source_save_path"),
         "target_torrent_file": payload.get("target_torrent_file"),
@@ -4702,6 +4721,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     base_dir_args = ["--base-dir", str(payload["base_dir"])] if payload.get("base_dir") else []
     qbit_options = payload.get("qbit_options") if isinstance(payload.get("qbit_options"), dict) else {}
     output_options = payload.get("output_options") if isinstance(payload.get("output_options"), dict) else {}
+    material_options = payload.get("material_options") if isinstance(payload.get("material_options"), dict) else {}
     source_qbit_options = qbit_options.get("source") if isinstance(qbit_options.get("source"), dict) else {}
     uploaded_qbit_options = qbit_options.get("uploaded") if isinstance(qbit_options.get("uploaded"), dict) else {}
     source_output_dir = output_options.get("source_output_dir") or "./tmp/source"
@@ -4836,7 +4856,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                     "--client",
                     client,
                     *path_args,
-                    *(_target_package_material_resume_args(requested_actions, effective_actions)),
+                    *(_target_package_material_resume_args(requested_actions, effective_actions, material_options)),
                     "--check-dupes",
                     "--prepare-target",
                     "--target-output-dir",
@@ -5079,19 +5099,38 @@ def _qbit_resume_args(options: dict[str, Any], *, prefix: str) -> list[str]:
     return args
 
 
-def _target_package_material_resume_args(requested_actions: dict[str, Any], effective_actions: dict[str, Any]) -> list[str]:
+def _target_package_material_resume_args(requested_actions: dict[str, Any], effective_actions: dict[str, Any], material_options: dict[str, Any]) -> list[str]:
     args: list[str] = []
+    include_metadata = bool(requested_actions.get("enrich_metadata") or effective_actions.get("enrich_metadata") or requested_actions.get("fetch_ptgen") or effective_actions.get("fetch_ptgen"))
     if requested_actions.get("enrich_metadata") or effective_actions.get("enrich_metadata"):
         args.append("--enrich-metadata")
     if requested_actions.get("fetch_ptgen") or effective_actions.get("fetch_ptgen"):
         args.append("--fetch-ptgen")
+    if include_metadata:
+        _append_option(args, "--metadata-file", material_options.get("metadata_file"))
+        _append_option(args, "--imdb-id", material_options.get("imdb_id"))
+        _append_option(args, "--tmdb-id", material_options.get("tmdb_id"))
+        _append_option(args, "--douban-id", material_options.get("douban_id"))
+        _append_option(args, "--douban-url", material_options.get("douban_url"))
+    _append_option(args, "--mediainfo-file", material_options.get("mediainfo_file"))
+    _append_option(args, "--bdinfo-file", material_options.get("bdinfo_file"))
     if requested_actions.get("generate_mediainfo") or effective_actions.get("generate_mediainfo"):
         args.append("--generate-mediainfo")
+    for screenshot_file in material_options.get("screenshot_files") if isinstance(material_options.get("screenshot_files"), list) else []:
+        _append_option(args, "--screenshot-file", screenshot_file)
     if requested_actions.get("generate_screenshots") or effective_actions.get("generate_screenshots"):
         args.append("--generate-screenshots")
+        _append_option(args, "--screenshot-count", material_options.get("screenshot_count"))
+    _append_option(args, "--image-host-file", material_options.get("image_host_file"))
     if requested_actions.get("upload_screenshots") or effective_actions.get("upload_screenshots"):
         args.append("--upload-screenshots")
+        _append_option(args, "--image-host", material_options.get("image_host"))
     return args
+
+
+def _append_option(args: list[str], option: str, value: Any) -> None:
+    if value is not None and value != "":
+        args.extend([option, str(value)])
 
 
 def _ptcli_command(args: list[str]) -> str:

@@ -9101,6 +9101,14 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
     monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    metadata_file = tmp_path / "metadata.json"
+    await asyncio.to_thread(metadata_file.write_text, json.dumps({"tmdb_id": 999, "douban_id": "1291546"}), encoding="utf-8")
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    await asyncio.to_thread(mediainfo.write_text, "General\nComplete name : Name.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    await asyncio.to_thread(screenshot.write_bytes, b"png")
+    image_host_file = tmp_path / "image-host-uploads.json"
+    await asyncio.to_thread(image_host_file.write_text, json.dumps([{"url": "https://img.example/screen-1.png"}]), encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args(
         [
@@ -9115,10 +9123,26 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
             str(tmp_path),
             "--path",
             "/downloads/Name",
+            "--enrich-metadata",
+            "--metadata-file",
+            str(metadata_file),
             "--check-dupes",
             "--prepare-target",
             "--target-output-dir",
             str(tmp_path / "target"),
+            "--mediainfo-file",
+            str(mediainfo),
+            "--generate-mediainfo",
+            "--screenshot-file",
+            str(screenshot),
+            "--generate-screenshots",
+            "--screenshot-count",
+            "2",
+            "--image-host-file",
+            str(image_host_file),
+            "--upload-screenshots",
+            "--image-host",
+            "ptpimg",
             "--accept-rules",
             "--write-summary",
             "--json",
@@ -9168,6 +9192,12 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["artifacts"]["target_package_files"] == target_stage["result"]["files"]
     assert summary_payload["artifacts"]["target_materials"]["ready"] is False
     assert summary_payload["artifacts"]["target_materials_ready"] is False
+    assert summary_payload["material_options"]["metadata_file"] == str(metadata_file)
+    assert summary_payload["material_options"]["mediainfo_file"] == str(mediainfo)
+    assert summary_payload["material_options"]["screenshot_files"] == [str(screenshot)]
+    assert summary_payload["material_options"]["screenshot_count"] == 2
+    assert summary_payload["material_options"]["image_host"] == "ptpimg"
+    assert summary_payload["material_options"]["image_host_file"] == str(image_host_file)
     assert summary_payload["resume_state"]["complete"] is False
     assert summary_payload["resume_state"]["resume_available"] is True
     assert summary_payload["resume_state"]["next_stage"] == "resume-target-package"
@@ -9179,6 +9209,15 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "--prepare-target" in resume_commands["resume-target-package"]
     assert "--check-dupes" in resume_commands["resume-target-package"]
     assert "--target-output-dir" in resume_commands["resume-target-package"]
+    assert f"--metadata-file {shlex.quote(str(metadata_file))}" in resume_commands["resume-target-package"]
+    assert f"--mediainfo-file {shlex.quote(str(mediainfo))}" in resume_commands["resume-target-package"]
+    assert "--generate-mediainfo" in resume_commands["resume-target-package"]
+    assert f"--screenshot-file {shlex.quote(str(screenshot))}" in resume_commands["resume-target-package"]
+    assert "--generate-screenshots" in resume_commands["resume-target-package"]
+    assert "--screenshot-count 2" in resume_commands["resume-target-package"]
+    assert f"--image-host-file {shlex.quote(str(image_host_file))}" in resume_commands["resume-target-package"]
+    assert "--upload-screenshots" in resume_commands["resume-target-package"]
+    assert "--image-host ptpimg" in resume_commands["resume-target-package"]
     assert "resume-target-upload" not in resume_commands
     assert summary_payload["next_actions"]
 
