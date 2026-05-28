@@ -690,6 +690,12 @@ def _mteam_description_material_lines(materials: dict[str, Any]) -> list[str]:
     lines.append(f"MediaInfo: {'ready' if mediainfo.get('ready') else 'missing'}")
     lines.append(f"BDInfo: {'ready' if bdinfo.get('ready') else 'missing'}")
     lines.append(f"Screenshots: {int(screenshots.get('count', 0) or 0)} local file(s)")
+    mediainfo_block = _mteam_description_material_text_block("MediaInfo", mediainfo)
+    bdinfo_block = _mteam_description_material_text_block("BDInfo", bdinfo)
+    if mediainfo_block:
+        lines.extend(["", *mediainfo_block])
+    if bdinfo_block:
+        lines.extend(["", *bdinfo_block])
     items = image_hosts.get("items") if isinstance(image_hosts.get("items"), list) else []
     if items:
         lines.append("")
@@ -697,7 +703,7 @@ def _mteam_description_material_lines(materials: dict[str, Any]) -> list[str]:
         for item in items:
             if not isinstance(item, dict):
                 continue
-            raw_url = str(item.get("raw_url") or "")
+            raw_url = str(item.get("raw_url") or item.get("url") or "")
             img_url = str(item.get("img_url") or raw_url)
             web_url = str(item.get("web_url") or raw_url)
             if img_url and web_url:
@@ -705,6 +711,26 @@ def _mteam_description_material_lines(materials: dict[str, Any]) -> list[str]:
     else:
         lines.append("Image host uploads: missing")
     return lines
+
+
+def _mteam_description_material_text_block(label: str, asset: dict[str, Any]) -> list[str]:
+    if not asset.get("ready") or not asset.get("path"):
+        return []
+    text = _read_material_text_excerpt(str(asset["path"]))
+    if not text:
+        return []
+    return [f"[b]{label}[/b]", "[quote]", text, "[/quote]"]
+
+
+def _read_material_text_excerpt(path: str, limit: int = 20000) -> str:
+    try:
+        text = Path(path).expanduser().read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit].rstrip()}\n\n[ptcli truncated material text at {limit} characters]"
 
 
 def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[str, Any] | None, content_path: str | None, material_files: dict[str, Any] | None = None) -> dict[str, Any]:

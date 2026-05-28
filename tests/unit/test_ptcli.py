@@ -11427,7 +11427,38 @@ def test_mteam_description_draft_includes_material_screenshots(tmp_path) -> None
 
     assert "[b]Media materials[/b]" in description
     assert "MediaInfo: ready" in description
+    assert "[b]MediaInfo[/b]" in description
+    assert "Complete name : Example.mkv" in description
     assert "[url=https://img.example/page][img]https://img.example/thumb.png[/img][/url]" in description
+
+
+def test_mteam_description_draft_accepts_url_only_image_host_items(tmp_path) -> None:
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(json.dumps([{"url": "https://img.example/screen-1.png"}]), encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "torrenthash": "a" * 40,
+    }
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
+    materials = build_mteam_materials_manifest(
+        preview,
+        source_info,
+        "/downloads/Example",
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
+
+    description = build_mteam_description_draft(preview["meta_draft"], source_info, materials=materials)
+
+    assert "[url=https://img.example/screen-1.png][img]https://img.example/screen-1.png[/img][/url]" in description
 
 
 def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
