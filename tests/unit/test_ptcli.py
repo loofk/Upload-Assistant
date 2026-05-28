@@ -11707,6 +11707,20 @@ async def test_upload_screenshot_image_hosts_writes_upload_json(tmp_path) -> Non
     assert await asyncio.to_thread(Path(result["image_host_file"]).exists)
 
 
+@pytest.mark.asyncio
+async def test_upload_screenshot_image_hosts_blocks_legacy_imgbox_without_extra_dependency(tmp_path) -> None:
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+
+    result = await upload_screenshot_image_hosts({"DEFAULT": {"img_host_1": "imgbox"}}, [str(screenshot)], str(tmp_path / "materials"))
+
+    assert result["status"] == "blocked"
+    assert result["host"] == "imgbox"
+    assert result["count"] == 0
+    assert "pyimgbox" in result["blockers"][0]
+    assert await asyncio.to_thread(Path(result["image_host_file"]).exists)
+
+
 def test_normalize_metadata_overrides_accepts_urls_and_ids(tmp_path) -> None:
     metadata_file = tmp_path / "metadata.json"
     metadata_file.write_text(json.dumps({"imdb": "tt1234567", "tmdb": "999", "douban": "https://movie.douban.com/subject/1291546/"}), encoding="utf-8")

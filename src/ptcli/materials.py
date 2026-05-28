@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import aiofiles
+import httpx
 from pymediainfo import MediaInfo
-
-from src.uploadscreens import upload_image_task
 
 VIDEO_EXTENSIONS = {
     ".avi",
@@ -78,7 +80,7 @@ async def upload_screenshot_image_hosts(
     host = image_host or _default_image_host(config)
     if not host:
         return {"status": "blocked", "host": None, "count": 0, "items": [], "blockers": ["No image host was provided and DEFAULT.img_host_1 is empty."]}
-    upload = uploader or upload_image_task
+    upload = uploader or _focused_upload_image_task
     items = []
     blockers = []
     for index, screenshot in enumerate(screenshot_files, start=1):
@@ -300,6 +302,190 @@ def _default_image_host(config: dict[str, Any]) -> str | None:
         if value:
             return str(value)
     return None
+
+
+async def _focused_upload_image_task(args: list[Any]) -> dict[str, Any]:
+    image, img_host, config, _meta = args
+    host = str(img_host or "").strip().lower()
+    if not host:
+        return {"status": "failed", "reason": "No image host was supplied."}
+    if host == "ptpimg":
+        return await _upload_ptpimg(str(image), config)
+    if host in {"imgbb", "dalexni"}:
+        endpoint = "https://api.imgbb.com/1/upload" if host == "imgbb" else "https://dalexni.com/1/upload"
+        api_key = _default_config_value(config, f"{host}_api")
+        return await _upload_chevereto_base64(str(image), endpoint, api_key, key_field="key", image_field="image", host_name=host)
+    if host in {"ptscreens", "utppm", "onlyimage", "lensdump", "passtheimage"}:
+        return await _upload_chevereto_api(str(image), host, config)
+    if host == "zipline":
+        return await _upload_zipline(str(image), config)
+    if host == "sharex":
+        return await _upload_sharex(str(image), config)
+    if host == "pixhost":
+        return await _upload_pixhost(str(image))
+    if host == "imgbox":
+        return {
+            "status": "failed",
+            "reason": "imgbox upload requires the legacy pyimgbox dependency; choose an API image host for focused ptcli or supply --image-host-file.",
+        }
+    return {"status": "failed", "reason": f"Unsupported focused ptcli image host: {host}"}
+
+
+async def _upload_ptpimg(image: str, config: dict[str, Any]) -> dict[str, Any]:
+    api_key = _default_config_value(config, "ptpimg_api")
+    if not api_key:
+        return {"status": "failed", "reason": "Missing ptpimg API key in config DEFAULT.ptpimg_api"}
+    try:
+        async with aiofiles.open(image, "rb") as file:
+            files = {"file-upload[0]": (os.path.basename(image), await file.read())}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://ptpimg.me/upload.php",
+                headers={"referer": "https://ptpimg.me/index.php"},
+                data={"format": "json", "api_key": api_key},
+                files=files,
+                timeout=60,
+            )
+        response.raise_for_status()
+        payload = response.json()
+    except httpx.TimeoutException:
+        return {"status": "failed", "reason": "Request timed out"}
+    except (httpx.RequestError, ValueError) as exc:
+        return {"status": "failed", "reason": f"ptpimg upload failed: {exc}"}
+    if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict) or not payload[0].get("code"):
+        return {"status": "failed", "reason": "Invalid JSON response from ptpimg"}
+    code = payload[0]["code"]
+    ext = payload[0].get("ext") or "png"
+    url = f"https://ptpimg.me/{code}.{ext}"
+    return {"status": "success", "img_url": url, "raw_url": url, "web_url": url, "local_file_path": image}
+
+
+async def _upload_chevereto_api(image: str, host: str, config: dict[str, Any]) -> dict[str, Any]:
+    endpoints = {
+        "ptscreens": ("https://ptscreens.com/api/1/upload", "ptscreens_api", "source", "X-API-Key"),
+        "utppm": ("https://utp.pm/api/1/upload", "utppm_api", "source", "X-API-Key"),
+        "onlyimage": ("https://onlyimage.org/api/1/upload", "onlyimage_api", "image", "X-API-Key"),
+        "lensdump": ("https://lensdump.com/api/1/upload", "lensdump_api", "image", "X-API-Key"),
+        "passtheimage": ("https://passtheima.ge/api/1/upload", "passtheima_ge_api", "source", "X-API-Key"),
+    }
+    endpoint, key_name, image_field, header_name = endpoints[host]
+    api_key = _default_config_value(config, key_name)
+    if not api_key:
+        return {"status": "failed", "reason": f"Missing {host} API key in config DEFAULT.{key_name}"}
+    async with aiofiles.open(image, "rb") as file:
+        encoded = base64.b64encode(await file.read()).decode("utf8")
+    return await _post_chevereto_payload(endpoint, {image_field: encoded}, {header_name: api_key}, host, image)
+
+
+async def _upload_chevereto_base64(image: str, endpoint: str, api_key: str | None, *, key_field: str, image_field: str, host_name: str) -> dict[str, Any]:
+    if not api_key:
+        return {"status": "failed", "reason": f"Missing {host_name} API key in config DEFAULT.{host_name}_api"}
+    async with aiofiles.open(image, "rb") as file:
+        encoded = base64.b64encode(await file.read()).decode("utf8")
+    return await _post_chevereto_payload(endpoint, {key_field: api_key, image_field: encoded}, {}, host_name, image)
+
+
+async def _post_chevereto_payload(endpoint: str, data: dict[str, str], headers: dict[str, str], host_name: str, image: str) -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(endpoint, data=data, headers=headers, timeout=60)
+        payload = response.json()
+    except httpx.TimeoutException:
+        return {"status": "failed", "reason": "Request timed out"}
+    except (httpx.RequestError, ValueError) as exc:
+        return {"status": "failed", "reason": f"{host_name} upload failed: {exc}"}
+    if response.status_code not in (200, 201):
+        return {"status": "failed", "reason": f"{host_name} upload failed with status code {response.status_code}"}
+    urls = _chevereto_urls(payload)
+    if not urls:
+        return {"status": "failed", "reason": f"No valid URLs returned from {host_name}"}
+    return {"status": "success", **urls, "local_file_path": image}
+
+
+async def _upload_zipline(image: str, config: dict[str, Any]) -> dict[str, Any]:
+    url = _default_config_value(config, "zipline_url")
+    api_key = _default_config_value(config, "zipline_api_key")
+    if not url or not api_key:
+        return {"status": "failed", "reason": "Missing Zipline URL or API key in config DEFAULT.zipline_url/zipline_api_key"}
+    try:
+        async with aiofiles.open(image, "rb") as file:
+            files = {"file": (os.path.basename(image), await file.read())}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, files=files, headers={"Authorization": api_key}, timeout=60)
+        payload = response.json()
+    except httpx.TimeoutException:
+        return {"status": "failed", "reason": "Request timed out"}
+    except (httpx.RequestError, ValueError) as exc:
+        return {"status": "failed", "reason": f"zipline upload failed: {exc}"}
+    if response.status_code not in (200, 201) or not isinstance(payload, dict) or not payload.get("files"):
+        return {"status": "failed", "reason": "No valid URL returned from Zipline"}
+    url = str(payload["files"][0])
+    return {"status": "success", "img_url": url, "raw_url": url.replace("/u/", "/r/"), "web_url": url.replace("/u/", "/r/"), "local_file_path": image}
+
+
+async def _upload_sharex(image: str, config: dict[str, Any]) -> dict[str, Any]:
+    url = _default_config_value(config, "sharex_url") or "https://img.digitalcore.club/api/upload"
+    api_key = _default_config_value(config, "sharex_api_key")
+    if not api_key:
+        return {"status": "failed", "reason": "Missing ShareX image host token in config DEFAULT.sharex_api_key"}
+    try:
+        async with aiofiles.open(image, "rb") as file:
+            files = {"file": (os.path.basename(image), await file.read())}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers={"Authorization": api_key}, data={"title": "Upload-Assistant screenshot"}, files=files, timeout=60)
+        payload = response.json()
+    except httpx.TimeoutException:
+        return {"status": "failed", "reason": "Request timed out"}
+    except (httpx.RequestError, ValueError) as exc:
+        return {"status": "failed", "reason": f"sharex upload failed: {exc}"}
+    link = payload.get("data", {}).get("link") if isinstance(payload.get("data"), dict) else None
+    link = link or payload.get("link")
+    if response.status_code not in (200, 201) or not link:
+        return {"status": "failed", "reason": "No link in sharex response"}
+    return {"status": "success", "img_url": link, "raw_url": link, "web_url": link, "local_file_path": image}
+
+
+async def _upload_pixhost(image: str) -> dict[str, Any]:
+    try:
+        async with aiofiles.open(image, "rb") as file:
+            files = {"img": ("file-upload[0]", await file.read())}
+        async with httpx.AsyncClient() as client:
+            response = await client.post("https://api.pixhost.to/images", data={"content_type": "0", "max_th_size": "350"}, files=files, timeout=60)
+        payload = response.json()
+    except httpx.TimeoutException:
+        return {"status": "failed", "reason": "Request timed out"}
+    except (httpx.RequestError, ValueError) as exc:
+        return {"status": "failed", "reason": f"pixhost upload failed: {exc}"}
+    if response.status_code != 200 or not isinstance(payload, dict) or not payload.get("th_url"):
+        return {"status": "failed", "reason": "Invalid response from pixhost"}
+    img_url = payload["th_url"]
+    raw_url = str(img_url).replace("https://t", "https://img").replace("/thumbs/", "/images/")
+    return {"status": "success", "img_url": img_url, "raw_url": raw_url, "web_url": payload.get("show_url") or raw_url, "local_file_path": image}
+
+
+def _chevereto_urls(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload.get("image") if isinstance(payload.get("image"), dict) else None
+    if not isinstance(data, dict):
+        return None
+    image = data.get("image") if isinstance(data.get("image"), dict) else {}
+    medium = data.get("medium") if isinstance(data.get("medium"), dict) else {}
+    thumb = data.get("thumb") if isinstance(data.get("thumb"), dict) else {}
+    img_url = medium.get("url") or thumb.get("url") or image.get("url") or data.get("url")
+    raw_url = image.get("url") or data.get("url")
+    web_url = data.get("url_viewer") or raw_url
+    if not img_url or not raw_url or not web_url:
+        return None
+    return {"img_url": img_url, "raw_url": raw_url, "web_url": web_url}
+
+
+def _default_config_value(config: dict[str, Any], key: str) -> str | None:
+    default = config.get("DEFAULT", {}) if isinstance(config, dict) else {}
+    if not isinstance(default, dict):
+        return None
+    value = default.get(key)
+    return str(value).strip() if value else None
 
 
 def _hidden_path(path: Path, root: Path) -> bool:
