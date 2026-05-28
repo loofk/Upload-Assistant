@@ -3541,6 +3541,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
 
     ready = all(stage.get("ok", False) for stage in stages)
     blockers = _pipeline_stage_blockers(stages) if _pipeline_has_action(args) and not ready else []
+    if args.prepare_target or args.upload_target or args.target_execute:
+        _extend_unique_string(blockers, _pipeline_target_material_blockers(stages))
     closure = _pipeline_closure(stages, effective_content_path, effective_source_torrent_hash, effective_target_torrent_file)
     if live_target_upload and closure.get("complete") is not True:
         _extend_unique_string(blockers, _string_list(closure.get("blockers")))
@@ -4096,6 +4098,23 @@ def _pipeline_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:
         reason = stage.get("error") or stage.get("message") or "stage did not complete."
         blockers.append(f"{stage_name}: {reason}")
         blockers.extend(f"{stage_name}: {detail}" for detail in _stage_result_blockers(stage_name, stage.get("result")))
+    return blockers
+
+
+def _pipeline_target_material_blockers(stages: list[dict[str, Any]]) -> list[str]:
+    target_prepare = _find_stage(stages, "target-prepare")
+    result = target_prepare.get("result") if isinstance(target_prepare, dict) else None
+    if not isinstance(result, dict):
+        return []
+    materials = _target_materials_summary(result)
+    if materials.get("ready"):
+        return []
+    warnings = _string_list(materials.get("warnings"))
+    missing = _string_list(materials.get("missing"))
+    blockers: list[str] = []
+    for index, name in enumerate(missing):
+        message = warnings[index] if index < len(warnings) else "MTEAM target material is missing."
+        blockers.append(f"target.materials.{name}: {message}")
     return blockers
 
 
@@ -5203,6 +5222,14 @@ def _pipeline_stage_blocker_next_action(blocker: str) -> str:
         return "Review the tracker rules, then re-run with --accept-rules only if the transfer complies with the source and target site rules."
     if "target-prepare" in blocker and "duplicate_check" in blocker:
         return "Run target duplicate checking with --check-dupes and stop if MTEAM reports an existing torrent."
+    if blocker.startswith("target.materials.metadata."):
+        return "Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description, then regenerate the MTEAM target package."
+    if blocker.startswith("target.materials.assets.mediainfo_or_bdinfo"):
+        return "Generate or provide MediaInfo/BDInfo, then regenerate the MTEAM target package."
+    if blocker.startswith("target.materials.assets.screenshots"):
+        return "Generate or provide screenshots, then regenerate the MTEAM target package."
+    if blocker.startswith("target.materials.assets.image_host_uploads"):
+        return "Upload screenshots to the configured image host, then regenerate the MTEAM target package."
     return f"Fix {blocker}"
 
 

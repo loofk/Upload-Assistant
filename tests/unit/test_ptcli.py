@@ -9245,6 +9245,9 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["artifacts"]["target_package_files"] == target_stage["result"]["files"]
     assert summary_payload["artifacts"]["target_materials"]["ready"] is False
     assert summary_payload["artifacts"]["target_materials_ready"] is False
+    assert summary_payload["status"] == "blocked"
+    assert any("target.materials.metadata.ptgen_description" in blocker for blocker in summary_payload["blockers"])
+    assert any("PTGen/Douban description" in action for action in summary_payload["next_actions"])
     assert summary_payload["material_options"]["metadata_file"] == str(metadata_file)
     assert summary_payload["material_options"]["mediainfo_file"] == str(mediainfo)
     assert summary_payload["material_options"]["screenshot_files"] == [str(screenshot)]
