@@ -283,7 +283,7 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
     field_checks = _mteam_upload_field_checks(form_fields)
     material_checks = _mteam_upload_material_checks(description_summary, description_length, materials=materials)
     blockers = [f"{check['name']}: {check['message']}" for check in field_checks if not check["ok"]]
-    enforce_materials = require_materials and _mteam_material_gate_applicable(materials)
+    enforce_materials = require_materials
     blockers.extend(f"{check['name']}: {check['message']}" for check in material_checks if not check["ok"] and (enforce_materials or check["name"].startswith("payload.description_")))
     blockers.extend(torrent_blockers)
 
@@ -1356,19 +1356,6 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
                     )
                 )
     return material_checks
-
-
-def _mteam_material_gate_applicable(materials: dict[str, Any]) -> bool:
-    metadata = materials.get("metadata") if isinstance(materials.get("metadata"), dict) else {}
-    if metadata.get("tmdb_id") or metadata.get("douban_id") or metadata.get("douban_url") or metadata.get("ptgen_description_length"):
-        return True
-    assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
-    for key in ("mediainfo", "bdinfo", "screenshots", "image_hosts"):
-        asset = assets.get(key) if isinstance(assets.get(key), dict) else {}
-        if asset.get("path") or asset.get("count") or asset.get("items") or asset.get("files"):
-            return True
-    return False
-
 
 def _mteam_material_mediainfo_source(materials: dict[str, Any]) -> str | None:
     assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}

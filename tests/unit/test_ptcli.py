@@ -175,6 +175,7 @@ def write_material_ready_mteam_package(source_info: dict, tmp_path: Path, conten
         "tmdb_id": source_info.get("tmdb_id") or 999,
         "douban_id": source_info.get("douban_id") or "1291546",
         "douban_url": source_info.get("douban_url") or "https://movie.douban.com/subject/1291546/",
+        "ptgen_description": source_info.get("ptgen_description") or "◎译　　名　示例电影\n◎简　　介　示例简介",
     }
     material_dir = tmp_path / "material-fixtures" / str(ready_source.get("torrent_id", "unknown"))
     material_dir.mkdir(parents=True, exist_ok=True)
@@ -6470,8 +6471,7 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, str(content_path), str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path=str(content_path), output_dir=str(tmp_path / "target"))
 
     payload = build_doctor_check(
         config,
@@ -6527,7 +6527,7 @@ def test_doctor_auto_enables_uploaded_torrent_followup_for_live_closure(tmp_path
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path=str(content_path), output_dir=str(tmp_path / "target"))
 
     payload = build_doctor_check(
         config,
@@ -6574,7 +6574,7 @@ def test_doctor_infers_uploaded_save_path_from_package_content(tmp_path) -> None
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path=str(content_path), output_dir=str(tmp_path / "target"))
 
     payload = build_doctor_check(
         config,
@@ -6750,7 +6750,7 @@ def test_doctor_accepts_resume_files_for_live_closure(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path=str(content_path), output_dir=str(tmp_path / "target"))
 
     payload = build_doctor_check(
         config,
@@ -6944,7 +6944,7 @@ def test_doctor_runtime_check_blocks_live_safe_when_requested(monkeypatch, tmp_p
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path=str(content_path), output_dir=str(tmp_path / "target"))
     original_find_spec = ptcli_doctor.importlib.util.find_spec
 
     def fake_find_spec(module: str):
@@ -7063,7 +7063,7 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path=str(content_path), output_dir=str(tmp_path / "target"))
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     code = main(
@@ -11870,8 +11870,7 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
@@ -12056,8 +12055,7 @@ def test_mteam_upload_preflight_reports_torrent_safety_metadata(tmp_path) -> Non
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     content = tmp_path / "Example.mkv"
     content.write_bytes(b"content")
     source_torrent = tmp_path / "source.torrent"
@@ -12092,8 +12090,7 @@ def test_mteam_upload_preflight_blocks_unsafe_target_torrent(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     content = tmp_path / "Example.mkv"
     content.write_bytes(b"content")
     unsafe_torrent = tmp_path / "unsafe.torrent"
@@ -12121,8 +12118,7 @@ def test_mteam_upload_preflight_blocks_extra_torrent_metadata(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     safe_torrent = Path(make_mteam_safe_torrent(tmp_path, "unsafe-extra"))
     torrent = Torrent.read(str(safe_torrent), validate=False)
     torrent.metainfo["announce-list"] = [["https://source.example/passkey/announce"]]
@@ -12151,8 +12147,7 @@ def test_mteam_upload_preflight_allows_execute_when_payload_is_ready(tmp_path) -
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
@@ -12175,8 +12170,7 @@ async def test_mteam_live_upload_requires_confirmation(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     result = await upload_mteam_from_package({}, package["package_dir"], str(torrent_file), execute=True)
@@ -12198,8 +12192,7 @@ async def test_mteam_live_upload_blocks_unsafe_torrent_before_uploader(tmp_path)
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     unsafe_torrent = tmp_path / "unsafe.torrent"
     unsafe_torrent.write_bytes(b"d4:infod")
 
@@ -12232,8 +12225,7 @@ async def test_mteam_live_upload_uses_injected_uploader(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     async def fake_uploader(_config, package_dir, torrent_file_path):
@@ -12269,8 +12261,7 @@ async def test_mteam_live_upload_can_download_uploaded_torrent(tmp_path) -> None
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     async def fake_uploader(_config, _package_dir, _torrent_file_path):
@@ -12312,8 +12303,7 @@ async def test_mteam_live_upload_reports_missing_uploaded_torrent_id(tmp_path) -
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     async def fake_uploader(_config, _package_dir, _torrent_file_path):
@@ -12380,7 +12370,7 @@ def test_mteam_upload_payload_summary_blocks_invalid_optional_urls(tmp_path) -> 
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
@@ -12426,8 +12416,7 @@ def test_mteam_upload_payload_summary_writes_payload_file(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file), write_payload=True)
@@ -12461,6 +12450,34 @@ def test_mteam_upload_preflight_execute_requires_ready_materials(tmp_path) -> No
     assert preflight["status"] == "blocked"
     assert preflight["upload_payload"]["materials_ready_required"] is True
     assert any("materials.assets.mediainfo_or_bdinfo" in blocker for blocker in preflight["upload_payload"]["blockers"])
+
+
+def test_mteam_upload_preflight_execute_requires_materials_even_when_none_supplied(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": None,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    assert preflight["upload_payload"]["materials_ready_required"] is True
+    blockers = preflight["upload_payload"]["blockers"]
+    assert any("materials.metadata.imdb" in blocker for blocker in blockers)
+    assert any("materials.metadata.tmdb" in blocker for blocker in blockers)
+    assert any("materials.metadata.douban" in blocker for blocker in blockers)
+    assert any("materials.metadata.ptgen_description" in blocker for blocker in blockers)
+    assert any("materials.assets.screenshots" in blocker for blocker in blockers)
+    assert any("materials.assets.image_host_uploads" in blocker for blocker in blockers)
 
 
 def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> None:
@@ -12560,8 +12577,7 @@ def test_target_upload_execute_requires_confirmation_before_config_load(tmp_path
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     code = main(["target-upload", "--config", "/missing/config.py", "--package-dir", package["package_dir"], "--torrent-file", str(torrent_file), "--execute", "--json"])
@@ -12584,8 +12600,7 @@ def test_target_upload_execute_requires_uploaded_torrent_followup_before_config_
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     code = main(["target-upload", "--config", "/missing/config.py", "--package-dir", package["package_dir"], "--torrent-file", str(torrent_file), "--execute", "--confirm-upload", "--json"])
@@ -12643,8 +12658,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    stages = mteam_ready_stages()
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], stages, "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
     uploaded_path = tmp_path / "MTEAM-999.torrent"
@@ -12868,7 +12882,7 @@ async def test_target_upload_execute_blocks_on_fresh_duplicate_check(monkeypatch
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path)
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
 

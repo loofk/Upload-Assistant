@@ -55,7 +55,7 @@ def build_doctor_check(
     checks.append(_confirmation_check(target_execute, confirm_upload))
     checks.append(_target_torrent_check(target_torrent_file, required=bool((package_dir or target_execute) and not uploaded_torrent_file and not uploaded_torrent_id)))
     checks.append(_torrent_file_check("uploaded_torrent_file", uploaded_torrent_file, required=False))
-    package_preflight = _package_preflight(package_dir, target_execute, target_torrent_file or uploaded_torrent_file, recover_uploaded=bool(uploaded_torrent_id))
+    package_preflight = _package_preflight(package_dir, target_execute, target_torrent_file or uploaded_torrent_file, recover_uploaded=bool(uploaded_torrent_id or uploaded_torrent_file))
     package_content_path = _package_content_path(package_preflight)
     effective_uploaded_save_path = uploaded_save_path or content_path or package_content_path
     if package_preflight:
@@ -227,12 +227,12 @@ def _package_preflight(package_dir: str | None, target_execute: bool, target_tor
 
 
 def _uploaded_recovery_preflight(preflight: dict[str, Any]) -> dict[str, Any]:
-    blockers = [blocker for blocker in _string_list(preflight.get("blockers")) if blocker != "MTEAM upload torrent file is required."]
+    blockers = [blocker for blocker in _string_list(preflight.get("blockers")) if blocker != "MTEAM upload torrent file is required." and not blocker.startswith("materials.")]
     upload_payload = preflight.get("upload_payload")
     if isinstance(upload_payload, dict):
         upload_payload = {
             **upload_payload,
-            "blockers": [blocker for blocker in _string_list(upload_payload.get("blockers")) if blocker != "MTEAM upload torrent file is required."],
+            "blockers": [blocker for blocker in _string_list(upload_payload.get("blockers")) if blocker != "MTEAM upload torrent file is required." and not blocker.startswith("materials.")],
         }
     return {
         **preflight,
