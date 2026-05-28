@@ -7,7 +7,7 @@
 `ptcli.py` 的目标是在盒子上完成可审计、可恢复、对 AI 友好的转种闭环：
 
 ```text
-源站详情/源种 -> qBittorrent 下载或匹配 -> 目标站查重/准备 -> MTEAM 上传 -> 下载新种 -> qBittorrent 注入/等待完成
+源站详情/源种 -> qBittorrent 下载或匹配 -> IMDb/TMDb/豆瓣/MediaInfo/截图材料 -> 目标站查重/准备 -> MTEAM 上传 -> 下载新种 -> qBittorrent 注入/等待完成
 ```
 
 当前 live target upload 只面向 MTEAM。完整闭环源站以 `python3 ptcli.py sites --json` 输出的 `full_live_closure_sources` 为准。
@@ -25,12 +25,14 @@ python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --ac
 3. 下载源站 `.torrent`。
 4. 注入 qBittorrent 并等待下载完成。
 5. 从完成的 qBittorrent 任务推导内容路径。
-6. 对 MTEAM 做查重。
-7. 生成 MTEAM 准备包、描述、字段映射和 upload gate。
-8. 从 qBittorrent 导出目标候选种子并清理为 MTEAM-safe torrent。
-9. 执行 MTEAM 上传。
-10. 下载 MTEAM 上传后生成的新种。
-11. 把新种注入 qBittorrent，并等待任务完成。
+6. 补齐 IMDb/TMDb/豆瓣外部 ID 和简介材料。
+7. 生成 MediaInfo/BDInfo，截取视频图并上传图床。
+8. 对 MTEAM 做查重。
+9. 生成 MTEAM 准备包、描述、字段映射和 upload gate。
+10. 从 qBittorrent 导出目标候选种子并清理为 MTEAM-safe torrent。
+11. 执行 MTEAM 上传。
+12. 下载 MTEAM 上传后生成的新种。
+13. 把新种注入 qBittorrent，并等待任务完成。
 
 只有 `closure.complete=true` 且所有请求动作完成时，顶层 `status` 才会是 `complete`。否则命令返回 `status: blocked`、`blockers`、`next_actions` 和非 0 退出码。
 
@@ -92,7 +94,7 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --path "/downlo
 - MTEAM 查重结果干净。
 - upload gate ready。
 - rule review package 内的每个 source/target obligation 都有规则 URL、确认状态和非空人工审查范围。
-- 描述材料、名称、简介、分类和标准字段可用。
+- 描述材料、名称、简介、分类和标准字段可用；U2/CHD -> MTEAM 的 live flow 应优先要求 IMDb/TMDb/豆瓣材料、MediaInfo/BDInfo、截图和图床 BBCode 都 ready。
 - torrent announce/source/comment 符合 MTEAM-safe 元数据门禁，且没有残留 `announce-list` 或其他非预期顶层字段。
 - 源站若暴露 infohash，下载到本地的源种必须能读出 infohash 并与源站元数据一致。
 - 已显式传入 `--confirm-upload`。
@@ -142,5 +144,6 @@ python3 ptcli.py pipeline --from U2 --source-id 60635 --to MTEAM --package-dir .
 
 - 在 live automation 前审阅源站下载/转载规则和目标站上传/做种规则。
 - 提供真实盒子环境里的源站 cookie、MTEAM API key、qBittorrent 连接和内容路径。
+- 在真实盒子环境验证截图、图床、IMDb/TMDb、豆瓣/PTGen、MediaInfo/BDInfo 组成的材料链。
 - MTEAM 以外目标站尚未实现 live upload 闭环。
 - Web UI、Discord、海外 tracker 和非转种路径仍处于迁移期兼容状态，尚未完成瘦身。

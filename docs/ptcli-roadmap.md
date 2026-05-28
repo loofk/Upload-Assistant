@@ -9,6 +9,44 @@
 - 所有真实上传、下载、QB 注入都必须经过 dry-run 可审计计划。
 - 非 dry-run 模式必须显式传入 `--accept-rules`，表示用户已确认源站和目标站规则。
 
+## Delivery Priority
+
+继续推进时按“关键闭环优先，体验和瘦身后置”的顺序交付。
+
+### P0: U2/CHD -> MTEAM live closure
+
+第一阶段只服务真实闭环，不扩散目标站和 UI 范围。验收标准是同一条命令或可恢复 summary 能证明：
+
+- 源站详情读取、源种下载、qBittorrent 注入和等待完成可审计。
+- 从源站详情或外部元数据补齐 IMDb、TMDb 和豆瓣 ID；没有 ID 时必须在 blockers 中说明缺口，不能静默生成低质量描述。
+- 基于 IMDb/TMDb/豆瓣生成 MTEAM 所需描述，包括 PTGen/豆瓣简介、IMDb/TMDb/Douban 外部链接、MediaInfo/BDInfo、截图 BBCode 和转载来源信息。
+- 对本地内容生成 MediaInfo/BDInfo；影片类内容必须支持视频截图并上传图床，图床失败时 live upload 不应继续，除非目标站规则明确允许且用户显式放行。
+- MTEAM 查重、规则 obligation、字段映射、目标种子安全净化和 live upload gate 全部 ready。
+- 上传成功后下载 MTEAM 新种，注入 qBittorrent 做种，并在 summary/evidence 中暴露 hash、路径、规则确认和可恢复命令。
+
+### P1: automation hardening
+
+第二阶段只围绕盒子长期运行补强，不增加新站点复杂度：
+
+- `doctor` / `summary-check` 对运行时依赖、cookie/API、qBittorrent、图床、外部元数据服务给出机器可读诊断。
+- 所有失败都能落到 `blockers`、`next_actions`、`resume_commands` 和稳定 JSON 字段。
+- focused Docker/requirements 只包含 ptcli 闭环必需依赖，避免旧 Web UI/Discord 依赖泄漏到盒子 CLI。
+
+### P2: more mainland PT flows
+
+第三阶段再扩展中文 PT 站点：
+
+- 先扩展源站详情/源种下载，再扩展目标站 prepare/upload。
+- 每个站点必须有 rule profile、credential requirements、支持范围和 live 前人工确认边界。
+- MTEAM 以外目标站只有在分类、描述、截图、种子、安全字段和上传后做种都能闭环时才标记 live ready。
+
+### P3: legacy slimming
+
+最后再精简旧代码：
+
+- Web UI、Discord、海外 tracker 和非转种路径保留在 legacy 入口，待 P0/P1 稳定后再迁移、隔离或删除。
+- 删除前必须确认 focused `ptcli.py` 不再依赖对应 legacy 模块。
+
 ## CLI Shape
 
 ```bash
@@ -67,8 +105,10 @@ python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --ac
 1. 新增 `ptcli.py` 和 allowlist，只生成计划，不做真实网络操作。
 2. 接入 qBittorrent 只读能力：列出、匹配、导出已有种子。
 3. 接入源站 metadata/torrent 下载能力，默认 dry-run。
-4. 接入目标站 prepare/check/upload，逐站开启。
-5. 将 Web UI、Discord、海外 tracker 和非转种路径移到 legacy 或删除。
+4. 优先打通 U2/CHD -> MTEAM live closure，包括源种下载、QB 下载/匹配、IMDb/TMDb/豆瓣补全、MediaInfo/BDInfo、截图上传图床、MTEAM 描述、查重、规则门禁、上传、新种下载和 QB 做种。
+5. 补强盒子自动化：runtime doctor、summary-check、恢复命令、focused Docker/requirements 和 AI 友好 JSON。
+6. 扩展更多中文 PT 源站与目标站，每个站点先完成 rule profile 和凭据诊断，再开启 live upload。
+7. 将 Web UI、Discord、海外 tracker 和非转种路径移到 legacy 或删除。
 
 当前已完成：
 
@@ -86,3 +126,10 @@ python3 ptcli.py retorrent --from U2 --source-id 60635 --to MTEAM --execute --ac
 - `inspect`: 只读列出 qBittorrent 任务。
 - `match`: 按盒子路径匹配 qBittorrent 任务。
 - `export`: 从 qBittorrent 只读导出已有 `.torrent` 到指定目录。
+
+当前优先缺口：
+
+- 真实盒子环境验证 U2/CHD -> MTEAM 的完整 live closure。
+- 把截图上传图床、IMDb/TMDb、豆瓣/PTGen、MediaInfo/BDInfo 明确纳入 MTEAM live upload 的关键材料 gate。
+- 检查 focused runtime 是否仍通过 legacy 截图/图床模块引入无关依赖，并收束到 `requirements-ptcli.txt`。
+- 为图床、外部元数据和材料生成失败补齐机器可读 blockers 与恢复建议。

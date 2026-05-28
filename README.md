@@ -101,7 +101,9 @@ python3 -m ruff check --config pyproject.toml src/ptcli tests/unit/test_ptcli.py
 
 已实现：新 CLI 入口、中文 PT allowlist、规则 obligation 输出、qBittorrent inspect/match/export、源站信息和源种下载、MTEAM 准备/查重/上传预检和 live upload、上传后新种下载/注入/等待、`pipeline`/`retorrent --execute` 闭环证据与恢复命令。
 
-仍未完成：真实 U2/CHD cookie + MTEAM API + qBittorrent live 环境验证；旧 Web UI/Discord/海外 tracker 代码瘦身；所有站点规则的逐站程序化编码；MTEAM 以外目标站的 live upload 闭环。
+当前优先级：先完成 U2/CHD -> MTEAM 真实闭环，并把 IMDb/TMDb、豆瓣/PTGen、MediaInfo/BDInfo、视频截图上传图床和 MTEAM 描述生成作为 live upload 的关键材料 gate；之后再补强盒子自动化、扩展更多中文 PT 站点，最后瘦身 Web UI/Discord/海外 tracker 等 legacy 代码。
+
+仍未完成：真实 U2/CHD cookie + MTEAM API + qBittorrent live 环境验证；材料链在真实盒子环境里的截图/图床/外部元数据验证；旧 Web UI/Discord/海外 tracker 代码瘦身；所有站点规则的逐站程序化编码；MTEAM 以外目标站的 live upload 闭环。
 
 ## 原项目说明
 
