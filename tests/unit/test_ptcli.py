@@ -11889,6 +11889,31 @@ async def test_pipeline_metadata_enrichment_stage_blocks_missing_ready_metadata(
     assert "tmdb_id" in enrichment["missing"]
 
 
+def test_pipeline_stage_blockers_include_metadata_enrichment_readiness() -> None:
+    blockers = ptcli_cli._pipeline_stage_blockers(
+        [
+            {
+                "stage": "metadata-enrich",
+                "ok": False,
+                "message": "Metadata enrichment completed with blockers.",
+                "result": {
+                    "metadata_enrichment": {
+                        "readiness_blockers": [
+                            "Missing metadata after enrichment: tmdb_id, douban_id, douban_url",
+                            "PTGen/Douban description is missing after enrichment.",
+                        ],
+                    },
+                },
+            }
+        ]
+    )
+    actions = [ptcli_cli._pipeline_stage_blocker_next_action(blocker) for blocker in blockers]
+
+    assert "metadata-enrich: Missing metadata after enrichment: tmdb_id, douban_id, douban_url" in blockers
+    assert "metadata-enrich: PTGen/Douban description is missing after enrichment." in blockers
+    assert actions.count("Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description, then rerun target preparation.") == len(actions)
+
+
 def test_mteam_upload_gate_surfaces_duplicate_blocker() -> None:
     source_info = {
         "tracker": "U2",

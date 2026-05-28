@@ -4137,11 +4137,22 @@ def _stage_result_blockers(stage_name: str, result: Any) -> list[str]:
         return []
     if stage_name == "target-upload":
         return _target_upload_result_blockers(result)
+    if stage_name == "metadata-enrich":
+        return _metadata_enrich_result_blockers(result)
     if stage_name == "inject-source":
         return _source_inject_result_blockers(result)
     if stage_name == "wait-complete":
         return _wait_complete_result_blockers(result)
     return _string_list(result.get("blockers"))
+
+
+def _metadata_enrich_result_blockers(result: dict[str, Any]) -> list[str]:
+    blockers = _string_list(result.get("blockers"))
+    enrichment = result.get("metadata_enrichment")
+    if isinstance(enrichment, dict):
+        _extend_unique_string(blockers, _string_list(enrichment.get("blockers")))
+        _extend_unique_string(blockers, _string_list(enrichment.get("readiness_blockers")))
+    return blockers
 
 
 def _source_inject_result_blockers(result: dict[str, Any]) -> list[str]:
@@ -5216,6 +5227,8 @@ def _pipeline_next_actions(args: argparse.Namespace, blockers: list[str], closur
 def _pipeline_stage_blocker_next_action(blocker: str) -> str:
     if blocker.startswith("runtime-check:"):
         return "Install the focused ptcli runtime dependencies with requirements-ptcli.txt, then rerun the pipeline."
+    if blocker.startswith("metadata-enrich:"):
+        return "Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description, then rerun target preparation."
     if blocker.startswith("source-download:"):
         return "Fix source torrent download prerequisites, then re-run with --download-source after runtime-check, flow-check, source-info, and rule-check pass."
     if blocker.startswith("inject-source: --save-path"):
