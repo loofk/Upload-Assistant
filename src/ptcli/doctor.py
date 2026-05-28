@@ -60,9 +60,11 @@ def build_doctor_check(
     effective_uploaded_save_path = uploaded_save_path or content_path or package_content_path
     if package_preflight:
         checks.append(package_preflight["check"])
+        checks.extend(_target_material_checks(package_preflight.get("preflight"), target_execute))
         checks.append(_rule_obligations_check(package_preflight.get("preflight"), target_execute))
     else:
         checks.append(_check("target_package", False, "Target package directory was not provided."))
+        checks.extend(_target_material_checks(None, target_execute))
         checks.append(_rule_obligations_check(None, target_execute))
     if check_runtime:
         checks.append(_runtime_dependency_check())
@@ -236,6 +238,7 @@ def _uploaded_recovery_preflight(preflight: dict[str, Any]) -> dict[str, Any]:
         }
     return {
         **preflight,
+        "uploaded_recovery": True,
         "status": "blocked" if blockers else "ready",
         "blockers": blockers,
         "upload_payload": upload_payload if isinstance(upload_payload, dict) else preflight.get("upload_payload"),
@@ -281,6 +284,37 @@ def _rule_obligations_check(preflight: dict[str, Any] | None, target_execute: bo
     if isinstance(blockers, list) and blockers:
         return _check("rule_obligations", False, f"MTEAM live upload rule obligations have blockers: {'; '.join(str(blocker) for blocker in blockers)}")
     return _check("rule_obligations", False, "MTEAM live upload rule obligations have blockers.")
+
+
+def _target_material_checks(preflight: dict[str, Any] | None, target_execute: bool) -> list[dict[str, Any]]:
+    if not target_execute:
+        return [_check("target_materials", True, "Live upload is not requested.")]
+    if not isinstance(preflight, dict):
+        return [_check("target_materials", False, "MTEAM material readiness cannot be checked without a target package preflight.")]
+    if preflight.get("uploaded_recovery"):
+        return [_check("target_materials", True, "Uploaded torrent recovery does not re-submit MTEAM materials.")]
+    upload_payload = preflight.get("upload_payload")
+    if not isinstance(upload_payload, dict):
+        return [_check("target_materials", False, "MTEAM upload payload summary is missing material checks.")]
+    material_checks = upload_payload.get("material_checks")
+    if not isinstance(material_checks, list):
+        return [_check("target_materials", False, "MTEAM upload payload summary is missing material checks.")]
+    normalized = [
+        _check(
+            f"target_{str(check.get('name', 'materials')).replace('.', '_')}",
+            bool(check.get("ok")),
+            str(check.get("message") or "MTEAM material check failed."),
+        )
+        for check in material_checks
+        if isinstance(check, dict)
+    ]
+    failed = [check for check in normalized if not check["ok"]]
+    aggregate = _check(
+        "target_materials",
+        not failed,
+        "MTEAM material gate is ready." if not failed else f"MTEAM material gate has blockers: {'; '.join(check['message'] for check in failed)}",
+    )
+    return [aggregate, *normalized]
 
 
 def _doctor_compliance_summary(rule_check: dict[str, Any], preflight: dict[str, Any] | None) -> dict[str, Any]:
@@ -387,6 +421,7 @@ def _live_safe_to_attempt(checks: list[dict[str, Any]], target_execute: bool) ->
         "live_upload_confirmation",
         "target_torrent_file",
         "target_package",
+        "target_materials",
         "download_uploaded_torrent",
         "inject_uploaded_torrent",
         "wait_uploaded_complete",
