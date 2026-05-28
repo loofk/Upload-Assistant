@@ -675,8 +675,6 @@ def _mteam_description_ptgen_lines(source_info: dict[str, Any]) -> list[str]:
 
 def _normalize_ptgen_description_text(text: str) -> str:
     normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
-    normalized = re.sub(r"\[img\]([^\[]+?)\[/img\]", r"![](\1)", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\[img=\d+\]([^\[]+?)\[/img\]", r"![](\1)", normalized, flags=re.IGNORECASE)
     return normalized
 
 

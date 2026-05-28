@@ -11566,7 +11566,8 @@ def test_mteam_description_draft_and_upload_gate() -> None:
 
     assert "Retorrent review draft" in description
     assert "[b]Movie information[/b]" in description
-    assert "![](https://poster.example/poster.jpg)" in description
+    assert "[img]https://poster.example/poster.jpg[/img]" in description
+    assert "![](https://poster.example/poster.jpg)" not in description
     assert "◎简　　介　示例简介" in description
     assert "Source tracker: U2" in description
     assert gate["ready"] is True
