@@ -22,6 +22,7 @@ from src.ptcli.source import create_source_meta, extract_torrent_id, source_info
 from src.ptcli.target import (
     build_mteam_description_draft,
     build_mteam_field_mapping,
+    build_mteam_materials_manifest,
     build_mteam_meta_draft,
     build_mteam_prepare_preview,
     build_mteam_rule_review,
@@ -10950,6 +10951,35 @@ def test_mteam_description_draft_and_upload_gate() -> None:
     assert gate["blockers"] == []
 
 
+def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
+
+    materials = build_mteam_materials_manifest(preview, source_info, "/downloads/Example")
+
+    metadata_checks = {check["name"]: check for check in materials["checks"]["metadata"]}
+    asset_checks = {check["name"]: check for check in materials["checks"]["assets"]}
+    assert metadata_checks["imdb"]["ok"] is True
+    assert metadata_checks["tmdb"]["ok"] is True
+    assert metadata_checks["douban"]["ok"] is True
+    assert asset_checks["mediainfo_or_bdinfo"]["ok"] is False
+    assert asset_checks["screenshots"]["ok"] is False
+    assert asset_checks["image_host_uploads"]["ok"] is False
+    assert materials["metadata"]["source_description_available"] is True
+    assert materials["ready"] is False
+    assert "Generate MediaInfo or BDInfo" in materials["next_actions"][0]
+
+
 def test_mteam_upload_gate_surfaces_duplicate_blocker() -> None:
     source_info = {
         "tracker": "U2",
@@ -11097,6 +11127,7 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     assert package["files"]["preview"].endswith("mteam-prepare-preview.json")
     assert package["files"]["meta_draft"].endswith("mteam-meta-draft.json")
     assert package["files"]["field_mapping"].endswith("mteam-field-mapping.json")
+    assert package["files"]["materials"].endswith("mteam-materials.json")
     assert package["files"]["description_draft"].endswith("mteam-description-draft.txt")
     assert package["files"]["rule_review"].endswith("mteam-rule-review.json")
     assert package["files"]["upload_gate"].endswith("mteam-upload-gate.json")
@@ -11108,6 +11139,10 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     assert package["metadata"]["tracker"] == "U2"
     assert package["metadata"]["torrent_id"] == "60635"
     assert package["package_manifest"]["files"]["preview"]["sha1"]
+    assert package["package_manifest"]["files"]["materials"]["sha1"]
+    assert package["materials"]["kind"] == "ptcli.mteam.materials"
+    assert package["materials"]["assets"]["mediainfo"]["ready"] is False
+    assert package["materials"]["assets"]["screenshots"]["ready"] is False
     assert package["package_manifest"]["rule_obligations"]["count"] == 2
     manifest_commands = {command["stage"]: command["command"] for command in package["package_manifest"]["commands"]}
     assert "--package-dir" in manifest_commands["target-upload-preflight"]
@@ -11120,12 +11155,15 @@ def test_write_mteam_prepare_package_creates_auditable_files(tmp_path) -> None:
     assert "--wait-uploaded-complete" in manifest_commands["target-upload-live"]
     assert "--uploaded-torrent-id '<id>'" in manifest_commands["resume-uploaded-torrent-id"]
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-prepare-preview.json").exists()
+    assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-materials.json").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-description-draft.txt").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-rule-review.json").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-package-manifest.json").exists()
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-field-mapping.json").read_text(encoding="utf-8").strip().startswith("{")
     loaded = load_mteam_prepare_package(package["package_dir"])
     assert loaded["files"]["manifest"].endswith("mteam-package-manifest.json")
+    assert loaded["files"]["materials"].endswith("mteam-materials.json")
+    assert loaded["materials"]["kind"] == "ptcli.mteam.materials"
     assert loaded["package_manifest"]["ready"] is package["package_manifest"]["ready"]
     assert loaded["package_manifest"]["source"]["tracker"] == "U2"
     assert loaded["preview"]["metadata"]["torrent_id"] == "60635"

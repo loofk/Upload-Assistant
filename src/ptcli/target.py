@@ -19,6 +19,7 @@ REQUIRED_MTEAM_PACKAGE_FILES = {
     "preview": "mteam-prepare-preview.json",
     "meta_draft": "mteam-meta-draft.json",
     "field_mapping": "mteam-field-mapping.json",
+    "materials": "mteam-materials.json",
     "description_draft": "mteam-description-draft.txt",
     "rule_review": "mteam-rule-review.json",
     "upload_gate": "mteam-upload-gate.json",
@@ -86,17 +87,20 @@ def write_mteam_prepare_package(
     preview_path = package_dir / "mteam-prepare-preview.json"
     meta_draft_path = package_dir / "mteam-meta-draft.json"
     field_mapping_path = package_dir / "mteam-field-mapping.json"
+    materials_path = package_dir / "mteam-materials.json"
     description_path = package_dir / "mteam-description-draft.txt"
     rule_review_path = package_dir / "mteam-rule-review.json"
     upload_gate_path = package_dir / "mteam-upload-gate.json"
     manifest_path = package_dir / MTEAM_PACKAGE_MANIFEST_FILENAME
     rule_review = build_mteam_rule_review(stages, accept_rules=accept_rules)
     upload_gate = build_mteam_upload_gate(preview, stages, accept_rules=accept_rules)
+    materials = build_mteam_materials_manifest(preview, source_info, content_path)
     package_blockers = _mteam_prepare_package_blockers(preview, rule_review, upload_gate)
     files = {
         "preview": str(preview_path),
         "meta_draft": str(meta_draft_path),
         "field_mapping": str(field_mapping_path),
+        "materials": str(materials_path),
         "description_draft": str(description_path),
         "rule_review": str(rule_review_path),
         "upload_gate": str(upload_gate_path),
@@ -106,6 +110,7 @@ def write_mteam_prepare_package(
     _write_json(preview_path, preview)
     _write_json(meta_draft_path, preview["meta_draft"])
     _write_json(field_mapping_path, preview["field_mapping"])
+    _write_json(materials_path, materials)
     description_path.write_text(build_mteam_description_draft(preview["meta_draft"], source_info), encoding="utf-8")
     _write_json(rule_review_path, rule_review)
     _write_json(upload_gate_path, upload_gate)
@@ -117,6 +122,7 @@ def write_mteam_prepare_package(
         "blockers": package_blockers,
         "rule_review": rule_review,
         "upload_gate": upload_gate,
+        "materials": materials,
         "package_manifest": package_manifest,
         "package_dir": str(package_dir),
         "files": files,
@@ -444,6 +450,7 @@ def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
     preview = _read_json(paths["preview"])
     meta_draft = _read_json(paths["meta_draft"])
     field_mapping = _read_json(paths["field_mapping"])
+    materials = _read_json(paths["materials"])
     rule_review = _read_json(paths["rule_review"])
     upload_gate = _read_json(paths["upload_gate"])
     manifest_path = root / MTEAM_PACKAGE_MANIFEST_FILENAME
@@ -470,6 +477,7 @@ def load_mteam_prepare_package(package_dir: str) -> dict[str, Any]:
         "preview": preview,
         "meta_draft": meta_draft,
         "field_mapping": field_mapping,
+        "materials": materials,
         "description_length": len(description),
         "rule_review": rule_review,
         "upload_gate": upload_gate,
@@ -644,6 +652,78 @@ def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[
         "Confirm source-site and MTEAM rules, transfer permissions, description requirements, screenshots, subtitles, naming, and duplicate status before upload.",
     ]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[str, Any] | None, content_path: str | None) -> dict[str, Any]:
+    meta_draft = preview.get("meta_draft") if isinstance(preview.get("meta_draft"), dict) else {}
+    source_description_length = int(source_info.get("description_length", 0) or 0) if isinstance(source_info, dict) else 0
+    metadata_checks = [
+        _material_check("imdb", bool(meta_draft.get("imdb") or meta_draft.get("imdb_id")), "IMDb id is present.", "IMDb id is missing; fetch or supply IMDb metadata before live upload."),
+        _material_check("tmdb", bool(meta_draft.get("tmdb_id")), "TMDb id is present.", "TMDb id is missing; fetch or supply TMDb metadata before live upload."),
+        _material_check("douban", bool(meta_draft.get("douban_url") or meta_draft.get("douban_id")), "Douban id/url is present.", "Douban id/url is missing; fetch or supply Douban metadata before live upload."),
+    ]
+    asset_checks = [
+        _material_check("mediainfo_or_bdinfo", False, "MediaInfo/BDInfo is present.", "MediaInfo/BDInfo has not been generated into the package yet."),
+        _material_check("screenshots", False, "Screenshots are present.", "Screenshots have not been generated into the package yet."),
+        _material_check("image_host_uploads", False, "Image host uploads are present.", "Screenshot image-host upload results are missing."),
+        _material_check("description_draft", True, "MTEAM description draft has been generated.", "MTEAM description draft is missing."),
+    ]
+    warnings = [check["message"] for check in [*metadata_checks, *asset_checks] if not check["ok"]]
+    return {
+        "schema_version": 1,
+        "kind": "ptcli.mteam.materials",
+        "target_tracker": "MTEAM",
+        "content_path": content_path,
+        "source": {
+            "tracker": source_info.get("tracker") if isinstance(source_info, dict) else None,
+            "torrent_id": source_info.get("torrent_id") if isinstance(source_info, dict) else None,
+            "name": source_info.get("name") if isinstance(source_info, dict) else None,
+            "description_length": source_description_length,
+        },
+        "metadata": {
+            "imdb_id": meta_draft.get("imdb_id"),
+            "tmdb_id": meta_draft.get("tmdb_id"),
+            "douban_id": meta_draft.get("douban_id"),
+            "douban_url": meta_draft.get("douban_url"),
+            "source_description_available": source_description_length > 0,
+        },
+        "assets": {
+            "mediainfo": {"ready": False, "path": None},
+            "bdinfo": {"ready": False, "path": None},
+            "screenshots": {"ready": False, "count": 0, "files": []},
+            "image_hosts": {"ready": False, "count": 0, "items": []},
+            "description": {"ready": True, "path": REQUIRED_MTEAM_PACKAGE_FILES["description_draft"]},
+        },
+        "checks": {
+            "metadata": metadata_checks,
+            "assets": asset_checks,
+        },
+        "ready": all(check["ok"] for check in [*metadata_checks, *asset_checks]),
+        "warnings": warnings,
+        "next_actions": _mteam_material_next_actions([*metadata_checks, *asset_checks]),
+    }
+
+
+def _material_check(name: str, ok: bool, ok_message: str, missing_message: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "ok": ok,
+        "message": ok_message if ok else missing_message,
+    }
+
+
+def _mteam_material_next_actions(checks: list[dict[str, Any]]) -> list[str]:
+    missing = {str(check.get("name")) for check in checks if isinstance(check, dict) and not check.get("ok")}
+    actions = []
+    if missing.intersection({"imdb", "tmdb", "douban"}):
+        actions.append("Fetch or supply IMDb/TMDb/Douban metadata before live upload.")
+    if "mediainfo_or_bdinfo" in missing:
+        actions.append("Generate MediaInfo or BDInfo and add it to the MTEAM package.")
+    if "screenshots" in missing:
+        actions.append("Generate video screenshots for the completed local content.")
+    if "image_host_uploads" in missing:
+        actions.append("Upload screenshots to the configured image host and record the links.")
+    return actions or ["Review generated MTEAM materials before target-upload."]
 
 
 def build_mteam_rule_review(stages: list[dict[str, Any]], accept_rules: bool) -> dict[str, Any]:
