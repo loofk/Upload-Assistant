@@ -6172,8 +6172,8 @@ def build_plan_commands(
         ),
         _plan_command_entry(
             "retorrent-execute",
-            f"python3 ptcli.py retorrent --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} --execute --accept-rules --confirm-upload {retorrent_path_arg} --download-uploaded-torrent --inject-uploaded-torrent --wait-uploaded-complete --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json",
-            ["retorrent", "--from", source_tracker, "--source-id", source_torrent_id, "--to", target_trackers_arg, "--execute", "--accept-rules", "--confirm-upload", "--path" if content_path else "--save-path", content_path or "/downloads", "--download-uploaded-torrent", "--inject-uploaded-torrent", "--wait-uploaded-complete", "--uploaded-qbit-category", "MTEAM", "--uploaded-qbit-tags", "retorrent", "--write-summary", "--json"],
+            f"python3 ptcli.py retorrent --from {source_tracker} --source-id {source_torrent_id} --to {target_trackers_arg} --execute --accept-rules --confirm-upload {retorrent_path_arg} --fetch-ptgen --generate-mediainfo --generate-screenshots --upload-screenshots --download-uploaded-torrent --inject-uploaded-torrent --wait-uploaded-complete --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json",
+            ["retorrent", "--from", source_tracker, "--source-id", source_torrent_id, "--to", target_trackers_arg, "--execute", "--accept-rules", "--confirm-upload", "--path" if content_path else "--save-path", content_path or "/downloads", "--fetch-ptgen", "--generate-mediainfo", "--generate-screenshots", "--upload-screenshots", "--download-uploaded-torrent", "--inject-uploaded-torrent", "--wait-uploaded-complete", "--uploaded-qbit-category", "MTEAM", "--uploaded-qbit-tags", "retorrent", "--write-summary", "--json"],
         ),
     ]
     if content_path:

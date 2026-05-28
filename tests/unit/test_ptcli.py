@@ -470,6 +470,10 @@ def test_retorrent_plan_resume_commands_keep_live_closure_flags() -> None:
     assert command_argv["retorrent-resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "retorrent"]
 
     retorrent_execute = commands["retorrent-execute"]
+    assert "--fetch-ptgen" in retorrent_execute
+    assert "--generate-mediainfo" in retorrent_execute
+    assert "--generate-screenshots" in retorrent_execute
+    assert "--upload-screenshots" in retorrent_execute
     assert "--download-uploaded-torrent" in retorrent_execute
     assert "--inject-uploaded-torrent" in retorrent_execute
     assert "--wait-uploaded-complete" in retorrent_execute
@@ -517,6 +521,10 @@ def test_retorrent_plan_commands_preserve_runtime_context() -> None:
     assert "--config /etc/ua/config.py" in commands["retorrent-execute"]
     assert "--client seedbox" in commands["retorrent-execute"]
     assert "--base-dir /srv/Upload-Assistant" in commands["retorrent-execute"]
+    assert "--fetch-ptgen" in command_argv["retorrent-execute"]
+    assert "--generate-mediainfo" in command_argv["retorrent-execute"]
+    assert "--generate-screenshots" in command_argv["retorrent-execute"]
+    assert "--upload-screenshots" in command_argv["retorrent-execute"]
     assert "--client seedbox" in commands["match"]
     assert "/etc/ua/config.py" in command_argv["match"]
     assert "--base-dir" not in command_argv["match"]
