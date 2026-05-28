@@ -25,7 +25,7 @@ from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check, build_runtime_dependency_check, extend_doctor_check
 from src.ptcli.flows import MTEAM_SOURCE_FLOW_TRACKERS, flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
-from src.ptcli.materials import generate_mediainfo_material
+from src.ptcli.materials import generate_mediainfo_material, generate_screenshot_materials
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import build_rule_check, get_rule_profiles, rule_profiles_to_dicts
 from src.ptcli.source import (
@@ -242,6 +242,8 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
     pipeline.add_argument("--bdinfo-file", help="Existing BDInfo text file to record in the MTEAM preparation materials manifest.")
     pipeline.add_argument("--generate-mediainfo", action="store_true", help="Generate MediaInfo files from --path or the resolved qBittorrent content path before preparing the MTEAM package.")
+    pipeline.add_argument("--generate-screenshots", action="store_true", help="Generate local video screenshots from --path or the resolved qBittorrent content path before preparing the MTEAM package.")
+    pipeline.add_argument("--screenshot-count", type=int, default=3, help="Number of screenshots to generate with --generate-screenshots.")
     pipeline.add_argument("--screenshot-file", action="append", default=[], help="Existing screenshot image file to record in the MTEAM preparation materials manifest. May be repeated.")
     pipeline.add_argument("--image-host-file", help="Existing image-host upload JSON file to record in the MTEAM preparation materials manifest.")
     pipeline.add_argument("--check-dupes", action="store_true", help="Run target duplicate search after source metadata is available.")
@@ -319,6 +321,8 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
     retorrent.add_argument("--bdinfo-file", help="Existing BDInfo text file to record in the MTEAM preparation materials manifest.")
     retorrent.add_argument("--generate-mediainfo", action="store_true", help="Generate MediaInfo files from --path or the resolved qBittorrent content path during --execute target preparation.")
+    retorrent.add_argument("--generate-screenshots", action="store_true", help="Generate local video screenshots from --path or the resolved qBittorrent content path during --execute target preparation.")
+    retorrent.add_argument("--screenshot-count", type=int, default=3, help="Number of screenshots to generate with --generate-screenshots.")
     retorrent.add_argument("--screenshot-file", action="append", default=[], help="Existing screenshot image file to record in the MTEAM preparation materials manifest. May be repeated.")
     retorrent.add_argument("--image-host-file", help="Existing image-host upload JSON file to record in the MTEAM preparation materials manifest.")
     retorrent.add_argument("--target-torrent-file", help="MTEAM .torrent file used by the live upload stage.")
@@ -1112,6 +1116,8 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         mediainfo_file=args.mediainfo_file,
         bdinfo_file=args.bdinfo_file,
         generate_mediainfo=args.generate_mediainfo,
+        generate_screenshots=args.generate_screenshots,
+        screenshot_count=args.screenshot_count,
         screenshot_file=list(getattr(args, "screenshot_file", []) or []),
         image_host_file=args.image_host_file,
         check_dupes=not bool(args.package_dir and (args.uploaded_torrent_file or args.uploaded_torrent_id)),
@@ -3367,6 +3373,12 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             generated_mediainfo = material_stage.get("result", {}).get("mediainfo_file") if material_stage.get("ok") else None
             if generated_mediainfo and not material_files.get("mediainfo_file"):
                 material_files["mediainfo_file"] = str(generated_mediainfo)
+        if args.generate_screenshots:
+            screenshot_stage = await _pipeline_screenshot_material_stage(args, source_result if isinstance(source_result, dict) else None, effective_content_path, material_files)
+            stages.append(screenshot_stage)
+            generated_screenshots = screenshot_stage.get("result", {}).get("screenshot_files") if screenshot_stage.get("ok") else None
+            if generated_screenshots and not material_files.get("screenshot_files"):
+                material_files["screenshot_files"] = list(generated_screenshots)
         target_prepare = write_mteam_prepare_package(
             source_result if isinstance(source_result, dict) else None,
             target_trackers,
@@ -3644,6 +3656,36 @@ async def _pipeline_mediainfo_material_stage(
         "ok": result.get("status") == "generated",
         "result": result,
         "message": "Generated MediaInfo material files." if result.get("status") == "generated" else "MediaInfo material generation failed.",
+    }
+
+
+async def _pipeline_screenshot_material_stage(
+    args: argparse.Namespace,
+    source_info: dict[str, Any] | None,
+    content_path: str | None,
+    material_files: dict[str, Any],
+) -> dict[str, Any]:
+    if material_files.get("screenshot_files"):
+        return {
+            "stage": "materials-screenshots",
+            "ok": True,
+            "skipped": True,
+            "message": "Existing screenshot material files supplied; generation skipped.",
+        }
+    if not content_path:
+        return {
+            "stage": "materials-screenshots",
+            "ok": False,
+            "skipped": True,
+            "message": "--generate-screenshots requires --path or a resolved qBittorrent content path.",
+        }
+    output_dir = _mteam_material_output_dir(args, source_info) / "screenshots"
+    result = await generate_screenshot_materials(str(content_path), str(output_dir), count=args.screenshot_count)
+    return {
+        "stage": "materials-screenshots",
+        "ok": result.get("status") == "generated",
+        "result": result,
+        "message": "Generated screenshot material files." if result.get("status") == "generated" else "Screenshot material generation failed.",
     }
 
 
