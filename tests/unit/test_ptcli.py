@@ -9169,12 +9169,16 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["artifacts"]["target_materials"]["ready"] is False
     assert summary_payload["artifacts"]["target_materials_ready"] is False
     assert summary_payload["resume_state"]["complete"] is False
-    assert summary_payload["resume_state"]["resume_available"] is False
-    assert summary_payload["resume_state"]["next_stage"] is None
+    assert summary_payload["resume_state"]["resume_available"] is True
+    assert summary_payload["resume_state"]["next_stage"] == "resume-target-package"
     assert summary_payload["resume_state"]["artifacts"]["target_package_dir"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_materials_ready"] is False
     assert summary_payload["resume_state"]["artifacts"]["target_torrent_file"] is False
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
+    assert "resume-target-package" in resume_commands
+    assert "--prepare-target" in resume_commands["resume-target-package"]
+    assert "--check-dupes" in resume_commands["resume-target-package"]
+    assert "--target-output-dir" in resume_commands["resume-target-package"]
     assert "resume-target-upload" not in resume_commands
     assert summary_payload["next_actions"]
 

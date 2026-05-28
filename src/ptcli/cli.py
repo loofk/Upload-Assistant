@@ -4705,6 +4705,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     source_qbit_options = qbit_options.get("source") if isinstance(qbit_options.get("source"), dict) else {}
     uploaded_qbit_options = qbit_options.get("uploaded") if isinstance(qbit_options.get("uploaded"), dict) else {}
     source_output_dir = output_options.get("source_output_dir") or "./tmp/source"
+    target_output_dir = output_options.get("target_output_dir") or "./tmp/target"
     uploaded_output_dir = output_options.get("uploaded_output_dir")
     uploaded_output_dir_args = ["--uploaded-output-dir", str(uploaded_output_dir)] if uploaded_output_dir else []
     summary_output_dir = output_options.get("summary_output_dir")
@@ -4816,6 +4817,37 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     target_package_dir = artifacts.get("target_package_dir")
     target_torrent_file = artifacts.get("target_torrent_file")
     uploaded_torrent_id = artifacts.get("uploaded_torrent_id")
+    target_materials_ready = bool(artifacts.get("target_materials_ready"))
+    target_package_planned = bool(requested_actions.get("prepare_target") or effective_actions.get("prepare_target") or effective_actions.get("live_target_upload"))
+    if target_package_planned and (not target_package_dir or not target_materials_ready):
+        commands.append(
+            _ptcli_command_entry(
+                "resume-target-package",
+                [
+                    "pipeline",
+                    "--from",
+                    source_tracker,
+                    "--source-id",
+                    source_torrent_id,
+                    "--to",
+                    target_trackers_arg,
+                    *config_args,
+                    *base_dir_args,
+                    "--client",
+                    client,
+                    *path_args,
+                    *(_target_package_material_resume_args(requested_actions, effective_actions)),
+                    "--check-dupes",
+                    "--prepare-target",
+                    "--target-output-dir",
+                    str(target_output_dir),
+                    "--accept-rules",
+                    "--write-summary",
+                    *summary_output_dir_args,
+                    "--json",
+                ],
+            )
+        )
     if target_package_dir and target_torrent_file:
         commands.append(
             _ptcli_command_entry(
@@ -4991,6 +5023,8 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
             stage_detail_preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
         elif blocker.startswith("target-upload:"):
             stage_generic_preferred.append("resume-target-upload")
+        elif blocker.startswith(("target-prepare:", "materials-", "metadata-enrich:")):
+            stage_detail_preferred.append("resume-target-package")
     preferred_stages.extend(stage_detail_preferred)
     if (
         "source.ready" in blocker_names
@@ -5007,6 +5041,12 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
     if "target.uploaded" in blocker_names:
         preferred_stages.append("resume-target-upload")
     if (
+        "target.prepared" in blocker_names
+        or "target.materials_ready" in blocker_names
+        or "closure audit missing: target.materials_ready" in blocker_names
+    ):
+        preferred_stages.append("resume-target-package")
+    if (
         "target.injected" in blocker_names
         or "target.seeding" in blocker_names
         or "target.hash_consistent" in blocker_names
@@ -5018,7 +5058,7 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
     ):
         preferred_stages.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     preferred_stages.extend(stage_generic_preferred)
-    preferred_stages.extend(["resume-source-torrent", "resume-source-download", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
+    preferred_stages.extend(["resume-source-torrent", "resume-source-download", "resume-target-package", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
     for stage in preferred_stages:
         command = commands_by_stage.get(stage)
         if command:
@@ -5036,6 +5076,21 @@ def _qbit_resume_args(options: dict[str, Any], *, prefix: str) -> list[str]:
         args.extend([f"--{prefix}qbit-tags", str(tags)])
     if options.get("paused"):
         args.append(f"--{prefix}paused")
+    return args
+
+
+def _target_package_material_resume_args(requested_actions: dict[str, Any], effective_actions: dict[str, Any]) -> list[str]:
+    args: list[str] = []
+    if requested_actions.get("enrich_metadata") or effective_actions.get("enrich_metadata"):
+        args.append("--enrich-metadata")
+    if requested_actions.get("fetch_ptgen") or effective_actions.get("fetch_ptgen"):
+        args.append("--fetch-ptgen")
+    if requested_actions.get("generate_mediainfo") or effective_actions.get("generate_mediainfo"):
+        args.append("--generate-mediainfo")
+    if requested_actions.get("generate_screenshots") or effective_actions.get("generate_screenshots"):
+        args.append("--generate-screenshots")
+    if requested_actions.get("upload_screenshots") or effective_actions.get("upload_screenshots"):
+        args.append("--upload-screenshots")
     return args
 
 
