@@ -1105,7 +1105,55 @@ async def test_retorrent_execute_defaults_to_export_target_torrent(monkeypatch) 
     assert captured_args["args"].export_target_torrent is True
     assert captured_args["args"].target_torrent_file is None
     assert captured_args["args"].uploaded_output_dir == "./tmp/uploaded"
+    assert captured_args["args"].enrich_metadata is True
+    assert captured_args["args"].fetch_ptgen is True
+    assert captured_args["args"].generate_mediainfo is True
+    assert captured_args["args"].generate_screenshots is True
+    assert captured_args["args"].upload_screenshots is True
     assert payload["output_options"]["uploaded_output_dir"] == "./tmp/uploaded"
+
+
+@pytest.mark.asyncio
+async def test_retorrent_execute_can_disable_default_material_chain(monkeypatch) -> None:
+    captured_args = {}
+
+    async def fake_pipeline_payload(args):
+        captured_args["args"] = args
+        return {"ready": True, "closure": {"complete": True, "blockers": []}, "evidence": {"complete": True}, "stages": []}
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--path",
+            "/downloads/Name",
+            "--no-enrich-metadata",
+            "--no-fetch-ptgen",
+            "--no-generate-mediainfo",
+            "--no-generate-screenshots",
+            "--no-upload-screenshots",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    assert payload["ready"] is True
+    assert captured_args["args"].enrich_metadata is False
+    assert captured_args["args"].fetch_ptgen is False
+    assert captured_args["args"].generate_mediainfo is False
+    assert captured_args["args"].generate_screenshots is False
+    assert captured_args["args"].upload_screenshots is False
 
 
 @pytest.mark.asyncio

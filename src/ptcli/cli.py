@@ -326,8 +326,10 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--paused", action="store_true", help="Add injected source torrent paused.")
     retorrent.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait for qBittorrent completion during --execute.")
     retorrent.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds during --execute.")
-    retorrent.add_argument("--enrich-metadata", action="store_true", help="Fill missing IMDb/TMDb/Douban metadata during --execute target preparation.")
-    retorrent.add_argument("--fetch-ptgen", action="store_true", help="Fetch PTGen/Douban movie information during --execute target preparation.")
+    retorrent.add_argument("--enrich-metadata", dest="enrich_metadata", action="store_true", default=None, help="Fill missing IMDb/TMDb/Douban metadata during --execute target preparation. Enabled by default for --execute.")
+    retorrent.add_argument("--no-enrich-metadata", dest="enrich_metadata", action="store_false", help="Skip metadata enrichment during --execute.")
+    retorrent.add_argument("--fetch-ptgen", dest="fetch_ptgen", action="store_true", default=None, help="Fetch PTGen/Douban movie information during --execute target preparation. Enabled by default for --execute.")
+    retorrent.add_argument("--no-fetch-ptgen", dest="fetch_ptgen", action="store_false", help="Skip PTGen/Douban description fetching during --execute.")
     retorrent.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, douban_id, or douban_url overrides during --execute.")
     retorrent.add_argument("--imdb-id", help="IMDb id override during --execute metadata enrichment.")
     retorrent.add_argument("--tmdb-id", help="TMDb id override during --execute metadata enrichment.")
@@ -337,11 +339,14 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--target-output-dir", default="./tmp/target", help="Directory for MTEAM target preparation package.")
     retorrent.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
     retorrent.add_argument("--bdinfo-file", help="Existing BDInfo text file to record in the MTEAM preparation materials manifest.")
-    retorrent.add_argument("--generate-mediainfo", action="store_true", help="Generate MediaInfo files from --path or the resolved qBittorrent content path during --execute target preparation.")
-    retorrent.add_argument("--generate-screenshots", action="store_true", help="Generate local video screenshots from --path or the resolved qBittorrent content path during --execute target preparation.")
+    retorrent.add_argument("--generate-mediainfo", dest="generate_mediainfo", action="store_true", default=None, help="Generate MediaInfo files from --path or the resolved qBittorrent content path during --execute target preparation. Enabled by default for --execute.")
+    retorrent.add_argument("--no-generate-mediainfo", dest="generate_mediainfo", action="store_false", help="Skip MediaInfo/BDInfo generation during --execute target preparation.")
+    retorrent.add_argument("--generate-screenshots", dest="generate_screenshots", action="store_true", default=None, help="Generate local video screenshots from --path or the resolved qBittorrent content path during --execute target preparation. Enabled by default for --execute.")
+    retorrent.add_argument("--no-generate-screenshots", dest="generate_screenshots", action="store_false", help="Skip screenshot generation during --execute target preparation.")
     retorrent.add_argument("--screenshot-count", type=int, default=3, help="Number of screenshots to generate with --generate-screenshots.")
     retorrent.add_argument("--screenshot-file", action="append", default=[], help="Existing screenshot image file to record in the MTEAM preparation materials manifest. May be repeated.")
-    retorrent.add_argument("--upload-screenshots", action="store_true", help="Upload screenshot files to the configured image host during --execute target preparation.")
+    retorrent.add_argument("--upload-screenshots", dest="upload_screenshots", action="store_true", default=None, help="Upload screenshot files to the configured image host during --execute target preparation. Enabled by default for --execute.")
+    retorrent.add_argument("--no-upload-screenshots", dest="upload_screenshots", action="store_false", help="Skip screenshot image-host uploads during --execute target preparation.")
     retorrent.add_argument("--image-host", help="Image host name for --upload-screenshots. Defaults to DEFAULT.img_host_1.")
     retorrent.add_argument("--image-host-file", help="Existing image-host upload JSON file to record in the MTEAM preparation materials manifest.")
     retorrent.add_argument("--target-torrent-file", help="MTEAM .torrent file used by the live upload stage.")
@@ -1109,6 +1114,11 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
     needs_source_injection = not bool(args.content_path or package_upload_resume)
     target_execute = not bool(args.uploaded_torrent_file or args.uploaded_torrent_id)
     needs_target_torrent = bool(target_execute and not (args.uploaded_torrent_file or args.uploaded_torrent_id))
+    enrich_metadata = _retorrent_execute_default(args.enrich_metadata, True)
+    fetch_ptgen = _retorrent_execute_default(args.fetch_ptgen, True)
+    generate_mediainfo = _retorrent_execute_default(args.generate_mediainfo, True)
+    generate_screenshots = _retorrent_execute_default(args.generate_screenshots, True)
+    upload_screenshots = _retorrent_execute_default(args.upload_screenshots, True)
     return argparse.Namespace(
         command="pipeline",
         config=args.config,
@@ -1129,8 +1139,8 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         wait_complete=needs_source_injection or bool(args.content_path),
         wait_timeout=args.wait_timeout,
         wait_interval=args.wait_interval,
-        enrich_metadata=args.enrich_metadata or args.fetch_ptgen,
-        fetch_ptgen=args.fetch_ptgen,
+        enrich_metadata=enrich_metadata or fetch_ptgen,
+        fetch_ptgen=fetch_ptgen,
         metadata_file=args.metadata_file,
         imdb_id=args.imdb_id,
         tmdb_id=args.tmdb_id,
@@ -1141,11 +1151,11 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         target_output_dir=args.target_output_dir,
         mediainfo_file=args.mediainfo_file,
         bdinfo_file=args.bdinfo_file,
-        generate_mediainfo=args.generate_mediainfo,
-        generate_screenshots=args.generate_screenshots,
+        generate_mediainfo=generate_mediainfo,
+        generate_screenshots=generate_screenshots,
         screenshot_count=args.screenshot_count,
         screenshot_file=list(getattr(args, "screenshot_file", []) or []),
-        upload_screenshots=args.upload_screenshots,
+        upload_screenshots=upload_screenshots,
         image_host=args.image_host,
         image_host_file=args.image_host_file,
         check_dupes=not bool(args.package_dir and (args.uploaded_torrent_file or args.uploaded_torrent_id)),
@@ -1175,6 +1185,10 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         summary_output_dir=args.summary_output_dir,
         json=getattr(args, "json", False),
     )
+
+
+def _retorrent_execute_default(value: bool | None, default: bool) -> bool:
+    return default if value is None else bool(value)
 
 
 def build_sites_payload() -> dict[str, Any]:
