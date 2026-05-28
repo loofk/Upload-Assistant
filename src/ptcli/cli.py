@@ -238,6 +238,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait with --wait-complete.")
     pipeline.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds for --wait-complete.")
     pipeline.add_argument("--enrich-metadata", action="store_true", help="Fill missing IMDb/TMDb/Douban metadata before duplicate check and target preparation.")
+    pipeline.add_argument("--fetch-ptgen", action="store_true", help="Fetch PTGen/Douban movie information during metadata enrichment for the MTEAM description draft.")
     pipeline.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, douban_id, or douban_url overrides for --enrich-metadata.")
     pipeline.add_argument("--imdb-id", help="IMDb id override for --enrich-metadata.")
     pipeline.add_argument("--tmdb-id", help="TMDb id override for --enrich-metadata.")
@@ -326,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait for qBittorrent completion during --execute.")
     retorrent.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds during --execute.")
     retorrent.add_argument("--enrich-metadata", action="store_true", help="Fill missing IMDb/TMDb/Douban metadata during --execute target preparation.")
+    retorrent.add_argument("--fetch-ptgen", action="store_true", help="Fetch PTGen/Douban movie information during --execute target preparation.")
     retorrent.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, douban_id, or douban_url overrides during --execute.")
     retorrent.add_argument("--imdb-id", help="IMDb id override during --execute metadata enrichment.")
     retorrent.add_argument("--tmdb-id", help="TMDb id override during --execute metadata enrichment.")
@@ -1127,7 +1129,8 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         wait_complete=needs_source_injection or bool(args.content_path),
         wait_timeout=args.wait_timeout,
         wait_interval=args.wait_interval,
-        enrich_metadata=args.enrich_metadata,
+        enrich_metadata=args.enrich_metadata or args.fetch_ptgen,
+        fetch_ptgen=args.fetch_ptgen,
         metadata_file=args.metadata_file,
         imdb_id=args.imdb_id,
         tmdb_id=args.tmdb_id,
@@ -3253,7 +3256,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             invalid_message="Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
         )
     stages.append(source_info_result)
-    if getattr(args, "enrich_metadata", False):
+    if getattr(args, "enrich_metadata", False) or getattr(args, "fetch_ptgen", False):
         source_info_result = await _pipeline_metadata_enrichment_stage(config, args, source_info_result)
         stages.append(source_info_result)
     effective_source_torrent_hash = _source_torrent_hash_from_stage(source_info_result)
@@ -3689,7 +3692,13 @@ async def _pipeline_metadata_enrichment_stage(config: dict[str, Any], args: argp
             "douban_url": getattr(args, "douban_url", None),
         }
     )
-    result = await enrich_source_metadata(config, source_info, overrides={**file_overrides, **cli_overrides})
+    result = await enrich_source_metadata(
+        config,
+        source_info,
+        overrides={**file_overrides, **cli_overrides},
+        fetch_ptgen=bool(getattr(args, "fetch_ptgen", False)),
+        base_dir=getattr(args, "base_dir", None),
+    )
     enriched_source = result.get("source_info") if isinstance(result.get("source_info"), dict) else source_info
     stage_result = {
         **enriched_source,

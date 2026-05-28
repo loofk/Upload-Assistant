@@ -601,8 +601,10 @@ def build_mteam_prepare_preview(source_info: dict[str, Any] | None, target_track
         "imdb_id": source_info.get("imdb_id") if source_info else None,
         "tmdb_id": source_info.get("tmdb_id") if source_info else None,
         "douban_id": source_info.get("douban_id") if source_info else None,
+        "douban_url": source_info.get("douban_url") if source_info else None,
         "torrenthash": source_info.get("torrenthash") if source_info else None,
         "description_length": source_info.get("description_length") if source_info else 0,
+        "ptgen_description_length": len(str(source_info.get("ptgen_description") or "")) if source_info else 0,
     }
 
     if not any([metadata["imdb_id"], metadata["tmdb_id"], metadata["douban_id"], metadata["name"]]):
@@ -634,6 +636,7 @@ def build_mteam_prepare_preview(source_info: dict[str, Any] | None, target_track
 
 
 def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[str, Any] | None, materials: dict[str, Any] | None = None) -> str:
+    ptgen_lines = _mteam_description_ptgen_lines(source_info if isinstance(source_info, dict) else {})
     material_lines = _mteam_description_material_lines(materials if isinstance(materials, dict) else {})
     lines = [
         "[b]Retorrent review draft[/b]",
@@ -653,12 +656,28 @@ def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[
         f"Source torrent hash: {source_info.get('torrenthash') if source_info else ''}",
         f"Local content path: {meta_draft.get('content_path') or ''}",
         "",
+        *ptgen_lines,
+        "",
         *material_lines,
         "",
         "[b]Manual review required[/b]",
         "Confirm source-site and MTEAM rules, transfer permissions, description requirements, screenshots, subtitles, naming, and duplicate status before upload.",
     ]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _mteam_description_ptgen_lines(source_info: dict[str, Any]) -> list[str]:
+    ptgen_text = str(source_info.get("ptgen_description") or "").strip()
+    if not ptgen_text:
+        return ["[b]Movie information[/b]", "PTGen/Douban description: missing"]
+    return ["[b]Movie information[/b]", _normalize_ptgen_description_text(ptgen_text)]
+
+
+def _normalize_ptgen_description_text(text: str) -> str:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    normalized = re.sub(r"\[img\]([^\[]+?)\[/img\]", r"![](\1)", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\[img=\d+\]([^\[]+?)\[/img\]", r"![](\1)", normalized, flags=re.IGNORECASE)
+    return normalized
 
 
 def _mteam_description_material_lines(materials: dict[str, Any]) -> list[str]:
@@ -696,10 +715,12 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
     bdinfo = _material_file_asset(material_files.get("bdinfo_file"))
     screenshots = _screenshots_asset(material_files.get("screenshot_files"))
     image_hosts = _image_host_asset(material_files.get("image_host_file"))
+    ptgen_description_length = len(str(source_info.get("ptgen_description") or "")) if isinstance(source_info, dict) else 0
     metadata_checks = [
         _material_check("imdb", bool(meta_draft.get("imdb") or meta_draft.get("imdb_id")), "IMDb id is present.", "IMDb id is missing; fetch or supply IMDb metadata before live upload."),
         _material_check("tmdb", bool(meta_draft.get("tmdb_id")), "TMDb id is present.", "TMDb id is missing; fetch or supply TMDb metadata before live upload."),
         _material_check("douban", bool(meta_draft.get("douban_url") or meta_draft.get("douban_id")), "Douban id/url is present.", "Douban id/url is missing; fetch or supply Douban metadata before live upload."),
+        _material_check("ptgen_description", ptgen_description_length > 0, "PTGen/Douban description text is present.", "PTGen/Douban description text is missing; run metadata enrichment with --fetch-ptgen before live upload."),
     ]
     asset_checks = [
         _material_check("mediainfo_or_bdinfo", bool(mediainfo.get("ready") or bdinfo.get("ready")), "MediaInfo/BDInfo is present.", "MediaInfo/BDInfo has not been generated into the package yet."),
@@ -725,6 +746,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "douban_id": meta_draft.get("douban_id"),
             "douban_url": meta_draft.get("douban_url"),
             "source_description_available": source_description_length > 0,
+            "ptgen_description_length": ptgen_description_length,
         },
         "assets": {
             "mediainfo": mediainfo,
@@ -793,7 +815,7 @@ def _image_host_asset(path_value: Any) -> dict[str, Any]:
 def _mteam_material_next_actions(checks: list[dict[str, Any]]) -> list[str]:
     missing = {str(check.get("name")) for check in checks if isinstance(check, dict) and not check.get("ok")}
     actions = []
-    if missing.intersection({"imdb", "tmdb", "douban"}):
+    if missing.intersection({"imdb", "tmdb", "douban", "ptgen_description"}):
         actions.append("Fetch or supply IMDb/TMDb/Douban metadata before live upload.")
     if "mediainfo_or_bdinfo" in missing:
         actions.append("Generate MediaInfo or BDInfo and add it to the MTEAM package.")
@@ -929,6 +951,7 @@ def build_mteam_meta_draft(source_info: dict[str, Any] | None, content_path: str
         "tmdb_id": source_info.get("tmdb_id") if source_info else None,
         "douban_id": douban_id,
         "douban_url": source_info.get("douban_url") if source_info else None,
+        "ptgen_description_length": len(str(source_info.get("ptgen_description") or "")) if source_info else 0,
         "torrenthash": source_info.get("torrenthash") if source_info else None,
         "content_path": content_path,
     }
@@ -1337,7 +1360,7 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
 
 def _mteam_material_gate_applicable(materials: dict[str, Any]) -> bool:
     metadata = materials.get("metadata") if isinstance(materials.get("metadata"), dict) else {}
-    if metadata.get("tmdb_id") or metadata.get("douban_id") or metadata.get("douban_url"):
+    if metadata.get("tmdb_id") or metadata.get("douban_id") or metadata.get("douban_url") or metadata.get("ptgen_description_length"):
         return True
     assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
     for key in ("mediainfo", "bdinfo", "screenshots", "image_hosts"):

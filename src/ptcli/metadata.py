@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,8 @@ async def enrich_source_metadata(
     source_info: dict[str, Any],
     *,
     overrides: dict[str, Any] | None = None,
+    fetch_ptgen: bool = False,
+    base_dir: str | None = None,
 ) -> dict[str, Any]:
     base = dict(source_info)
     applied: dict[str, Any] = {}
@@ -43,10 +47,27 @@ async def enrich_source_metadata(
         base["douban_url"] = f"https://movie.douban.com/subject/{base['douban_id']}/"
         applied["douban_url"] = base["douban_url"]
 
+    if fetch_ptgen:
+        ptgen_result = await _ptgen_from_metadata(config, base, base_dir=base_dir)
+        if ptgen_result.get("description"):
+            base["ptgen_description"] = ptgen_result["description"]
+            applied["ptgen_description"] = {"length": len(str(ptgen_result["description"]))}
+            sources.append("ptgen")
+        if ptgen_result.get("ptgen"):
+            base["ptgen"] = ptgen_result["ptgen"]
+        if ptgen_result.get("douban_id") and not base.get("douban_id"):
+            base["douban_id"] = ptgen_result["douban_id"]
+            applied["douban_id"] = ptgen_result["douban_id"]
+        if ptgen_result.get("douban_url") and not base.get("douban_url"):
+            base["douban_url"] = ptgen_result["douban_url"]
+            applied["douban_url"] = ptgen_result["douban_url"]
+        if ptgen_result.get("blocker"):
+            blockers.append(str(ptgen_result["blocker"]))
+
     missing = [key for key in METADATA_KEYS if not base.get(key)]
     return {
         "status": "enriched" if applied else "unchanged",
-        "ready": not missing,
+        "ready": not missing and (not fetch_ptgen or bool(base.get("ptgen_description"))),
         "source_info": base,
         "applied": applied,
         "missing": missing,
@@ -99,6 +120,85 @@ async def _tmdb_from_imdb(config: dict[str, Any], imdb_id: Any) -> dict[str, Any
         return {"blocker": f"TMDb enrichment failed: {exc}"}
     normalized = _normalize_int(tmdb_id)
     return {"tmdb_id": normalized} if normalized else {"blocker": "TMDb enrichment returned no TMDb id."}
+
+
+async def _ptgen_from_metadata(config: dict[str, Any], source_info: dict[str, Any], *, base_dir: str | None) -> dict[str, Any]:
+    from src.trackers.COMMON import COMMON
+
+    imdb_id = _normalize_int(source_info.get("imdb_id"))
+    douban_url = _normalize_douban_url(source_info.get("douban_url") or source_info.get("douban_id"))
+    if not imdb_id and not douban_url:
+        return {"blocker": "PTGen enrichment requires IMDb id or Douban URL."}
+
+    tracker_config = config.get("TRACKERS", {}).get("MTEAM", {}) if isinstance(config, dict) else {}
+    ptgen_api = str(tracker_config.get("ptgen_api") or "").strip() if isinstance(tracker_config, dict) else ""
+    ptgen_retry = int(tracker_config.get("ptgen_retry", 3) or 3) if isinstance(tracker_config, dict) else 3
+    uuid = _ptgen_uuid(source_info)
+    work_root = await asyncio.to_thread(_prepare_ptgen_work_root, base_dir, uuid)
+    meta = _ptgen_meta(source_info, work_root, uuid, imdb_id, douban_url)
+
+    try:
+        description = await COMMON(config=config).ptgen(meta, ptgen_api, ptgen_retry)
+    except Exception as exc:
+        return {"blocker": f"PTGen enrichment failed: {exc}"}
+    if not description.strip():
+        return {"blocker": "PTGen enrichment returned no description text."}
+
+    douban_id = _normalize_douban_id(meta.get("douban_id") or meta.get("douban") or douban_url)
+    return {
+        "description": description,
+        "ptgen": meta.get("ptgen") if isinstance(meta.get("ptgen"), dict) else None,
+        "douban_id": douban_id,
+        "douban_url": _normalize_douban_url(meta.get("douban_url") or douban_id),
+    }
+
+
+def _ptgen_meta(source_info: dict[str, Any], work_root: Path, uuid: str, imdb_id: int | None, douban_url: str | None) -> dict[str, Any]:
+    title = _title_from_source(source_info)
+    meta: dict[str, Any] = {
+        "base_dir": str(work_root),
+        "uuid": uuid,
+        "name": source_info.get("name") or title or uuid,
+        "title": title or source_info.get("name") or uuid,
+        "original_title": title or source_info.get("name") or uuid,
+        "year": _year_from_name(str(source_info.get("name") or "")),
+        "imdb_id": imdb_id or 0,
+        "imdb": str(imdb_id) if imdb_id else "",
+        "tmdb": source_info.get("tmdb_id") or source_info.get("tmdb") or 0,
+        "tmdb_id": source_info.get("tmdb_id"),
+        "douban_id": _normalize_douban_id(source_info.get("douban_id") or douban_url),
+        "douban": _normalize_douban_id(source_info.get("douban_id") or douban_url) or "",
+        "douban_url": douban_url or "",
+        "unattended": True,
+        "unattended_confirm": False,
+        "debug": False,
+    }
+    return meta
+
+
+def _prepare_ptgen_work_root(base_dir: str | None, uuid: str) -> Path:
+    work_root = Path(base_dir).expanduser() if base_dir else Path(tempfile.gettempdir()) / "ptcli-ptgen"
+    (work_root / "tmp" / uuid).mkdir(parents=True, exist_ok=True)
+    return work_root
+
+
+def _ptgen_uuid(source_info: dict[str, Any]) -> str:
+    tracker = str(source_info.get("tracker") or "SOURCE")
+    torrent_id = str(source_info.get("torrent_id") or "unknown")
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", f"ptcli-{tracker}-{torrent_id}")[:120]
+
+
+def _title_from_source(source_info: dict[str, Any]) -> str | None:
+    name = str(source_info.get("name") or "").strip()
+    if not name:
+        return None
+    title = re.split(r"\b(?:19|20)\d{2}\b", name, maxsplit=1)[0].strip(". -_")
+    return title.replace(".", " ") if title else name
+
+
+def _year_from_name(name: str) -> str:
+    match = re.search(r"\b((?:19|20)\d{2})\b", name)
+    return match.group(1) if match else ""
 
 
 def _normalize_int(value: Any) -> int | None:

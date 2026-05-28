@@ -652,6 +652,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "--wait-interval",
             "45",
             "--enrich-metadata",
+            "--fetch-ptgen",
             "--tmdb-id",
             "999",
             "--douban-id",
@@ -834,6 +835,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.wait_timeout == 7200.0
     assert pipeline_args.wait_interval == 45.0
     assert pipeline_args.enrich_metadata is True
+    assert pipeline_args.fetch_ptgen is True
     assert pipeline_args.tmdb_id == "999"
     assert pipeline_args.douban_id == "1291546"
     assert pipeline_args.uploaded_wait_timeout == 900.0
@@ -11246,6 +11248,7 @@ def test_mteam_description_draft_and_upload_gate() -> None:
         "tmdb_id": 999,
         "douban_id": "1291546",
         "torrenthash": "a" * 40,
+        "ptgen_description": "[img]https://poster.example/poster.jpg[/img]\n◎译　　名　示例电影\n◎简　　介　示例简介",
     }
     meta_draft = build_mteam_meta_draft(source_info, "/downloads/Example")
     description = build_mteam_description_draft(meta_draft, source_info)
@@ -11257,6 +11260,9 @@ def test_mteam_description_draft_and_upload_gate() -> None:
     )
 
     assert "Retorrent review draft" in description
+    assert "[b]Movie information[/b]" in description
+    assert "![](https://poster.example/poster.jpg)" in description
+    assert "◎简　　介　示例简介" in description
     assert "Source tracker: U2" in description
     assert gate["ready"] is True
     assert gate["blockers"] == []
@@ -11317,12 +11323,37 @@ def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
     assert metadata_checks["imdb"]["ok"] is True
     assert metadata_checks["tmdb"]["ok"] is True
     assert metadata_checks["douban"]["ok"] is True
+    assert metadata_checks["ptgen_description"]["ok"] is False
     assert asset_checks["mediainfo_or_bdinfo"]["ok"] is False
     assert asset_checks["screenshots"]["ok"] is False
     assert asset_checks["image_host_uploads"]["ok"] is False
     assert materials["metadata"]["source_description_available"] is True
+    assert materials["metadata"]["ptgen_description_length"] == 0
     assert materials["ready"] is False
-    assert "Generate MediaInfo or BDInfo" in materials["next_actions"][0]
+    assert "Fetch or supply IMDb/TMDb/Douban metadata" in materials["next_actions"][0]
+    assert "Generate MediaInfo or BDInfo" in materials["next_actions"][1]
+
+
+def test_mteam_materials_manifest_accepts_ptgen_description() -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+    }
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
+
+    materials = build_mteam_materials_manifest(preview, source_info, "/downloads/Example")
+
+    metadata_checks = {check["name"]: check for check in materials["checks"]["metadata"]}
+    assert metadata_checks["ptgen_description"]["ok"] is True
+    assert materials["metadata"]["ptgen_description_length"] == len(source_info["ptgen_description"])
 
 
 def test_mteam_materials_manifest_records_existing_material_files(tmp_path) -> None:
@@ -11342,6 +11373,7 @@ def test_mteam_materials_manifest_records_existing_material_files(tmp_path) -> N
         "douban_url": "https://movie.douban.com/subject/1291546/",
         "torrenthash": "a" * 40,
         "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
     }
     preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
 
@@ -12320,6 +12352,7 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
         "douban_url": "https://movie.douban.com/subject/1291546/",
         "torrenthash": "a" * 40,
         "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
     }
     package = write_mteam_prepare_package(
         source_info,
