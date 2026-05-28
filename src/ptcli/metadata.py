@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from src.tmdb import TmdbManager
+import httpx
 
 METADATA_KEYS = ("imdb_id", "tmdb_id", "douban_id", "douban_url")
 
@@ -113,18 +113,42 @@ def normalize_metadata_overrides(payload: dict[str, Any]) -> dict[str, Any]:
 
 async def _tmdb_from_imdb(config: dict[str, Any], imdb_id: Any) -> dict[str, Any]:
     default = config.get("DEFAULT", {}) if isinstance(config, dict) else {}
-    if not isinstance(default, dict) or not default.get("tmdb_api"):
+    tmdb_api = str(default.get("tmdb_api") or "").strip() if isinstance(default, dict) else ""
+    if not tmdb_api:
         return {"blocker": "TMDb enrichment requires DEFAULT.tmdb_api."}
     imdb_value = _normalize_imdb_tt(imdb_id)
     if not imdb_value:
         return {"blocker": "TMDb enrichment requires a valid IMDb id."}
     try:
-        manager = TmdbManager(config)
-        _category, tmdb_id, _language, _filename_search = await manager.get_tmdb_from_imdb(imdb_value, mode="discord")
-    except Exception as exc:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"https://api.themoviedb.org/3/find/{imdb_value}",
+                params={"api_key": tmdb_api, "external_source": "imdb_id"},
+            )
+        response.raise_for_status()
+        payload = response.json()
+    except httpx.TimeoutException:
+        return {"blocker": "TMDb enrichment timed out."}
+    except (httpx.RequestError, ValueError) as exc:
         return {"blocker": f"TMDb enrichment failed: {exc}"}
-    normalized = _normalize_int(tmdb_id)
+    normalized = _tmdb_id_from_find_payload(payload)
     return {"tmdb_id": normalized} if normalized else {"blocker": "TMDb enrichment returned no TMDb id."}
+
+
+def _tmdb_id_from_find_payload(payload: Any) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("movie_results", "tv_results"):
+        results = payload.get(key)
+        if not isinstance(results, list):
+            continue
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            normalized = _normalize_int(item.get("id"))
+            if normalized:
+                return normalized
+    return None
 
 
 async def _ptgen_from_metadata(config: dict[str, Any], source_info: dict[str, Any], *, base_dir: str | None) -> dict[str, Any]:

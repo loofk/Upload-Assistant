@@ -9,6 +9,7 @@ from torf import Torrent
 
 import src.ptcli.cli as ptcli_cli
 import src.ptcli.doctor as ptcli_doctor
+import src.ptcli.metadata as ptcli_metadata
 import src.ptcli.source as ptcli_source
 import src.ptcli.target as ptcli_target
 from src.ptcli.cli import _with_captured_stdout, build_parser, build_plan, main
@@ -11838,6 +11839,52 @@ async def test_enrich_source_metadata_derives_douban_id_from_existing_url() -> N
     assert result["ready"] is True
     assert result["source_info"]["douban_id"] == "1291546"
     assert result["applied"]["douban_id"] == "1291546"
+
+
+@pytest.mark.asyncio
+async def test_enrich_source_metadata_fetches_tmdb_without_legacy_tmdb_manager(monkeypatch) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "name": "Name",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+    }
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"movie_results": [{"id": 999}], "tv_results": []}
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            assert kwargs["timeout"] == 30.0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url, params):
+            assert url == "https://api.themoviedb.org/3/find/tt1234567"
+            assert params == {"api_key": "tmdb-key", "external_source": "imdb_id"}
+            return FakeResponse()
+
+    monkeypatch.setattr(ptcli_metadata.httpx, "AsyncClient", FakeClient)
+
+    result = await enrich_source_metadata({"DEFAULT": {"tmdb_api": "tmdb-key"}}, source_info)
+
+    assert result["ready"] is True
+    assert result["source_info"]["tmdb_id"] == 999
+    assert result["sources"] == ["tmdb_api"]
+    assert result["applied"]["tmdb_id"] == 999
 
 
 @pytest.mark.asyncio
