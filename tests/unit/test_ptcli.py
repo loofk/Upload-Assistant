@@ -2178,6 +2178,59 @@ async def test_reference_source_info_uses_ptcli_generic_details(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
+async def test_reference_source_info_parses_plain_external_ids(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "CHD.txt").write_text("uid=1;", encoding="utf-8")
+    html = """
+    <html>
+      <head><title>CHD Reference</title></head>
+      <body>
+        <h1>CHD.Reference.2024.1080p.BluRay-GROUP</h1>
+        <table>
+          <tr><td>IMDb</td><td>tt7654321</td></tr>
+          <tr><td>TMDb ID</td><td>98765</td></tr>
+          <tr><td>豆瓣</td><td>3541415</td></tr>
+        </table>
+        <div class="torrent-description">Info Hash: 1234567890ABCDEF1234567890ABCDEF12345678</div>
+      </body>
+    </html>
+    """
+
+    class FakeResponse:
+        text = html
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url):
+            assert url == "https://ptchdbits.co/details.php?id=2468"
+            return FakeResponse()
+
+    monkeypatch.setattr(ptcli_source.httpx, "AsyncClient", FakeClient)
+
+    info = await ptcli_source.fetch_source_info({}, "CHD", "2468", base_dir=str(tmp_path))
+
+    assert info.tracker == "CHD"
+    assert info.torrent_id == "2468"
+    assert info.imdb_id == 7654321
+    assert info.tmdb_id == 98765
+    assert info.douban_id == "3541415"
+    assert info.douban_url == "https://movie.douban.com/subject/3541415/"
+    assert info.torrenthash == "1234567890abcdef1234567890abcdef12345678"
+
+
+@pytest.mark.asyncio
 async def test_enabled_nexus_source_info_uses_ptcli_generic_details(monkeypatch, tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)

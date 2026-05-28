@@ -290,8 +290,8 @@ async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torre
     return SourceTorrentInfo(
         tracker=tracker,
         torrent_id=torrent_id,
-        imdb_id=_extract_first_int(r"imdb\.com/title/tt(\d+)", response.text),
-        tmdb_id=_extract_first_int(r"themoviedb\.org/(?:movie|tv)/(\d+)", response.text),
+        imdb_id=_extract_imdb_id(response.text, page_text),
+        tmdb_id=_extract_tmdb_id(response.text, page_text),
         name=_extract_generic_name(soup, page_text),
         torrenthash=_extract_torrent_hash(page_text),
         description_length=len(_extract_generic_description(soup, page_text)),
@@ -316,6 +316,37 @@ def _extract_id_from_url(value: Any, pattern: str) -> int | None:
     if not isinstance(value, str):
         return None
     return _extract_first_int(pattern, value)
+
+
+def _extract_imdb_id(html: str, page_text: str) -> int | None:
+    for pattern in (
+        r"imdb\.com/title/tt(\d{5,10})",
+        r"\btt(\d{5,10})\b",
+        r"\bimdb(?:[_\s-]*id)?\b[^0-9t]{0,40}(?:tt)?(\d{5,10})\b",
+    ):
+        value = _extract_first_int(pattern, html)
+        if value:
+            return value
+    return _extract_first_int(r"\bimdb(?:[_\s-]*id)?\b[^0-9t]{0,40}(?:tt)?(\d{5,10})\b", page_text)
+
+
+def _extract_tmdb_id(html: str, page_text: str) -> int | None:
+    for pattern in (
+        r"themoviedb\.org/(?:movie|tv)/(\d{2,10})",
+        r"\btmdb(?:[_\s-]*id)?\b[^0-9]{0,40}(\d{2,10})\b",
+        r"\bthe\s*movie\s*db\b[^0-9]{0,40}(\d{2,10})\b",
+    ):
+        value = _extract_first_int(pattern, html)
+        if value:
+            return value
+    for pattern in (
+        r"\btmdb(?:[_\s-]*id)?\b[^0-9]{0,40}(\d{2,10})\b",
+        r"\bthe\s*movie\s*db\b[^0-9]{0,40}(\d{2,10})\b",
+    ):
+        value = _extract_first_int(pattern, page_text)
+        if value:
+            return value
+    return None
 
 
 def _extract_douban_from_value(value: Any) -> tuple[str | None, str | None]:
