@@ -11819,6 +11819,76 @@ async def test_enrich_source_metadata_applies_overrides_without_clobbering_exist
     assert "imdb_id" not in result["applied"]
 
 
+@pytest.mark.asyncio
+async def test_enrich_source_metadata_derives_douban_id_from_existing_url() -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "name": "Name",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "douban_id": None,
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+    }
+
+    result = await enrich_source_metadata({}, source_info)
+
+    assert result["ready"] is True
+    assert result["source_info"]["douban_id"] == "1291546"
+    assert result["applied"]["douban_id"] == "1291546"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_metadata_enrichment_stage_blocks_missing_ready_metadata(monkeypatch) -> None:
+    args = argparse.Namespace(
+        metadata_file=None,
+        imdb_id=None,
+        tmdb_id=None,
+        douban_id=None,
+        douban_url=None,
+        fetch_ptgen=True,
+        base_dir=None,
+    )
+    source_stage = {
+        "stage": "source-info",
+        "ok": True,
+        "result": {
+            "tracker": "U2",
+            "torrent_id": "60635",
+            "imdb_id": 1234567,
+            "tmdb_id": None,
+            "douban_id": None,
+            "douban_url": None,
+            "name": "Name",
+            "torrenthash": "a" * 40,
+        },
+    }
+
+    async def fake_enrich_source_metadata(_config, source_info, *, overrides=None, fetch_ptgen=False, base_dir=None):
+        _ = (overrides, fetch_ptgen, base_dir)
+        return {
+            "status": "unchanged",
+            "ready": False,
+            "source_info": source_info,
+            "applied": {},
+            "missing": ["tmdb_id", "douban_id", "douban_url"],
+            "sources": [],
+            "blockers": [],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "enrich_source_metadata", fake_enrich_source_metadata)
+
+    stage = await ptcli_cli._pipeline_metadata_enrichment_stage({}, args, source_stage)
+
+    enrichment = stage["result"]["metadata_enrichment"]
+    assert stage["ok"] is False
+    assert "Missing metadata after enrichment" in enrichment["readiness_blockers"][0]
+    assert "PTGen/Douban description is missing" in enrichment["readiness_blockers"][1]
+    assert "tmdb_id" in enrichment["missing"]
+
+
 def test_mteam_upload_gate_surfaces_duplicate_blocker() -> None:
     source_info = {
         "tracker": "U2",

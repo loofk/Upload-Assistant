@@ -3722,12 +3722,26 @@ async def _pipeline_metadata_enrichment_stage(config: dict[str, Any], args: argp
         **enriched_source,
         "metadata_enrichment": {key: result.get(key) for key in ("status", "ready", "applied", "missing", "sources", "blockers")},
     }
+    readiness_blockers = _metadata_enrichment_readiness_blockers(result, fetch_ptgen=bool(getattr(args, "fetch_ptgen", False)))
+    stage_result["metadata_enrichment"]["readiness_blockers"] = readiness_blockers
+    blockers = [*_string_list(result.get("blockers")), *readiness_blockers]
     return {
         "stage": "metadata-enrich",
-        "ok": not result.get("blockers"),
+        "ok": not blockers,
         "result": stage_result,
-        "message": "Metadata enrichment completed." if not result.get("blockers") else "Metadata enrichment completed with blockers.",
+        "message": "Metadata enrichment completed." if not blockers else "Metadata enrichment completed with blockers.",
     }
+
+
+def _metadata_enrichment_readiness_blockers(result: dict[str, Any], *, fetch_ptgen: bool) -> list[str]:
+    blockers = []
+    missing = _string_list(result.get("missing"))
+    if missing:
+        blockers.append(f"Missing metadata after enrichment: {', '.join(missing)}")
+    source_info = result.get("source_info") if isinstance(result.get("source_info"), dict) else {}
+    if fetch_ptgen and not source_info.get("ptgen_description"):
+        blockers.append("PTGen/Douban description is missing after enrichment.")
+    return blockers
 
 
 async def _pipeline_mediainfo_material_stage(

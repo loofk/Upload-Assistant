@@ -46,6 +46,11 @@ async def enrich_source_metadata(
     if base.get("douban_id") and not base.get("douban_url"):
         base["douban_url"] = f"https://movie.douban.com/subject/{base['douban_id']}/"
         applied["douban_url"] = base["douban_url"]
+    if base.get("douban_url") and not base.get("douban_id"):
+        douban_id = _normalize_douban_id(base.get("douban_url"))
+        if douban_id:
+            base["douban_id"] = douban_id
+            applied["douban_id"] = douban_id
 
     if fetch_ptgen:
         ptgen_result = await _ptgen_from_metadata(config, base, base_dir=base_dir)
