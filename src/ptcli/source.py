@@ -154,16 +154,18 @@ def source_info_from_tuple(tracker: str, torrent_id: str, result: tuple[Any, ...
     name = _optional_str(result[2] if len(result) > 2 else None)
     torrenthash = _optional_str(result[3] if len(result) > 3 else None)
     description = _optional_str(result[4] if len(result) > 4 else None)
+    metadata_text = "\n".join(_optional_str(value) or "" for value in (description, meta.get("description"), meta.get("bdinfo"), meta.get("mediainfo")))
+    douban_id, douban_url = _extract_douban(metadata_text, metadata_text)
     return SourceTorrentInfo(
         tracker=tracker,
         torrent_id=torrent_id,
-        imdb_id=imdb_id,
-        tmdb_id=tmdb_id,
+        imdb_id=imdb_id or _optional_int(meta.get("imdb_id")) or _extract_imdb_id(metadata_text, metadata_text),
+        tmdb_id=tmdb_id or _optional_int(meta.get("tmdb_id")) or _extract_tmdb_id(metadata_text, metadata_text),
         name=name,
         torrenthash=torrenthash,
         description_length=len(description or ""),
-        douban_id=_optional_str(meta.get("douban_id")),
-        douban_url=_optional_str(meta.get("douban_url")),
+        douban_id=_optional_str(meta.get("douban_id")) or douban_id,
+        douban_url=_optional_str(meta.get("douban_url")) or douban_url,
     )
 
 

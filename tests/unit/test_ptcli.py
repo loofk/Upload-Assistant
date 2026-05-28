@@ -6291,6 +6291,21 @@ def test_source_info_from_tuple_includes_meta_side_effects() -> None:
     assert info.douban_id == "1291546"
 
 
+def test_source_info_from_tuple_extracts_external_ids_from_description() -> None:
+    description = """
+    IMDb: https://www.imdb.com/title/tt7654321/
+    TMDb ID: 98765
+    豆瓣：https://movie.douban.com/subject/3541415/
+    """
+
+    info = source_info_from_tuple("CHD", "2468", (None, None, "Release Name", "b" * 40, description), {})
+
+    assert info.imdb_id == 7654321
+    assert info.tmdb_id == 98765
+    assert info.douban_id == "3541415"
+    assert info.douban_url == "https://movie.douban.com/subject/3541415/"
+
+
 @pytest.mark.asyncio
 async def test_mteam_source_info_uses_ptcli_api_client(monkeypatch) -> None:
     closed = {"value": False}
