@@ -25,7 +25,7 @@ from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check, build_runtime_dependency_check, extend_doctor_check
 from src.ptcli.flows import MTEAM_SOURCE_FLOW_TRACKERS, flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
-from src.ptcli.materials import generate_mediainfo_material, generate_screenshot_materials
+from src.ptcli.materials import generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import build_rule_check, get_rule_profiles, rule_profiles_to_dicts
 from src.ptcli.source import (
@@ -245,6 +245,8 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--generate-screenshots", action="store_true", help="Generate local video screenshots from --path or the resolved qBittorrent content path before preparing the MTEAM package.")
     pipeline.add_argument("--screenshot-count", type=int, default=3, help="Number of screenshots to generate with --generate-screenshots.")
     pipeline.add_argument("--screenshot-file", action="append", default=[], help="Existing screenshot image file to record in the MTEAM preparation materials manifest. May be repeated.")
+    pipeline.add_argument("--upload-screenshots", action="store_true", help="Upload screenshot files to the configured image host before preparing the MTEAM package.")
+    pipeline.add_argument("--image-host", help="Image host name for --upload-screenshots. Defaults to DEFAULT.img_host_1.")
     pipeline.add_argument("--image-host-file", help="Existing image-host upload JSON file to record in the MTEAM preparation materials manifest.")
     pipeline.add_argument("--check-dupes", action="store_true", help="Run target duplicate search after source metadata is available.")
     pipeline.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
@@ -324,6 +326,8 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--generate-screenshots", action="store_true", help="Generate local video screenshots from --path or the resolved qBittorrent content path during --execute target preparation.")
     retorrent.add_argument("--screenshot-count", type=int, default=3, help="Number of screenshots to generate with --generate-screenshots.")
     retorrent.add_argument("--screenshot-file", action="append", default=[], help="Existing screenshot image file to record in the MTEAM preparation materials manifest. May be repeated.")
+    retorrent.add_argument("--upload-screenshots", action="store_true", help="Upload screenshot files to the configured image host during --execute target preparation.")
+    retorrent.add_argument("--image-host", help="Image host name for --upload-screenshots. Defaults to DEFAULT.img_host_1.")
     retorrent.add_argument("--image-host-file", help="Existing image-host upload JSON file to record in the MTEAM preparation materials manifest.")
     retorrent.add_argument("--target-torrent-file", help="MTEAM .torrent file used by the live upload stage.")
     retorrent.add_argument("--export-target-torrent", action="store_true", help="Export the matched qBittorrent .torrent as the target upload candidate if --target-torrent-file is omitted.")
@@ -1119,6 +1123,8 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         generate_screenshots=args.generate_screenshots,
         screenshot_count=args.screenshot_count,
         screenshot_file=list(getattr(args, "screenshot_file", []) or []),
+        upload_screenshots=args.upload_screenshots,
+        image_host=args.image_host,
         image_host_file=args.image_host_file,
         check_dupes=not bool(args.package_dir and (args.uploaded_torrent_file or args.uploaded_torrent_id)),
         accept_rules=args.accept_rules,
@@ -3379,6 +3385,12 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             generated_screenshots = screenshot_stage.get("result", {}).get("screenshot_files") if screenshot_stage.get("ok") else None
             if generated_screenshots and not material_files.get("screenshot_files"):
                 material_files["screenshot_files"] = list(generated_screenshots)
+        if args.upload_screenshots:
+            image_host_stage = await _pipeline_image_host_material_stage(config, args, source_result if isinstance(source_result, dict) else None, material_files)
+            stages.append(image_host_stage)
+            generated_image_host_file = image_host_stage.get("result", {}).get("image_host_file") if image_host_stage.get("ok") else None
+            if generated_image_host_file and not material_files.get("image_host_file"):
+                material_files["image_host_file"] = str(generated_image_host_file)
         target_prepare = write_mteam_prepare_package(
             source_result if isinstance(source_result, dict) else None,
             target_trackers,
@@ -3686,6 +3698,37 @@ async def _pipeline_screenshot_material_stage(
         "ok": result.get("status") == "generated",
         "result": result,
         "message": "Generated screenshot material files." if result.get("status") == "generated" else "Screenshot material generation failed.",
+    }
+
+
+async def _pipeline_image_host_material_stage(
+    config: dict[str, Any],
+    args: argparse.Namespace,
+    source_info: dict[str, Any] | None,
+    material_files: dict[str, Any],
+) -> dict[str, Any]:
+    if material_files.get("image_host_file"):
+        return {
+            "stage": "materials-image-host",
+            "ok": True,
+            "skipped": True,
+            "message": "Existing image-host upload file supplied; upload skipped.",
+        }
+    screenshot_files = list(material_files.get("screenshot_files") or [])
+    if not screenshot_files:
+        return {
+            "stage": "materials-image-host",
+            "ok": False,
+            "skipped": True,
+            "message": "--upload-screenshots requires --screenshot-file or successful --generate-screenshots output.",
+        }
+    output_dir = _mteam_material_output_dir(args, source_info)
+    result = await upload_screenshot_image_hosts(config, screenshot_files, str(output_dir), image_host=args.image_host)
+    return {
+        "stage": "materials-image-host",
+        "ok": result.get("status") == "uploaded",
+        "result": result,
+        "message": "Uploaded screenshots to image host." if result.get("status") == "uploaded" else "Screenshot image-host upload failed.",
     }
 
 

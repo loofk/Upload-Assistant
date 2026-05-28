@@ -16,7 +16,7 @@ from src.ptcli.config import resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list
-from src.ptcli.materials import find_primary_media_file, generate_mediainfo_material, generate_screenshot_materials
+from src.ptcli.materials import find_primary_media_file, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summarize_torrent
 from src.ptcli.rules import build_rule_check
 from src.ptcli.source import create_source_meta, extract_torrent_id, source_info_from_tuple
@@ -631,6 +631,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "2",
             "--screenshot-file",
             str(tmp_path / "screen-1.png"),
+            "--upload-screenshots",
+            "--image-host",
+            "ptpimg",
             "--image-host-file",
             str(tmp_path / "image-host.json"),
             "--uploaded-output-dir",
@@ -804,6 +807,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.generate_screenshots is True
     assert pipeline_args.screenshot_count == 2
     assert pipeline_args.screenshot_file == [str(tmp_path / "screen-1.png")]
+    assert pipeline_args.upload_screenshots is True
+    assert pipeline_args.image_host == "ptpimg"
     assert pipeline_args.image_host_file == str(tmp_path / "image-host.json")
 
 
@@ -8715,6 +8720,74 @@ async def test_pipeline_generate_screenshot_materials_before_prepare_target(monk
 
 
 @pytest.mark.asyncio
+async def test_pipeline_upload_screenshots_before_prepare_target(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {"imdb_id": 1234567, "tmdb_id": 999, "douban_id": "1291546"})
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_upload_screenshot_image_hosts(_config, screenshot_files, output_dir, image_host=None):
+        output_path = Path(output_dir) / "image-host-uploads.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "status": "uploaded",
+            "host": image_host,
+            "count": len(screenshot_files),
+            "items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}],
+            "blockers": [],
+        }
+        output_path.write_text(json.dumps(payload), encoding="utf-8")
+        return {**payload, "image_host_file": str(output_path)}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "upload_screenshot_image_hosts", fake_upload_screenshot_image_hosts)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--path",
+            "/downloads/Name",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--screenshot-file",
+            str(screenshot),
+            "--upload-screenshots",
+            "--image-host",
+            "ptpimg",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    image_host_stage = next(stage for stage in payload["stages"] if stage["stage"] == "materials-image-host")
+    target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
+    assert image_host_stage["ok"] is True
+    assert image_host_stage["result"]["image_host_file"].endswith("image-host-uploads.json")
+    assert target_stage["result"]["materials"]["assets"]["image_hosts"]["ready"] is True
+    assert target_stage["result"]["materials"]["assets"]["image_hosts"]["count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_pipeline_prepare_target_blocks_mismatched_existing_qbit_content(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -11229,6 +11302,29 @@ async def test_generate_screenshot_materials_writes_files_and_evidence(tmp_path)
     assert len(result["screenshot_files"]) == 2
     assert result["files"][0]["sha1"]
     assert result["files"][0]["timestamp_seconds"] > 0
+
+
+@pytest.mark.asyncio
+async def test_upload_screenshot_image_hosts_writes_upload_json(tmp_path) -> None:
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+
+    async def fake_uploader(args):
+        image, host, _config, _meta = args
+        return {
+            "status": "success",
+            "img_url": f"https://{host}/thumb/{Path(image).name}",
+            "raw_url": f"https://{host}/raw/{Path(image).name}",
+            "web_url": f"https://{host}/page/{Path(image).name}",
+        }
+
+    result = await upload_screenshot_image_hosts({"DEFAULT": {"img_host_1": "ptpimg"}}, [str(screenshot)], str(tmp_path / "materials"), uploader=fake_uploader)
+
+    assert result["status"] == "uploaded"
+    assert result["host"] == "ptpimg"
+    assert result["count"] == 1
+    assert result["items"][0]["raw_url"] == "https://ptpimg/raw/screen-1.png"
+    assert await asyncio.to_thread(Path(result["image_host_file"]).exists)
 
 
 def test_mteam_upload_gate_surfaces_duplicate_blocker() -> None:

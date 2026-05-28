@@ -13,6 +13,8 @@ from typing import Any
 
 from pymediainfo import MediaInfo
 
+from src.uploadscreens import upload_image_task
+
 VIDEO_EXTENSIONS = {
     ".avi",
     ".m2ts",
@@ -61,6 +63,50 @@ async def generate_screenshot_materials(
     ffmpeg_binary: str | None = None,
 ) -> dict[str, Any]:
     return await asyncio.to_thread(_generate_screenshot_materials_sync, content_path, output_dir, count, parser or MediaInfo.parse, runner, ffmpeg_binary)
+
+
+async def upload_screenshot_image_hosts(
+    config: dict[str, Any],
+    screenshot_files: list[str],
+    output_dir: str,
+    *,
+    image_host: str | None = None,
+    uploader: Callable[[list[Any]], Any] | None = None,
+) -> dict[str, Any]:
+    if not screenshot_files:
+        return {"status": "blocked", "host": image_host, "count": 0, "items": [], "blockers": ["No screenshot files were supplied for image-host upload."]}
+    host = image_host or _default_image_host(config)
+    if not host:
+        return {"status": "blocked", "host": None, "count": 0, "items": [], "blockers": ["No image host was provided and DEFAULT.img_host_1 is empty."]}
+    upload = uploader or upload_image_task
+    items = []
+    blockers = []
+    for index, screenshot in enumerate(screenshot_files, start=1):
+        result = await upload([screenshot, host, config, {"debug": False}])
+        if not isinstance(result, dict) or result.get("status") != "success":
+            reason = result.get("reason") if isinstance(result, dict) else "upload task returned a non-dict result"
+            blockers.append(f"Screenshot {index} upload failed: {reason}")
+            continue
+        items.append(
+            {
+                "index": index,
+                "host": host,
+                "local_file": screenshot,
+                "img_url": result.get("img_url"),
+                "raw_url": result.get("raw_url"),
+                "web_url": result.get("web_url"),
+            }
+        )
+    payload = {
+        "status": "uploaded" if len(items) == len(screenshot_files) and not blockers else "blocked",
+        "host": host,
+        "count": len(items),
+        "requested_count": len(screenshot_files),
+        "items": items,
+        "blockers": blockers,
+    }
+    output_path = await asyncio.to_thread(_write_image_host_payload, output_dir, payload)
+    return {**payload, "image_host_file": str(output_path)}
 
 
 def _generate_mediainfo_material_sync(content_path: str, output_dir: str, parser: Callable[..., Any]) -> dict[str, Any]:
@@ -237,6 +283,23 @@ def _screenshot_timestamps(duration: float | None, count: int) -> list[float]:
 
 def _run_subprocess(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+
+
+def _write_image_host_payload(output_dir: str, payload: dict[str, Any]) -> Path:
+    destination_dir = Path(output_dir).expanduser()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    output_path = destination_dir / "image-host-uploads.json"
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return output_path
+
+
+def _default_image_host(config: dict[str, Any]) -> str | None:
+    default = config.get("DEFAULT", {}) if isinstance(config, dict) else {}
+    for key in ("img_host_1", "img_host", "imghost"):
+        value = default.get(key) if isinstance(default, dict) else None
+        if value:
+            return str(value)
+    return None
 
 
 def _hidden_path(path: Path, root: Path) -> bool:
