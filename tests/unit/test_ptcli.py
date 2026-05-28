@@ -17,6 +17,7 @@ from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list
 from src.ptcli.materials import find_primary_media_file, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
+from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, normalize_metadata_overrides
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summarize_torrent
 from src.ptcli.rules import build_rule_check
 from src.ptcli.source import create_source_meta, extract_torrent_id, source_info_from_tuple
@@ -650,6 +651,11 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "7200",
             "--wait-interval",
             "45",
+            "--enrich-metadata",
+            "--tmdb-id",
+            "999",
+            "--douban-id",
+            "1291546",
             "--target-torrent-file",
             str(torrent_file),
             "--mediainfo-file",
@@ -827,6 +833,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.save_path == "/downloads"
     assert pipeline_args.wait_timeout == 7200.0
     assert pipeline_args.wait_interval == 45.0
+    assert pipeline_args.enrich_metadata is True
+    assert pipeline_args.tmdb_id == "999"
+    assert pipeline_args.douban_id == "1291546"
     assert pipeline_args.uploaded_wait_timeout == 900.0
     assert pipeline_args.uploaded_wait_interval == 20.0
     assert pipeline_args.target_torrent_file == str(torrent_file)
@@ -8689,6 +8698,59 @@ async def test_pipeline_generate_mediainfo_material_before_prepare_target(monkey
 
 
 @pytest.mark.asyncio
+async def test_pipeline_enrich_metadata_before_prepare_target(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1234567, None, "Name", "a" * 40, "desc"), {})
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    metadata_file = tmp_path / "metadata.json"
+    metadata_file.write_text(json.dumps({"tmdb_id": 999, "douban": "https://movie.douban.com/subject/1291546/"}), encoding="utf-8")
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--path",
+            "/downloads/Name",
+            "--enrich-metadata",
+            "--metadata-file",
+            str(metadata_file),
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    enrichment_stage = next(stage for stage in payload["stages"] if stage["stage"] == "metadata-enrich")
+    target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
+    assert enrichment_stage["ok"] is True
+    assert enrichment_stage["result"]["tmdb_id"] == 999
+    assert enrichment_stage["result"]["douban_id"] == "1291546"
+    assert target_stage["result"]["metadata"]["tmdb_id"] == 999
+    assert target_stage["result"]["materials"]["metadata"]["douban_url"] == "https://movie.douban.com/subject/1291546/"
+
+
+@pytest.mark.asyncio
 async def test_pipeline_generate_screenshot_materials_before_prepare_target(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -11388,6 +11450,44 @@ async def test_upload_screenshot_image_hosts_writes_upload_json(tmp_path) -> Non
     assert result["count"] == 1
     assert result["items"][0]["raw_url"] == "https://ptpimg/raw/screen-1.png"
     assert await asyncio.to_thread(Path(result["image_host_file"]).exists)
+
+
+def test_normalize_metadata_overrides_accepts_urls_and_ids(tmp_path) -> None:
+    metadata_file = tmp_path / "metadata.json"
+    metadata_file.write_text(json.dumps({"imdb": "tt1234567", "tmdb": "999", "douban": "https://movie.douban.com/subject/1291546/"}), encoding="utf-8")
+
+    overrides = load_metadata_overrides(str(metadata_file))
+
+    assert overrides == {
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+    }
+    assert normalize_metadata_overrides({"douban_id": "1291546"})["douban_url"] == "https://movie.douban.com/subject/1291546/"
+
+
+@pytest.mark.asyncio
+async def test_enrich_source_metadata_applies_overrides_without_clobbering_existing() -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "name": "Name",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "douban_id": None,
+        "douban_url": None,
+    }
+
+    result = await enrich_source_metadata({}, source_info, overrides={"imdb_id": 7654321, "tmdb_id": 999, "douban_id": "1291546"})
+
+    assert result["source_info"]["imdb_id"] == 1234567
+    assert result["source_info"]["tmdb_id"] == 999
+    assert result["source_info"]["douban_url"] == "https://movie.douban.com/subject/1291546/"
+    assert result["applied"]["tmdb_id"] == 999
+    assert "imdb_id" not in result["applied"]
 
 
 def test_mteam_upload_gate_surfaces_duplicate_blocker() -> None:

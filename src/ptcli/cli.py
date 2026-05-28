@@ -26,6 +26,7 @@ from src.ptcli.doctor import build_doctor_check, build_runtime_dependency_check,
 from src.ptcli.flows import MTEAM_SOURCE_FLOW_TRACKERS, flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
 from src.ptcli.materials import generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
+from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, normalize_metadata_overrides
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import build_rule_check, get_rule_profiles, rule_profiles_to_dicts
 from src.ptcli.source import (
@@ -236,6 +237,12 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--wait-complete", action="store_true", help="Wait for qBittorrent task completion after injection or by --path.")
     pipeline.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait with --wait-complete.")
     pipeline.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds for --wait-complete.")
+    pipeline.add_argument("--enrich-metadata", action="store_true", help="Fill missing IMDb/TMDb/Douban metadata before duplicate check and target preparation.")
+    pipeline.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, douban_id, or douban_url overrides for --enrich-metadata.")
+    pipeline.add_argument("--imdb-id", help="IMDb id override for --enrich-metadata.")
+    pipeline.add_argument("--tmdb-id", help="TMDb id override for --enrich-metadata.")
+    pipeline.add_argument("--douban-id", help="Douban id override for --enrich-metadata.")
+    pipeline.add_argument("--douban-url", help="Douban URL override for --enrich-metadata.")
     pipeline.add_argument("--prepare-target", action="store_true", help="Build a dry-run target preparation preview after prior stages.")
     pipeline.add_argument("--package-dir", help="Reuse an existing MTEAM package created by pipeline --prepare-target.")
     pipeline.add_argument("--target-output-dir", default="./tmp/target", help="Directory for --prepare-target review package files.")
@@ -318,6 +325,12 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--paused", action="store_true", help="Add injected source torrent paused.")
     retorrent.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait for qBittorrent completion during --execute.")
     retorrent.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds during --execute.")
+    retorrent.add_argument("--enrich-metadata", action="store_true", help="Fill missing IMDb/TMDb/Douban metadata during --execute target preparation.")
+    retorrent.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, douban_id, or douban_url overrides during --execute.")
+    retorrent.add_argument("--imdb-id", help="IMDb id override during --execute metadata enrichment.")
+    retorrent.add_argument("--tmdb-id", help="TMDb id override during --execute metadata enrichment.")
+    retorrent.add_argument("--douban-id", help="Douban id override during --execute metadata enrichment.")
+    retorrent.add_argument("--douban-url", help="Douban URL override during --execute metadata enrichment.")
     retorrent.add_argument("--package-dir", help="Reuse an existing MTEAM package during --execute instead of preparing a new one.")
     retorrent.add_argument("--target-output-dir", default="./tmp/target", help="Directory for MTEAM target preparation package.")
     retorrent.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
@@ -1114,6 +1127,12 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         wait_complete=needs_source_injection or bool(args.content_path),
         wait_timeout=args.wait_timeout,
         wait_interval=args.wait_interval,
+        enrich_metadata=args.enrich_metadata,
+        metadata_file=args.metadata_file,
+        imdb_id=args.imdb_id,
+        tmdb_id=args.tmdb_id,
+        douban_id=args.douban_id,
+        douban_url=args.douban_url,
         prepare_target=not bool(args.package_dir),
         package_dir=args.package_dir,
         target_output_dir=args.target_output_dir,
@@ -3234,6 +3253,9 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             invalid_message="Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
         )
     stages.append(source_info_result)
+    if getattr(args, "enrich_metadata", False):
+        source_info_result = await _pipeline_metadata_enrichment_stage(config, args, source_info_result)
+        stages.append(source_info_result)
     effective_source_torrent_hash = _source_torrent_hash_from_stage(source_info_result)
     rule_check_result = build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
     stages.append({"stage": "rule-check", "ok": True, "result": rule_check_result})
@@ -3353,7 +3375,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         stages.append({"stage": "match", "ok": True, "skipped": True, "message": "--path not provided; qBittorrent match skipped."})
 
     if args.check_dupes:
-        source_stage = _find_stage(stages, "source-info")
+        source_stage = _latest_source_info_stage(stages)
         source_result = source_stage.get("result") if source_stage and source_stage.get("ok") else None
         if "MTEAM" not in target_trackers:
             stages.append({"stage": "target-dupe-check", "ok": False, "skipped": True, "message": "Only MTEAM duplicate search is enabled in this stage."})
@@ -3370,7 +3392,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         stages.append({"stage": "target-dupe-check", "ok": True, "skipped": True, "message": "--check-dupes not provided; target duplicate search skipped."})
 
     if args.prepare_target:
-        source_stage = _find_stage(stages, "source-info")
+        source_stage = _latest_source_info_stage(stages)
         source_result = source_stage.get("result") if source_stage and source_stage.get("ok") else None
         material_files = _mteam_material_files_from_args(args)
         if args.generate_mediainfo:
@@ -3638,6 +3660,46 @@ def _mteam_material_files_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "bdinfo_file": getattr(args, "bdinfo_file", None),
         "screenshot_files": list(getattr(args, "screenshot_file", []) or []),
         "image_host_file": getattr(args, "image_host_file", None),
+    }
+
+
+async def _pipeline_metadata_enrichment_stage(config: dict[str, Any], args: argparse.Namespace, source_info_stage: dict[str, Any]) -> dict[str, Any]:
+    source_info = source_info_stage.get("result") if source_info_stage.get("ok") else None
+    if not isinstance(source_info, dict):
+        return {
+            "stage": "metadata-enrich",
+            "ok": False,
+            "skipped": True,
+            "message": "Skipped because source-info did not produce metadata.",
+        }
+    try:
+        file_overrides = load_metadata_overrides(getattr(args, "metadata_file", None))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "stage": "metadata-enrich",
+            "ok": False,
+            "message": f"Metadata override file could not be loaded: {exc}",
+            "result": {"status": "blocked", "blockers": [str(exc)]},
+        }
+    cli_overrides = normalize_metadata_overrides(
+        {
+            "imdb_id": getattr(args, "imdb_id", None),
+            "tmdb_id": getattr(args, "tmdb_id", None),
+            "douban_id": getattr(args, "douban_id", None),
+            "douban_url": getattr(args, "douban_url", None),
+        }
+    )
+    result = await enrich_source_metadata(config, source_info, overrides={**file_overrides, **cli_overrides})
+    enriched_source = result.get("source_info") if isinstance(result.get("source_info"), dict) else source_info
+    stage_result = {
+        **enriched_source,
+        "metadata_enrichment": {key: result.get(key) for key in ("status", "ready", "applied", "missing", "sources", "blockers")},
+    }
+    return {
+        "stage": "metadata-enrich",
+        "ok": not result.get("blockers"),
+        "result": stage_result,
+        "message": "Metadata enrichment completed." if not result.get("blockers") else "Metadata enrichment completed with blockers.",
     }
 
 
@@ -5035,6 +5097,10 @@ def _find_stage(stages: list[dict[str, Any]], stage_name: str) -> dict[str, Any]
         if stage.get("stage") == stage_name:
             return stage
     return None
+
+
+def _latest_source_info_stage(stages: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return _find_stage(stages, "metadata-enrich") or _find_stage(stages, "source-info")
 
 
 def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, source_torrent_hash: str | None, target_torrent_file: str | None) -> dict[str, Any]:
