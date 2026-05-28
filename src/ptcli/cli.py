@@ -25,6 +25,7 @@ from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check, build_runtime_dependency_check, extend_doctor_check
 from src.ptcli.flows import MTEAM_SOURCE_FLOW_TRACKERS, flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
+from src.ptcli.materials import generate_mediainfo_material
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import build_rule_check, get_rule_profiles, rule_profiles_to_dicts
 from src.ptcli.source import (
@@ -240,6 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--target-output-dir", default="./tmp/target", help="Directory for --prepare-target review package files.")
     pipeline.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
     pipeline.add_argument("--bdinfo-file", help="Existing BDInfo text file to record in the MTEAM preparation materials manifest.")
+    pipeline.add_argument("--generate-mediainfo", action="store_true", help="Generate MediaInfo files from --path or the resolved qBittorrent content path before preparing the MTEAM package.")
     pipeline.add_argument("--screenshot-file", action="append", default=[], help="Existing screenshot image file to record in the MTEAM preparation materials manifest. May be repeated.")
     pipeline.add_argument("--image-host-file", help="Existing image-host upload JSON file to record in the MTEAM preparation materials manifest.")
     pipeline.add_argument("--check-dupes", action="store_true", help="Run target duplicate search after source metadata is available.")
@@ -316,6 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--target-output-dir", default="./tmp/target", help="Directory for MTEAM target preparation package.")
     retorrent.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
     retorrent.add_argument("--bdinfo-file", help="Existing BDInfo text file to record in the MTEAM preparation materials manifest.")
+    retorrent.add_argument("--generate-mediainfo", action="store_true", help="Generate MediaInfo files from --path or the resolved qBittorrent content path during --execute target preparation.")
     retorrent.add_argument("--screenshot-file", action="append", default=[], help="Existing screenshot image file to record in the MTEAM preparation materials manifest. May be repeated.")
     retorrent.add_argument("--image-host-file", help="Existing image-host upload JSON file to record in the MTEAM preparation materials manifest.")
     retorrent.add_argument("--target-torrent-file", help="MTEAM .torrent file used by the live upload stage.")
@@ -1108,6 +1111,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         target_output_dir=args.target_output_dir,
         mediainfo_file=args.mediainfo_file,
         bdinfo_file=args.bdinfo_file,
+        generate_mediainfo=args.generate_mediainfo,
         screenshot_file=list(getattr(args, "screenshot_file", []) or []),
         image_host_file=args.image_host_file,
         check_dupes=not bool(args.package_dir and (args.uploaded_torrent_file or args.uploaded_torrent_id)),
@@ -3356,6 +3360,13 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     if args.prepare_target:
         source_stage = _find_stage(stages, "source-info")
         source_result = source_stage.get("result") if source_stage and source_stage.get("ok") else None
+        material_files = _mteam_material_files_from_args(args)
+        if args.generate_mediainfo:
+            material_stage = await _pipeline_mediainfo_material_stage(args, source_result if isinstance(source_result, dict) else None, effective_content_path, material_files)
+            stages.append(material_stage)
+            generated_mediainfo = material_stage.get("result", {}).get("mediainfo_file") if material_stage.get("ok") else None
+            if generated_mediainfo and not material_files.get("mediainfo_file"):
+                material_files["mediainfo_file"] = str(generated_mediainfo)
         target_prepare = write_mteam_prepare_package(
             source_result if isinstance(source_result, dict) else None,
             target_trackers,
@@ -3363,7 +3374,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             effective_content_path,
             args.target_output_dir,
             accept_rules=args.accept_rules,
-            material_files=_mteam_material_files_from_args(args),
+            material_files=material_files,
         )
         stages.append({"stage": "target-prepare", "ok": not target_prepare["blockers"], "result": target_prepare})
     elif args.package_dir:
@@ -3604,6 +3615,43 @@ def _mteam_material_files_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "screenshot_files": list(getattr(args, "screenshot_file", []) or []),
         "image_host_file": getattr(args, "image_host_file", None),
     }
+
+
+async def _pipeline_mediainfo_material_stage(
+    args: argparse.Namespace,
+    source_info: dict[str, Any] | None,
+    content_path: str | None,
+    material_files: dict[str, Any],
+) -> dict[str, Any]:
+    if material_files.get("mediainfo_file") or material_files.get("bdinfo_file"):
+        return {
+            "stage": "materials-mediainfo",
+            "ok": True,
+            "skipped": True,
+            "message": "Existing MediaInfo/BDInfo material file supplied; generation skipped.",
+        }
+    if not content_path:
+        return {
+            "stage": "materials-mediainfo",
+            "ok": False,
+            "skipped": True,
+            "message": "--generate-mediainfo requires --path or a resolved qBittorrent content path.",
+        }
+    output_dir = _mteam_material_output_dir(args, source_info)
+    result = await generate_mediainfo_material(str(content_path), str(output_dir))
+    return {
+        "stage": "materials-mediainfo",
+        "ok": result.get("status") == "generated",
+        "result": result,
+        "message": "Generated MediaInfo material files." if result.get("status") == "generated" else "MediaInfo material generation failed.",
+    }
+
+
+def _mteam_material_output_dir(args: argparse.Namespace, source_info: dict[str, Any] | None) -> Path:
+    source_tracker = str(source_info.get("tracker") or args.source_tracker).upper() if isinstance(source_info, dict) else str(args.source_tracker).upper()
+    source_id = str(source_info.get("torrent_id") or args.source_id).strip() if isinstance(source_info, dict) else str(args.source_id).strip()
+    package_dir = Path(args.target_output_dir).expanduser() / f"{source_tracker}-{extract_torrent_id(source_id)}-to-MTEAM"
+    return package_dir / "materials"
 
 
 def _package_upload_resume_requested(args: argparse.Namespace) -> bool:

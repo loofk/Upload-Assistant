@@ -16,6 +16,7 @@ from src.ptcli.config import resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list
+from src.ptcli.materials import find_primary_media_file, generate_mediainfo_material
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summarize_torrent
 from src.ptcli.rules import build_rule_check
 from src.ptcli.source import create_source_meta, extract_torrent_id, source_info_from_tuple
@@ -624,6 +625,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             str(torrent_file),
             "--mediainfo-file",
             str(tmp_path / "MEDIAINFO.txt"),
+            "--generate-mediainfo",
             "--screenshot-file",
             str(tmp_path / "screen-1.png"),
             "--image-host-file",
@@ -795,6 +797,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.target_torrent_file == str(torrent_file)
     assert pipeline_args.sanitize_target_torrent is True
     assert pipeline_args.mediainfo_file == str(tmp_path / "MEDIAINFO.txt")
+    assert pipeline_args.generate_mediainfo is True
     assert pipeline_args.screenshot_file == [str(tmp_path / "screen-1.png")]
     assert pipeline_args.image_host_file == str(tmp_path / "image-host.json")
 
@@ -8592,6 +8595,61 @@ async def test_pipeline_prepare_target_preview(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_pipeline_generate_mediainfo_material_before_prepare_target(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {"imdb_id": 1234567, "tmdb_id": 999, "douban_id": "1291546"})
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_generate_mediainfo_material(_content_path, output_dir):
+        output_path = Path(output_dir) / "MI_FULL_00.txt"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("General\nComplete name : Name.mkv\n", encoding="utf-8")
+        return {"status": "generated", "mediainfo_file": str(output_path), "blockers": []}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "generate_mediainfo_material", fake_generate_mediainfo_material)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--path",
+            "/downloads/Name",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--generate-mediainfo",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    material_stage = next(stage for stage in payload["stages"] if stage["stage"] == "materials-mediainfo")
+    target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
+    assert material_stage["ok"] is True
+    assert material_stage["result"]["mediainfo_file"].endswith("MI_FULL_00.txt")
+    assert target_stage["result"]["materials"]["assets"]["mediainfo"]["ready"] is True
+    assert target_stage["result"]["materials"]["assets"]["mediainfo"]["path"].endswith("MI_FULL_00.txt")
+
+
+@pytest.mark.asyncio
 async def test_pipeline_prepare_target_blocks_mismatched_existing_qbit_content(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -11043,6 +11101,45 @@ def test_mteam_materials_manifest_records_existing_material_files(tmp_path) -> N
     assert materials["assets"]["screenshots"]["count"] == 1
     assert materials["assets"]["image_hosts"]["count"] == 1
     assert materials["ready"] is True
+
+
+def test_find_primary_media_file_prefers_largest_supported_video(tmp_path) -> None:
+    content = tmp_path / "content"
+    content.mkdir()
+    small = content / "small.mkv"
+    small.write_bytes(b"1")
+    larger = content / "larger.m2ts"
+    larger.write_bytes(b"123")
+    hidden_dir = content / ".hidden"
+    hidden_dir.mkdir()
+    hidden = hidden_dir / "huge.mkv"
+    hidden.write_bytes(b"123456")
+
+    assert find_primary_media_file(str(content)) == larger
+
+
+@pytest.mark.asyncio
+async def test_generate_mediainfo_material_writes_files_and_evidence(tmp_path) -> None:
+    media_file = tmp_path / "Name.mkv"
+    media_file.write_bytes(b"video")
+
+    def fake_parse(path, output, full=False):
+        if output == "JSON":
+            return json.dumps({"media": {"track": [{"@type": "General"}]}})
+        suffix = "full" if full else "summary"
+        return f"General\nComplete name : {path}\nKind : {suffix}\n"
+
+    result = await generate_mediainfo_material(str(media_file), str(tmp_path / "materials"), parser=fake_parse)
+    full_text = await asyncio.to_thread(Path(result["mediainfo_file"]).read_text, encoding="utf-8")
+    json_text = await asyncio.to_thread(Path(result["mediainfo_json_file"]).read_text, encoding="utf-8")
+
+    assert result["status"] == "generated"
+    assert result["mediainfo_file"].endswith("MI_FULL_00.txt")
+    assert full_text.count(str(media_file)) == 0
+    assert await asyncio.to_thread(Path(result["mediainfo_summary_file"]).exists)
+    assert json.loads(json_text)["media"]["track"][0]["@type"] == "General"
+    assert result["sha1"]
+    assert result["size_bytes"] > 0
 
 
 def test_mteam_upload_gate_surfaces_duplicate_blocker() -> None:
