@@ -8688,6 +8688,12 @@ async def test_pipeline_prepare_target_preview(monkeypatch, tmp_path) -> None:
     assert target_stage["result"]["materials"]["assets"]["mediainfo"]["ready"] is True
     assert target_stage["result"]["materials"]["assets"]["screenshots"]["count"] == 1
     assert target_stage["result"]["materials"]["assets"]["image_hosts"]["count"] == 1
+    assert payload["evidence"]["target"]["materials"]["assets"]["mediainfo"]["ready"] is True
+    assert payload["evidence"]["target"]["materials"]["assets"]["screenshots"]["count"] == 1
+    assert payload["evidence"]["target"]["materials"]["assets"]["image_hosts"]["count"] == 1
+    assert payload["evidence"]["target"]["materials_ready"] is False
+    assert payload["artifacts"]["target_materials_ready"] is False
+    assert payload["resume_state"]["artifacts"]["target_materials_ready"] is False
     assert any("rules_acknowledged" in blocker for blocker in target_stage["result"]["blockers"])
     assert any("duplicate_check" in blocker for blocker in target_stage["result"]["blockers"])
 
@@ -9160,10 +9166,13 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["artifacts"]["summary_file"] == str(summary_path)
     assert summary_payload["artifacts"]["target_package_dir"] == target_stage["result"]["package_dir"]
     assert summary_payload["artifacts"]["target_package_files"] == target_stage["result"]["files"]
+    assert summary_payload["artifacts"]["target_materials"]["ready"] is False
+    assert summary_payload["artifacts"]["target_materials_ready"] is False
     assert summary_payload["resume_state"]["complete"] is False
     assert summary_payload["resume_state"]["resume_available"] is False
     assert summary_payload["resume_state"]["next_stage"] is None
     assert summary_payload["resume_state"]["artifacts"]["target_package_dir"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_materials_ready"] is False
     assert summary_payload["resume_state"]["artifacts"]["target_torrent_file"] is False
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
     assert "resume-target-upload" not in resume_commands
@@ -9302,12 +9311,28 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     torrent_file.write_bytes(b"d4:infod")
     source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
     source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Name.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}), encoding="utf-8")
     uploaded_hash: str | None = None
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
-        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", source_hash, "desc"), {})
+        return source_info_from_tuple(
+            tracker,
+            source_id,
+            (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", source_hash, "desc"),
+            {"douban_id": "1291546"},
+        )
+
+    async def fake_enrich_source_metadata(_config, source_info, *, overrides=None, fetch_ptgen=False, base_dir=None):
+        _ = (overrides, fetch_ptgen, base_dir)
+        enriched = {**source_info, "douban_id": "1291546", "douban_url": "https://movie.douban.com/subject/1291546/", "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介"}
+        return {"status": "enriched", "ready": True, "source_info": enriched, "applied": {"ptgen_description": {"length": len(enriched["ptgen_description"])}}, "missing": [], "sources": ["ptgen"], "blockers": []}
 
     async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
         _ = (tracker, source_id, output_dir, base_dir)
@@ -9348,6 +9373,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         return await fake_inject_uploaded_with_config(*args)
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "enrich_source_metadata", fake_enrich_source_metadata)
     monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
     monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_router)
     monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
@@ -9382,10 +9408,18 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
             "7200",
             "--wait-interval",
             "45",
+            "--enrich-metadata",
+            "--fetch-ptgen",
             "--check-dupes",
             "--prepare-target",
             "--target-output-dir",
             str(tmp_path / "target"),
+            "--mediainfo-file",
+            str(mediainfo),
+            "--screenshot-file",
+            str(screenshot),
+            "--image-host-file",
+            str(image_host_file),
             "--accept-rules",
             "--upload-target",
             "--target-torrent-file",
@@ -9420,6 +9454,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert payload["closure"]["source"]["complete"] is True
     assert payload["evidence"]["source"]["torrent_file_evidence"] is True
     assert payload["evidence"]["target"]["uploaded_torrent_file_evidence"] is True
+    assert payload["evidence"]["target"]["materials_ready"] is True
+    assert payload["evidence"]["target"]["materials"]["assets"]["image_hosts"]["count"] == 1
     assert payload["closure_audit"]["ready"] is True
     assert payload["closure_audit"]["missing"] == []
     audit_items = {item["name"]: item for item in payload["closure_audit"]["items"]}
@@ -9511,6 +9547,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "source_injection_verified": True,
         "source_wait_evidence": True,
         "target_package_dir": True,
+        "target_materials_ready": True,
         "target_torrent_file": True,
         "uploaded_torrent_id": True,
         "uploaded_torrent_file": True,

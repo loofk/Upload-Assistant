@@ -4325,6 +4325,11 @@ def _pipeline_requested_actions(args: argparse.Namespace) -> dict[str, bool]:
         "uploaded_torrent_file": bool(args.uploaded_torrent_file),
         "inject_uploaded_torrent": bool(args.inject_uploaded_torrent),
         "wait_uploaded_complete": bool(args.wait_uploaded_complete),
+        "enrich_metadata": bool(getattr(args, "enrich_metadata", False)),
+        "fetch_ptgen": bool(getattr(args, "fetch_ptgen", False)),
+        "generate_mediainfo": bool(getattr(args, "generate_mediainfo", False)),
+        "generate_screenshots": bool(getattr(args, "generate_screenshots", False)),
+        "upload_screenshots": bool(getattr(args, "upload_screenshots", False)),
         "write_summary": bool(args.write_summary),
     }
 
@@ -4355,6 +4360,11 @@ def _pipeline_effective_actions(
         "download_uploaded_torrent": bool(args.download_uploaded_torrent),
         "inject_uploaded_torrent": bool(args.inject_uploaded_torrent),
         "wait_uploaded_complete": bool(args.wait_uploaded_complete),
+        "enrich_metadata": bool(getattr(args, "enrich_metadata", False)),
+        "fetch_ptgen": bool(getattr(args, "fetch_ptgen", False)),
+        "generate_mediainfo": bool(getattr(args, "generate_mediainfo", False)),
+        "generate_screenshots": bool(getattr(args, "generate_screenshots", False)),
+        "upload_screenshots": bool(getattr(args, "upload_screenshots", False)),
         "write_summary": bool(args.write_summary),
     }
 
@@ -4649,6 +4659,8 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         if isinstance(prepare_result, dict):
             artifacts["target_package_dir"] = prepare_result.get("package_dir")
             artifacts["target_package_files"] = prepare_result.get("files")
+            artifacts["target_materials"] = _target_materials_summary(prepare_result)
+            artifacts["target_materials_ready"] = artifacts["target_materials"].get("ready")
     if isinstance(target_upload, dict):
         upload_result = target_upload.get("result")
         if isinstance(upload_result, dict):
@@ -4942,6 +4954,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "source_injection_verified": bool(artifacts.get("source_injection_verified")),
             "source_wait_evidence": bool(artifacts.get("source_wait_evidence")),
             "target_package_dir": bool(artifacts.get("target_package_dir")),
+            "target_materials_ready": bool(artifacts.get("target_materials_ready")),
             "target_torrent_file": bool(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
             "uploaded_torrent_file": bool(artifacts.get("uploaded_torrent_file")),
@@ -5148,6 +5161,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         fresh_duplicate_check = _duplicate_check_from_target_package(target_prepare_result)
     rule_review = target_prepare_result.get("rule_review") if isinstance(target_prepare_result, dict) else None
     rule_obligations = _rule_obligation_summary(rule_review)
+    target_materials = _target_materials_summary(target_prepare_result)
     source_downloaded = _stage_completed(source_download) and _torrent_file_present(source_download_result)
     source_injected = _source_injection_verified(inject_source)
     source_complete = _source_wait_completed(wait_complete)
@@ -5206,6 +5220,8 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "fresh_duplicate_check": fresh_duplicate_check,
         "duplicate_clean": _fresh_duplicate_check_clean(fresh_duplicate_check),
         "rule_obligations": rule_obligations,
+        "materials": target_materials,
+        "materials_ready": bool(target_materials.get("ready")),
         "package_reused": bool(target_prepare_result.get("reused")) if isinstance(target_prepare_result, dict) else False,
         "uploaded_torrent_reused": bool(downloaded_torrent.get("reused")) if isinstance(downloaded_torrent, dict) else False,
     }
@@ -5268,6 +5284,60 @@ def _duplicate_check_from_target_package(package: Any) -> dict[str, Any] | None:
         "source": "target_package_upload_gate",
         "ok": check_ok,
         "message": duplicate_check.get("message"),
+    }
+
+
+def _target_materials_summary(package: Any) -> dict[str, Any]:
+    materials = package.get("materials") if isinstance(package, dict) else None
+    if not isinstance(materials, dict):
+        return {
+            "ready": False,
+            "metadata_ready": False,
+            "assets_ready": False,
+            "metadata": {},
+            "assets": {},
+            "missing": ["materials"],
+            "warnings": ["MTEAM materials manifest is missing."],
+        }
+    checks = materials.get("checks") if isinstance(materials.get("checks"), dict) else {}
+    metadata_checks = checks.get("metadata") if isinstance(checks.get("metadata"), list) else []
+    asset_checks = checks.get("assets") if isinstance(checks.get("assets"), list) else []
+    missing = _target_material_missing_checks(metadata_checks, "metadata") + _target_material_missing_checks(asset_checks, "assets")
+    assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
+    return {
+        "ready": bool(materials.get("ready")),
+        "metadata_ready": bool(metadata_checks) and not _target_material_missing_checks(metadata_checks, "metadata"),
+        "assets_ready": bool(asset_checks) and not _target_material_missing_checks(asset_checks, "assets"),
+        "metadata": materials.get("metadata") if isinstance(materials.get("metadata"), dict) else {},
+        "assets": {
+            "mediainfo": _material_asset_ready(assets, "mediainfo"),
+            "bdinfo": _material_asset_ready(assets, "bdinfo"),
+            "screenshots": _material_asset_count_ready(assets, "screenshots"),
+            "image_hosts": _material_asset_count_ready(assets, "image_hosts"),
+        },
+        "missing": missing,
+        "warnings": materials.get("warnings") if isinstance(materials.get("warnings"), list) else [],
+        "next_actions": materials.get("next_actions") if isinstance(materials.get("next_actions"), list) else [],
+    }
+
+
+def _target_material_missing_checks(checks: list[Any], scope: str) -> list[str]:
+    return [f"{scope}.{check.get('name')}" for check in checks if isinstance(check, dict) and not check.get("ok")]
+
+
+def _material_asset_ready(assets: dict[str, Any], key: str) -> dict[str, Any]:
+    asset = assets.get(key) if isinstance(assets.get(key), dict) else {}
+    return {
+        "ready": bool(asset.get("ready")),
+        "path": asset.get("path"),
+    }
+
+
+def _material_asset_count_ready(assets: dict[str, Any], key: str) -> dict[str, Any]:
+    asset = assets.get(key) if isinstance(assets.get(key), dict) else {}
+    return {
+        "ready": bool(asset.get("ready")),
+        "count": int(asset.get("count", 0) or 0),
     }
 
 
@@ -5358,6 +5428,8 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "hash_consistent": bool(target.get("hash_consistent")),
             "duplicate_clean": bool(target.get("duplicate_clean")),
             "rule_obligations": target.get("rule_obligations"),
+            "materials": target.get("materials"),
+            "materials_ready": bool(target.get("materials_ready")),
             "torrent_file": target.get("torrent_file"),
             "uploaded_torrent_id": target.get("uploaded_torrent_id"),
             "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
@@ -5425,6 +5497,8 @@ def _pipeline_closure_audit(closure: dict[str, Any] | None, evidence: dict[str, 
     add("target.duplicate_clean", closure_target.get("duplicate_clean") or evidence_target.get("duplicate_clean"), scope="target", evidence_keys=["closure.target.duplicate_clean", "evidence.target.duplicate_clean"])
     target_rules = closure_target.get("rule_obligations") if isinstance(closure_target.get("rule_obligations"), dict) else evidence_target.get("rule_obligations")
     add("target.rule_obligations", isinstance(target_rules, dict) and target_rules.get("ready"), scope="target", evidence_keys=["closure.target.rule_obligations", "evidence.target.rule_obligations"])
+    if closure_target.get("prepared") or evidence_target.get("prepared") or isinstance(evidence_target.get("materials"), dict):
+        add("target.materials_ready", closure_target.get("materials_ready") or evidence_target.get("materials_ready"), scope="target", evidence_keys=["closure.target.materials_ready", "evidence.target.materials_ready"])
     add("target.uploaded_torrent_hash", closure_target.get("uploaded_torrent_hash") or evidence_target.get("uploaded_torrent_hash"), scope="target", evidence_keys=["closure.target.uploaded_torrent_hash", "evidence.target.uploaded_torrent_hash"])
     add("target.injected_torrent_hash", closure_target.get("injected_torrent_hash") or evidence_target.get("injected_torrent_hash"), scope="target", evidence_keys=["closure.target.injected_torrent_hash", "evidence.target.injected_torrent_hash"])
     target_injection_evidence = evidence_target.get("qbit_closure", {}).get("injection") if isinstance(evidence_target.get("qbit_closure"), dict) else None
