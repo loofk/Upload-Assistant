@@ -238,6 +238,10 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--prepare-target", action="store_true", help="Build a dry-run target preparation preview after prior stages.")
     pipeline.add_argument("--package-dir", help="Reuse an existing MTEAM package created by pipeline --prepare-target.")
     pipeline.add_argument("--target-output-dir", default="./tmp/target", help="Directory for --prepare-target review package files.")
+    pipeline.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
+    pipeline.add_argument("--bdinfo-file", help="Existing BDInfo text file to record in the MTEAM preparation materials manifest.")
+    pipeline.add_argument("--screenshot-file", action="append", default=[], help="Existing screenshot image file to record in the MTEAM preparation materials manifest. May be repeated.")
+    pipeline.add_argument("--image-host-file", help="Existing image-host upload JSON file to record in the MTEAM preparation materials manifest.")
     pipeline.add_argument("--check-dupes", action="store_true", help="Run target duplicate search after source metadata is available.")
     pipeline.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
     pipeline.add_argument("--upload-target", action="store_true", help="Run the target upload stage after --prepare-target succeeds.")
@@ -310,6 +314,10 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds during --execute.")
     retorrent.add_argument("--package-dir", help="Reuse an existing MTEAM package during --execute instead of preparing a new one.")
     retorrent.add_argument("--target-output-dir", default="./tmp/target", help="Directory for MTEAM target preparation package.")
+    retorrent.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
+    retorrent.add_argument("--bdinfo-file", help="Existing BDInfo text file to record in the MTEAM preparation materials manifest.")
+    retorrent.add_argument("--screenshot-file", action="append", default=[], help="Existing screenshot image file to record in the MTEAM preparation materials manifest. May be repeated.")
+    retorrent.add_argument("--image-host-file", help="Existing image-host upload JSON file to record in the MTEAM preparation materials manifest.")
     retorrent.add_argument("--target-torrent-file", help="MTEAM .torrent file used by the live upload stage.")
     retorrent.add_argument("--export-target-torrent", action="store_true", help="Export the matched qBittorrent .torrent as the target upload candidate if --target-torrent-file is omitted.")
     retorrent.add_argument("--target-torrent-output-dir", default="./tmp/exported", help="Directory for --export-target-torrent output.")
@@ -1098,6 +1106,10 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         prepare_target=not bool(args.package_dir),
         package_dir=args.package_dir,
         target_output_dir=args.target_output_dir,
+        mediainfo_file=args.mediainfo_file,
+        bdinfo_file=args.bdinfo_file,
+        screenshot_file=list(getattr(args, "screenshot_file", []) or []),
+        image_host_file=args.image_host_file,
         check_dupes=not bool(args.package_dir and (args.uploaded_torrent_file or args.uploaded_torrent_id)),
         accept_rules=args.accept_rules,
         upload_target=True,
@@ -3351,6 +3363,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             effective_content_path,
             args.target_output_dir,
             accept_rules=args.accept_rules,
+            material_files=_mteam_material_files_from_args(args),
         )
         stages.append({"stage": "target-prepare", "ok": not target_prepare["blockers"], "result": target_prepare})
     elif args.package_dir:
@@ -3581,6 +3594,15 @@ def _load_existing_target_prepare_package(package_dir: str) -> dict[str, Any]:
         **package,
         "blockers": blockers,
         "reused": True,
+    }
+
+
+def _mteam_material_files_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "mediainfo_file": getattr(args, "mediainfo_file", None),
+        "bdinfo_file": getattr(args, "bdinfo_file", None),
+        "screenshot_files": list(getattr(args, "screenshot_file", []) or []),
+        "image_host_file": getattr(args, "image_host_file", None),
     }
 
 

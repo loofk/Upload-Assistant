@@ -81,6 +81,7 @@ def write_mteam_prepare_package(
     content_path: str | None,
     output_dir: str,
     accept_rules: bool = False,
+    material_files: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     preview = build_mteam_prepare_preview(source_info, target_trackers, stages, content_path)
     package_dir = _prepare_package_dir(output_dir, source_info)
@@ -94,7 +95,7 @@ def write_mteam_prepare_package(
     manifest_path = package_dir / MTEAM_PACKAGE_MANIFEST_FILENAME
     rule_review = build_mteam_rule_review(stages, accept_rules=accept_rules)
     upload_gate = build_mteam_upload_gate(preview, stages, accept_rules=accept_rules)
-    materials = build_mteam_materials_manifest(preview, source_info, content_path)
+    materials = build_mteam_materials_manifest(preview, source_info, content_path, material_files=material_files)
     package_blockers = _mteam_prepare_package_blockers(preview, rule_review, upload_gate)
     files = {
         "preview": str(preview_path),
@@ -654,18 +655,23 @@ def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[
     return "\n".join(lines).rstrip() + "\n"
 
 
-def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[str, Any] | None, content_path: str | None) -> dict[str, Any]:
+def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[str, Any] | None, content_path: str | None, material_files: dict[str, Any] | None = None) -> dict[str, Any]:
     meta_draft = preview.get("meta_draft") if isinstance(preview.get("meta_draft"), dict) else {}
+    material_files = material_files if isinstance(material_files, dict) else {}
     source_description_length = int(source_info.get("description_length", 0) or 0) if isinstance(source_info, dict) else 0
+    mediainfo = _material_file_asset(material_files.get("mediainfo_file"))
+    bdinfo = _material_file_asset(material_files.get("bdinfo_file"))
+    screenshots = _screenshots_asset(material_files.get("screenshot_files"))
+    image_hosts = _image_host_asset(material_files.get("image_host_file"))
     metadata_checks = [
         _material_check("imdb", bool(meta_draft.get("imdb") or meta_draft.get("imdb_id")), "IMDb id is present.", "IMDb id is missing; fetch or supply IMDb metadata before live upload."),
         _material_check("tmdb", bool(meta_draft.get("tmdb_id")), "TMDb id is present.", "TMDb id is missing; fetch or supply TMDb metadata before live upload."),
         _material_check("douban", bool(meta_draft.get("douban_url") or meta_draft.get("douban_id")), "Douban id/url is present.", "Douban id/url is missing; fetch or supply Douban metadata before live upload."),
     ]
     asset_checks = [
-        _material_check("mediainfo_or_bdinfo", False, "MediaInfo/BDInfo is present.", "MediaInfo/BDInfo has not been generated into the package yet."),
-        _material_check("screenshots", False, "Screenshots are present.", "Screenshots have not been generated into the package yet."),
-        _material_check("image_host_uploads", False, "Image host uploads are present.", "Screenshot image-host upload results are missing."),
+        _material_check("mediainfo_or_bdinfo", bool(mediainfo.get("ready") or bdinfo.get("ready")), "MediaInfo/BDInfo is present.", "MediaInfo/BDInfo has not been generated into the package yet."),
+        _material_check("screenshots", bool(screenshots.get("ready")), "Screenshots are present.", "Screenshots have not been generated into the package yet."),
+        _material_check("image_host_uploads", bool(image_hosts.get("ready")), "Image host uploads are present.", "Screenshot image-host upload results are missing."),
         _material_check("description_draft", True, "MTEAM description draft has been generated.", "MTEAM description draft is missing."),
     ]
     warnings = [check["message"] for check in [*metadata_checks, *asset_checks] if not check["ok"]]
@@ -688,10 +694,10 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "source_description_available": source_description_length > 0,
         },
         "assets": {
-            "mediainfo": {"ready": False, "path": None},
-            "bdinfo": {"ready": False, "path": None},
-            "screenshots": {"ready": False, "count": 0, "files": []},
-            "image_hosts": {"ready": False, "count": 0, "items": []},
+            "mediainfo": mediainfo,
+            "bdinfo": bdinfo,
+            "screenshots": screenshots,
+            "image_hosts": image_hosts,
             "description": {"ready": True, "path": REQUIRED_MTEAM_PACKAGE_FILES["description_draft"]},
         },
         "checks": {
@@ -709,6 +715,45 @@ def _material_check(name: str, ok: bool, ok_message: str, missing_message: str) 
         "name": name,
         "ok": ok,
         "message": ok_message if ok else missing_message,
+    }
+
+
+def _material_file_asset(path_value: Any) -> dict[str, Any]:
+    if not path_value:
+        return {"ready": False, "path": None}
+    artifact = _file_artifact(Path(str(path_value)).expanduser())
+    return {**artifact, "ready": bool(artifact.get("is_file") and int(artifact.get("size_bytes", 0) or 0) > 0)}
+
+
+def _screenshots_asset(paths_value: Any) -> dict[str, Any]:
+    paths = paths_value if isinstance(paths_value, list) else []
+    files = [_material_file_asset(path) for path in paths if path]
+    return {
+        "ready": bool(files) and all(file.get("ready") for file in files),
+        "count": len(files),
+        "files": files,
+    }
+
+
+def _image_host_asset(path_value: Any) -> dict[str, Any]:
+    artifact = _material_file_asset(path_value)
+    items: list[Any] = []
+    if artifact.get("ready") and artifact.get("path"):
+        try:
+            payload = json.loads(Path(str(artifact["path"])).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = None
+        if isinstance(payload, list):
+            items = payload
+        elif isinstance(payload, dict):
+            raw_items = payload.get("items") or payload.get("images") or payload.get("uploaded_images")
+            if isinstance(raw_items, list):
+                items = raw_items
+    return {
+        **artifact,
+        "ready": bool(artifact.get("ready") and items),
+        "count": len(items),
+        "items": items,
     }
 
 

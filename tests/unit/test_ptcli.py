@@ -622,6 +622,12 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "45",
             "--target-torrent-file",
             str(torrent_file),
+            "--mediainfo-file",
+            str(tmp_path / "MEDIAINFO.txt"),
+            "--screenshot-file",
+            str(tmp_path / "screen-1.png"),
+            "--image-host-file",
+            str(tmp_path / "image-host.json"),
             "--uploaded-output-dir",
             str(tmp_path / "uploaded"),
             "--inject-uploaded-torrent",
@@ -788,6 +794,9 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.uploaded_wait_interval == 20.0
     assert pipeline_args.target_torrent_file == str(torrent_file)
     assert pipeline_args.sanitize_target_torrent is True
+    assert pipeline_args.mediainfo_file == str(tmp_path / "MEDIAINFO.txt")
+    assert pipeline_args.screenshot_file == [str(tmp_path / "screen-1.png")]
+    assert pipeline_args.image_host_file == str(tmp_path / "image-host.json")
 
 
 @pytest.mark.asyncio
@@ -8534,6 +8543,12 @@ async def test_pipeline_prepare_target_preview(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    mediainfo = tmp_path / "MEDIAINFO.txt"
+    mediainfo.write_text("General\nComplete name : Name.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_hosts = tmp_path / "image-host.json"
+    image_hosts.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png"}]}), encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args(
         [
@@ -8551,6 +8566,12 @@ async def test_pipeline_prepare_target_preview(monkeypatch, tmp_path) -> None:
             "--prepare-target",
             "--target-output-dir",
             str(tmp_path / "target"),
+            "--mediainfo-file",
+            str(mediainfo),
+            "--screenshot-file",
+            str(screenshot),
+            "--image-host-file",
+            str(image_hosts),
             "--json",
         ]
     )
@@ -8563,6 +8584,9 @@ async def test_pipeline_prepare_target_preview(monkeypatch, tmp_path) -> None:
     assert target_stage["result"]["verified_content"] is True
     assert target_stage["result"]["metadata"]["name"] == "Name"
     assert target_stage["result"]["files"]["preview"].endswith("mteam-prepare-preview.json")
+    assert target_stage["result"]["materials"]["assets"]["mediainfo"]["ready"] is True
+    assert target_stage["result"]["materials"]["assets"]["screenshots"]["count"] == 1
+    assert target_stage["result"]["materials"]["assets"]["image_hosts"]["count"] == 1
     assert any("rules_acknowledged" in blocker for blocker in target_stage["result"]["blockers"])
     assert any("duplicate_check" in blocker for blocker in target_stage["result"]["blockers"])
 
@@ -10978,6 +11002,47 @@ def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
     assert materials["metadata"]["source_description_available"] is True
     assert materials["ready"] is False
     assert "Generate MediaInfo or BDInfo" in materials["next_actions"][0]
+
+
+def test_mteam_materials_manifest_records_existing_material_files(tmp_path) -> None:
+    mediainfo = tmp_path / "MEDIAINFO.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_hosts = tmp_path / "image-host.json"
+    image_hosts.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png"}]}), encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
+
+    materials = build_mteam_materials_manifest(
+        preview,
+        source_info,
+        "/downloads/Example",
+        material_files={
+            "mediainfo_file": str(mediainfo),
+            "screenshot_files": [str(screenshot)],
+            "image_host_file": str(image_hosts),
+        },
+    )
+
+    asset_checks = {check["name"]: check for check in materials["checks"]["assets"]}
+    assert asset_checks["mediainfo_or_bdinfo"]["ok"] is True
+    assert asset_checks["screenshots"]["ok"] is True
+    assert asset_checks["image_host_uploads"]["ok"] is True
+    assert materials["assets"]["mediainfo"]["sha1"]
+    assert materials["assets"]["screenshots"]["count"] == 1
+    assert materials["assets"]["image_hosts"]["count"] == 1
+    assert materials["ready"] is True
 
 
 def test_mteam_upload_gate_surfaces_duplicate_blocker() -> None:
