@@ -168,6 +168,35 @@ def mteam_ready_stages() -> list[dict]:
     ]
 
 
+def write_material_ready_mteam_package(source_info: dict, tmp_path: Path, content_path: str = "/downloads/Example", output_dir: str | None = None) -> dict:
+    ready_source = {
+        **source_info,
+        "tmdb_id": source_info.get("tmdb_id") or 999,
+        "douban_id": source_info.get("douban_id") or "1291546",
+        "douban_url": source_info.get("douban_url") or "https://movie.douban.com/subject/1291546/",
+    }
+    material_dir = tmp_path / "material-fixtures" / str(ready_source.get("torrent_id", "unknown"))
+    material_dir.mkdir(parents=True, exist_ok=True)
+    mediainfo = material_dir / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshot = material_dir / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host_file = material_dir / "image-host-uploads.json"
+    image_host_file.write_text(
+        json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}),
+        encoding="utf-8",
+    )
+    return write_mteam_prepare_package(
+        ready_source,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        content_path,
+        output_dir or str(tmp_path),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
+
+
 def mteam_clean_rule_review() -> dict:
     rule_check = build_rule_check("U2", ["MTEAM"], accept_rules=True)
     return {
@@ -11171,6 +11200,40 @@ def test_mteam_description_draft_and_upload_gate() -> None:
     assert gate["blockers"] == []
 
 
+def test_mteam_description_draft_includes_material_screenshots(tmp_path) -> None:
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(
+        json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}),
+        encoding="utf-8",
+    )
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "torrenthash": "a" * 40,
+    }
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
+    materials = build_mteam_materials_manifest(
+        preview,
+        source_info,
+        "/downloads/Example",
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
+
+    description = build_mteam_description_draft(preview["meta_draft"], source_info, materials=materials)
+
+    assert "[b]Media materials[/b]" in description
+    assert "MediaInfo: ready" in description
+    assert "[url=https://img.example/page][img]https://img.example/thumb.png[/img][/url]" in description
+
+
 def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
     source_info = {
         "tracker": "U2",
@@ -12114,6 +12177,65 @@ def test_mteam_upload_payload_summary_writes_payload_file(tmp_path) -> None:
     assert (tmp_path / "U2-60635-to-MTEAM" / "mteam-upload-payload.json").exists()
     assert preflight["upload_payload"]["description_file"]["exists"] is True
     assert preflight["upload_payload"]["description_file"]["char_length"] == preflight["upload_payload"]["form_fields"]["descr"]["length"]
+    description_checks = [check for check in preflight["upload_payload"]["material_checks"] if check["name"].startswith("payload.description_")]
+    assert all(check["ok"] for check in description_checks)
+    assert preflight["upload_payload"]["materials_ready_required"] is False
+
+
+def test_mteam_upload_preflight_execute_requires_ready_materials(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    assert preflight["upload_payload"]["materials_ready_required"] is True
+    assert any("materials.assets.mediainfo_or_bdinfo" in blocker for blocker in preflight["upload_payload"]["blockers"])
+
+
+def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}), encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        "/downloads/Example",
+        str(tmp_path),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "ready"
+    assert preflight["upload_payload"]["form_fields"]["mediainfo"]["length"] == len(mediainfo.read_text(encoding="utf-8"))
     assert all(check["ok"] for check in preflight["upload_payload"]["material_checks"])
 
 

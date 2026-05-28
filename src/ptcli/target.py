@@ -112,7 +112,7 @@ def write_mteam_prepare_package(
     _write_json(meta_draft_path, preview["meta_draft"])
     _write_json(field_mapping_path, preview["field_mapping"])
     _write_json(materials_path, materials)
-    description_path.write_text(build_mteam_description_draft(preview["meta_draft"], source_info), encoding="utf-8")
+    description_path.write_text(build_mteam_description_draft(preview["meta_draft"], source_info, materials=materials), encoding="utf-8")
     _write_json(rule_review_path, rule_review)
     _write_json(upload_gate_path, upload_gate)
     package_manifest = build_mteam_package_manifest(preview, rule_review, upload_gate, package_dir, files, package_blockers)
@@ -140,7 +140,7 @@ def build_mteam_upload_preflight(package_dir: str, execute: bool = False, torren
     rule_review = package.get("rule_review", {})
     files = package.get("files", {})
     blockers = list(package.get("blockers", []))
-    payload_summary = build_mteam_upload_payload_summary(package, torrent_file=torrent_file)
+    payload_summary = build_mteam_upload_payload_summary(package, torrent_file=torrent_file, require_materials=execute)
     _extend_unique(blockers, payload_summary["blockers"])
 
     if not isinstance(gate, dict) or not gate.get("ready"):
@@ -273,16 +273,18 @@ def _extract_mteam_torrent_id(response: Any) -> str | None:
     return None
 
 
-def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: str | None = None) -> dict[str, Any]:
+def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: str | None = None, require_materials: bool = False) -> dict[str, Any]:
     field_mapping = package.get("field_mapping", {})
     description_length = int(package.get("description_length", 0) or 0)
-    form_fields = _mteam_upload_form_fields(field_mapping, description_length)
+    materials = package.get("materials") if isinstance(package.get("materials"), dict) else {}
+    form_fields = _mteam_upload_form_fields(field_mapping, description_length, materials=materials)
     description_summary = _mteam_description_summary(package, description_length)
     torrent_summary, torrent_blockers = _torrent_file_summary(torrent_file)
     field_checks = _mteam_upload_field_checks(form_fields)
-    material_checks = _mteam_upload_material_checks(description_summary, description_length)
+    material_checks = _mteam_upload_material_checks(description_summary, description_length, materials=materials)
     blockers = [f"{check['name']}: {check['message']}" for check in field_checks if not check["ok"]]
-    blockers.extend(f"{check['name']}: {check['message']}" for check in material_checks if not check["ok"])
+    enforce_materials = require_materials and _mteam_material_gate_applicable(materials)
+    blockers.extend(f"{check['name']}: {check['message']}" for check in material_checks if not check["ok"] and (enforce_materials or check["name"].startswith("payload.description_")))
     blockers.extend(torrent_blockers)
 
     return {
@@ -292,6 +294,7 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
         "form_fields": form_fields,
         "field_checks": field_checks,
         "material_checks": material_checks,
+        "materials_ready_required": enforce_materials,
         "file_field": "file",
         "description_file": description_summary,
         "torrent_file": torrent_summary,
@@ -630,7 +633,8 @@ def build_mteam_prepare_preview(source_info: dict[str, Any] | None, target_track
     }
 
 
-def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[str, Any] | None) -> str:
+def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[str, Any] | None, materials: dict[str, Any] | None = None) -> str:
+    material_lines = _mteam_description_material_lines(materials if isinstance(materials, dict) else {})
     lines = [
         "[b]Retorrent review draft[/b]",
         "",
@@ -649,10 +653,39 @@ def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[
         f"Source torrent hash: {source_info.get('torrenthash') if source_info else ''}",
         f"Local content path: {meta_draft.get('content_path') or ''}",
         "",
+        *material_lines,
+        "",
         "[b]Manual review required[/b]",
         "Confirm source-site and MTEAM rules, transfer permissions, description requirements, screenshots, subtitles, naming, and duplicate status before upload.",
     ]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _mteam_description_material_lines(materials: dict[str, Any]) -> list[str]:
+    assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
+    lines = ["[b]Media materials[/b]"]
+    mediainfo = assets.get("mediainfo") if isinstance(assets.get("mediainfo"), dict) else {}
+    bdinfo = assets.get("bdinfo") if isinstance(assets.get("bdinfo"), dict) else {}
+    screenshots = assets.get("screenshots") if isinstance(assets.get("screenshots"), dict) else {}
+    image_hosts = assets.get("image_hosts") if isinstance(assets.get("image_hosts"), dict) else {}
+    lines.append(f"MediaInfo: {'ready' if mediainfo.get('ready') else 'missing'}")
+    lines.append(f"BDInfo: {'ready' if bdinfo.get('ready') else 'missing'}")
+    lines.append(f"Screenshots: {int(screenshots.get('count', 0) or 0)} local file(s)")
+    items = image_hosts.get("items") if isinstance(image_hosts.get("items"), list) else []
+    if items:
+        lines.append("")
+        lines.append("[b]Screenshots[/b]")
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw_url = str(item.get("raw_url") or "")
+            img_url = str(item.get("img_url") or raw_url)
+            web_url = str(item.get("web_url") or raw_url)
+            if img_url and web_url:
+                lines.append(f"[url={web_url}][img]{img_url}[/img][/url]")
+    else:
+        lines.append("Image host uploads: missing")
+    return lines
 
 
 def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[str, Any] | None, content_path: str | None, material_files: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1152,8 +1185,12 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 async def _submit_mteam_upload(config: dict[str, Any], package_dir: str, torrent_file: str) -> dict[str, Any]:
     package = load_mteam_prepare_package(package_dir)
     torrent_path, torrent_bytes, description = await asyncio.to_thread(_read_mteam_upload_files, package, torrent_file)
-    data = _mteam_upload_form_fields(package["field_mapping"], len(description))
+    materials = package.get("materials") if isinstance(package.get("materials"), dict) else {}
+    data = _mteam_upload_form_fields(package["field_mapping"], len(description), materials=materials)
     data["descr"] = description
+    mediainfo_text = await asyncio.to_thread(_mteam_material_mediainfo_text, materials)
+    if mediainfo_text:
+        data["mediainfo"] = mediainfo_text
     files = {
         "file": (torrent_path.name, torrent_bytes, "application/x-bittorrent"),
     }
@@ -1175,7 +1212,8 @@ async def _download_mteam_uploaded_torrent(config: dict[str, Any], torrent_id: s
     return str(destination)
 
 
-def _mteam_upload_form_fields(field_mapping: dict[str, Any], description_length: int) -> dict[str, Any]:
+def _mteam_upload_form_fields(field_mapping: dict[str, Any], description_length: int, materials: dict[str, Any] | None = None) -> dict[str, Any]:
+    mediainfo_length = _mteam_material_mediainfo_length(materials if isinstance(materials, dict) else {})
     form_fields: dict[str, Any] = {
         "name": field_mapping.get("name"),
         "smallDescr": field_mapping.get("smallDescr"),
@@ -1188,6 +1226,8 @@ def _mteam_upload_form_fields(field_mapping: dict[str, Any], description_length:
         "aids": "",
         "mediainfoAnalysisResult": None,
     }
+    if mediainfo_length > 0:
+        form_fields["mediainfo"] = {"source": _mteam_material_mediainfo_source(materials if isinstance(materials, dict) else {}), "length": mediainfo_length}
     for optional_field in ("imdb", "douban"):
         if field_mapping.get(optional_field):
             form_fields[optional_field] = field_mapping[optional_field]
@@ -1260,11 +1300,11 @@ def _mteam_description_summary(package: dict[str, Any], expected_length: int) ->
     return summary
 
 
-def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_length: int) -> list[dict[str, Any]]:
+def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_length: int, materials: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     exists = bool(description_summary.get("exists")) and bool(description_summary.get("is_file"))
     char_length = description_summary.get("char_length")
     blockers = description_summary.get("blockers") if isinstance(description_summary.get("blockers"), list) else []
-    return [
+    material_checks = [
         _payload_field_check(
             "payload.description_file",
             exists and not blockers,
@@ -1278,6 +1318,60 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
             f"MTEAM description draft length mismatch: expected {expected_length}, got {char_length}.",
         ),
     ]
+    materials = materials if isinstance(materials, dict) else {}
+    checks = materials.get("checks") if isinstance(materials.get("checks"), dict) else {}
+    for scope in ("metadata", "assets"):
+        for check in checks.get(scope, []) if isinstance(checks.get(scope), list) else []:
+            if isinstance(check, dict):
+                name = str(check.get("name") or "")
+                material_checks.append(
+                    _payload_field_check(
+                        f"materials.{scope}.{name}",
+                        bool(check.get("ok")),
+                        str(check.get("message") or f"{name} is ready."),
+                        str(check.get("message") or f"{name} is not ready."),
+                    )
+                )
+    return material_checks
+
+
+def _mteam_material_gate_applicable(materials: dict[str, Any]) -> bool:
+    metadata = materials.get("metadata") if isinstance(materials.get("metadata"), dict) else {}
+    if metadata.get("tmdb_id") or metadata.get("douban_id") or metadata.get("douban_url"):
+        return True
+    assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
+    for key in ("mediainfo", "bdinfo", "screenshots", "image_hosts"):
+        asset = assets.get(key) if isinstance(assets.get(key), dict) else {}
+        if asset.get("path") or asset.get("count") or asset.get("items") or asset.get("files"):
+            return True
+    return False
+
+
+def _mteam_material_mediainfo_source(materials: dict[str, Any]) -> str | None:
+    assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
+    for key in ("bdinfo", "mediainfo"):
+        asset = assets.get(key) if isinstance(assets.get(key), dict) else {}
+        if asset.get("ready") and asset.get("path"):
+            return str(asset["path"])
+    return None
+
+
+def _mteam_material_mediainfo_length(materials: dict[str, Any]) -> int:
+    text = _mteam_material_mediainfo_text(materials)
+    return len(text)
+
+
+def _mteam_material_mediainfo_text(materials: dict[str, Any]) -> str:
+    source = _mteam_material_mediainfo_source(materials)
+    if not source:
+        return ""
+    path = Path(source).expanduser()
+    if not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _payload_field_check(name: str, ok: bool, ok_message: str, failed_message: str) -> dict[str, Any]:
