@@ -7022,6 +7022,7 @@ def test_doctor_runtime_check_reports_ptcli_dependencies(tmp_path) -> None:
     runtime_check = next(check for check in payload["checks"] if check["name"] == "runtime.ptcli_dependencies")
     assert runtime_check["ok"] is True
     assert any(item["module"] == "qbittorrentapi" and item["available"] is True for item in runtime_check["required"])
+    assert any(item["module"] == "src.trackers.COMMON" and item["available"] is True for item in runtime_check["internal_imports"])
     assert runtime_check["legacy_optional"]["message"] == "Legacy Web UI/Discord/client dependencies are not required for ptcli."
 
 
@@ -7056,6 +7057,42 @@ def test_doctor_runtime_check_blocks_missing_ptcli_dependency(monkeypatch, tmp_p
     runtime_check = next(check for check in payload["checks"] if check["name"] == "runtime.ptcli_dependencies")
     assert runtime_check["ok"] is False
     assert "qbittorrent-api" in runtime_check["message"]
+
+
+def test_doctor_runtime_check_blocks_failed_internal_import(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    original_import_module = ptcli_doctor.importlib.import_module
+
+    def fake_import_module(module: str):
+        if module == "src.trackers.COMMON":
+            raise ImportError("missing focused ptgen dependency")
+        return original_import_module(module)
+
+    monkeypatch.setattr(ptcli_doctor.importlib, "import_module", fake_import_module)
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        check_runtime=True,
+    )
+
+    runtime_check = next(check for check in payload["checks"] if check["name"] == "runtime.ptcli_dependencies")
+    ptgen_import = next(item for item in runtime_check["internal_imports"] if item["name"] == "ptgen_adapter")
+    assert runtime_check["ok"] is False
+    assert "ptgen_adapter" in runtime_check["message"]
+    assert ptgen_import["available"] is False
+    assert "missing focused ptgen dependency" in ptgen_import["error"]
 
 
 def test_doctor_runtime_check_blocks_live_safe_when_requested(monkeypatch, tmp_path) -> None:

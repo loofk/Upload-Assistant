@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 from pathlib import Path
 from typing import Any
 
@@ -121,17 +121,37 @@ _LEGACY_RUNTIME_MODULES: tuple[tuple[str, str], ...] = (
     ("transmission-rpc", "transmission_rpc"),
 )
 
+_PTCLI_INTERNAL_IMPORTS: tuple[tuple[str, str], ...] = (
+    ("ptcli.cli", "src.ptcli.cli"),
+    ("ptcli.materials", "src.ptcli.materials"),
+    ("ptcli.metadata", "src.ptcli.metadata"),
+    ("ptcli.source", "src.ptcli.source"),
+    ("ptcli.target", "src.ptcli.target"),
+    ("ptgen_adapter", "src.trackers.COMMON"),
+)
+
 
 def build_runtime_dependency_check() -> dict[str, Any]:
     required = [_module_status(package, module) for package, module in _PTCLI_RUNTIME_MODULES]
     legacy = [_module_status(package, module) for package, module in _LEGACY_RUNTIME_MODULES]
+    internal = [_internal_import_status(name, module) for name, module in _PTCLI_INTERNAL_IMPORTS]
     missing = [item["package"] for item in required if not item["available"]]
+    internal_missing = [item["name"] for item in internal if not item["available"]]
     legacy_present = [item["package"] for item in legacy if item["available"]]
+    ok = not missing and not internal_missing
+    message = "PTCLI runtime dependencies and internal imports are ready."
+    if missing:
+        message = f"Missing PTCLI runtime dependencies: {', '.join(missing)}"
+        if internal_missing:
+            message = f"{message}; failed internal imports: {', '.join(internal_missing)}"
+    elif internal_missing:
+        message = f"PTCLI runtime internal imports failed: {', '.join(internal_missing)}"
     return {
         "name": "runtime.ptcli_dependencies",
-        "ok": not missing,
-        "message": "PTCLI runtime dependencies are importable." if not missing else f"Missing PTCLI runtime dependencies: {', '.join(missing)}",
+        "ok": ok,
+        "message": message,
         "required": required,
+        "internal_imports": internal,
         "legacy_optional": {
             "present": legacy_present,
             "message": "Legacy Web UI/Discord/client dependencies are not required for ptcli.",
@@ -149,6 +169,14 @@ def _module_status(package: str, module: str) -> dict[str, Any]:
         "module": module,
         "available": importlib.util.find_spec(module) is not None,
     }
+
+
+def _internal_import_status(name: str, module: str) -> dict[str, Any]:
+    try:
+        importlib.import_module(module)
+    except Exception as exc:
+        return {"name": name, "module": module, "available": False, "error": str(exc)}
+    return {"name": name, "module": module, "available": True}
 
 
 def _prefix_checks(prefix: str, checks: list[Any]) -> list[dict[str, Any]]:
