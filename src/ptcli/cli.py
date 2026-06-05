@@ -6145,15 +6145,21 @@ def _target_package_material_artifact_options(artifacts: dict[str, Any] | None) 
     if not isinstance(artifacts, dict):
         return {}
     generation = artifacts.get("material_generation") if isinstance(artifacts.get("material_generation"), dict) else {}
+    target_materials = artifacts.get("target_materials") if isinstance(artifacts.get("target_materials"), dict) else {}
+    target_assets = target_materials.get("assets") if isinstance(target_materials.get("assets"), dict) else {}
     bdinfo = generation.get("bdinfo") if isinstance(generation.get("bdinfo"), dict) else {}
     mediainfo = generation.get("mediainfo") if isinstance(generation.get("mediainfo"), dict) else {}
     screenshots = generation.get("screenshots") if isinstance(generation.get("screenshots"), dict) else {}
     image_host = generation.get("image_host") if isinstance(generation.get("image_host"), dict) else {}
+    target_bdinfo = target_assets.get("bdinfo") if isinstance(target_assets.get("bdinfo"), dict) else {}
+    target_mediainfo = target_assets.get("mediainfo") if isinstance(target_assets.get("mediainfo"), dict) else {}
+    target_screenshots = target_assets.get("screenshots") if isinstance(target_assets.get("screenshots"), dict) else {}
+    target_image_host = target_assets.get("image_hosts") if isinstance(target_assets.get("image_hosts"), dict) else {}
     return {
-        "bdinfo_file": bdinfo.get("bdinfo_file"),
-        "mediainfo_file": mediainfo.get("mediainfo_file"),
-        "screenshot_files": screenshots.get("screenshot_files") if isinstance(screenshots.get("screenshot_files"), list) else None,
-        "image_host_file": image_host.get("image_host_file"),
+        "bdinfo_file": bdinfo.get("bdinfo_file") or target_bdinfo.get("path"),
+        "mediainfo_file": mediainfo.get("mediainfo_file") or target_mediainfo.get("path"),
+        "screenshot_files": screenshots.get("screenshot_files") if isinstance(screenshots.get("screenshot_files"), list) else target_screenshots.get("paths"),
+        "image_host_file": image_host.get("image_host_file") or target_image_host.get("path"),
     }
 
 
@@ -6558,6 +6564,11 @@ def _material_asset_count_ready(assets: dict[str, Any], key: str) -> dict[str, A
         "ready": bool(asset.get("ready")),
         "count": int(asset.get("count", 0) or 0),
     }
+    if asset.get("path"):
+        payload["path"] = asset.get("path")
+    if isinstance(asset.get("files"), list):
+        payload["files"] = asset.get("files")
+        payload["paths"] = [file.get("path") for file in asset["files"] if isinstance(file, dict) and file.get("path")]
     if isinstance(asset.get("items"), list):
         payload["items"] = asset.get("items")
     return payload

@@ -582,6 +582,45 @@ def test_retorrent_plan_commands_preserve_runtime_context() -> None:
     assert "--base-dir" not in command_argv["match"]
 
 
+def test_resume_target_package_reuses_existing_material_manifest_assets() -> None:
+    payload = {
+        "source_tracker": "U2",
+        "source_torrent_id": "60635",
+        "target_trackers": ["MTEAM"],
+        "client": "default",
+        "path": "/downloads/Example",
+        "requested_actions": {"prepare_target": True, "generate_screenshots": True, "upload_screenshots": True},
+        "effective_actions": {"prepare_target": True, "generate_screenshots": True, "upload_screenshots": True, "fetch_ptgen": True},
+        "material_options": {"screenshot_count": 3, "image_host": "ptpimg"},
+        "output_options": {"target_output_dir": "./tmp/target"},
+    }
+    artifacts = {
+        "target_package_dir": "./tmp/target/U2-60635-to-MTEAM",
+        "target_materials_ready": False,
+        "target_preparation_ready": False,
+        "target_materials": {
+            "assets": {
+                "mediainfo": {"ready": True, "path": "/tmp/materials/MI_FULL_00.txt"},
+                "screenshots": {"ready": True, "count": 2, "paths": ["/tmp/materials/screen-1.png", "/tmp/materials/screen-2.png"]},
+                "image_hosts": {"ready": True, "count": 2, "path": "/tmp/materials/image-host-uploads.json"},
+            }
+        },
+    }
+
+    commands = {command["stage"]: command for command in ptcli_cli._run_summary_resume_commands(payload, artifacts)}
+    argv = commands["resume-target-package"]["argv"]
+    command = commands["resume-target-package"]["command"]
+
+    assert "--mediainfo-file /tmp/materials/MI_FULL_00.txt" in command
+    assert argv.count("--screenshot-file") == 2
+    assert "/tmp/materials/screen-1.png" in argv
+    assert "/tmp/materials/screen-2.png" in argv
+    assert "--image-host-file /tmp/materials/image-host-uploads.json" in command
+    assert "--fetch-ptgen" in argv
+    assert "--upload-screenshots" in argv
+    assert "--image-host" in argv
+
+
 def test_retorrent_execute_blocked_returns_nonzero(capsys, tmp_path) -> None:
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
