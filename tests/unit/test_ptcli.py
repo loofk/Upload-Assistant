@@ -6712,6 +6712,43 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
     assert any(check["name"] == "target_materials" and check["ok"] is True for check in payload["checks"])
     assert any(check["name"] == "wait_uploaded_complete" and check["ok"] is True for check in payload["checks"])
     assert any(check["name"] == "rule_obligations" and check["ok"] is True for check in payload["checks"])
+    args = build_parser().parse_args(
+        [
+            "doctor",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--path",
+            str(content_path),
+            "--package-dir",
+            package["package_dir"],
+            "--target-torrent-file",
+            target_torrent,
+            "--accept-rules",
+            "--target-execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            str(content_path),
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+    )
+    summary = ptcli_cli._doctor_summary_payload(payload, args, str(tmp_path / "ptcli-doctor-summary.json"))
+    audit = summary["target_preparation_audit"]
+    assert audit["ready"] is True
+    assert audit["description"]["has_ptgen_description"] is True
+    assert audit["description"]["has_external_ids"] is True
+    assert audit["description"]["has_mediainfo_or_bdinfo"] is True
+    assert audit["description"]["has_screenshot_bbcode"] is True
+    assert audit["description"]["bbcode_image_count"] == 1
+    assert summary["artifacts"]["target_preparation_ready"] is True
+    assert summary["resume_state"]["artifacts"]["target_preparation_ready"] is True
 
 
 def test_doctor_auto_enables_uploaded_torrent_followup_for_live_closure(tmp_path) -> None:
@@ -13752,6 +13789,53 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert "--uploaded-save-path /mnt/seedbox/Example" in commands["retorrent-resume-uploaded-torrent-download"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["retorrent-resume-uploaded-torrent-download"]
     assert command_argv["retorrent-resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "retorrent"]
+
+
+def test_target_upload_summary_exposes_target_preparation_audit(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_material_ready_mteam_package(source_info, tmp_path)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            package["package_dir"],
+            "--torrent-file",
+            str(torrent_file),
+            "--execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+    )
+
+    summary_file = ptcli_cli._write_target_upload_summary({"status": "uploaded", "uploaded_torrent_id": "999"}, preflight, args, package["package_dir"])
+
+    summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+    audit = summary_payload["summary"]["target_preparation_audit"]
+    assert audit["ready"] is True
+    assert audit["description"]["has_ptgen_description"] is True
+    assert audit["description"]["has_external_ids"] is True
+    assert audit["description"]["has_mediainfo_or_bdinfo"] is True
+    assert audit["description"]["has_screenshot_bbcode"] is True
+    assert audit["description"]["bbcode_image_count"] == 1
+    assert summary_payload["summary"]["target_preparation_ready"] is True
+    assert summary_payload["artifacts"]["target_preparation_ready"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_preparation_ready"] is True
 
 
 def test_target_upload_retry_command_uses_inferred_uploaded_save_path(tmp_path) -> None:
