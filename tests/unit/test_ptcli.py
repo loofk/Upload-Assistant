@@ -4526,6 +4526,57 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
     assert "export PTCLI_QBIT_WAIT_SOURCE_RETRY_REASON='source qBittorrent wait matched a different torrent/content than requested_hash.'\n" in out
 
 
+def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "resume_commands": [{"stage": "resume-target-package", "command": "python3 ptcli.py pipeline --prepare-target", "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"]}],
+                "resume_state": {
+                    "complete": False,
+                    "resume_available": True,
+                    "next_stage": "resume-target-package",
+                    "next_command": "python3 ptcli.py pipeline --prepare-target",
+                    "next_command_argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+                    "available_stages": ["resume-target-package"],
+                    "artifacts": {"target_materials_ready": False, "target_preparation_ready": False},
+                    "materials": {
+                        "target_materials_ready": False,
+                        "target_preparation_ready": False,
+                        "target_materials_missing": ["metadata.ptgen_description", "assets.image_host_uploads"],
+                        "target_preparation_missing": ["description.content"],
+                        "next_actions": [
+                            "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
+                            "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
+                        ],
+                    },
+                    "blockers": ["target.materials_ready"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_RESUME_MATERIALS_PRESENT=1\n" in out
+    assert "export PTCLI_RESUME_TARGET_MATERIALS_READY=0\n" in out
+    assert "export PTCLI_RESUME_TARGET_PREPARATION_READY=0\n" in out
+    assert "export PTCLI_RESUME_TARGET_MATERIALS_MISSING=metadata.ptgen_description,assets.image_host_uploads\n" in out
+    assert "export PTCLI_RESUME_TARGET_PREPARATION_MISSING=description.content\n" in out
+    assert "PTCLI_RESUME_MATERIAL_NEXT_ACTIONS='Fetch PTGen/Douban description" in out
+    assert "Upload screenshots to an image host" in out
+
+
 def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatch, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(

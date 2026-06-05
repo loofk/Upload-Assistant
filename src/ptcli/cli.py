@@ -2700,6 +2700,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "next_command_argv": next_command.get("argv"),
         "next_command_source": next_command.get("source"),
         "candidate_commands": _summary_candidate_commands(payload),
+        "resume_state": resume_state,
         **diagnostics,
         "closure_status": closure_status,
         **artifact_status,
@@ -7419,6 +7420,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else {}
     qbit_wait_diagnostics = payload.get("qbit_wait_diagnostics") if isinstance(payload.get("qbit_wait_diagnostics"), dict) else {}
     qbit_wait_retry_hints = payload.get("qbit_wait_retry_hints") if isinstance(payload.get("qbit_wait_retry_hints"), dict) else {}
+    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
     fields = {
         "PTCLI_SUMMARY_STATUS": payload.get("status"),
         "PTCLI_AUTOMATION_ACTION": payload.get("automation_action"),
@@ -7486,6 +7488,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     fields.update(_summary_check_closure_review_shell_fields(closure_review))
     fields.update(_summary_check_material_shell_fields(material_diagnostics))
     fields.update(_summary_check_target_upload_shell_fields(target_upload_diagnostics))
+    fields.update(_summary_check_resume_material_shell_fields(resume_state))
     fields.update(_summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics))
     fields.update(_summary_check_qbit_retry_shell_fields(qbit_wait_retry_hints))
     for key, value in fields.items():
@@ -7553,6 +7556,18 @@ def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -
         "PTCLI_CLOSURE_REVIEW_CHECK_TARGET_PREPARATION": _summary_check_bool_field(checks, "target.preparation_ready"),
         "PTCLI_CLOSURE_REVIEW_CHECK_TARGET_UPLOADED_WAIT": _summary_check_bool_field(checks, "target.uploaded_wait_evidence"),
         "PTCLI_CLOSURE_REVIEW_CHECK_TARGET_RULES": _summary_check_bool_field(checks, "target.rule_obligations"),
+    }
+
+
+def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) -> dict[str, Any]:
+    materials = resume_state.get("materials") if isinstance(resume_state.get("materials"), dict) else {}
+    return {
+        "PTCLI_RESUME_MATERIALS_PRESENT": _shell_bool(bool(materials)) if resume_state else None,
+        "PTCLI_RESUME_TARGET_MATERIALS_READY": _shell_bool(materials.get("target_materials_ready")) if materials.get("target_materials_ready") is not None else None,
+        "PTCLI_RESUME_TARGET_PREPARATION_READY": _shell_bool(materials.get("target_preparation_ready")) if materials.get("target_preparation_ready") is not None else None,
+        "PTCLI_RESUME_TARGET_MATERIALS_MISSING": ",".join(_string_list(materials.get("target_materials_missing"))),
+        "PTCLI_RESUME_TARGET_PREPARATION_MISSING": ",".join(_string_list(materials.get("target_preparation_missing"))),
+        "PTCLI_RESUME_MATERIAL_NEXT_ACTIONS": " | ".join(_string_list(materials.get("next_actions"))),
     }
 
 
