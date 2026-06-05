@@ -10100,7 +10100,7 @@ async def test_pipeline_check_dupes_runs_after_source_info(monkeypatch, tmp_path
 
 
 @pytest.mark.asyncio
-async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkeypatch, tmp_path) -> None:
+async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkeypatch, tmp_path, capsys) -> None:
     source_url = "https://u2.dmhy.org/details.php?id=60635&hit=1"
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -10246,7 +10246,40 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["resume_state"]["materials"]["target_preparation_ready"] is False
     assert "metadata.ptgen_description" in summary_payload["resume_state"]["materials"]["target_materials_missing"]
     assert "metadata.ptgen_description" in summary_payload["resume_state"]["materials"]["target_preparation_missing"]
+    material_closure = summary_payload["resume_state"]["materials"]["closure"]
+    assert material_closure["ready"] is False
+    assert material_closure["metadata"]["ready"] is False
+    assert material_closure["metadata"]["imdb_id"] == 1234567
+    assert material_closure["metadata"]["tmdb_id"] == 2
+    assert material_closure["metadata"]["douban_id"] == "1291546"
+    assert material_closure["metadata"]["ptgen_description_length"] == 0
+    assert "metadata.ptgen_description" in material_closure["metadata"]["missing"]
+    assert material_closure["mediainfo"] == {"ready": True, "generated": False, "missing": [], "path": str(mediainfo)}
+    assert material_closure["bdinfo"]["required"] is False
+    assert material_closure["screenshots"]["ready"] is True
+    assert material_closure["screenshots"]["count"] == 1
+    assert material_closure["image_host"]["ready"] is True
+    assert material_closure["image_host"]["count"] == 1
+    assert material_closure["description"]["ready"] is False
+    assert material_closure["description"]["has_ptgen_description"] is False
+    assert material_closure["description"]["has_external_ids"] is True
+    assert material_closure["description"]["has_mediainfo_or_bdinfo"] is True
+    assert material_closure["description"]["has_screenshot_bbcode"] is True
     assert any("PTGen/Douban description" in action for action in summary_payload["resume_state"]["materials"]["next_actions"])
+    code = main(["summary-check", "--summary-file", str(summary_path), "--print-shell"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_RESUME_MATERIAL_CLOSURE_READY=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_METADATA_READY=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_METADATA_IMDB_ID=1234567\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_METADATA_TMDB_ID=2\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_METADATA_DOUBAN_ID=1291546\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_PTGEN_DESCRIPTION_LENGTH=0\n" in out
+    assert f"export PTCLI_RESUME_MATERIAL_MEDIAINFO_FILE={mediainfo}\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_SCREENSHOTS_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_PTGEN=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
     assert "resume-target-package" in resume_commands
     assert "--prepare-target" in resume_commands["resume-target-package"]

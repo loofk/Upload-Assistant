@@ -5857,10 +5857,99 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
             "target_materials_missing": target_materials_missing,
             "target_preparation_missing": target_preparation_missing,
+            "closure": _run_summary_material_closure(artifacts, material_missing),
             "next_actions": _target_preparation_missing_next_actions(material_missing),
         },
         "blockers": blockers,
     }
+
+
+def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: list[str]) -> dict[str, Any]:
+    target_materials = artifacts.get("target_materials") if isinstance(artifacts.get("target_materials"), dict) else {}
+    target_assets = target_materials.get("assets") if isinstance(target_materials.get("assets"), dict) else {}
+    target_metadata = target_materials.get("metadata") if isinstance(target_materials.get("metadata"), dict) else {}
+    generation = artifacts.get("material_generation") if isinstance(artifacts.get("material_generation"), dict) else {}
+    preparation = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
+    description = preparation.get("description") if isinstance(preparation.get("description"), dict) else {}
+    disc_structure = target_assets.get("disc_structure") if isinstance(target_assets.get("disc_structure"), dict) else {}
+    metadata_section = generation.get("metadata") if isinstance(generation.get("metadata"), dict) else {}
+    bdinfo_asset = target_assets.get("bdinfo") if isinstance(target_assets.get("bdinfo"), dict) else {}
+    mediainfo_asset = target_assets.get("mediainfo") if isinstance(target_assets.get("mediainfo"), dict) else {}
+    screenshot_asset = target_assets.get("screenshots") if isinstance(target_assets.get("screenshots"), dict) else {}
+    image_host_asset = target_assets.get("image_hosts") if isinstance(target_assets.get("image_hosts"), dict) else {}
+    bdinfo_generation = generation.get("bdinfo") if isinstance(generation.get("bdinfo"), dict) else {}
+    mediainfo_generation = generation.get("mediainfo") if isinstance(generation.get("mediainfo"), dict) else {}
+    screenshot_generation = generation.get("screenshots") if isinstance(generation.get("screenshots"), dict) else {}
+    image_host_generation = generation.get("image_host") if isinstance(generation.get("image_host"), dict) else {}
+    metadata_ready = bool(target_materials.get("metadata_ready"))
+    assets_ready = bool(target_materials.get("assets_ready"))
+    description_ready = bool(preparation.get("description_ready"))
+    bdinfo_required = bool(disc_structure.get("bdmv"))
+    return {
+        "ready": bool(target_materials.get("ready") and preparation.get("ready")),
+        "metadata_ready": metadata_ready,
+        "assets_ready": assets_ready,
+        "description_ready": description_ready,
+        "missing": material_missing,
+        "metadata": {
+            "ready": metadata_ready,
+            "generated": _material_generation_section_ready(metadata_section),
+            "missing": _missing_with_prefix(material_missing, "metadata."),
+            "imdb_id": target_metadata.get("imdb_id") or metadata_section.get("imdb_id"),
+            "tmdb_id": target_metadata.get("tmdb_id") or metadata_section.get("tmdb_id"),
+            "douban_id": target_metadata.get("douban_id") or metadata_section.get("douban_id"),
+            "douban_url": target_metadata.get("douban_url") or metadata_section.get("douban_url"),
+            "ptgen_description_length": target_metadata.get("ptgen_description_length") or metadata_section.get("ptgen_description_length"),
+        },
+        "mediainfo": {
+            "ready": bool(mediainfo_asset.get("ready")),
+            "generated": _material_generation_section_ready(mediainfo_generation),
+            "missing": _missing_with_prefix(material_missing, ("assets.mediainfo", "assets.mediainfo_or_bdinfo")),
+            "path": mediainfo_asset.get("path") or mediainfo_generation.get("mediainfo_file"),
+        },
+        "bdinfo": {
+            "ready": bool(bdinfo_asset.get("ready")),
+            "required": bdinfo_required,
+            "generated": _material_generation_section_ready(bdinfo_generation),
+            "missing": _missing_with_prefix(material_missing, ("assets.bdinfo", "assets.bdinfo_for_disc")),
+            "path": bdinfo_asset.get("path") or bdinfo_generation.get("bdinfo_file"),
+        },
+        "screenshots": {
+            "ready": bool(screenshot_asset.get("ready")),
+            "generated": _material_generation_section_ready(screenshot_generation),
+            "missing": _missing_with_prefix(material_missing, "assets.screenshots"),
+            "count": int(screenshot_asset.get("count", 0) or screenshot_generation.get("count", 0) or 0),
+            "requested_count": screenshot_generation.get("requested_count"),
+            "files": screenshot_generation.get("screenshot_files") if isinstance(screenshot_generation.get("screenshot_files"), list) else [],
+        },
+        "image_host": {
+            "ready": bool(image_host_asset.get("ready")),
+            "generated": _material_generation_section_ready(image_host_generation),
+            "missing": _missing_with_prefix(material_missing, ("assets.image_host", "assets.image_host_uploads")),
+            "host": image_host_generation.get("host"),
+            "count": int(image_host_asset.get("count", 0) or image_host_generation.get("count", 0) or 0),
+            "image_host_file": image_host_generation.get("image_host_file"),
+        },
+        "description": {
+            "ready": description_ready,
+            "missing": _string_list(description.get("missing")),
+            "path": description.get("path"),
+            "has_ptgen_description": bool(description.get("has_ptgen_description")),
+            "has_external_ids": bool(description.get("has_external_ids")),
+            "has_mediainfo_or_bdinfo": bool(description.get("has_mediainfo_or_bdinfo")),
+            "has_screenshot_bbcode": bool(description.get("has_screenshot_bbcode")),
+            "bbcode_image_count": int(description.get("bbcode_image_count", 0) or 0),
+        },
+    }
+
+
+def _material_generation_section_ready(section: dict[str, Any]) -> bool:
+    return bool(section.get("ok") and not section.get("skipped"))
+
+
+def _missing_with_prefix(missing: list[str], prefix: str | tuple[str, ...]) -> list[str]:
+    prefixes = (prefix,) if isinstance(prefix, str) else prefix
+    return [item for item in missing if item.startswith(prefixes)]
 
 
 def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
@@ -7626,12 +7715,51 @@ def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -
 
 def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) -> dict[str, Any]:
     materials = resume_state.get("materials") if isinstance(resume_state.get("materials"), dict) else {}
+    closure = materials.get("closure") if isinstance(materials.get("closure"), dict) else {}
+    metadata = closure.get("metadata") if isinstance(closure.get("metadata"), dict) else {}
+    mediainfo = closure.get("mediainfo") if isinstance(closure.get("mediainfo"), dict) else {}
+    bdinfo = closure.get("bdinfo") if isinstance(closure.get("bdinfo"), dict) else {}
+    screenshots = closure.get("screenshots") if isinstance(closure.get("screenshots"), dict) else {}
+    image_host = closure.get("image_host") if isinstance(closure.get("image_host"), dict) else {}
+    description = closure.get("description") if isinstance(closure.get("description"), dict) else {}
     return {
         "PTCLI_RESUME_MATERIALS_PRESENT": _shell_bool(bool(materials)) if resume_state else None,
         "PTCLI_RESUME_TARGET_MATERIALS_READY": _shell_bool(materials.get("target_materials_ready")) if materials.get("target_materials_ready") is not None else None,
         "PTCLI_RESUME_TARGET_PREPARATION_READY": _shell_bool(materials.get("target_preparation_ready")) if materials.get("target_preparation_ready") is not None else None,
         "PTCLI_RESUME_TARGET_MATERIALS_MISSING": ",".join(_string_list(materials.get("target_materials_missing"))),
         "PTCLI_RESUME_TARGET_PREPARATION_MISSING": ",".join(_string_list(materials.get("target_preparation_missing"))),
+        "PTCLI_RESUME_MATERIAL_CLOSURE_READY": _shell_bool(closure.get("ready")) if closure.get("ready") is not None else None,
+        "PTCLI_RESUME_MATERIAL_CLOSURE_MISSING": ",".join(_string_list(closure.get("missing"))),
+        "PTCLI_RESUME_MATERIAL_METADATA_READY": _shell_bool(metadata.get("ready")) if metadata.get("ready") is not None else None,
+        "PTCLI_RESUME_MATERIAL_METADATA_GENERATED": _shell_bool(metadata.get("generated")) if metadata.get("generated") is not None else None,
+        "PTCLI_RESUME_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
+        "PTCLI_RESUME_MATERIAL_METADATA_IMDB_ID": metadata.get("imdb_id"),
+        "PTCLI_RESUME_MATERIAL_METADATA_TMDB_ID": metadata.get("tmdb_id"),
+        "PTCLI_RESUME_MATERIAL_METADATA_DOUBAN_ID": metadata.get("douban_id"),
+        "PTCLI_RESUME_MATERIAL_METADATA_DOUBAN_URL": metadata.get("douban_url"),
+        "PTCLI_RESUME_MATERIAL_PTGEN_DESCRIPTION_LENGTH": metadata.get("ptgen_description_length"),
+        "PTCLI_RESUME_MATERIAL_MEDIAINFO_READY": _shell_bool(mediainfo.get("ready")) if mediainfo.get("ready") is not None else None,
+        "PTCLI_RESUME_MATERIAL_MEDIAINFO_GENERATED": _shell_bool(mediainfo.get("generated")) if mediainfo.get("generated") is not None else None,
+        "PTCLI_RESUME_MATERIAL_MEDIAINFO_FILE": mediainfo.get("path"),
+        "PTCLI_RESUME_MATERIAL_BDINFO_READY": _shell_bool(bdinfo.get("ready")) if bdinfo.get("ready") is not None else None,
+        "PTCLI_RESUME_MATERIAL_BDINFO_REQUIRED": _shell_bool(bdinfo.get("required")) if bdinfo.get("required") is not None else None,
+        "PTCLI_RESUME_MATERIAL_BDINFO_GENERATED": _shell_bool(bdinfo.get("generated")) if bdinfo.get("generated") is not None else None,
+        "PTCLI_RESUME_MATERIAL_BDINFO_FILE": bdinfo.get("path"),
+        "PTCLI_RESUME_MATERIAL_SCREENSHOTS_READY": _shell_bool(screenshots.get("ready")) if screenshots.get("ready") is not None else None,
+        "PTCLI_RESUME_MATERIAL_SCREENSHOTS_GENERATED": _shell_bool(screenshots.get("generated")) if screenshots.get("generated") is not None else None,
+        "PTCLI_RESUME_MATERIAL_SCREENSHOTS_COUNT": screenshots.get("count"),
+        "PTCLI_RESUME_MATERIAL_SCREENSHOTS_FILES": ",".join(_string_list(screenshots.get("files"))),
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_READY": _shell_bool(image_host.get("ready")) if image_host.get("ready") is not None else None,
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_GENERATED": _shell_bool(image_host.get("generated")) if image_host.get("generated") is not None else None,
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_HOST": image_host.get("host"),
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_COUNT": image_host.get("count"),
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_FILE": image_host.get("image_host_file"),
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_READY": _shell_bool(description.get("ready")) if description.get("ready") is not None else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
         "PTCLI_RESUME_MATERIAL_NEXT_ACTIONS": " | ".join(_string_list(materials.get("next_actions"))),
     }
 
