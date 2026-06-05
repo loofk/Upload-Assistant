@@ -1985,8 +1985,70 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
             "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
             "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
         },
+        "uploaded_followup": _target_upload_followup_closure(summary, artifacts),
         "blockers": _string_list(summary.get("blockers")),
     }
+
+
+def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str, Any]) -> dict[str, Any]:
+    uploaded_torrent_file = artifacts.get("uploaded_torrent_file") if isinstance(artifacts.get("uploaded_torrent_file"), dict) else {}
+    uploaded_save_path = artifacts.get("uploaded_save_path") if isinstance(artifacts.get("uploaded_save_path"), dict) else {}
+    downloaded = bool(_path_artifact_exists(uploaded_torrent_file))
+    uploaded = bool(summary.get("uploaded"))
+    injected = bool(summary.get("injected") or artifacts.get("injection_verified"))
+    injection_verified = bool(artifacts.get("injection_verified"))
+    wait_evidence = bool(artifacts.get("uploaded_wait_evidence"))
+    hash_consistent = bool(artifacts.get("target_hash_consistent"))
+    duplicate_clean = bool(artifacts.get("target_duplicate_clean"))
+    rule_obligations_ready = _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations"))
+    ready = bool(uploaded and downloaded and injected and injection_verified and wait_evidence and hash_consistent and duplicate_clean and rule_obligations_ready)
+    checks = {
+        "uploaded": uploaded,
+        "downloaded": downloaded,
+        "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
+        "injected_torrent_hash": bool(artifacts.get("injected_torrent_hash")),
+        "injection_verified": injection_verified,
+        "uploaded_wait_evidence": wait_evidence,
+        "hash_consistent": hash_consistent,
+        "duplicate_clean": duplicate_clean,
+        "rule_obligations_ready": rule_obligations_ready,
+    }
+    missing = [name for name, ok in checks.items() if not ok]
+    return {
+        "ready": ready,
+        "uploaded": uploaded,
+        "downloaded": downloaded,
+        "injected": injected,
+        "injection_verified": injection_verified,
+        "uploaded_wait_evidence": wait_evidence,
+        "hash_consistent": hash_consistent,
+        "duplicate_clean": duplicate_clean,
+        "rule_obligations_ready": rule_obligations_ready,
+        "missing": missing,
+        "uploaded_torrent_id": artifacts.get("uploaded_torrent_id"),
+        "uploaded_torrent_hash": artifacts.get("uploaded_torrent_hash"),
+        "injected_torrent_hash": artifacts.get("injected_torrent_hash"),
+        "uploaded_torrent_file": uploaded_torrent_file.get("path"),
+        "uploaded_save_path": uploaded_save_path.get("path"),
+        "next_actions": _target_upload_followup_next_actions(missing),
+    }
+
+
+def _target_upload_followup_next_actions(missing: list[str]) -> list[str]:
+    actions: list[str] = []
+    if any(item in missing for item in ("downloaded", "uploaded_torrent_hash")):
+        actions.append("Download or provide the uploaded MTEAM torrent, then resume uploaded torrent injection.")
+    if any(item in missing for item in ("injected_torrent_hash", "injection_verified")):
+        actions.append("Inject the uploaded MTEAM torrent into qBittorrent with the correct save path.")
+    if "uploaded_wait_evidence" in missing:
+        actions.append("Wait for qBittorrent to report the uploaded MTEAM torrent as matched and complete.")
+    if "hash_consistent" in missing:
+        actions.append("Verify the downloaded uploaded torrent hash matches the injected qBittorrent task.")
+    if "duplicate_clean" in missing:
+        actions.append("Rerun a fresh MTEAM duplicate check before treating the upload as closed.")
+    if "rule_obligations_ready" in missing:
+        actions.append("Confirm source and MTEAM rule obligations before treating the upload as closed.")
+    return actions
 
 
 def _target_upload_next_command(summary: dict[str, Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
@@ -2852,6 +2914,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "next_command_argv": next_command.get("argv"),
         "next_command_source": next_command.get("source"),
         "candidate_commands": _summary_candidate_commands(payload),
+        "resume_state": resume_state,
         **diagnostics,
         **artifact_status,
     })
@@ -7731,6 +7794,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     fields.update(_summary_check_material_shell_fields(material_diagnostics))
     fields.update(_summary_check_target_upload_shell_fields(target_upload_diagnostics))
     fields.update(_summary_check_resume_material_shell_fields(resume_state))
+    fields.update(_summary_check_uploaded_followup_shell_fields(resume_state))
     fields.update(_summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics))
     fields.update(_summary_check_qbit_retry_shell_fields(qbit_wait_retry_hints))
     for key, value in fields.items():
@@ -7886,6 +7950,29 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
         "PTCLI_TARGET_UPLOAD_CHECK_HASH_CONSISTENT": _summary_check_bool_field(checks, "hash_consistent"),
         "PTCLI_TARGET_UPLOAD_CHECK_DUPLICATE_CLEAN": _summary_check_bool_field(checks, "duplicate_clean"),
         "PTCLI_TARGET_UPLOAD_CHECK_RULES_READY": _summary_check_bool_field(checks, "rule_obligations_ready"),
+    }
+
+
+def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) -> dict[str, Any]:
+    followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
+    return {
+        "PTCLI_UPLOADED_FOLLOWUP_PRESENT": _shell_bool(bool(followup)) if resume_state else None,
+        "PTCLI_UPLOADED_FOLLOWUP_READY": _shell_bool(followup.get("ready")) if followup.get("ready") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_UPLOADED": _shell_bool(followup.get("uploaded")) if followup.get("uploaded") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_DOWNLOADED": _shell_bool(followup.get("downloaded")) if followup.get("downloaded") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_INJECTED": _shell_bool(followup.get("injected")) if followup.get("injected") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_INJECTION_VERIFIED": _shell_bool(followup.get("injection_verified")) if followup.get("injection_verified") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_EVIDENCE": _shell_bool(followup.get("uploaded_wait_evidence")) if followup.get("uploaded_wait_evidence") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_HASH_CONSISTENT": _shell_bool(followup.get("hash_consistent")) if followup.get("hash_consistent") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_DUPLICATE_CLEAN": _shell_bool(followup.get("duplicate_clean")) if followup.get("duplicate_clean") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_RULES_READY": _shell_bool(followup.get("rule_obligations_ready")) if followup.get("rule_obligations_ready") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_MISSING": ",".join(_string_list(followup.get("missing"))),
+        "PTCLI_UPLOADED_FOLLOWUP_TORRENT_ID": followup.get("uploaded_torrent_id"),
+        "PTCLI_UPLOADED_FOLLOWUP_TORRENT_HASH": followup.get("uploaded_torrent_hash"),
+        "PTCLI_UPLOADED_FOLLOWUP_INJECTED_HASH": followup.get("injected_torrent_hash"),
+        "PTCLI_UPLOADED_FOLLOWUP_TORRENT_FILE": followup.get("uploaded_torrent_file"),
+        "PTCLI_UPLOADED_FOLLOWUP_SAVE_PATH": followup.get("uploaded_save_path"),
+        "PTCLI_UPLOADED_FOLLOWUP_NEXT_ACTIONS": " | ".join(_string_list(followup.get("next_actions"))),
     }
 
 
