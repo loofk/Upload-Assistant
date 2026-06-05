@@ -1344,7 +1344,21 @@ def _mteam_description_summary(package: dict[str, Any], expected_length: int) ->
             summary["blockers"] = [f"MTEAM description draft is not valid UTF-8: {exc}"]
         else:
             summary["char_length"] = len(text)
+            summary["content"] = _mteam_description_content_summary(text)
     return summary
+
+
+def _mteam_description_content_summary(text: str) -> dict[str, Any]:
+    img_matches = re.findall(r"\[img(?:=[^\]]+)?\]", text, flags=re.IGNORECASE)
+    return {
+        "has_ptgen_description": "[b]Movie information[/b]" in text and "PTGen/Douban description: missing" not in text,
+        "has_screenshot_bbcode": "[b]Screenshots[/b]" in text and bool(img_matches),
+        "bbcode_image_count": len(img_matches),
+        "has_mediainfo_or_bdinfo": "[b]MediaInfo[/b]" in text or "[b]BDInfo[/b]" in text,
+        "has_imdb": bool(re.search(r"imdb\.com/title/tt\d+|^\[b\]IMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
+        "has_tmdb": bool(re.search(r"^\[b\]TMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
+        "has_douban": bool(re.search(r"movie\.douban\.com/subject/\d+|^\[b\]Douban\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
+    }
 
 
 def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_length: int, materials: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -1365,6 +1379,35 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
             f"MTEAM description draft length mismatch: expected {expected_length}, got {char_length}.",
         ),
     ]
+    content = description_summary.get("content") if isinstance(description_summary.get("content"), dict) else {}
+    material_checks.extend(
+        [
+            _payload_field_check(
+                "materials.description.ptgen_description",
+                bool(content.get("has_ptgen_description")),
+                "MTEAM description includes PTGen/Douban description text.",
+                "MTEAM description is missing PTGen/Douban description text.",
+            ),
+            _payload_field_check(
+                "materials.description.external_ids",
+                bool(content.get("has_imdb")) and bool(content.get("has_tmdb")) and bool(content.get("has_douban")),
+                "MTEAM description includes IMDb, TMDb, and Douban references.",
+                "MTEAM description is missing one or more IMDb/TMDb/Douban references.",
+            ),
+            _payload_field_check(
+                "materials.description.mediainfo_or_bdinfo",
+                bool(content.get("has_mediainfo_or_bdinfo")),
+                "MTEAM description includes MediaInfo/BDInfo excerpt.",
+                "MTEAM description is missing a MediaInfo/BDInfo excerpt.",
+            ),
+            _payload_field_check(
+                "materials.description.screenshot_bbcode",
+                bool(content.get("has_screenshot_bbcode")),
+                "MTEAM description includes screenshot BBCode from image-host uploads.",
+                "MTEAM description is missing screenshot BBCode from image-host uploads.",
+            ),
+        ]
+    )
     materials = materials if isinstance(materials, dict) else {}
     checks = materials.get("checks") if isinstance(materials.get("checks"), dict) else {}
     for scope in ("metadata", "assets"):

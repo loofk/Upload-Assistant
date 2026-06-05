@@ -12878,7 +12878,65 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
 
     assert preflight["status"] == "ready"
     assert preflight["upload_payload"]["form_fields"]["mediainfo"]["length"] == len(mediainfo.read_text(encoding="utf-8"))
+    assert preflight["upload_payload"]["description_file"]["content"]["has_ptgen_description"] is True
+    assert preflight["upload_payload"]["description_file"]["content"]["has_screenshot_bbcode"] is True
+    assert preflight["upload_payload"]["description_file"]["content"]["has_mediainfo_or_bdinfo"] is True
     assert all(check["ok"] for check in preflight["upload_payload"]["material_checks"])
+
+
+def test_mteam_upload_preflight_execute_blocks_stale_description_materials(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}), encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+    }
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        "/downloads/Example",
+        str(tmp_path),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
+    package_from_disk = load_mteam_prepare_package(package["package_dir"])
+    description_path = Path(package_from_disk["files"]["description_draft"])
+    stale_description = "\n".join(
+        [
+            "[b]Retorrent review draft[/b]",
+            "[b]IMDb[/b]: 1234567",
+            "[b]TMDb[/b]: 999",
+            "[b]Douban[/b]: https://movie.douban.com/subject/1291546/",
+            "[b]Movie information[/b]",
+            "PTGen/Douban description: missing",
+        ]
+    )
+    description_path.write_text(stale_description, encoding="utf-8")
+    package_from_disk["description_length"] = len(stale_description)
+    manifest_path = Path(package_from_disk["files"]["manifest"])
+    manifest_path.write_text(json.dumps(package_from_disk, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    blockers = preflight["upload_payload"]["blockers"]
+    assert any("materials.description.ptgen_description" in blocker for blocker in blockers)
+    assert any("materials.description.mediainfo_or_bdinfo" in blocker for blocker in blockers)
+    assert any("materials.description.screenshot_bbcode" in blocker for blocker in blockers)
 
 
 def test_mteam_upload_payload_summary_blocks_missing_description_file(tmp_path) -> None:
