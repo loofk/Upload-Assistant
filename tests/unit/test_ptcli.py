@@ -3033,6 +3033,38 @@ def test_resume_next_command_uses_stage_blocker_details() -> None:
     assert generic_target["stage"] == "resume-target-upload"
 
 
+def test_target_package_resume_args_reuse_generated_material_artifacts() -> None:
+    args = ptcli_cli._target_package_material_resume_args(
+        {"generate_mediainfo": True, "generate_screenshots": True, "upload_screenshots": True},
+        {"generate_bdinfo": True},
+        {"image_host": "ptpimg", "screenshot_count": 3},
+        {
+            "material_generation": {
+                "bdinfo": {"bdinfo_file": "/tmp/materials/BD_FULL_00.txt"},
+                "mediainfo": {"mediainfo_file": "/tmp/materials/MI_FULL_00.txt"},
+                "screenshots": {"screenshot_files": ["/tmp/materials/screenshot-01.png", "/tmp/materials/screenshot-02.png"]},
+                "image_host": {"image_host_file": "/tmp/materials/image-host-uploads.json"},
+            }
+        },
+    )
+
+    assert "--bdinfo-file" in args
+    assert "/tmp/materials/BD_FULL_00.txt" in args
+    assert "--mediainfo-file" in args
+    assert "/tmp/materials/MI_FULL_00.txt" in args
+    assert args.count("--screenshot-file") == 2
+    assert "/tmp/materials/screenshot-01.png" in args
+    assert "/tmp/materials/screenshot-02.png" in args
+    assert "--image-host-file" in args
+    assert "/tmp/materials/image-host-uploads.json" in args
+    assert "--generate-bdinfo" in args
+    assert "--generate-mediainfo" in args
+    assert "--generate-screenshots" in args
+    assert "--upload-screenshots" in args
+    assert "--image-host" in args
+    assert "ptpimg" in args
+
+
 def test_run_summary_resume_commands_prefer_artifact_save_paths() -> None:
     payload = {
         "source_tracker": "U2",

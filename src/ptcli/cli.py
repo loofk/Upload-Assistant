@@ -5602,7 +5602,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                     "--client",
                     client,
                     *path_args,
-                    *(_target_package_material_resume_args(requested_actions, effective_actions, material_options)),
+                    *(_target_package_material_resume_args(requested_actions, effective_actions, material_options, artifacts)),
                     "--check-dupes",
                     "--prepare-target",
                     "--target-output-dir",
@@ -5898,7 +5898,8 @@ def _qbit_resume_args(options: dict[str, Any], *, prefix: str) -> list[str]:
     return args
 
 
-def _target_package_material_resume_args(requested_actions: dict[str, Any], effective_actions: dict[str, Any], material_options: dict[str, Any]) -> list[str]:
+def _target_package_material_resume_args(requested_actions: dict[str, Any], effective_actions: dict[str, Any], material_options: dict[str, Any], artifacts: dict[str, Any] | None = None) -> list[str]:
+    artifact_options = _target_package_material_artifact_options(artifacts)
     args: list[str] = []
     include_metadata = bool(requested_actions.get("enrich_metadata") or effective_actions.get("enrich_metadata") or requested_actions.get("fetch_ptgen") or effective_actions.get("fetch_ptgen"))
     if requested_actions.get("enrich_metadata") or effective_actions.get("enrich_metadata"):
@@ -5911,23 +5912,40 @@ def _target_package_material_resume_args(requested_actions: dict[str, Any], effe
         _append_option(args, "--tmdb-id", material_options.get("tmdb_id"))
         _append_option(args, "--douban-id", material_options.get("douban_id"))
         _append_option(args, "--douban-url", material_options.get("douban_url"))
-    _append_option(args, "--mediainfo-file", material_options.get("mediainfo_file"))
-    _append_option(args, "--bdinfo-file", material_options.get("bdinfo_file"))
+    _append_option(args, "--mediainfo-file", material_options.get("mediainfo_file") or artifact_options.get("mediainfo_file"))
+    _append_option(args, "--bdinfo-file", material_options.get("bdinfo_file") or artifact_options.get("bdinfo_file"))
     if requested_actions.get("generate_bdinfo") or effective_actions.get("generate_bdinfo"):
         args.append("--generate-bdinfo")
         _append_option(args, "--bdinfo-playlist", material_options.get("bdinfo_playlist"))
     if requested_actions.get("generate_mediainfo") or effective_actions.get("generate_mediainfo"):
         args.append("--generate-mediainfo")
-    for screenshot_file in material_options.get("screenshot_files") if isinstance(material_options.get("screenshot_files"), list) else []:
+    screenshot_files = material_options.get("screenshot_files") if isinstance(material_options.get("screenshot_files"), list) else artifact_options.get("screenshot_files")
+    for screenshot_file in screenshot_files if isinstance(screenshot_files, list) else []:
         _append_option(args, "--screenshot-file", screenshot_file)
     if requested_actions.get("generate_screenshots") or effective_actions.get("generate_screenshots"):
         args.append("--generate-screenshots")
         _append_option(args, "--screenshot-count", material_options.get("screenshot_count"))
-    _append_option(args, "--image-host-file", material_options.get("image_host_file"))
+    _append_option(args, "--image-host-file", material_options.get("image_host_file") or artifact_options.get("image_host_file"))
     if requested_actions.get("upload_screenshots") or effective_actions.get("upload_screenshots"):
         args.append("--upload-screenshots")
         _append_option(args, "--image-host", material_options.get("image_host"))
     return args
+
+
+def _target_package_material_artifact_options(artifacts: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(artifacts, dict):
+        return {}
+    generation = artifacts.get("material_generation") if isinstance(artifacts.get("material_generation"), dict) else {}
+    bdinfo = generation.get("bdinfo") if isinstance(generation.get("bdinfo"), dict) else {}
+    mediainfo = generation.get("mediainfo") if isinstance(generation.get("mediainfo"), dict) else {}
+    screenshots = generation.get("screenshots") if isinstance(generation.get("screenshots"), dict) else {}
+    image_host = generation.get("image_host") if isinstance(generation.get("image_host"), dict) else {}
+    return {
+        "bdinfo_file": bdinfo.get("bdinfo_file"),
+        "mediainfo_file": mediainfo.get("mediainfo_file"),
+        "screenshot_files": screenshots.get("screenshot_files") if isinstance(screenshots.get("screenshot_files"), list) else None,
+        "image_host_file": image_host.get("image_host_file"),
+    }
 
 
 def _append_option(args: list[str], option: str, value: Any) -> None:
