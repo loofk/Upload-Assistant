@@ -4397,6 +4397,11 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                             "expected_length": 4096,
                             "has_ptgen_description": True,
                             "has_external_ids": True,
+                            "external_links": {
+                                "imdb": "https://www.imdb.com/title/tt1234567",
+                                "tmdb": "https://www.themoviedb.org/movie/999",
+                                "douban": "https://movie.douban.com/subject/1291546/",
+                            },
                             "has_mediainfo_or_bdinfo": True,
                             "has_screenshot_bbcode": True,
                             "bbcode_image_count": 3,
@@ -4477,6 +4482,9 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_DESCRIPTION_EXPECTED_LENGTH=4096\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_PTGEN=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_IMDB_LINK=https://www.imdb.com/title/tt1234567\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_TMDB_LINK=https://www.themoviedb.org/movie/999\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_DOUBAN_LINK=https://movie.douban.com/subject/1291546/\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT=3\n" in out
@@ -7178,6 +7186,9 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
     assert audit["ready"] is True
     assert audit["description"]["has_ptgen_description"] is True
     assert audit["description"]["has_external_ids"] is True
+    assert audit["description"]["external_links"]["imdb"] == "https://www.imdb.com/title/tt1234567"
+    assert audit["description"]["external_links"]["tmdb"] == "https://www.themoviedb.org/movie/999"
+    assert audit["description"]["external_links"]["douban"] == "https://movie.douban.com/subject/1291546/"
     assert audit["description"]["has_mediainfo_or_bdinfo"] is True
     assert audit["description"]["has_screenshot_bbcode"] is True
     assert audit["description"]["bbcode_image_count"] == 1
@@ -10588,6 +10599,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["closure_review"]["target"]["preparation_missing"] == []
     assert summary_payload["closure_review"]["target"]["description"]["has_ptgen_description"] is True
     assert summary_payload["closure_review"]["target"]["description"]["has_external_ids"] is True
+    assert summary_payload["closure_review"]["target"]["description"]["external_links"]["imdb"] == "https://www.imdb.com/title/tt1234567"
+    assert summary_payload["closure_review"]["target"]["description"]["external_links"]["tmdb"] == "https://www.themoviedb.org/movie/2"
+    assert summary_payload["closure_review"]["target"]["description"]["external_links"]["douban"] == "https://movie.douban.com/subject/1291546/"
     assert summary_payload["closure_review"]["target"]["description"]["has_mediainfo_or_bdinfo"] is True
     assert summary_payload["closure_review"]["target"]["description"]["has_screenshot_bbcode"] is True
     assert summary_payload["closure_review"]["target"]["description"]["bbcode_image_count"] == 1
@@ -10632,6 +10646,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "export PTCLI_CLOSURE_REVIEW_TARGET_DESCRIPTION_READY=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_PTGEN=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_IMDB_LINK=https://www.imdb.com/title/tt1234567\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_TMDB_LINK=https://www.themoviedb.org/movie/2\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_DOUBAN_LINK=https://movie.douban.com/subject/1291546/\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_SCREENSHOTS=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_READY=1\n" in out

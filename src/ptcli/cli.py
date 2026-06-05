@@ -2159,6 +2159,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "expected_length": description.get("expected_length"),
             "has_ptgen_description": description.get("has_ptgen_description"),
             "has_external_ids": description.get("has_external_ids"),
+            "external_links": description.get("external_links") if isinstance(description.get("external_links"), dict) else {},
             "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
             "has_screenshot_bbcode": description.get("has_screenshot_bbcode"),
             "bbcode_image_count": description.get("bbcode_image_count"),
@@ -2572,6 +2573,7 @@ def _pipeline_closure_review(payload: dict[str, Any], artifacts: dict[str, Any] 
                 "expected_length": target_description.get("expected_length"),
                 "has_ptgen_description": target_description.get("has_ptgen_description"),
                 "has_external_ids": target_description.get("has_external_ids"),
+                "external_links": target_description.get("external_links") if isinstance(target_description.get("external_links"), dict) else {},
                 "has_mediainfo_or_bdinfo": target_description.get("has_mediainfo_or_bdinfo"),
                 "has_screenshot_bbcode": target_description.get("has_screenshot_bbcode"),
                 "bbcode_image_count": target_description.get("bbcode_image_count"),
@@ -3547,6 +3549,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
             "expected_length": description_file.get("expected_length"),
             "has_ptgen_description": bool(content.get("has_ptgen_description")),
             "has_external_ids": bool(content.get("has_imdb") and content.get("has_tmdb") and content.get("has_douban")),
+            "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
@@ -6330,6 +6333,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
             "expected_length": description_file.get("expected_length"),
             "has_ptgen_description": bool(content.get("has_ptgen_description")),
             "has_external_ids": bool(content.get("has_imdb") and content.get("has_tmdb") and content.get("has_douban")),
+            "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
@@ -7557,6 +7561,7 @@ def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -
     source = closure_review.get("source") if isinstance(closure_review.get("source"), dict) else {}
     target = closure_review.get("target") if isinstance(closure_review.get("target"), dict) else {}
     description = target.get("description") if isinstance(target.get("description"), dict) else {}
+    external_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
     checks = closure_review.get("checks") if isinstance(closure_review.get("checks"), dict) else {}
     return {
         "PTCLI_CLOSURE_REVIEW_COMPLETE": _shell_bool(closure_review.get("complete")) if closure_review.get("complete") is not None else None,
@@ -7599,6 +7604,9 @@ def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_EXPECTED_LENGTH": description.get("expected_length"),
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_IMDB_LINK": external_links.get("imdb"),
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_TMDB_LINK": external_links.get("tmdb"),
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_DOUBAN_LINK": external_links.get("douban"),
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
@@ -7672,6 +7680,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     image_host_urls = material_diagnostics.get("image_host_urls") if isinstance(material_diagnostics.get("image_host_urls"), dict) else {}
     disc_structure = material_diagnostics.get("disc_structure") if isinstance(material_diagnostics.get("disc_structure"), dict) else {}
     description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
+    description_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
     return {
         "PTCLI_MATERIAL_PRESENT": _shell_bool(material_diagnostics.get("present")) if "present" in material_diagnostics else None,
         "PTCLI_MATERIAL_GENERATION_PRESENT": _shell_bool(material_diagnostics.get("generation_present")) if "generation_present" in material_diagnostics else None,
@@ -7712,6 +7721,9 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_DESCRIPTION_EXPECTED_LENGTH": description.get("expected_length"),
         "PTCLI_MATERIAL_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_IMDB_LINK": description_links.get("imdb"),
+        "PTCLI_MATERIAL_DESCRIPTION_TMDB_LINK": description_links.get("tmdb"),
+        "PTCLI_MATERIAL_DESCRIPTION_DOUBAN_LINK": description_links.get("douban"),
         "PTCLI_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
