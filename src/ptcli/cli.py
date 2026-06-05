@@ -2140,6 +2140,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         for blocker in _string_list(section.get("blockers")):
             _append_unique_string(blockers, f"{key}: {blocker}")
     _extend_unique_string(blockers, _string_list(artifacts.get("target_materials_warnings")))
+    image_host_evidence = _summary_image_host_evidence(sections, target_assets)
     return {
         "present": bool(material_generation or target_materials),
         "generation_present": bool(material_generation),
@@ -2164,6 +2165,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "missing": _string_list(description.get("missing")),
         },
         "sections": sections,
+        "image_host_urls": _image_host_url_summary(image_host_evidence.get("items") if isinstance(image_host_evidence, dict) else []),
         "blockers": blockers,
     }
 
@@ -2203,7 +2205,41 @@ def _summary_material_section(section: Any) -> dict[str, Any]:
     ):
         if key in section:
             payload[key] = section.get(key)
+    if isinstance(payload.get("items"), list):
+        payload["urls"] = _image_host_url_summary(payload["items"])
     return payload
+
+
+def _summary_image_host_evidence(sections: dict[str, Any], target_assets: dict[str, Any]) -> dict[str, Any]:
+    generated = sections.get("image_host") if isinstance(sections.get("image_host"), dict) else {}
+    if isinstance(generated.get("items"), list) and generated.get("items"):
+        return generated
+    target_image_hosts = target_assets.get("image_hosts") if isinstance(target_assets.get("image_hosts"), dict) else {}
+    return target_image_hosts or generated
+
+
+def _image_host_url_summary(items: Any) -> dict[str, list[str]]:
+    raw_urls: list[str] = []
+    img_urls: list[str] = []
+    web_urls: list[str] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        raw_url = _nonempty_str(item.get("raw_url") or item.get("url"))
+        img_url = _nonempty_str(item.get("img_url") or raw_url)
+        web_url = _nonempty_str(item.get("web_url") or item.get("url_viewer") or raw_url)
+        if raw_url:
+            _append_unique_string(raw_urls, raw_url)
+        if img_url:
+            _append_unique_string(img_urls, img_url)
+        if web_url:
+            _append_unique_string(web_urls, web_url)
+    return {"raw_urls": raw_urls, "img_urls": img_urls, "web_urls": web_urls}
+
+
+def _nonempty_str(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _summary_flow_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
@@ -6344,10 +6380,13 @@ def _material_asset_ready(assets: dict[str, Any], key: str) -> dict[str, Any]:
 
 def _material_asset_count_ready(assets: dict[str, Any], key: str) -> dict[str, Any]:
     asset = assets.get(key) if isinstance(assets.get(key), dict) else {}
-    return {
+    payload = {
         "ready": bool(asset.get("ready")),
         "count": int(asset.get("count", 0) or 0),
     }
+    if isinstance(asset.get("items"), list):
+        payload["items"] = asset.get("items")
+    return payload
 
 
 def _source_hash_consistent(
@@ -7630,6 +7669,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     mediainfo = sections.get("mediainfo") if isinstance(sections.get("mediainfo"), dict) else {}
     screenshots = sections.get("screenshots") if isinstance(sections.get("screenshots"), dict) else {}
     image_host = sections.get("image_host") if isinstance(sections.get("image_host"), dict) else {}
+    image_host_urls = material_diagnostics.get("image_host_urls") if isinstance(material_diagnostics.get("image_host_urls"), dict) else {}
     disc_structure = material_diagnostics.get("disc_structure") if isinstance(material_diagnostics.get("disc_structure"), dict) else {}
     description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
     return {
@@ -7657,6 +7697,9 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_IMAGE_HOST_OK": _summary_material_section_shell_bool(image_host),
         "PTCLI_MATERIAL_IMAGE_HOST_HOST": image_host.get("host"),
         "PTCLI_MATERIAL_IMAGE_HOST_COUNT": image_host.get("count"),
+        "PTCLI_MATERIAL_IMAGE_HOST_RAW_URLS": ",".join(_string_list(image_host_urls.get("raw_urls"))),
+        "PTCLI_MATERIAL_IMAGE_HOST_IMG_URLS": ",".join(_string_list(image_host_urls.get("img_urls"))),
+        "PTCLI_MATERIAL_IMAGE_HOST_WEB_URLS": ",".join(_string_list(image_host_urls.get("web_urls"))),
         "PTCLI_MATERIAL_DESCRIPTION_READY": _shell_bool(description.get("ready")) if description.get("ready") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_PATH": description.get("path"),
         "PTCLI_MATERIAL_DESCRIPTION_LENGTH": description.get("char_length"),

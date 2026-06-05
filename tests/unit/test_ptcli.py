@@ -3323,7 +3323,14 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
                     },
                     "target_materials": {
                         "ready": False,
-                        "assets": {"disc_structure": {"ready": True, "path": "/downloads/Disc/BDMV", "bdmv": True, "type": "BDMV"}},
+                        "assets": {
+                            "disc_structure": {"ready": True, "path": "/downloads/Disc/BDMV", "bdmv": True, "type": "BDMV"},
+                            "image_hosts": {
+                                "ready": True,
+                                "count": 1,
+                                "items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}],
+                            },
+                        },
                         "missing": ["assets.bdinfo_for_disc", "assets.image_host_uploads"],
                     },
                     "target_materials_ready": False,
@@ -3358,6 +3365,9 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["sections"]["prerequisites"]["ok"] is False
     assert diagnostics["sections"]["prerequisites"]["checks"][0]["name"] == "assets.image_host"
     assert diagnostics["sections"]["metadata"]["ptgen_description_length"] == 42
+    assert diagnostics["image_host_urls"]["raw_urls"] == ["https://img.example/raw.png"]
+    assert diagnostics["image_host_urls"]["img_urls"] == ["https://img.example/thumb.png"]
+    assert diagnostics["image_host_urls"]["web_urls"] == ["https://img.example/page"]
     assert diagnostics["blockers"] == ["prerequisites: --upload-screenshots requires --image-host.", "BDMV disc content requires --bdinfo-file.", "Image-host uploads are missing."]
 
 
@@ -4354,7 +4364,16 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                         "metadata": {"ok": True, "missing": [], "ptgen_description_length": 42},
                         "mediainfo": {"ok": True, "mediainfo_file": "/tmp/MI_FULL_00.txt"},
                         "screenshots": {"ok": True, "count": 3, "screenshot_files": ["/tmp/s1.png", "/tmp/s2.png", "/tmp/s3.png"]},
-                        "image_host": {"ok": True, "host": "ptpimg", "count": 3, "image_host_file": "/tmp/image-host-uploads.json"},
+                        "image_host": {
+                            "ok": True,
+                            "host": "ptpimg",
+                            "count": 3,
+                            "image_host_file": "/tmp/image-host-uploads.json",
+                            "items": [
+                                {"raw_url": "https://img.example/raw-1.png", "img_url": "https://img.example/thumb-1.png", "web_url": "https://img.example/page-1"},
+                                {"raw_url": "https://img.example/raw-2.png", "img_url": "https://img.example/thumb-2.png", "web_url": "https://img.example/page-2"},
+                            ],
+                        },
                     },
                     "target_materials": {"ready": True, "assets": {"disc_structure": {"ready": True, "path": "/downloads/Disc/BDMV", "bdmv": True, "type": "BDMV"}}, "missing": []},
                     "target_materials_ready": True,
@@ -4433,6 +4452,9 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_IMAGE_HOST_OK=1\n" in out
     assert "export PTCLI_MATERIAL_IMAGE_HOST_HOST=ptpimg\n" in out
     assert "export PTCLI_MATERIAL_IMAGE_HOST_COUNT=3\n" in out
+    assert "export PTCLI_MATERIAL_IMAGE_HOST_RAW_URLS=https://img.example/raw-1.png,https://img.example/raw-2.png\n" in out
+    assert "export PTCLI_MATERIAL_IMAGE_HOST_IMG_URLS=https://img.example/thumb-1.png,https://img.example/thumb-2.png\n" in out
+    assert "export PTCLI_MATERIAL_IMAGE_HOST_WEB_URLS=https://img.example/page-1,https://img.example/page-2\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_READY=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_PATH='/tmp/with space/mteam-description-draft.txt'\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_LENGTH=4096\n" in out
