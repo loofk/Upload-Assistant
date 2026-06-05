@@ -4242,6 +4242,20 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                     "target_materials": {"ready": True, "assets": {"disc_structure": {"ready": True, "path": "/downloads/Disc/BDMV", "bdmv": True, "type": "BDMV"}}, "missing": []},
                     "target_materials_ready": True,
                     "target_preparation_ready": True,
+                    "target_preparation_audit": {
+                        "description_ready": True,
+                        "description": {
+                            "path": "/tmp/with space/mteam-description-draft.txt",
+                            "exists": True,
+                            "char_length": 4096,
+                            "expected_length": 4096,
+                            "has_ptgen_description": True,
+                            "has_external_ids": True,
+                            "has_mediainfo_or_bdinfo": True,
+                            "has_screenshot_bbcode": True,
+                            "bbcode_image_count": 3,
+                        },
+                    },
                     "target_materials_missing": [],
                     "target_preparation_missing": [],
                 },
@@ -4302,6 +4316,15 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_IMAGE_HOST_OK=1\n" in out
     assert "export PTCLI_MATERIAL_IMAGE_HOST_HOST=ptpimg\n" in out
     assert "export PTCLI_MATERIAL_IMAGE_HOST_COUNT=3\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_READY=1\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_PATH='/tmp/with space/mteam-description-draft.txt'\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_LENGTH=4096\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_EXPECTED_LENGTH=4096\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_PTGEN=1\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO=1\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS=1\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT=3\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=0\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCHES=''\n" in out

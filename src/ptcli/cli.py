@@ -2046,7 +2046,9 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     material_generation = artifacts.get("material_generation") if isinstance(artifacts.get("material_generation"), dict) else {}
     target_materials = artifacts.get("target_materials") if isinstance(artifacts.get("target_materials"), dict) else {}
     target_assets = target_materials.get("assets") if isinstance(target_materials.get("assets"), dict) else {}
+    target_preparation_audit = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
     disc_structure = target_assets.get("disc_structure") if isinstance(target_assets.get("disc_structure"), dict) else {}
+    description = target_preparation_audit.get("description") if isinstance(target_preparation_audit.get("description"), dict) else {}
     sections = {
         key: _summary_material_section(material_generation.get(key))
         for key in ("prerequisites", "metadata", "bdinfo", "mediainfo", "screenshots", "image_host")
@@ -2067,6 +2069,18 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "target_materials_missing": _string_list(artifacts.get("target_materials_missing") or target_materials.get("missing")),
         "target_preparation_missing": _string_list(artifacts.get("target_preparation_missing")),
         "disc_structure": disc_structure,
+        "description": {
+            "ready": target_preparation_audit.get("description_ready"),
+            "path": description.get("path"),
+            "exists": description.get("exists"),
+            "char_length": description.get("char_length"),
+            "expected_length": description.get("expected_length"),
+            "has_ptgen_description": description.get("has_ptgen_description"),
+            "has_external_ids": description.get("has_external_ids"),
+            "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
+            "has_screenshot_bbcode": description.get("has_screenshot_bbcode"),
+            "bbcode_image_count": description.get("bbcode_image_count"),
+        },
         "sections": sections,
         "blockers": blockers,
     }
@@ -7250,6 +7264,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     screenshots = sections.get("screenshots") if isinstance(sections.get("screenshots"), dict) else {}
     image_host = sections.get("image_host") if isinstance(sections.get("image_host"), dict) else {}
     disc_structure = material_diagnostics.get("disc_structure") if isinstance(material_diagnostics.get("disc_structure"), dict) else {}
+    description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
     return {
         "PTCLI_MATERIAL_PRESENT": _shell_bool(material_diagnostics.get("present")) if "present" in material_diagnostics else None,
         "PTCLI_MATERIAL_GENERATION_PRESENT": _shell_bool(material_diagnostics.get("generation_present")) if "generation_present" in material_diagnostics else None,
@@ -7275,6 +7290,15 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_IMAGE_HOST_OK": _summary_material_section_shell_bool(image_host),
         "PTCLI_MATERIAL_IMAGE_HOST_HOST": image_host.get("host"),
         "PTCLI_MATERIAL_IMAGE_HOST_COUNT": image_host.get("count"),
+        "PTCLI_MATERIAL_DESCRIPTION_READY": _shell_bool(description.get("ready")) if description.get("ready") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_PATH": description.get("path"),
+        "PTCLI_MATERIAL_DESCRIPTION_LENGTH": description.get("char_length"),
+        "PTCLI_MATERIAL_DESCRIPTION_EXPECTED_LENGTH": description.get("expected_length"),
+        "PTCLI_MATERIAL_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
     }
 
 
