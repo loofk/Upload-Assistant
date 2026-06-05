@@ -4361,7 +4361,17 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                 "artifacts": {
                     "material_generation": {
                         "prerequisites": {"ok": True, "blockers": []},
-                        "metadata": {"ok": True, "missing": [], "ptgen_description_length": 42},
+                        "metadata": {
+                            "ok": True,
+                            "missing": [],
+                            "sources": ["source", "tmdb_api", "ptgen"],
+                            "applied": {"tmdb_id": 999, "douban_url": "https://movie.douban.com/subject/1291546/"},
+                            "imdb_id": 1234567,
+                            "tmdb_id": 999,
+                            "douban_id": "1291546",
+                            "douban_url": "https://movie.douban.com/subject/1291546/",
+                            "ptgen_description_length": 42,
+                        },
                         "mediainfo": {"ok": True, "mediainfo_file": "/tmp/MI_FULL_00.txt"},
                         "screenshots": {"ok": True, "count": 3, "screenshot_files": ["/tmp/s1.png", "/tmp/s2.png", "/tmp/s3.png"]},
                         "image_host": {
@@ -4445,6 +4455,12 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_DISC_PATH=/downloads/Disc/BDMV\n" in out
     assert "export PTCLI_MATERIAL_PREREQUISITES_OK=1\n" in out
     assert "export PTCLI_MATERIAL_METADATA_OK=1\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_SOURCES=source,tmdb_api,ptgen\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_APPLIED_KEYS=douban_url,tmdb_id\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_IMDB_ID=1234567\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_TMDB_ID=999\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_DOUBAN_ID=1291546\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_DOUBAN_URL=https://movie.douban.com/subject/1291546/\n" in out
     assert "export PTCLI_MATERIAL_PTGEN_DESCRIPTION_LENGTH=42\n" in out
     assert "export PTCLI_MATERIAL_MEDIAINFO_OK=1\n" in out
     assert "export PTCLI_MATERIAL_SCREENSHOTS_OK=1\n" in out
