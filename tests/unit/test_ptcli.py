@@ -201,6 +201,9 @@ def write_material_ready_mteam_package(source_info: dict, tmp_path: Path, conten
 
 
 def patch_pipeline_live_material_stages(monkeypatch) -> None:
+    def fake_pipeline_material_prerequisite_check(_config, _args):
+        return {"name": "material.prerequisites", "ok": True, "message": "Material prerequisites are ready.", "checks": [], "blockers": []}
+
     async def fake_enrich_source_metadata(_config, source_info, *, overrides=None, fetch_ptgen=False, base_dir=None):
         _ = (overrides, base_dir)
         enriched = {
@@ -240,6 +243,7 @@ def patch_pipeline_live_material_stages(monkeypatch) -> None:
         output_path.write_text(json.dumps(payload), encoding="utf-8")
         return {**payload, "image_host_file": str(output_path)}
 
+    monkeypatch.setattr(ptcli_cli, "_pipeline_material_prerequisite_check", fake_pipeline_material_prerequisite_check)
     monkeypatch.setattr(ptcli_cli, "enrich_source_metadata", fake_enrich_source_metadata)
     monkeypatch.setattr(ptcli_cli, "generate_mediainfo_material", fake_generate_mediainfo_material)
     monkeypatch.setattr(ptcli_cli, "generate_screenshot_materials", fake_generate_screenshot_materials)
@@ -9303,7 +9307,7 @@ async def test_pipeline_generate_screenshot_materials_before_prepare_target(monk
 @pytest.mark.asyncio
 async def test_pipeline_upload_screenshots_before_prepare_target(monkeypatch, tmp_path) -> None:
     config = {
-        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg"},
+        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg", "ptpimg_api": "ptpimg-key"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
     }
@@ -9369,9 +9373,66 @@ async def test_pipeline_upload_screenshots_before_prepare_target(monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_pipeline_material_prerequisite_check_blocks_missing_image_host(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {"imdb_id": 1234567, "tmdb_id": 999, "douban_id": "1291546"})
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_upload_screenshot_image_hosts(*_args, **_kwargs):
+        raise AssertionError("image-host upload must not run without image-host prerequisites")
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "upload_screenshot_image_hosts", fake_upload_screenshot_image_hosts)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--path",
+            "/downloads/Name",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--screenshot-file",
+            str(screenshot),
+            "--upload-screenshots",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    prerequisite_stage = next(stage for stage in payload["stages"] if stage["stage"] == "material-prerequisite-check")
+    image_host_stage = next(stage for stage in payload["stages"] if stage["stage"] == "materials-image-host")
+    assert prerequisite_stage["ok"] is False
+    assert "--upload-screenshots requires --image-host" in prerequisite_stage["result"]["blockers"][0]
+    assert image_host_stage["ok"] is False
+    assert any(blocker.startswith("material-prerequisite-check:") for blocker in payload["blockers"])
+    assert "Fix the metadata/material prerequisites" in payload["next_actions"][0]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_target_execute_defaults_to_generating_materials(monkeypatch, tmp_path) -> None:
     config = {
-        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg"},
+        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg", "ptpimg_api": "ptpimg-key"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
     }

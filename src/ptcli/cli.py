@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -3353,6 +3354,16 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         stages.append({"stage": "runtime-check", "ok": bool(runtime_check.get("ok")), "message": runtime_check.get("message"), "result": runtime_check})
     else:
         stages.append({"stage": "runtime-check", "ok": True, "skipped": True, "message": "--check-runtime not provided; runtime dependency check skipped."})
+    material_prerequisite_check = _pipeline_material_prerequisite_check(config, args)
+    stages.append(
+        {
+            "stage": "material-prerequisite-check",
+            "ok": bool(material_prerequisite_check.get("ok")),
+            "skipped": bool(material_prerequisite_check.get("skipped")),
+            "message": material_prerequisite_check.get("message"),
+            "result": material_prerequisite_check,
+        }
+    )
 
     if package_upload_resume:
         flow_check_result = {
@@ -3537,11 +3548,14 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             if generated_screenshots and not material_files.get("screenshot_files"):
                 material_files["screenshot_files"] = list(generated_screenshots)
         if args.upload_screenshots:
-            image_host_stage = await _pipeline_image_host_material_stage(config, args, source_result if isinstance(source_result, dict) else None, material_files)
-            stages.append(image_host_stage)
-            generated_image_host_file = image_host_stage.get("result", {}).get("image_host_file") if image_host_stage.get("ok") else None
-            if generated_image_host_file and not material_files.get("image_host_file"):
-                material_files["image_host_file"] = str(generated_image_host_file)
+            if not _material_prerequisite_check_ready(stages):
+                stages.append({"stage": "materials-image-host", "ok": False, "skipped": True, "message": "Skipped because material-prerequisite-check did not pass."})
+            else:
+                image_host_stage = await _pipeline_image_host_material_stage(config, args, source_result if isinstance(source_result, dict) else None, material_files)
+                stages.append(image_host_stage)
+                generated_image_host_file = image_host_stage.get("result", {}).get("image_host_file") if image_host_stage.get("ok") else None
+                if generated_image_host_file and not material_files.get("image_host_file"):
+                    material_files["image_host_file"] = str(generated_image_host_file)
         target_prepare = write_mteam_prepare_package(
             source_result if isinstance(source_result, dict) else None,
             target_trackers,
@@ -3631,6 +3645,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because current pipeline run did not complete a clean MTEAM duplicate check before live target upload."})
         elif args.target_execute and not _runtime_check_ready(stages):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because focused ptcli runtime dependencies are not ready for live target upload."})
+        elif args.target_execute and not _material_prerequisite_check_ready(stages):
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because metadata/material prerequisites are not ready for live target upload."})
         else:
             package_dir = str(target_prepare_stage.get("result", {}).get("package_dir", ""))
             upload_stage = await _pipeline_stage(
@@ -3742,6 +3758,108 @@ def _rule_check_ready(stages: list[dict[str, Any]]) -> bool:
 def _runtime_check_ready(stages: list[dict[str, Any]]) -> bool:
     stage = _find_stage(stages, "runtime-check")
     return True if stage is None or stage.get("skipped") else bool(stage.get("ok"))
+
+
+def _material_prerequisite_check_ready(stages: list[dict[str, Any]]) -> bool:
+    stage = _find_stage(stages, "material-prerequisite-check")
+    return True if stage is None or stage.get("skipped") else bool(stage.get("ok"))
+
+
+def _pipeline_material_prerequisite_check(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    if getattr(args, "enrich_metadata", False):
+        checks.append(_pipeline_material_check("metadata.external_ids", True, "IMDb/TMDb/Douban enrichment is requested; source metadata, overrides, and TMDb/PTGen stages will provide final readiness."))
+    if getattr(args, "fetch_ptgen", False):
+        checks.append(_pipeline_material_check("metadata.ptgen_description", True, "PTGen/Douban description fetching is requested; metadata-enrich will verify the fetched description."))
+    if getattr(args, "generate_mediainfo", False):
+        checks.append(_pipeline_material_check("assets.mediainfo", True, "MediaInfo generation is requested; pymediainfo availability is covered by runtime-check and the generation stage will verify native parsing."))
+    if getattr(args, "generate_screenshots", False):
+        ffmpeg = shutil.which("ffmpeg")
+        checks.append(
+            _pipeline_material_check(
+                "assets.ffmpeg",
+                bool(ffmpeg),
+                f"ffmpeg binary is available: {ffmpeg}" if ffmpeg else "ffmpeg binary is required for screenshot generation.",
+            )
+        )
+    if getattr(args, "upload_screenshots", False) and not getattr(args, "image_host_file", None):
+        checks.extend(_pipeline_image_host_prerequisite_checks(config, getattr(args, "image_host", None)))
+    if not checks:
+        return {
+            "name": "material.prerequisites",
+            "ok": True,
+            "skipped": True,
+            "message": "No metadata/material generation or image-host upload actions requested.",
+            "checks": [],
+            "blockers": [],
+        }
+    blockers = [str(check["message"]) for check in checks if not check.get("ok")]
+    return {
+        "name": "material.prerequisites",
+        "ok": not blockers,
+        "message": "Material prerequisites are ready." if not blockers else "Material prerequisites have blockers.",
+        "checks": checks,
+        "blockers": blockers,
+    }
+
+
+def _pipeline_material_check(name: str, ok: bool, message: str) -> dict[str, Any]:
+    return {"name": name, "ok": ok, "message": message}
+
+
+def _pipeline_image_host_prerequisite_checks(config: dict[str, Any], image_host: str | None) -> list[dict[str, Any]]:
+    default = config.get("DEFAULT", {}) if isinstance(config, dict) else {}
+    configured_host = str(image_host or default.get("img_host_1") or default.get("img_host") or default.get("imghost") or "").strip().lower() if isinstance(default, dict) else str(image_host or "").strip().lower()
+    checks = [
+        _pipeline_material_check(
+            "assets.image_host",
+            bool(configured_host),
+            f"Image host is configured: {configured_host}" if configured_host else "--upload-screenshots requires --image-host, --image-host-file, or DEFAULT.img_host_1.",
+        )
+    ]
+    if not configured_host:
+        return checks
+    required_keys = {
+        "ptpimg": ("ptpimg_api",),
+        "imgbb": ("imgbb_api",),
+        "dalexni": ("dalexni_api",),
+        "ptscreens": ("ptscreens_api",),
+        "utppm": ("utppm_api",),
+        "onlyimage": ("onlyimage_api",),
+        "lensdump": ("lensdump_api",),
+        "passtheimage": ("passtheimage_api", "passtheima_ge_api"),
+        "zipline": ("zipline_url", "zipline_api_key"),
+        "sharex": ("sharex_api_key",),
+    }
+    if configured_host == "pixhost":
+        checks.append(_pipeline_material_check("assets.image_host.credentials", True, "pixhost upload does not require local API credentials."))
+        return checks
+    if configured_host == "imgbox":
+        checks.append(_pipeline_material_check("assets.image_host.supported", False, "imgbox requires legacy pyimgbox; use an API image host or provide --image-host-file for focused ptcli."))
+        return checks
+    keys = required_keys.get(configured_host)
+    if keys is None:
+        checks.append(_pipeline_material_check("assets.image_host.supported", False, f"Unsupported focused ptcli image host: {configured_host}."))
+        return checks
+    if configured_host == "passtheimage":
+        has_key = any(str(default.get(key) or "").strip() for key in keys)
+        checks.append(
+            _pipeline_material_check(
+                "assets.image_host.credentials",
+                has_key,
+                "Image host credential field is configured for passtheimage." if has_key else "Image host passtheimage is missing DEFAULT.passtheima_ge_api.",
+            )
+        )
+        return checks
+    missing = [key for key in keys if not str(default.get(key) or "").strip()]
+    checks.append(
+        _pipeline_material_check(
+            "assets.image_host.credentials",
+            not missing,
+            f"Image host credential fields are configured for {configured_host}." if not missing else f"Image host {configured_host} is missing DEFAULT field(s): {', '.join(missing)}.",
+        )
+    )
+    return checks
 
 
 def _source_ready_for_live_target_upload(stages: list[dict[str, Any]]) -> bool:
@@ -5421,6 +5539,8 @@ def _pipeline_next_actions(args: argparse.Namespace, blockers: list[str], closur
 def _pipeline_stage_blocker_next_action(blocker: str) -> str:
     if blocker.startswith("runtime-check:"):
         return "Install the focused ptcli runtime dependencies with requirements-ptcli.txt, then rerun the pipeline."
+    if blocker.startswith("material-prerequisite-check:"):
+        return "Fix the metadata/material prerequisites such as ffmpeg and image-host configuration, then rerun target preparation."
     if blocker.startswith("metadata-enrich:"):
         return "Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description, then rerun target preparation."
     if blocker.startswith("source-download:"):
