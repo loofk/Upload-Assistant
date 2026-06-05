@@ -2008,6 +2008,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
     qbit_wait_retry_hints = _summary_qbit_wait_retry_hints(qbit_wait_diagnostics)
     flow_diagnostics = _summary_flow_diagnostics(payload)
+    material_diagnostics = _summary_material_diagnostics(payload)
     closure_modes = _summary_closure_modes(payload)
     closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload)
     return {
@@ -2019,6 +2020,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "kind_supported": kind in SUPPORTED_SUMMARY_KINDS,
         "flow_diagnostics": flow_diagnostics,
         "credential_requirements": flow_diagnostics.get("credential_requirements", []),
+        "material_diagnostics": material_diagnostics,
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
@@ -2028,6 +2030,70 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "source_mode": closure_modes.get("source"),
         "target_mode": closure_modes.get("target"),
     }
+
+
+def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    material_generation = artifacts.get("material_generation") if isinstance(artifacts.get("material_generation"), dict) else {}
+    target_materials = artifacts.get("target_materials") if isinstance(artifacts.get("target_materials"), dict) else {}
+    sections = {
+        key: _summary_material_section(material_generation.get(key))
+        for key in ("prerequisites", "metadata", "mediainfo", "screenshots", "image_host")
+        if isinstance(material_generation.get(key), dict)
+    }
+    blockers: list[str] = []
+    for key, section in sections.items():
+        for blocker in _string_list(section.get("blockers")):
+            _append_unique_string(blockers, f"{key}: {blocker}")
+    _extend_unique_string(blockers, _string_list(artifacts.get("target_materials_warnings")))
+    return {
+        "present": bool(material_generation or target_materials),
+        "generation_present": bool(material_generation),
+        "target_materials_present": bool(target_materials),
+        "generation_ready": all(bool(section.get("ok")) for section in sections.values()) if sections else None,
+        "target_materials_ready": artifacts.get("target_materials_ready") if "target_materials_ready" in artifacts else target_materials.get("ready"),
+        "target_preparation_ready": artifacts.get("target_preparation_ready"),
+        "target_materials_missing": _string_list(artifacts.get("target_materials_missing") or target_materials.get("missing")),
+        "target_preparation_missing": _string_list(artifacts.get("target_preparation_missing")),
+        "sections": sections,
+        "blockers": blockers,
+    }
+
+
+def _summary_material_section(section: Any) -> dict[str, Any]:
+    if not isinstance(section, dict):
+        return {}
+    payload = {
+        "ok": section.get("ok") if isinstance(section.get("ok"), bool) else None,
+        "skipped": bool(section.get("skipped")),
+        "message": section.get("message"),
+        "status": section.get("status"),
+        "blockers": _string_list(section.get("blockers")),
+    }
+    for key in (
+        "ready",
+        "missing",
+        "sources",
+        "applied",
+        "imdb_id",
+        "tmdb_id",
+        "douban_id",
+        "douban_url",
+        "ptgen_description_length",
+        "mediainfo_file",
+        "mediainfo_summary_file",
+        "mediainfo_json_file",
+        "screenshot_files",
+        "image_host_file",
+        "count",
+        "requested_count",
+        "host",
+        "items",
+        "checks",
+    ):
+        if key in section:
+            payload[key] = section.get(key)
+    return payload
 
 
 def _summary_flow_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:

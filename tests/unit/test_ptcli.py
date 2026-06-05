@@ -3168,6 +3168,78 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
     assert payload["target_mode"] == "live_upload"
 
 
+def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["material-prerequisite-check: Material prerequisites have blockers."],
+                "artifacts": {
+                    "material_generation": {
+                        "prerequisites": {
+                            "ok": False,
+                            "skipped": False,
+                            "message": "Material prerequisites have blockers.",
+                            "checks": [{"name": "assets.image_host", "ok": False, "message": "--upload-screenshots requires --image-host."}],
+                            "blockers": ["--upload-screenshots requires --image-host."],
+                        },
+                        "metadata": {
+                            "ok": True,
+                            "ready": True,
+                            "missing": [],
+                            "imdb_id": 1234567,
+                            "tmdb_id": 999,
+                            "douban_id": "1291546",
+                            "ptgen_description_length": 42,
+                        },
+                        "image_host": {
+                            "ok": False,
+                            "skipped": True,
+                            "message": "Skipped because material-prerequisite-check did not pass.",
+                            "blockers": [],
+                        },
+                    },
+                    "target_materials": {
+                        "ready": False,
+                        "missing": ["assets.image_host_uploads"],
+                    },
+                    "target_materials_ready": False,
+                    "target_materials_missing": ["assets.image_host_uploads"],
+                    "target_materials_warnings": ["Image-host uploads are missing."],
+                    "target_preparation_missing": ["assets.image_host_uploads"],
+                },
+                "resume_state": {
+                    "next_stage": "resume-target-package",
+                    "next_command": "python3 ptcli.py pipeline --prepare-target",
+                    "next_command_argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+                    "available_stages": ["resume-target-package"],
+                    "artifacts": {"target_materials_ready": False},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    diagnostics = payload["material_diagnostics"]
+    assert diagnostics["present"] is True
+    assert diagnostics["generation_ready"] is False
+    assert diagnostics["target_materials_ready"] is False
+    assert diagnostics["target_materials_missing"] == ["assets.image_host_uploads"]
+    assert diagnostics["target_preparation_missing"] == ["assets.image_host_uploads"]
+    assert diagnostics["sections"]["prerequisites"]["ok"] is False
+    assert diagnostics["sections"]["prerequisites"]["checks"][0]["name"] == "assets.image_host"
+    assert diagnostics["sections"]["metadata"]["ptgen_description_length"] == 42
+    assert diagnostics["blockers"] == ["prerequisites: --upload-screenshots requires --image-host.", "Image-host uploads are missing."]
+
+
 def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
