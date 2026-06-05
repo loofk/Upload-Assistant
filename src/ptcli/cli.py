@@ -237,8 +237,10 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--wait-complete", action="store_true", help="Wait for qBittorrent task completion after injection or by --path.")
     pipeline.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait with --wait-complete.")
     pipeline.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds for --wait-complete.")
-    pipeline.add_argument("--enrich-metadata", action="store_true", help="Fill missing IMDb/TMDb/Douban metadata before duplicate check and target preparation.")
-    pipeline.add_argument("--fetch-ptgen", action="store_true", help="Fetch PTGen/Douban movie information during metadata enrichment for the MTEAM description draft.")
+    pipeline.add_argument("--enrich-metadata", dest="enrich_metadata", action="store_true", default=None, help="Fill missing IMDb/TMDb/Douban metadata before duplicate check and target preparation. Enabled by default for --target-execute.")
+    pipeline.add_argument("--no-enrich-metadata", dest="enrich_metadata", action="store_false", help="Skip metadata enrichment during --target-execute.")
+    pipeline.add_argument("--fetch-ptgen", dest="fetch_ptgen", action="store_true", default=None, help="Fetch PTGen/Douban movie information during metadata enrichment for the MTEAM description draft. Enabled by default for --target-execute.")
+    pipeline.add_argument("--no-fetch-ptgen", dest="fetch_ptgen", action="store_false", help="Skip PTGen/Douban description fetching during --target-execute.")
     pipeline.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, douban_id, or douban_url overrides for --enrich-metadata.")
     pipeline.add_argument("--imdb-id", help="IMDb id override for --enrich-metadata.")
     pipeline.add_argument("--tmdb-id", help="TMDb id override for --enrich-metadata.")
@@ -249,11 +251,14 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--target-output-dir", default="./tmp/target", help="Directory for --prepare-target review package files.")
     pipeline.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
     pipeline.add_argument("--bdinfo-file", help="Existing BDInfo text file to record in the MTEAM preparation materials manifest.")
-    pipeline.add_argument("--generate-mediainfo", action="store_true", help="Generate MediaInfo files from --path or the resolved qBittorrent content path before preparing the MTEAM package.")
-    pipeline.add_argument("--generate-screenshots", action="store_true", help="Generate local video screenshots from --path or the resolved qBittorrent content path before preparing the MTEAM package.")
+    pipeline.add_argument("--generate-mediainfo", dest="generate_mediainfo", action="store_true", default=None, help="Generate MediaInfo files from --path or the resolved qBittorrent content path before preparing the MTEAM package. Enabled by default for --target-execute.")
+    pipeline.add_argument("--no-generate-mediainfo", dest="generate_mediainfo", action="store_false", help="Skip MediaInfo generation during --target-execute target preparation.")
+    pipeline.add_argument("--generate-screenshots", dest="generate_screenshots", action="store_true", default=None, help="Generate local video screenshots from --path or the resolved qBittorrent content path before preparing the MTEAM package. Enabled by default for --target-execute.")
+    pipeline.add_argument("--no-generate-screenshots", dest="generate_screenshots", action="store_false", help="Skip screenshot generation during --target-execute target preparation.")
     pipeline.add_argument("--screenshot-count", type=int, default=3, help="Number of screenshots to generate with --generate-screenshots.")
     pipeline.add_argument("--screenshot-file", action="append", default=[], help="Existing screenshot image file to record in the MTEAM preparation materials manifest. May be repeated.")
-    pipeline.add_argument("--upload-screenshots", action="store_true", help="Upload screenshot files to the configured image host before preparing the MTEAM package.")
+    pipeline.add_argument("--upload-screenshots", dest="upload_screenshots", action="store_true", default=None, help="Upload screenshot files to the configured image host before preparing the MTEAM package. Enabled by default for --target-execute.")
+    pipeline.add_argument("--no-upload-screenshots", dest="upload_screenshots", action="store_false", help="Skip screenshot image-host uploads during --target-execute target preparation.")
     pipeline.add_argument("--image-host", help="Image host name for --upload-screenshots. Defaults to DEFAULT.img_host_1.")
     pipeline.add_argument("--image-host-file", help="Existing image-host upload JSON file to record in the MTEAM preparation materials manifest.")
     pipeline.add_argument("--check-dupes", action="store_true", help="Run target duplicate search after source metadata is available.")
@@ -3235,6 +3240,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             args.download_uploaded_torrent = True
         args.inject_uploaded_torrent = True
         args.wait_uploaded_complete = True
+    _apply_pipeline_live_metadata_defaults(args, live_target_upload=live_target_upload, package_upload_resume=package_upload_resume)
+    _apply_pipeline_live_material_defaults(args, live_target_upload=live_target_upload, package_upload_resume=package_upload_resume)
 
     stages: list[dict[str, Any]] = []
     if runtime_check_requested:
@@ -3844,6 +3851,34 @@ def _mteam_material_output_dir(args: argparse.Namespace, source_info: dict[str, 
 
 def _package_upload_resume_requested(args: argparse.Namespace) -> bool:
     return bool(args.package_dir and args.upload_target and (args.uploaded_torrent_file or args.uploaded_torrent_id) and not args.target_execute)
+
+
+def _apply_pipeline_live_metadata_defaults(args: argparse.Namespace, *, live_target_upload: bool, package_upload_resume: bool) -> None:
+    if live_target_upload and args.prepare_target and not package_upload_resume:
+        args.enrich_metadata = _pipeline_live_material_default(args.enrich_metadata, True)
+        args.fetch_ptgen = _pipeline_live_material_default(args.fetch_ptgen, bool(args.enrich_metadata))
+        if args.fetch_ptgen:
+            args.enrich_metadata = True
+        return
+    args.enrich_metadata = bool(getattr(args, "enrich_metadata", False))
+    args.fetch_ptgen = bool(getattr(args, "fetch_ptgen", False))
+
+
+def _apply_pipeline_live_material_defaults(args: argparse.Namespace, *, live_target_upload: bool, package_upload_resume: bool) -> None:
+    if live_target_upload and args.prepare_target and not package_upload_resume:
+        args.generate_mediainfo = _pipeline_live_material_default(args.generate_mediainfo, not bool(args.mediainfo_file or args.bdinfo_file))
+        args.generate_screenshots = _pipeline_live_material_default(args.generate_screenshots, not bool(getattr(args, "screenshot_file", []) or []))
+        args.upload_screenshots = _pipeline_live_material_default(args.upload_screenshots, not bool(args.image_host_file))
+        return
+    args.generate_mediainfo = bool(getattr(args, "generate_mediainfo", False))
+    args.generate_screenshots = bool(getattr(args, "generate_screenshots", False))
+    args.upload_screenshots = bool(getattr(args, "upload_screenshots", False))
+
+
+def _pipeline_live_material_default(value: Any, enabled: bool) -> bool:
+    if value is None:
+        return bool(enabled)
+    return bool(value)
 
 
 def _source_info_from_existing_target_package(package_dir: str) -> dict[str, Any] | None:

@@ -200,6 +200,52 @@ def write_material_ready_mteam_package(source_info: dict, tmp_path: Path, conten
     )
 
 
+def patch_pipeline_live_material_stages(monkeypatch) -> None:
+    async def fake_enrich_source_metadata(_config, source_info, *, overrides=None, fetch_ptgen=False, base_dir=None):
+        _ = (overrides, base_dir)
+        enriched = {
+            **source_info,
+            "tmdb_id": source_info.get("tmdb_id") or 999,
+            "douban_id": source_info.get("douban_id") or "1291546",
+            "douban_url": source_info.get("douban_url") or "https://movie.douban.com/subject/1291546/",
+            "ptgen_description": source_info.get("ptgen_description") or "◎译　　名　示例电影\n◎简　　介　示例简介",
+        }
+        return {"status": "enriched", "ready": True, "source_info": enriched, "missing": [], "blockers": [], "sources": ["ptgen"] if fetch_ptgen else ["override"]}
+
+    async def fake_generate_mediainfo_material(_content_path, output_dir):
+        output_path = Path(output_dir) / "MI_FULL_00.txt"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("General\nComplete name : Name.mkv\n", encoding="utf-8")
+        return {"status": "generated", "mediainfo_file": str(output_path), "blockers": []}
+
+    async def fake_generate_screenshot_materials(_content_path, output_dir, count):
+        files = []
+        for index in range(1, int(count or 1) + 1):
+            output_path = Path(output_dir) / f"screenshot-{index:02d}.png"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"png")
+            files.append(str(output_path))
+        return {"status": "generated", "screenshot_files": files, "count": len(files), "blockers": []}
+
+    async def fake_upload_screenshot_image_hosts(_config, screenshot_files, output_dir, image_host=None):
+        output_path = Path(output_dir) / "image-host-uploads.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "status": "uploaded",
+            "host": image_host,
+            "count": len(screenshot_files),
+            "items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"} for _ in screenshot_files],
+            "blockers": [],
+        }
+        output_path.write_text(json.dumps(payload), encoding="utf-8")
+        return {**payload, "image_host_file": str(output_path)}
+
+    monkeypatch.setattr(ptcli_cli, "enrich_source_metadata", fake_enrich_source_metadata)
+    monkeypatch.setattr(ptcli_cli, "generate_mediainfo_material", fake_generate_mediainfo_material)
+    monkeypatch.setattr(ptcli_cli, "generate_screenshot_materials", fake_generate_screenshot_materials)
+    monkeypatch.setattr(ptcli_cli, "upload_screenshot_image_hosts", fake_upload_screenshot_image_hosts)
+
+
 def mteam_clean_rule_review() -> dict:
     rule_check = build_rule_check("U2", ["MTEAM"], accept_rules=True)
     return {
@@ -9109,6 +9155,124 @@ async def test_pipeline_upload_screenshots_before_prepare_target(monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_pipeline_target_execute_defaults_to_generating_materials(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (base_dir, source_id)
+        return source_info_from_tuple(
+            tracker,
+            "60635",
+            (1234567, 999, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"),
+            {"douban_id": "1291546"},
+        )
+
+    async def fake_enrich_source_metadata(_config, source_info, *, overrides=None, fetch_ptgen=False, base_dir=None):
+        _ = (overrides, base_dir)
+        assert fetch_ptgen is True
+        enriched = {
+            **source_info,
+            "tmdb_id": source_info.get("tmdb_id") or 999,
+            "douban_id": "1291546",
+            "douban_url": "https://movie.douban.com/subject/1291546/",
+            "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+        }
+        return {"status": "enriched", "ready": True, "source_info": enriched, "missing": [], "blockers": [], "sources": ["ptgen"]}
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
+
+    async def fake_generate_mediainfo_material(_content_path, output_dir):
+        output_path = Path(output_dir) / "MI_FULL_00.txt"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("General\nComplete name : Name.mkv\n", encoding="utf-8")
+        return {"status": "generated", "mediainfo_file": str(output_path), "blockers": []}
+
+    async def fake_generate_screenshot_materials(_content_path, output_dir, count):
+        output_path = Path(output_dir) / "screenshot-01.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"png")
+        return {"status": "generated", "screenshot_files": [str(output_path)], "count": count, "blockers": []}
+
+    async def fake_upload_screenshot_image_hosts(_config, screenshot_files, output_dir, image_host=None):
+        output_path = Path(output_dir) / "image-host-uploads.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "status": "uploaded",
+            "host": image_host,
+            "count": len(screenshot_files),
+            "items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}],
+            "blockers": [],
+        }
+        output_path.write_text(json.dumps(payload), encoding="utf-8")
+        return {**payload, "image_host_file": str(output_path)}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "enrich_source_metadata", fake_enrich_source_metadata)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "generate_mediainfo_material", fake_generate_mediainfo_material)
+    monkeypatch.setattr(ptcli_cli, "generate_screenshot_materials", fake_generate_screenshot_materials)
+    monkeypatch.setattr(ptcli_cli, "upload_screenshot_image_hosts", fake_upload_screenshot_image_hosts)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--path",
+            "/downloads/Name",
+            "--check-dupes",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--accept-rules",
+            "--upload-target",
+            "--target-torrent-file",
+            str(torrent_file),
+            "--target-execute",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--wait-uploaded-complete",
+            "--uploaded-save-path",
+            "/downloads/Name",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    assert payload["requested_actions"]["generate_mediainfo"] is False
+    assert payload["requested_actions"]["generate_screenshots"] is False
+    assert payload["requested_actions"]["upload_screenshots"] is False
+    assert payload["requested_actions"]["enrich_metadata"] is False
+    assert payload["requested_actions"]["fetch_ptgen"] is False
+    assert payload["effective_actions"]["enrich_metadata"] is True
+    assert payload["effective_actions"]["fetch_ptgen"] is True
+    assert payload["effective_actions"]["generate_mediainfo"] is True
+    assert payload["effective_actions"]["generate_screenshots"] is True
+    assert payload["effective_actions"]["upload_screenshots"] is True
+    assert next(stage for stage in payload["stages"] if stage["stage"] == "materials-mediainfo")["ok"] is True
+    assert next(stage for stage in payload["stages"] if stage["stage"] == "materials-screenshots")["ok"] is True
+    assert next(stage for stage in payload["stages"] if stage["stage"] == "materials-image-host")["ok"] is True
+    target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
+    assert target_stage["result"]["materials"]["ready"] is True
+
+
+@pytest.mark.asyncio
 async def test_pipeline_prepare_target_blocks_mismatched_existing_qbit_content(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -9412,6 +9576,7 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    patch_pipeline_live_material_stages(monkeypatch)
     uploaded_hash: str | None = None
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
@@ -9841,6 +10006,7 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    patch_pipeline_live_material_stages(monkeypatch)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
@@ -9970,6 +10136,7 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
     source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
     source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    patch_pipeline_live_material_stages(monkeypatch)
     uploaded_hash: str | None = None
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
@@ -10081,6 +10248,7 @@ async def test_pipeline_exports_matched_torrent_for_target_upload(monkeypatch, t
     uploaded_path = tmp_path / "MTEAM-999.torrent"
     uploaded_hash = write_valid_torrent(uploaded_path, tmp_path / "uploaded-content" / "MTEAM-999.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    patch_pipeline_live_material_stages(monkeypatch)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
@@ -10546,6 +10714,7 @@ async def test_pipeline_target_execute_enables_uploaded_torrent_followup(monkeyp
     uploaded_hash = write_valid_torrent(uploaded_torrent, tmp_path / "uploaded-content" / "MTEAM-999.mkv")
     torrent_file.write_bytes(b"d4:infod")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    patch_pipeline_live_material_stages(monkeypatch)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
@@ -11072,6 +11241,7 @@ async def test_pipeline_sanitizes_manual_target_torrent_for_upload(monkeypatch, 
     uploaded_hash = write_valid_torrent(uploaded_path, tmp_path / "uploaded-content" / "MTEAM-999.mkv")
     raw_torrent.write_bytes(b"d4:infod")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    patch_pipeline_live_material_stages(monkeypatch)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
@@ -11167,6 +11337,7 @@ async def test_pipeline_target_execute_auto_exports_and_sanitizes_target_torrent
     uploaded_torrent = tmp_path / "uploaded" / "MTEAM-999.torrent"
     uploaded_hash = write_valid_torrent(uploaded_torrent, tmp_path / "uploaded-content" / "MTEAM-999.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    patch_pipeline_live_material_stages(monkeypatch)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
@@ -11275,6 +11446,7 @@ async def test_pipeline_target_execute_auto_downloads_injects_and_waits_source(m
     source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     uploaded_hash = write_valid_torrent(uploaded_torrent, tmp_path / "uploaded-content" / "MTEAM-999.mkv")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    patch_pipeline_live_material_stages(monkeypatch)
 
     async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
         _ = base_dir
