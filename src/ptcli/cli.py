@@ -5770,6 +5770,10 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
     complete = bool(closure.get("complete"))
     next_command = {"stage": None, "command": None} if complete else _resume_next_command(blockers, commands_by_stage)
     next_command_argv = _resume_state_next_command_argv(next_command, resume_commands)
+    target_materials_missing = _string_list(artifacts.get("target_materials_missing"))
+    target_preparation_missing = _string_list(artifacts.get("target_preparation_missing"))
+    material_missing = [*target_materials_missing]
+    _extend_unique_string(material_missing, target_preparation_missing)
     return {
         "complete": complete,
         "resume_available": bool(resume_commands),
@@ -5807,6 +5811,13 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
             "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
             "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
+        },
+        "materials": {
+            "target_materials_ready": bool(artifacts.get("target_materials_ready")),
+            "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
+            "target_materials_missing": target_materials_missing,
+            "target_preparation_missing": target_preparation_missing,
+            "next_actions": _target_preparation_missing_next_actions(material_missing),
         },
         "blockers": blockers,
     }
