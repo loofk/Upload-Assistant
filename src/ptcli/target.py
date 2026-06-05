@@ -739,6 +739,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
     bdinfo = _material_file_asset(material_files.get("bdinfo_file"))
     screenshots = _screenshots_asset(material_files.get("screenshot_files"))
     image_hosts = _image_host_asset(material_files.get("image_host_file"))
+    disc_structure = _disc_structure_asset(content_path)
     ptgen_description_length = len(str(source_info.get("ptgen_description") or "")) if isinstance(source_info, dict) else 0
     metadata_checks = [
         _material_check("imdb", bool(meta_draft.get("imdb") or meta_draft.get("imdb_id")), "IMDb id is present.", "IMDb id is missing; fetch or supply IMDb metadata before live upload."),
@@ -748,6 +749,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
     ]
     asset_checks = [
         _material_check("mediainfo_or_bdinfo", bool(mediainfo.get("ready") or bdinfo.get("ready")), "MediaInfo/BDInfo is present.", "MediaInfo/BDInfo has not been generated into the package yet."),
+        _material_check("bdinfo_for_disc", not disc_structure.get("bdmv") or bool(bdinfo.get("ready")), "BDInfo requirement for disc content is satisfied.", "BDMV disc content requires --bdinfo-file for MTEAM target preparation."),
         _material_check("screenshots", bool(screenshots.get("ready")), "Screenshots are present.", "Screenshots have not been generated into the package yet."),
         _material_check("image_host_uploads", bool(image_hosts.get("ready")), "Image host uploads are present.", "Screenshot image-host upload results are missing."),
         _material_check("description_draft", True, "MTEAM description draft has been generated.", "MTEAM description draft is missing."),
@@ -777,6 +779,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "bdinfo": bdinfo,
             "screenshots": screenshots,
             "image_hosts": image_hosts,
+            "disc_structure": disc_structure,
             "description": {"ready": True, "path": REQUIRED_MTEAM_PACKAGE_FILES["description_draft"]},
         },
         "checks": {
@@ -836,6 +839,23 @@ def _image_host_asset(path_value: Any) -> dict[str, Any]:
     }
 
 
+def _disc_structure_asset(content_path: str | None) -> dict[str, Any]:
+    if not content_path:
+        return {"ready": False, "path": None, "bdmv": False, "type": None}
+    path = Path(content_path).expanduser()
+    if not path.exists():
+        return {"ready": False, "path": str(path), "bdmv": False, "type": None}
+    if path.is_dir() and path.name.upper() == "BDMV":
+        return {"ready": True, "path": str(path), "bdmv": True, "type": "BDMV"}
+    bdmv_dir = path / "BDMV" if path.is_dir() else None
+    if bdmv_dir and bdmv_dir.is_dir():
+        return {"ready": True, "path": str(bdmv_dir), "bdmv": True, "type": "BDMV"}
+    video_ts_dir = path / "VIDEO_TS" if path.is_dir() else None
+    if video_ts_dir and video_ts_dir.is_dir():
+        return {"ready": True, "path": str(video_ts_dir), "bdmv": False, "type": "VIDEO_TS"}
+    return {"ready": False, "path": str(path), "bdmv": False, "type": None}
+
+
 def _mteam_material_next_actions(checks: list[dict[str, Any]]) -> list[str]:
     missing = {str(check.get("name")) for check in checks if isinstance(check, dict) and not check.get("ok")}
     actions = []
@@ -843,6 +863,8 @@ def _mteam_material_next_actions(checks: list[dict[str, Any]]) -> list[str]:
         actions.append("Fetch or supply IMDb/TMDb/Douban metadata before live upload.")
     if "mediainfo_or_bdinfo" in missing:
         actions.append("Generate MediaInfo or BDInfo and add it to the MTEAM package.")
+    if "bdinfo_for_disc" in missing:
+        actions.append("Provide a BDInfo text file with --bdinfo-file for BDMV disc content before live upload.")
     if "screenshots" in missing:
         actions.append("Generate video screenshots for the completed local content.")
     if "image_host_uploads" in missing:

@@ -5703,6 +5703,8 @@ def _pipeline_stage_blocker_next_action(blocker: str) -> str:
         return "Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description, then regenerate the MTEAM target package."
     if blocker.startswith("target.materials.assets.mediainfo_or_bdinfo"):
         return "Generate or provide MediaInfo/BDInfo, then regenerate the MTEAM target package."
+    if blocker.startswith("target.materials.assets.bdinfo_for_disc"):
+        return "Provide a BDInfo text file with --bdinfo-file for BDMV disc content, then regenerate the MTEAM target package."
     if blocker.startswith("target.materials.assets.screenshots"):
         return "Generate or provide screenshots, then regenerate the MTEAM target package."
     if blocker.startswith("target.materials.assets.image_host_uploads"):
@@ -5914,6 +5916,7 @@ def _target_materials_summary(package: Any) -> dict[str, Any]:
             "bdinfo": _material_asset_ready(assets, "bdinfo"),
             "screenshots": _material_asset_count_ready(assets, "screenshots"),
             "image_hosts": _material_asset_count_ready(assets, "image_hosts"),
+            "disc_structure": assets.get("disc_structure") if isinstance(assets.get("disc_structure"), dict) else {},
         },
         "missing": missing,
         "warnings": materials.get("warnings") if isinstance(materials.get("warnings"), list) else [],

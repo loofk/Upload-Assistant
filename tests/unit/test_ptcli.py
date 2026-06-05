@@ -12308,6 +12308,66 @@ def test_mteam_materials_manifest_records_existing_material_files(tmp_path) -> N
     assert materials["ready"] is True
 
 
+def test_mteam_materials_manifest_requires_bdinfo_for_bdmv_content(tmp_path) -> None:
+    content = tmp_path / "Disc"
+    (content / "BDMV" / "STREAM").mkdir(parents=True)
+    mediainfo = tmp_path / "MEDIAINFO.txt"
+    mediainfo.write_text("General\nComplete name : 00001.m2ts\n", encoding="utf-8")
+    bdinfo = tmp_path / "BD_FULL_00.txt"
+    bdinfo.write_text("DISC INFO:\nDisc Title: Example\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_hosts = tmp_path / "image-host.json"
+    image_hosts.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png"}]}), encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.BluRay.COMPLETE-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+    }
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), str(content))
+
+    missing_bdinfo = build_mteam_materials_manifest(
+        preview,
+        source_info,
+        str(content),
+        material_files={
+            "mediainfo_file": str(mediainfo),
+            "screenshot_files": [str(screenshot)],
+            "image_host_file": str(image_hosts),
+        },
+    )
+
+    missing_checks = {check["name"]: check for check in missing_bdinfo["checks"]["assets"]}
+    assert missing_checks["mediainfo_or_bdinfo"]["ok"] is True
+    assert missing_checks["bdinfo_for_disc"]["ok"] is False
+    assert missing_bdinfo["assets"]["disc_structure"]["type"] == "BDMV"
+    assert missing_bdinfo["ready"] is False
+    assert any("Provide a BDInfo text file with --bdinfo-file" in action for action in missing_bdinfo["next_actions"])
+
+    ready = build_mteam_materials_manifest(
+        preview,
+        source_info,
+        str(content),
+        material_files={
+            "bdinfo_file": str(bdinfo),
+            "screenshot_files": [str(screenshot)],
+            "image_host_file": str(image_hosts),
+        },
+    )
+
+    ready_checks = {check["name"]: check for check in ready["checks"]["assets"]}
+    assert ready_checks["bdinfo_for_disc"]["ok"] is True
+    assert ready["assets"]["bdinfo"]["ready"] is True
+    assert ready["ready"] is True
+
+
 def test_find_primary_media_file_prefers_largest_supported_video(tmp_path) -> None:
     content = tmp_path / "content"
     content.mkdir()
@@ -12585,6 +12645,12 @@ def test_pipeline_stage_blockers_include_metadata_enrichment_readiness() -> None
     assert "metadata-enrich: Missing metadata after enrichment: tmdb_id, douban_id, douban_url" in blockers
     assert "metadata-enrich: PTGen/Douban description is missing after enrichment." in blockers
     assert actions.count("Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description, then rerun target preparation.") == len(actions)
+
+
+def test_pipeline_stage_blocker_next_action_explains_bdmv_bdinfo_requirement() -> None:
+    action = ptcli_cli._pipeline_stage_blocker_next_action("target.materials.assets.bdinfo_for_disc: BDMV disc content requires --bdinfo-file for MTEAM target preparation.")
+
+    assert action == "Provide a BDInfo text file with --bdinfo-file for BDMV disc content, then regenerate the MTEAM target package."
 
 
 def test_mteam_upload_gate_surfaces_duplicate_blocker() -> None:
