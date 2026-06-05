@@ -14016,6 +14016,18 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert summary_payload["summary"]["qbit_closure"]["injection"]["tags"] == "retorrent"
     assert summary_payload["summary"]["qbit_closure"]["wait"]["complete"] is True
     assert summary_payload["summary"]["qbit_closure"]["wait"]["query"]["torrent_hash"] == uploaded_hash
+    completion_review = summary_payload["summary"]["completion_review"]
+    assert completion_review["complete"] is True
+    assert completion_review["missing"] == []
+    assert completion_review["checks"]["uploaded_torrent_file"] is True
+    assert completion_review["checks"]["injection_verified"] is True
+    assert completion_review["checks"]["uploaded_wait_complete"] is True
+    assert completion_review["uploaded_torrent_id"] == "999"
+    assert completion_review["uploaded_torrent_hash"] == uploaded_hash
+    assert completion_review["uploaded_torrent_path"] == str(tmp_path / "MTEAM-999.torrent")
+    assert completion_review["injected_torrent_hash"] == uploaded_hash
+    assert completion_review["uploaded_save_path"] == "/downloads/Example"
+    assert completion_review["uploaded_wait_query"]["torrent_hash"] == uploaded_hash
     assert summary_payload["qbit_wait_mismatch"] is False
     assert summary_payload["qbit_wait_mismatches"] == []
     assert summary_payload["qbit_wait_diagnostics"]["uploaded"]["complete"] is True
@@ -14247,6 +14259,11 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
     assert summary_payload["summary"]["mode"] == "live_upload"
     assert summary_payload["summary"]["uploaded_torrent_id"] == "999"
+    assert summary_payload["summary"]["completion_review"]["complete"] is False
+    assert summary_payload["summary"]["completion_review"]["uploaded_torrent_id"] == "999"
+    assert "uploaded_torrent_file" in summary_payload["summary"]["completion_review"]["missing"]
+    assert "injection_verified" in summary_payload["summary"]["completion_review"]["missing"]
+    assert "uploaded_wait_complete" in summary_payload["summary"]["completion_review"]["missing"]
     assert summary_payload["artifacts"]["uploaded_torrent_id"] == "999"
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["resume_state"]["resume_available"] is True

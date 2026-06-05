@@ -3223,6 +3223,7 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any], ar
         "injection": _qbit_injection_evidence(injected_torrent),
         "wait": _qbit_wait_evidence(uploaded_wait),
     }
+    completion_review = _target_upload_completion_review(result, preflight, preparation_audit, duplicate_check, rule_obligations)
     return {
         "status": result.get("status"),
         "mode": _target_upload_summary_mode(result, preflight, args),
@@ -3245,10 +3246,56 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any], ar
         "preflight_blockers": preflight.get("blockers", []),
         "target_preparation_audit": preparation_audit,
         "target_preparation_ready": bool(preparation_audit.get("ready")),
+        "completion_review": completion_review,
         "fresh_duplicate_check": duplicate_check,
         "hash_consistent": not _uploaded_torrent_hash_consistency_blockers(result),
         "duplicate_clean": _fresh_duplicate_check_clean(duplicate_check),
         "rule_obligations": rule_obligations,
+    }
+
+
+def _target_upload_completion_review(
+    result: dict[str, Any],
+    preflight: dict[str, Any],
+    preparation_audit: dict[str, Any],
+    duplicate_check: Any,
+    rule_obligations: Any,
+) -> dict[str, Any]:
+    downloaded_torrent = result.get("downloaded_torrent")
+    injected_torrent = result.get("injected_torrent")
+    uploaded_wait = result.get("uploaded_wait")
+    uploaded_torrent_file_ready = _torrent_file_evidence_complete(downloaded_torrent)
+    injection_visible = _injected_torrent_visible(injected_torrent)
+    injection_verified = _injected_torrent_verified(injected_torrent)
+    wait_complete = _wait_result_completed(uploaded_wait)
+    hash_consistent = not _uploaded_torrent_hash_consistency_blockers(result)
+    duplicate_clean = _fresh_duplicate_check_clean(duplicate_check)
+    rule_obligations_ready = isinstance(rule_obligations, dict) and rule_obligations.get("ready") is True
+    checks = {
+        "target_preparation_ready": bool(preparation_audit.get("ready")),
+        "uploaded": result.get("status") == "uploaded",
+        "uploaded_torrent_id": bool(_uploaded_torrent_id_from_result(result)),
+        "uploaded_torrent_file": uploaded_torrent_file_ready,
+        "uploaded_torrent_hash": bool(_uploaded_torrent_hash_from_result(result)),
+        "injection_visible_in_client": injection_visible,
+        "injection_verified": injection_verified,
+        "uploaded_wait_complete": wait_complete,
+        "hash_consistent": hash_consistent,
+        "duplicate_clean": duplicate_clean,
+        "rule_obligations_ready": rule_obligations_ready,
+    }
+    missing = [name for name, ok in checks.items() if not ok]
+    return {
+        "complete": not missing,
+        "missing": missing,
+        "checks": checks,
+        "uploaded_torrent_id": _uploaded_torrent_id_from_result(result),
+        "uploaded_torrent_hash": _uploaded_torrent_hash_from_result(result),
+        "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
+        "injected_torrent_hash": _torrent_hash_from_result(injected_torrent),
+        "uploaded_save_path": _uploaded_save_path_from_result(result),
+        "uploaded_wait_query": uploaded_wait.get("query") if isinstance(uploaded_wait, dict) else None,
+        "preflight_status": preflight.get("status"),
     }
 
 
