@@ -711,6 +711,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     closure_status = pipeline_result.get("closure_status") if isinstance(pipeline_result.get("closure_status"), dict) else _closure_status_summary(pipeline_result)
     resume_commands = pipeline_result.get("resume_commands", [])
     resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands)
+    closure_review = pipeline_result.get("closure_review") if isinstance(pipeline_result.get("closure_review"), dict) else _pipeline_closure_review(pipeline_result, artifacts)
     resume_command_audit = _resume_command_audit_fields(resume_commands, resume_state.get("next_command"), resume_state.get("next_command_argv"))
     automation_fields = _retorrent_automation_fields(
         status="complete" if not blockers else "blocked",
@@ -735,6 +736,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "closure": closure,
         "closure_audit": closure_audit,
         "closure_status": closure_status,
+        "closure_review": closure_review,
         "evidence": evidence,
         "summary": summary,
         "summary_file": summary_file,
@@ -2019,6 +2021,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     flow_diagnostics = _summary_flow_diagnostics(payload)
     material_diagnostics = _summary_material_diagnostics(payload)
     target_upload_diagnostics = _summary_target_upload_diagnostics(payload)
+    closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else _pipeline_closure_review(payload)
     closure_modes = _summary_closure_modes(payload)
     closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload)
     return {
@@ -2032,6 +2035,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "credential_requirements": flow_diagnostics.get("credential_requirements", []),
         "material_diagnostics": material_diagnostics,
         "target_upload_diagnostics": target_upload_diagnostics,
+        "closure_review": closure_review,
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
@@ -2404,6 +2408,60 @@ def _closure_status_summary(payload: dict[str, Any]) -> dict[str, Any]:
             ),
             "uploaded_wait_evidence": _wait_result_completed(closure_target.get("uploaded_wait")) or bool(evidence_target.get("uploaded_wait_evidence")),
             "injection_verified": bool(closure_target.get("injection_verified") or evidence_target.get("injection_verified")),
+        },
+    }
+
+
+def _pipeline_closure_review(payload: dict[str, Any], artifacts: dict[str, Any] | None = None) -> dict[str, Any]:
+    artifacts = artifacts if isinstance(artifacts, dict) else payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload)
+    supplied_audit = payload.get("closure_audit") if isinstance(payload.get("closure_audit"), dict) else {}
+    closure = payload.get("closure") if isinstance(payload.get("closure"), dict) else None
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else None
+    computed_audit = _pipeline_closure_audit(closure, evidence) if closure or evidence else {}
+    closure_audit = computed_audit or supplied_audit
+    checks: dict[str, bool] = {
+        str(item.get("name")): bool(item.get("ok"))
+        for item in closure_audit.get("items", [])
+        if isinstance(item, dict) and item.get("name")
+    } if isinstance(closure_audit.get("items"), list) else {}
+    if isinstance(supplied_audit.get("items"), list):
+        checks.update({str(item.get("name")): bool(item.get("ok")) for item in supplied_audit["items"] if isinstance(item, dict) and item.get("name")})
+    missing = [name for name, ok in checks.items() if not ok] or _string_list(closure_audit.get("missing"))
+    _extend_unique_string(missing, [name for name in _string_list(supplied_audit.get("missing")) if not checks.get(name)])
+    if closure_status.get("qbit_wait_mismatch"):
+        _append_unique_string(missing, "qbit_wait_mismatch")
+    if _string_list(closure_status.get("pipeline_blockers")):
+        _append_unique_string(missing, "pipeline.blockers")
+    if _string_list(closure_status.get("closure_blockers")):
+        _append_unique_string(missing, "closure.blockers")
+    return {
+        "complete": bool(closure_status.get("complete")) and not missing,
+        "missing": missing,
+        "checks": checks,
+        "source": {
+            "mode": closure_status.get("source", {}).get("mode") if isinstance(closure_status.get("source"), dict) else None,
+            "ready": closure_status.get("source", {}).get("ready") if isinstance(closure_status.get("source"), dict) else None,
+            "hash_consistent": closure_status.get("source", {}).get("hash_consistent") if isinstance(closure_status.get("source"), dict) else None,
+            "wait_evidence": closure_status.get("source", {}).get("wait_evidence") if isinstance(closure_status.get("source"), dict) else None,
+            "injection_verified": closure_status.get("source", {}).get("injection_verified") if isinstance(closure_status.get("source"), dict) else None,
+            "torrent_hash": artifacts.get("source_torrent_hash"),
+            "torrent_file": artifacts.get("source_torrent_file"),
+            "injected_torrent_hash": artifacts.get("source_injected_torrent_hash"),
+        },
+        "target": {
+            "mode": closure_status.get("target", {}).get("mode") if isinstance(closure_status.get("target"), dict) else None,
+            "ready": closure_status.get("target", {}).get("ready") if isinstance(closure_status.get("target"), dict) else None,
+            "hash_consistent": closure_status.get("target", {}).get("hash_consistent") if isinstance(closure_status.get("target"), dict) else None,
+            "duplicate_clean": closure_status.get("target", {}).get("duplicate_clean") if isinstance(closure_status.get("target"), dict) else None,
+            "rule_obligations_ready": closure_status.get("target", {}).get("rule_obligations_ready") if isinstance(closure_status.get("target"), dict) else None,
+            "uploaded_wait_evidence": closure_status.get("target", {}).get("uploaded_wait_evidence") if isinstance(closure_status.get("target"), dict) else None,
+            "injection_verified": closure_status.get("target", {}).get("injection_verified") if isinstance(closure_status.get("target"), dict) else None,
+            "uploaded_torrent_id": artifacts.get("uploaded_torrent_id"),
+            "uploaded_torrent_hash": artifacts.get("uploaded_torrent_hash"),
+            "uploaded_torrent_file": artifacts.get("uploaded_torrent_file"),
+            "injected_torrent_hash": artifacts.get("injected_torrent_hash"),
+            "uploaded_save_path": artifacts.get("uploaded_save_path"),
         },
     }
 
@@ -3903,6 +3961,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         summary["summary_file"] = summary_file
     artifacts = _run_summary_artifacts(payload, str(payload.get("summary_file") or ""))
     payload["artifacts"] = artifacts
+    payload["closure_review"] = _pipeline_closure_review(payload, artifacts)
+    summary["closure_review"] = payload["closure_review"]
     resume_commands = _run_summary_resume_commands(payload, artifacts)
     payload["resume_commands"] = resume_commands
     payload["resume_state"] = _run_summary_resume_state(payload, artifacts, resume_commands)
@@ -5103,6 +5163,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
     destination = destination_dir / "ptcli-run-summary.json"
     artifacts = _run_summary_artifacts(payload, str(destination))
     resume_commands = _run_summary_resume_commands(payload, artifacts)
+    closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else _pipeline_closure_review(payload, artifacts)
     summary_payload = {
         "schema_version": 1,
         "kind": "ptcli.pipeline.run_summary",
@@ -5132,6 +5193,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "closure": payload.get("closure"),
         "closure_audit": payload.get("closure_audit"),
         "closure_status": payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload),
+        "closure_review": closure_review,
         "flow_check": payload.get("flow_check"),
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),
@@ -7261,6 +7323,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     closure_target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
     material_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
     target_upload_diagnostics = payload.get("target_upload_diagnostics") if isinstance(payload.get("target_upload_diagnostics"), dict) else {}
+    closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else {}
     qbit_wait_diagnostics = payload.get("qbit_wait_diagnostics") if isinstance(payload.get("qbit_wait_diagnostics"), dict) else {}
     qbit_wait_retry_hints = payload.get("qbit_wait_retry_hints") if isinstance(payload.get("qbit_wait_retry_hints"), dict) else {}
     fields = {
@@ -7327,6 +7390,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_LIVE_SAFE_TO_ATTEMPT": _shell_bool(payload.get("live_safe_to_attempt")),
         "PTCLI_SUMMARY_FILE": payload.get("summary_file"),
     }
+    fields.update(_summary_check_closure_review_shell_fields(closure_review))
     fields.update(_summary_check_material_shell_fields(material_diagnostics))
     fields.update(_summary_check_target_upload_shell_fields(target_upload_diagnostics))
     fields.update(_summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics))
@@ -7334,6 +7398,39 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     for key, value in fields.items():
         print(f"export {key}={shlex.quote('' if value is None else str(value))}")
     return 0
+
+
+def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -> dict[str, Any]:
+    source = closure_review.get("source") if isinstance(closure_review.get("source"), dict) else {}
+    target = closure_review.get("target") if isinstance(closure_review.get("target"), dict) else {}
+    checks = closure_review.get("checks") if isinstance(closure_review.get("checks"), dict) else {}
+    return {
+        "PTCLI_CLOSURE_REVIEW_COMPLETE": _shell_bool(closure_review.get("complete")) if closure_review.get("complete") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_MISSING": ",".join(_string_list(closure_review.get("missing"))),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_MODE": source.get("mode"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_READY": _shell_bool(source.get("ready")) if source.get("ready") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_SOURCE_HASH_CONSISTENT": _shell_bool(source.get("hash_consistent")) if source.get("hash_consistent") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_SOURCE_WAIT_EVIDENCE": _shell_bool(source.get("wait_evidence")) if source.get("wait_evidence") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_SOURCE_INJECTION_VERIFIED": _shell_bool(source.get("injection_verified")) if source.get("injection_verified") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_HASH": source.get("torrent_hash"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_FILE": source.get("torrent_file"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_INJECTED_HASH": source.get("injected_torrent_hash"),
+        "PTCLI_CLOSURE_REVIEW_TARGET_MODE": target.get("mode"),
+        "PTCLI_CLOSURE_REVIEW_TARGET_READY": _shell_bool(target.get("ready")) if target.get("ready") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_TARGET_HASH_CONSISTENT": _shell_bool(target.get("hash_consistent")) if target.get("hash_consistent") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_TARGET_DUPLICATE_CLEAN": _shell_bool(target.get("duplicate_clean")) if target.get("duplicate_clean") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_TARGET_RULES_READY": _shell_bool(target.get("rule_obligations_ready")) if target.get("rule_obligations_ready") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_TARGET_UPLOADED_WAIT_EVIDENCE": _shell_bool(target.get("uploaded_wait_evidence")) if target.get("uploaded_wait_evidence") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_TARGET_INJECTION_VERIFIED": _shell_bool(target.get("injection_verified")) if target.get("injection_verified") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_UPLOADED_TORRENT_ID": target.get("uploaded_torrent_id"),
+        "PTCLI_CLOSURE_REVIEW_UPLOADED_TORRENT_HASH": target.get("uploaded_torrent_hash"),
+        "PTCLI_CLOSURE_REVIEW_UPLOADED_TORRENT_FILE": target.get("uploaded_torrent_file"),
+        "PTCLI_CLOSURE_REVIEW_INJECTED_HASH": target.get("injected_torrent_hash"),
+        "PTCLI_CLOSURE_REVIEW_UPLOADED_SAVE_PATH": target.get("uploaded_save_path"),
+        "PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_READY": _summary_check_bool_field(checks, "source.ready"),
+        "PTCLI_CLOSURE_REVIEW_CHECK_TARGET_UPLOADED_WAIT": _summary_check_bool_field(checks, "target.uploaded_wait_evidence"),
+        "PTCLI_CLOSURE_REVIEW_CHECK_TARGET_RULES": _summary_check_bool_field(checks, "target.rule_obligations"),
+    }
 
 
 def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[str, Any]) -> dict[str, Any]:

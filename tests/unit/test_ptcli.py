@@ -626,6 +626,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "evidence": {
                 "complete": True,
                 "source": {
+                    "ready": True,
                     "mode": "downloaded",
                     "torrent_hash": "a" * 40,
                     "source_torrent_path": "/tmp/U2-60635.torrent",
@@ -643,6 +644,12 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                 },
                 "target": {
                     "ready": True,
+                    "prepared": True,
+                    "uploaded": True,
+                    "downloaded": True,
+                    "injected": True,
+                    "seeding": True,
+                    "materials_ready": True,
                     "uploaded_torrent_id": "999",
                     "uploaded_torrent_hash": "b" * 40,
                     "uploaded_torrent_file_evidence": True,
@@ -790,6 +797,12 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["closure_status"]["complete"] is True
     assert payload["closure_status"]["target"]["ready"] is True
     assert payload["closure_status"]["target"]["rule_obligations_ready"] is True
+    assert payload["closure_review"]["complete"] is True
+    assert payload["closure_review"]["missing"] == []
+    assert payload["closure_review"]["checks"]["source.ready"] is True
+    assert payload["closure_review"]["checks"]["target.uploaded_wait_evidence"] is True
+    assert payload["closure_review"]["target"]["uploaded_torrent_hash"] == "b" * 40
+    assert payload["closure_review"]["target"]["uploaded_torrent_file"] == "/tmp/MTEAM-999.torrent"
     assert payload["closure"]["source"]["complete"] is True
     assert payload["closure"]["target"]["injected"] is True
     assert payload["closure_audit"]["ready"] is True
@@ -10163,7 +10176,7 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tmp_path) -> None:
+async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tmp_path, capsys) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
@@ -10358,6 +10371,11 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["closure_status"]["target"]["ready"] is True
     assert summary_payload["closure_status"]["target"]["rule_obligations_ready"] is True
     assert summary_payload["closure_status"]["target"]["uploaded_wait_evidence"] is True
+    assert summary_payload["closure_review"]["complete"] is True
+    assert summary_payload["closure_review"]["missing"] == []
+    assert summary_payload["closure_review"]["source"]["torrent_hash"] == source_hash
+    assert summary_payload["closure_review"]["target"]["uploaded_torrent_hash"] == uploaded_hash
+    assert summary_payload["closure_review"]["target"]["uploaded_torrent_file"].endswith("MTEAM-999.torrent")
     assert summary_payload["summary"]["closure_audit"]["ready"] is True
     assert summary_payload["config"] == str(tmp_path / "config.py")
     assert summary_payload["base_dir"] == str(tmp_path)
@@ -10378,6 +10396,19 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["source_save_path"] == "/downloads"
     assert summary_payload["artifacts"]["source_qbit_category"] == "SOURCE"
     assert summary_payload["artifacts"]["source_qbit_tags"] == "source-tag"
+
+    code = main(["summary-check", "--summary-file", str(payload["summary_file"]), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_CLOSURE_REVIEW_COMPLETE=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_MISSING=''\n" in out
+    assert f"export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_HASH={source_hash}\n" in out
+    assert f"export PTCLI_CLOSURE_REVIEW_UPLOADED_TORRENT_HASH={uploaded_hash}\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_TARGET_UPLOADED_WAIT_EVIDENCE=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_READY=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_CHECK_TARGET_UPLOADED_WAIT=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_CHECK_TARGET_RULES=1\n" in out
     assert summary_payload["artifacts"]["source_paused"] is True
     assert summary_payload["artifacts"]["source_hash_consistent"] is True
     assert summary_payload["artifacts"]["source_injected_torrent_hash"] == source_hash
