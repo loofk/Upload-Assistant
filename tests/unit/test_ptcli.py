@@ -655,6 +655,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "rule_obligations": rule_obligations,
                     "preparation_audit": {
                         "ready": True,
+                        "missing": [],
                         "description": {
                             "has_ptgen_description": True,
                             "has_external_ids": True,
@@ -826,6 +827,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "target_rule_obligations": {"ready": True, "count": 2, "missing": []},
         "target_preparation_audit": {
             "ready": True,
+            "missing": [],
             "description": {
                 "has_ptgen_description": True,
                 "has_external_ids": True,
@@ -835,6 +837,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             },
         },
         "target_preparation_ready": True,
+        "target_preparation_missing": [],
     }
     assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
     assert payload["candidate_command_count"] == 1
@@ -9683,6 +9686,9 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["artifacts"]["target_package_files"] == target_stage["result"]["files"]
     assert summary_payload["artifacts"]["target_materials"]["ready"] is False
     assert summary_payload["artifacts"]["target_materials_ready"] is False
+    assert "metadata.ptgen_description" in summary_payload["artifacts"]["target_materials_missing"]
+    assert summary_payload["artifacts"]["target_materials_warnings"]
+    assert "metadata.ptgen_description" in summary_payload["artifacts"]["target_preparation_missing"]
     assert summary_payload["status"] == "blocked"
     assert any("target.materials.metadata.ptgen_description" in blocker for blocker in summary_payload["blockers"])
     assert any("PTGen/Douban description" in action for action in summary_payload["next_actions"])

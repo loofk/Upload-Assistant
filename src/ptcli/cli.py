@@ -804,6 +804,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         "target_rule_obligations",
         "target_preparation_audit",
         "target_preparation_ready",
+        "target_preparation_missing",
     ):
         if key in merged and _artifact_value_present(merged.get(key)):
             continue
@@ -814,6 +815,8 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
     preparation_audit = merged.get("target_preparation_audit")
     if "target_preparation_ready" not in merged and isinstance(preparation_audit, dict):
         merged["target_preparation_ready"] = bool(preparation_audit.get("ready"))
+    if "target_preparation_missing" not in merged and isinstance(preparation_audit, dict):
+        merged["target_preparation_missing"] = _string_list(preparation_audit.get("missing"))
     if "injection_visible_in_client" not in merged:
         target_injection = evidence_target.get("qbit_closure", {}).get("injection") if isinstance(evidence_target.get("qbit_closure"), dict) else None
         if isinstance(target_injection, dict):
@@ -1037,6 +1040,7 @@ def _target_artifact_evidence_key(artifact_key: str) -> str:
         "target_duplicate_clean": "duplicate_clean",
         "target_rule_obligations": "rule_obligations",
         "target_preparation_audit": "preparation_audit",
+        "target_preparation_missing": "preparation_missing",
         "uploaded_torrent_file_evidence": "uploaded_torrent_file_evidence",
     }.get(artifact_key, artifact_key)
 
@@ -4838,6 +4842,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
     if _artifact_value_present(evidence_target.get("preparation_audit")):
         artifacts["target_preparation_audit"] = evidence_target.get("preparation_audit")
         artifacts["target_preparation_ready"] = bool(evidence_target["preparation_audit"].get("ready")) if isinstance(evidence_target.get("preparation_audit"), dict) else False
+        artifacts["target_preparation_missing"] = _string_list(evidence_target["preparation_audit"].get("missing")) if isinstance(evidence_target.get("preparation_audit"), dict) else []
     if isinstance(source_download, dict):
         source_result = source_download.get("result")
         if isinstance(source_result, dict):
@@ -4860,6 +4865,10 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
             artifacts["target_package_files"] = prepare_result.get("files")
             artifacts["target_materials"] = _target_materials_summary(prepare_result)
             artifacts["target_materials_ready"] = artifacts["target_materials"].get("ready")
+            artifacts["target_materials_missing"] = _string_list(artifacts["target_materials"].get("missing")) if isinstance(artifacts.get("target_materials"), dict) else []
+            artifacts["target_materials_warnings"] = _string_list(artifacts["target_materials"].get("warnings")) if isinstance(artifacts.get("target_materials"), dict) else []
+            if "target_preparation_missing" not in artifacts and isinstance(artifacts.get("target_preparation_audit"), dict):
+                artifacts["target_preparation_missing"] = _string_list(artifacts["target_preparation_audit"].get("missing"))
     if isinstance(target_upload, dict):
         upload_result = target_upload.get("result")
         if isinstance(upload_result, dict):
