@@ -4325,6 +4325,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT=3\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_MISSING=''\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=0\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCHES=''\n" in out
@@ -10326,6 +10327,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert target_audit["description"]["has_mediainfo_or_bdinfo"] is True
     assert target_audit["description"]["has_screenshot_bbcode"] is True
     assert target_audit["description"]["bbcode_image_count"] == 1
+    assert target_audit["description"]["missing"] == []
     assert target_audit["payload"]["description_checks_ready"] is True
     assert payload["closure_audit"]["ready"] is True
     assert payload["closure_audit"]["missing"] == []
@@ -13687,6 +13689,10 @@ def test_mteam_upload_preflight_execute_blocks_stale_description_materials(tmp_p
     assert any("materials.description.ptgen_description" in blocker for blocker in blockers)
     assert any("materials.description.mediainfo_or_bdinfo" in blocker for blocker in blockers)
     assert any("materials.description.screenshot_bbcode" in blocker for blocker in blockers)
+    audit = ptcli_cli._target_preparation_audit(package_from_disk, str(torrent_file))
+    assert "materials.description.ptgen_description" in audit["description"]["missing"]
+    assert "materials.description.mediainfo_or_bdinfo" in audit["description"]["missing"]
+    assert "materials.description.screenshot_bbcode" in audit["description"]["missing"]
 
 
 def test_mteam_upload_payload_summary_blocks_missing_description_file(tmp_path) -> None:

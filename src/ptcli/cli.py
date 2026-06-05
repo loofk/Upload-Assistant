@@ -2080,6 +2080,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
             "has_screenshot_bbcode": description.get("has_screenshot_bbcode"),
             "bbcode_image_count": description.get("bbcode_image_count"),
+            "missing": _string_list(description.get("missing")),
         },
         "sections": sections,
         "blockers": blockers,
@@ -3275,6 +3276,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
     materials_ready = metadata_ready and assets_ready
     payload_ready = preflight.get("status") == "ready" and payload_checks_ready
     missing = _target_preparation_missing_from_checks(material_checks)
+    description_missing = _target_preparation_missing_from_checks(description_checks)
     if not payload_ready:
         _append_unique_string(missing, "payload.preflight")
     if not description_checks_ready:
@@ -3300,6 +3302,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
+            "missing": description_missing,
         },
         "payload": {
             "status": preflight.get("status"),
@@ -6016,6 +6019,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
     material_checks = upload_payload.get("material_checks") if isinstance(upload_payload.get("material_checks"), list) else []
     payload_checks = [check for check in material_checks if isinstance(check, dict) and str(check.get("name") or "").startswith("payload.")]
     description_checks = [check for check in material_checks if isinstance(check, dict) and str(check.get("name") or "").startswith("materials.description.")]
+    description_missing = _target_preparation_missing_from_checks(description_checks)
     required_description_checks = {
         "materials.description.ptgen_description",
         "materials.description.external_ids",
@@ -6048,6 +6052,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
+            "missing": description_missing,
         },
         "payload": {
             "status": preflight.get("status") if preflight else None,
@@ -7299,6 +7304,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
+        "PTCLI_MATERIAL_DESCRIPTION_MISSING": ",".join(_string_list(description.get("missing"))),
     }
 
 
