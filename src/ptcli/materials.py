@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import os
+import platform
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -65,6 +66,18 @@ async def generate_screenshot_materials(
     ffmpeg_binary: str | None = None,
 ) -> dict[str, Any]:
     return await asyncio.to_thread(_generate_screenshot_materials_sync, content_path, output_dir, count, parser or MediaInfo.parse, runner, ffmpeg_binary)
+
+
+async def generate_bdinfo_material(
+    content_path: str,
+    output_dir: str,
+    *,
+    base_dir: str | None = None,
+    playlist: str | None = None,
+    runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None,
+    bdinfo_binary: str | None = None,
+) -> dict[str, Any]:
+    return await asyncio.to_thread(_generate_bdinfo_material_sync, content_path, output_dir, base_dir, playlist, runner, bdinfo_binary)
 
 
 async def upload_screenshot_image_hosts(
@@ -230,6 +243,75 @@ def _generate_screenshot_materials_sync(
     }
 
 
+def _generate_bdinfo_material_sync(
+    content_path: str,
+    output_dir: str,
+    base_dir: str | None,
+    playlist: str | None,
+    runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None,
+    bdinfo_binary: str | None,
+) -> dict[str, Any]:
+    disc = _find_bdmv_dir(content_path)
+    if disc is None:
+        return {"status": "skipped", "content_path": str(Path(content_path).expanduser()), "blockers": ["No BDMV directory was found for BDInfo generation."]}
+    selected_playlist = _bdinfo_playlist(disc, playlist)
+    if selected_playlist is None:
+        return {
+            "status": "blocked",
+            "content_path": str(Path(content_path).expanduser()),
+            "bdmv_dir": str(disc),
+            "blockers": ["No .mpls playlist was found under BDMV/PLAYLIST for BDInfo generation."],
+        }
+    binary = bdinfo_binary or _bdinfo_binary(base_dir)
+    if not binary:
+        return {
+            "status": "blocked",
+            "content_path": str(Path(content_path).expanduser()),
+            "bdmv_dir": str(disc),
+            "playlist": selected_playlist.name,
+            "blockers": ["bdinfo/BDInfo binary was not found for BDInfo generation."],
+        }
+    destination_dir = Path(output_dir).expanduser()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    command = [binary, str(disc), "-m", selected_playlist.name, str(destination_dir)]
+    result = (runner or _run_subprocess)(command)
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        return {
+            "status": "blocked",
+            "content_path": str(Path(content_path).expanduser()),
+            "bdmv_dir": str(disc),
+            "playlist": selected_playlist.name,
+            "command": command,
+            "blockers": ["BDInfo generation failed" + (f": {stderr}" if stderr else ".")],
+        }
+    generated = _latest_bdinfo_output(destination_dir)
+    if generated is None:
+        return {
+            "status": "blocked",
+            "content_path": str(Path(content_path).expanduser()),
+            "bdmv_dir": str(disc),
+            "playlist": selected_playlist.name,
+            "command": command,
+            "blockers": ["BDInfo command completed but no BDINFO*.txt output was found."],
+        }
+    output_path = destination_dir / "BD_FULL_00.txt"
+    text = generated.read_text(encoding="utf-8", errors="replace")
+    output_path.write_text(text, encoding="utf-8")
+    return {
+        "status": "generated",
+        "content_path": str(Path(content_path).expanduser()),
+        "bdmv_dir": str(disc),
+        "playlist": selected_playlist.name,
+        "bdinfo_file": str(output_path),
+        "raw_bdinfo_file": str(generated),
+        "sha1": _file_sha1(output_path),
+        "size_bytes": output_path.stat().st_size,
+        "command": command,
+        "blockers": [],
+    }
+
+
 def _clean_mediainfo_text(text: str, media_file: Path) -> str:
     cleaned = "\n".join(line for line in text.splitlines() if not line.strip().startswith(("ReportBy", "Report created by ")))
     return cleaned.replace(str(media_file), media_file.name)
@@ -285,6 +367,53 @@ def _screenshot_timestamps(duration: float | None, count: int) -> list[float]:
 
 def _run_subprocess(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+
+
+def _find_bdmv_dir(content_path: str) -> Path | None:
+    root = Path(content_path).expanduser()
+    if root.is_dir() and root.name.upper() == "BDMV":
+        return root
+    bdmv = root / "BDMV"
+    return bdmv if bdmv.is_dir() else None
+
+
+def _bdinfo_playlist(bdmv_dir: Path, playlist: str | None) -> Path | None:
+    playlist_dir = bdmv_dir / "PLAYLIST"
+    if playlist:
+        candidate = playlist_dir / Path(playlist).name
+        return candidate if candidate.is_file() else None
+    playlists = sorted(path for path in playlist_dir.glob("*.mpls") if path.is_file())
+    return playlists[0] if playlists else None
+
+
+def _bdinfo_binary(base_dir: str | None) -> str | None:
+    bundled = _bundled_bdinfo_binary(base_dir)
+    if bundled:
+        return bundled
+    return shutil.which("bdinfo") or shutil.which("BDInfo")
+
+
+def _bundled_bdinfo_binary(base_dir: str | None) -> str | None:
+    if not base_dir:
+        return None
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if system == "linux":
+        folder = "linux/amd64" if machine in {"x86_64", "amd64"} else "linux/arm64" if machine in {"arm64", "aarch64"} else "linux/arm"
+        candidate = Path(base_dir) / "bin" / "bdinfo" / folder / "bdinfo"
+    elif system == "darwin":
+        folder = "macos/arm64" if machine == "arm64" else "macos/x86_64"
+        candidate = Path(base_dir) / "bin" / "bdinfo" / folder / "bdinfo"
+    elif system == "windows":
+        candidate = Path(base_dir) / "bin" / "bdinfo" / "windows" / "x86_64" / "bdinfo.exe"
+    else:
+        return None
+    return str(candidate) if candidate.is_file() else None
+
+
+def _latest_bdinfo_output(output_dir: Path) -> Path | None:
+    candidates = [path for path in output_dir.glob("BDINFO*.txt") if path.is_file()]
+    return max(candidates, key=lambda path: (path.stat().st_mtime, str(path))) if candidates else None
 
 
 def _write_image_host_payload(output_dir: str, payload: dict[str, Any]) -> Path:

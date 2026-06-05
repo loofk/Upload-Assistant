@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ from src.ptcli.config import resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list
-from src.ptcli.materials import find_primary_media_file, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
+from src.ptcli.materials import find_primary_media_file, generate_bdinfo_material, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
 from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, normalize_metadata_overrides
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summarize_torrent
 from src.ptcli.rules import build_rule_check
@@ -9300,6 +9301,64 @@ async def test_pipeline_generate_mediainfo_material_before_prepare_target(monkey
 
 
 @pytest.mark.asyncio
+async def test_pipeline_generate_bdinfo_material_before_prepare_target(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", "a" * 40, "desc"), {"imdb_id": 1234567, "tmdb_id": 999, "douban_id": "1291546"})
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_generate_bdinfo_material(_content_path, output_dir, base_dir=None, playlist=None):
+        _ = (base_dir, playlist)
+        output_path = Path(output_dir) / "BD_FULL_00.txt"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("DISC INFO:\nDisc Title: Name\n", encoding="utf-8")
+        return {"status": "generated", "bdinfo_file": str(output_path), "playlist": "00001.mpls", "blockers": []}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "generate_bdinfo_material", fake_generate_bdinfo_material)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--path",
+            "/downloads/Disc",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--generate-bdinfo",
+            "--bdinfo-playlist",
+            "00001.mpls",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    material_stage = next(stage for stage in payload["stages"] if stage["stage"] == "materials-bdinfo")
+    target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
+    assert material_stage["ok"] is True
+    assert material_stage["result"]["bdinfo_file"].endswith("BD_FULL_00.txt")
+    assert target_stage["result"]["materials"]["assets"]["bdinfo"]["ready"] is True
+    assert target_stage["result"]["materials"]["assets"]["bdinfo"]["path"].endswith("BD_FULL_00.txt")
+
+
+@pytest.mark.asyncio
 async def test_pipeline_enrich_metadata_before_prepare_target(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -12411,6 +12470,29 @@ async def test_generate_mediainfo_material_writes_files_and_evidence(tmp_path) -
     assert json.loads(json_text)["media"]["track"][0]["@type"] == "General"
     assert result["sha1"]
     assert result["size_bytes"] > 0
+
+
+@pytest.mark.asyncio
+async def test_generate_bdinfo_material_writes_full_file_and_evidence(tmp_path) -> None:
+    content = tmp_path / "Disc"
+    playlist_dir = content / "BDMV" / "PLAYLIST"
+    playlist_dir.mkdir(parents=True)
+    (playlist_dir / "00001.mpls").write_bytes(b"mpls")
+
+    def fake_runner(command):
+        output_dir = Path(command[-1])
+        (output_dir / "BDINFO.00001.txt").write_text("DISC INFO:\nDisc Title: Example\n", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    result = await generate_bdinfo_material(str(content), str(tmp_path / "materials"), playlist="00001.mpls", runner=fake_runner, bdinfo_binary="/usr/bin/bdinfo")
+
+    assert result["status"] == "generated"
+    assert result["playlist"] == "00001.mpls"
+    assert result["bdinfo_file"].endswith("BD_FULL_00.txt")
+    generated_text = await asyncio.to_thread(Path(result["bdinfo_file"]).read_text, encoding="utf-8")
+    assert generated_text.startswith("DISC INFO:")
+    assert result["sha1"]
+    assert result["command"][:3] == ["/usr/bin/bdinfo", str(content / "BDMV"), "-m"]
 
 
 @pytest.mark.asyncio

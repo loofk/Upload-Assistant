@@ -26,7 +26,7 @@ from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check, build_runtime_dependency_check, extend_doctor_check
 from src.ptcli.flows import MTEAM_SOURCE_FLOW_TRACKERS, flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
-from src.ptcli.materials import generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
+from src.ptcli.materials import generate_bdinfo_material, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
 from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, normalize_metadata_overrides
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import build_rule_check, get_rule_profiles, rule_profiles_to_dicts
@@ -252,6 +252,9 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--target-output-dir", default="./tmp/target", help="Directory for --prepare-target review package files.")
     pipeline.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
     pipeline.add_argument("--bdinfo-file", help="Existing BDInfo text file to record in the MTEAM preparation materials manifest.")
+    pipeline.add_argument("--generate-bdinfo", dest="generate_bdinfo", action="store_true", default=None, help="Generate BDInfo from BDMV content before preparing the MTEAM package. Enabled by default for --target-execute when --bdinfo-file is absent.")
+    pipeline.add_argument("--no-generate-bdinfo", dest="generate_bdinfo", action="store_false", help="Skip BDInfo generation during target preparation.")
+    pipeline.add_argument("--bdinfo-playlist", help="Optional BDMV playlist filename for --generate-bdinfo, e.g. 00800.mpls. Defaults to the first playlist file.")
     pipeline.add_argument("--generate-mediainfo", dest="generate_mediainfo", action="store_true", default=None, help="Generate MediaInfo files from --path or the resolved qBittorrent content path before preparing the MTEAM package. Enabled by default for --target-execute.")
     pipeline.add_argument("--no-generate-mediainfo", dest="generate_mediainfo", action="store_false", help="Skip MediaInfo generation during --target-execute target preparation.")
     pipeline.add_argument("--generate-screenshots", dest="generate_screenshots", action="store_true", default=None, help="Generate local video screenshots from --path or the resolved qBittorrent content path before preparing the MTEAM package. Enabled by default for --target-execute.")
@@ -345,6 +348,9 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--target-output-dir", default="./tmp/target", help="Directory for MTEAM target preparation package.")
     retorrent.add_argument("--mediainfo-file", help="Existing MediaInfo text file to record in the MTEAM preparation materials manifest.")
     retorrent.add_argument("--bdinfo-file", help="Existing BDInfo text file to record in the MTEAM preparation materials manifest.")
+    retorrent.add_argument("--generate-bdinfo", dest="generate_bdinfo", action="store_true", default=None, help="Generate BDInfo from BDMV content during --execute target preparation. Enabled by default for --execute when --bdinfo-file is absent.")
+    retorrent.add_argument("--no-generate-bdinfo", dest="generate_bdinfo", action="store_false", help="Skip BDInfo generation during --execute target preparation.")
+    retorrent.add_argument("--bdinfo-playlist", help="Optional BDMV playlist filename for --generate-bdinfo, e.g. 00800.mpls.")
     retorrent.add_argument("--generate-mediainfo", dest="generate_mediainfo", action="store_true", default=None, help="Generate MediaInfo files from --path or the resolved qBittorrent content path during --execute target preparation. Enabled by default for --execute.")
     retorrent.add_argument("--no-generate-mediainfo", dest="generate_mediainfo", action="store_false", help="Skip MediaInfo/BDInfo generation during --execute target preparation.")
     retorrent.add_argument("--generate-screenshots", dest="generate_screenshots", action="store_true", default=None, help="Generate local video screenshots from --path or the resolved qBittorrent content path during --execute target preparation. Enabled by default for --execute.")
@@ -1136,6 +1142,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
     needs_target_torrent = bool(target_execute and not (args.uploaded_torrent_file or args.uploaded_torrent_id))
     enrich_metadata = _retorrent_execute_default(args.enrich_metadata, True)
     fetch_ptgen = _retorrent_execute_default(args.fetch_ptgen, True)
+    generate_bdinfo = _retorrent_execute_default(args.generate_bdinfo, not bool(args.bdinfo_file))
     generate_mediainfo = _retorrent_execute_default(args.generate_mediainfo, True)
     generate_screenshots = _retorrent_execute_default(args.generate_screenshots, True)
     upload_screenshots = _retorrent_execute_default(args.upload_screenshots, True)
@@ -1171,6 +1178,8 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         target_output_dir=args.target_output_dir,
         mediainfo_file=args.mediainfo_file,
         bdinfo_file=args.bdinfo_file,
+        generate_bdinfo=generate_bdinfo,
+        bdinfo_playlist=args.bdinfo_playlist,
         generate_mediainfo=generate_mediainfo,
         generate_screenshots=generate_screenshots,
         screenshot_count=args.screenshot_count,
@@ -2040,7 +2049,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     disc_structure = target_assets.get("disc_structure") if isinstance(target_assets.get("disc_structure"), dict) else {}
     sections = {
         key: _summary_material_section(material_generation.get(key))
-        for key in ("prerequisites", "metadata", "mediainfo", "screenshots", "image_host")
+        for key in ("prerequisites", "metadata", "bdinfo", "mediainfo", "screenshots", "image_host")
         if isinstance(material_generation.get(key), dict)
     }
     blockers: list[str] = []
@@ -2083,6 +2092,8 @@ def _summary_material_section(section: Any) -> dict[str, Any]:
         "douban_id",
         "douban_url",
         "ptgen_description_length",
+        "bdinfo_file",
+        "raw_bdinfo_file",
         "mediainfo_file",
         "mediainfo_summary_file",
         "mediainfo_json_file",
@@ -3604,6 +3615,12 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         source_stage = _latest_source_info_stage(stages)
         source_result = source_stage.get("result") if source_stage and source_stage.get("ok") else None
         material_files = _mteam_material_files_from_args(args)
+        if args.generate_bdinfo:
+            bdinfo_stage = await _pipeline_bdinfo_material_stage(args, source_result if isinstance(source_result, dict) else None, effective_content_path, material_files)
+            stages.append(bdinfo_stage)
+            generated_bdinfo = bdinfo_stage.get("result", {}).get("bdinfo_file") if bdinfo_stage.get("ok") else None
+            if generated_bdinfo and not material_files.get("bdinfo_file"):
+                material_files["bdinfo_file"] = str(generated_bdinfo)
         if args.generate_mediainfo:
             material_stage = await _pipeline_mediainfo_material_stage(args, source_result if isinstance(source_result, dict) else None, effective_content_path, material_files)
             stages.append(material_stage)
@@ -4042,6 +4059,44 @@ def _metadata_enrichment_readiness_blockers(result: dict[str, Any], *, fetch_ptg
     return blockers
 
 
+async def _pipeline_bdinfo_material_stage(
+    args: argparse.Namespace,
+    source_info: dict[str, Any] | None,
+    content_path: str | None,
+    material_files: dict[str, Any],
+) -> dict[str, Any]:
+    if material_files.get("bdinfo_file"):
+        return {
+            "stage": "materials-bdinfo",
+            "ok": True,
+            "skipped": True,
+            "message": "Existing BDInfo material file supplied; generation skipped.",
+        }
+    if not content_path:
+        return {
+            "stage": "materials-bdinfo",
+            "ok": False,
+            "skipped": True,
+            "message": "--generate-bdinfo requires --path or a resolved qBittorrent content path.",
+        }
+    output_dir = _mteam_material_output_dir(args, source_info)
+    result = await generate_bdinfo_material(str(content_path), str(output_dir), base_dir=getattr(args, "base_dir", None), playlist=getattr(args, "bdinfo_playlist", None))
+    if result.get("status") == "skipped":
+        return {
+            "stage": "materials-bdinfo",
+            "ok": True,
+            "skipped": True,
+            "result": result,
+            "message": "BDInfo generation skipped because no BDMV structure was detected.",
+        }
+    return {
+        "stage": "materials-bdinfo",
+        "ok": result.get("status") == "generated",
+        "result": result,
+        "message": "Generated BDInfo material files." if result.get("status") == "generated" else "BDInfo material generation failed.",
+    }
+
+
 async def _pipeline_mediainfo_material_stage(
     args: argparse.Namespace,
     source_info: dict[str, Any] | None,
@@ -4157,10 +4212,12 @@ def _apply_pipeline_live_metadata_defaults(args: argparse.Namespace, *, live_tar
 
 def _apply_pipeline_live_material_defaults(args: argparse.Namespace, *, live_target_upload: bool, package_upload_resume: bool) -> None:
     if live_target_upload and args.prepare_target and not package_upload_resume:
+        args.generate_bdinfo = _pipeline_live_material_default(args.generate_bdinfo, not bool(args.bdinfo_file))
         args.generate_mediainfo = _pipeline_live_material_default(args.generate_mediainfo, not bool(args.mediainfo_file or args.bdinfo_file))
         args.generate_screenshots = _pipeline_live_material_default(args.generate_screenshots, not bool(getattr(args, "screenshot_file", []) or []))
         args.upload_screenshots = _pipeline_live_material_default(args.upload_screenshots, not bool(args.image_host_file))
         return
+    args.generate_bdinfo = bool(getattr(args, "generate_bdinfo", False))
     args.generate_mediainfo = bool(getattr(args, "generate_mediainfo", False))
     args.generate_screenshots = bool(getattr(args, "generate_screenshots", False))
     args.upload_screenshots = bool(getattr(args, "upload_screenshots", False))
@@ -4699,6 +4756,7 @@ def _pipeline_requested_actions(args: argparse.Namespace) -> dict[str, bool]:
         "wait_uploaded_complete": bool(args.wait_uploaded_complete),
         "enrich_metadata": bool(getattr(args, "enrich_metadata", False)),
         "fetch_ptgen": bool(getattr(args, "fetch_ptgen", False)),
+        "generate_bdinfo": bool(getattr(args, "generate_bdinfo", False)),
         "generate_mediainfo": bool(getattr(args, "generate_mediainfo", False)),
         "generate_screenshots": bool(getattr(args, "generate_screenshots", False)),
         "upload_screenshots": bool(getattr(args, "upload_screenshots", False)),
@@ -4788,6 +4846,7 @@ def _pipeline_material_options(args: argparse.Namespace) -> dict[str, Any]:
         "douban_url": getattr(args, "douban_url", None),
         "mediainfo_file": getattr(args, "mediainfo_file", None),
         "bdinfo_file": getattr(args, "bdinfo_file", None),
+        "bdinfo_playlist": getattr(args, "bdinfo_playlist", None),
         "screenshot_files": list(getattr(args, "screenshot_file", []) or []),
         "screenshot_count": getattr(args, "screenshot_count", None),
         "image_host": getattr(args, "image_host", None),
@@ -5129,6 +5188,7 @@ def _material_generation_artifacts(stages: list[dict[str, Any]]) -> dict[str, An
             "douban_url": result.get("douban_url"),
             "ptgen_description_length": len(str(result.get("ptgen_description") or "")),
         }
+    _append_material_file_stage_artifact(artifacts, stages, "bdinfo", "materials-bdinfo", ("bdinfo_file", "raw_bdinfo_file"))
     _append_material_file_stage_artifact(artifacts, stages, "mediainfo", "materials-mediainfo", ("mediainfo_file", "mediainfo_summary_file", "mediainfo_json_file"))
     _append_material_file_stage_artifact(artifacts, stages, "screenshots", "materials-screenshots", ("screenshot_files",))
     _append_material_file_stage_artifact(artifacts, stages, "image_host", "materials-image-host", ("image_host_file",))
@@ -5609,6 +5669,9 @@ def _target_package_material_resume_args(requested_actions: dict[str, Any], effe
         _append_option(args, "--douban-url", material_options.get("douban_url"))
     _append_option(args, "--mediainfo-file", material_options.get("mediainfo_file"))
     _append_option(args, "--bdinfo-file", material_options.get("bdinfo_file"))
+    if requested_actions.get("generate_bdinfo") or effective_actions.get("generate_bdinfo"):
+        args.append("--generate-bdinfo")
+        _append_option(args, "--bdinfo-playlist", material_options.get("bdinfo_playlist"))
     if requested_actions.get("generate_mediainfo") or effective_actions.get("generate_mediainfo"):
         args.append("--generate-mediainfo")
     for screenshot_file in material_options.get("screenshot_files") if isinstance(material_options.get("screenshot_files"), list) else []:
@@ -7182,6 +7245,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     sections = material_diagnostics.get("sections") if isinstance(material_diagnostics.get("sections"), dict) else {}
     prerequisites = sections.get("prerequisites") if isinstance(sections.get("prerequisites"), dict) else {}
     metadata = sections.get("metadata") if isinstance(sections.get("metadata"), dict) else {}
+    bdinfo = sections.get("bdinfo") if isinstance(sections.get("bdinfo"), dict) else {}
     mediainfo = sections.get("mediainfo") if isinstance(sections.get("mediainfo"), dict) else {}
     screenshots = sections.get("screenshots") if isinstance(sections.get("screenshots"), dict) else {}
     image_host = sections.get("image_host") if isinstance(sections.get("image_host"), dict) else {}
@@ -7203,6 +7267,8 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_METADATA_OK": _summary_material_section_shell_bool(metadata),
         "PTCLI_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
         "PTCLI_MATERIAL_PTGEN_DESCRIPTION_LENGTH": metadata.get("ptgen_description_length"),
+        "PTCLI_MATERIAL_BDINFO_OK": _summary_material_section_shell_bool(bdinfo),
+        "PTCLI_MATERIAL_BDINFO_FILE": bdinfo.get("bdinfo_file"),
         "PTCLI_MATERIAL_MEDIAINFO_OK": _summary_material_section_shell_bool(mediainfo),
         "PTCLI_MATERIAL_SCREENSHOTS_OK": _summary_material_section_shell_bool(screenshots),
         "PTCLI_MATERIAL_SCREENSHOTS_COUNT": screenshots.get("count"),
