@@ -1961,6 +1961,7 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
     resume_available = any(stage.startswith("resume-") for stage in commands_by_stage)
     next_command = _target_upload_next_command(summary, commands_by_stage) if resume_available else {"stage": None, "command": None}
     next_command_argv = _resume_state_next_command_argv(next_command, recommended_commands)
+    qbit_wait_fields = _qbit_wait_summary_fields({"summary": summary})
     return {
         "ready": bool(summary.get("ready")),
         "resume_available": resume_available,
@@ -1985,12 +1986,12 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
             "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
             "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
         },
-        "uploaded_followup": _target_upload_followup_closure(summary, artifacts),
+        "uploaded_followup": _target_upload_followup_closure(summary, artifacts, qbit_wait_fields),
         "blockers": _string_list(summary.get("blockers")),
     }
 
 
-def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str, Any]) -> dict[str, Any]:
+def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str, Any], qbit_wait_fields: dict[str, Any]) -> dict[str, Any]:
     uploaded_torrent_file = artifacts.get("uploaded_torrent_file") if isinstance(artifacts.get("uploaded_torrent_file"), dict) else {}
     uploaded_save_path = artifacts.get("uploaded_save_path") if isinstance(artifacts.get("uploaded_save_path"), dict) else {}
     downloaded = bool(_path_artifact_exists(uploaded_torrent_file))
@@ -2014,6 +2015,9 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
         "rule_obligations_ready": rule_obligations_ready,
     }
     missing = [name for name, ok in checks.items() if not ok]
+    qbit_retry_hints = qbit_wait_fields.get("qbit_wait_retry_hints") if isinstance(qbit_wait_fields.get("qbit_wait_retry_hints"), dict) else {}
+    uploaded_retry_hint = qbit_retry_hints.get("uploaded") if isinstance(qbit_retry_hints.get("uploaded"), dict) else {}
+    qbit_wait_mismatches = _string_list(qbit_wait_fields.get("qbit_wait_mismatches"))
     return {
         "ready": ready,
         "uploaded": uploaded,
@@ -2030,6 +2034,9 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
         "injected_torrent_hash": artifacts.get("injected_torrent_hash"),
         "uploaded_torrent_file": uploaded_torrent_file.get("path"),
         "uploaded_save_path": uploaded_save_path.get("path"),
+        "qbit_wait_mismatch": bool(qbit_wait_mismatches),
+        "qbit_wait_mismatches": qbit_wait_mismatches,
+        "wait_retry": uploaded_retry_hint if uploaded_retry_hint else None,
         "next_actions": _target_upload_followup_next_actions(missing),
     }
 
@@ -7955,6 +7962,7 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
 
 def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) -> dict[str, Any]:
     followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
+    wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
     return {
         "PTCLI_UPLOADED_FOLLOWUP_PRESENT": _shell_bool(bool(followup)) if resume_state else None,
         "PTCLI_UPLOADED_FOLLOWUP_READY": _shell_bool(followup.get("ready")) if followup.get("ready") is not None else None,
@@ -7972,6 +7980,13 @@ def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) 
         "PTCLI_UPLOADED_FOLLOWUP_INJECTED_HASH": followup.get("injected_torrent_hash"),
         "PTCLI_UPLOADED_FOLLOWUP_TORRENT_FILE": followup.get("uploaded_torrent_file"),
         "PTCLI_UPLOADED_FOLLOWUP_SAVE_PATH": followup.get("uploaded_save_path"),
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_MISMATCH": _shell_bool(followup.get("qbit_wait_mismatch")) if followup.get("qbit_wait_mismatch") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_MISMATCHES": ",".join(_string_list(followup.get("qbit_wait_mismatches"))),
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_RETRY_RECOMMENDED": _shell_bool(wait_retry.get("retry_recommended")) if wait_retry.get("retry_recommended") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH": wait_retry.get("suggested_torrent_hash"),
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH": wait_retry.get("suggested_content_path"),
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH": wait_retry.get("suggested_save_path"),
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_RETRY_REASON": wait_retry.get("reason"),
         "PTCLI_UPLOADED_FOLLOWUP_NEXT_ACTIONS": " | ".join(_string_list(followup.get("next_actions"))),
     }
 

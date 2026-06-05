@@ -14828,7 +14828,7 @@ def test_target_upload_retorrent_resume_uses_package_source_identity_after_renam
     assert str(renamed_package_dir) in command_argv["retorrent-resume-uploaded-torrent-download"]
 
 
-def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path) -> None:
+def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path, capsys) -> None:
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -14883,6 +14883,13 @@ def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path) -> None:
     summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
     assert summary_payload["qbit_wait_mismatch"] is True
     assert summary_payload["qbit_wait_mismatches"] == ["uploaded.requested_content_path"]
+    followup = summary_payload["resume_state"]["uploaded_followup"]
+    assert followup["qbit_wait_mismatch"] is True
+    assert followup["qbit_wait_mismatches"] == ["uploaded.requested_content_path"]
+    assert followup["wait_retry"]["retry_recommended"] is True
+    assert followup["wait_retry"]["suggested_torrent_hash"] == "b" * 40
+    assert followup["wait_retry"]["suggested_content_path"] == "/downloads/Other"
+    assert followup["wait_retry"]["suggested_save_path"] == "/downloads"
     diagnostics = summary_payload["qbit_wait_diagnostics"]["uploaded"]
     assert diagnostics["complete"] is True
     assert diagnostics["request_mismatch"] is True
@@ -14892,6 +14899,14 @@ def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path) -> None:
     assert diagnostics["requested_content_path_matched"] is False
     assert diagnostics["observed_hashes"] == ["b" * 40]
     assert diagnostics["observed_content_paths"] == ["/downloads/Other"]
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_MISMATCH=1\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_MISMATCHES=uploaded.requested_content_path\n" in out
+    assert f"export PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH={'b' * 40}\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH=/downloads/Other\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH=/downloads\n" in out
 
 
 @pytest.mark.asyncio
