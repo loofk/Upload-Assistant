@@ -2418,6 +2418,10 @@ def _pipeline_closure_review(payload: dict[str, Any], artifacts: dict[str, Any] 
     supplied_audit = payload.get("closure_audit") if isinstance(payload.get("closure_audit"), dict) else {}
     closure = payload.get("closure") if isinstance(payload.get("closure"), dict) else None
     evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else None
+    closure_source = closure.get("source") if isinstance(closure, dict) and isinstance(closure.get("source"), dict) else {}
+    evidence_source = evidence.get("source") if isinstance(evidence, dict) and isinstance(evidence.get("source"), dict) else {}
+    target_preparation = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
+    target_description = target_preparation.get("description") if isinstance(target_preparation.get("description"), dict) else {}
     computed_audit = _pipeline_closure_audit(closure, evidence) if closure or evidence else {}
     closure_audit = computed_audit or supplied_audit
     checks: dict[str, bool] = {
@@ -2447,7 +2451,14 @@ def _pipeline_closure_review(payload: dict[str, Any], artifacts: dict[str, Any] 
             "injection_verified": closure_status.get("source", {}).get("injection_verified") if isinstance(closure_status.get("source"), dict) else None,
             "torrent_hash": artifacts.get("source_torrent_hash"),
             "torrent_file": artifacts.get("source_torrent_file"),
+            "torrent_file_evidence": artifacts.get("source_torrent_file_evidence"),
             "injected_torrent_hash": artifacts.get("source_injected_torrent_hash"),
+            "injection_visible_in_client": artifacts.get("source_injection_visible_in_client"),
+            "save_path": artifacts.get("source_save_path"),
+            "qbit_category": artifacts.get("source_qbit_category"),
+            "qbit_tags": artifacts.get("source_qbit_tags"),
+            "paused": artifacts.get("source_paused"),
+            "content_path": closure_source.get("content_path") or evidence_source.get("content_path"),
         },
         "target": {
             "mode": closure_status.get("target", {}).get("mode") if isinstance(closure_status.get("target"), dict) else None,
@@ -2462,6 +2473,24 @@ def _pipeline_closure_review(payload: dict[str, Any], artifacts: dict[str, Any] 
             "uploaded_torrent_file": artifacts.get("uploaded_torrent_file"),
             "injected_torrent_hash": artifacts.get("injected_torrent_hash"),
             "uploaded_save_path": artifacts.get("uploaded_save_path"),
+            "materials_ready": target_preparation.get("materials_ready"),
+            "metadata_ready": target_preparation.get("metadata_ready"),
+            "assets_ready": target_preparation.get("assets_ready"),
+            "description_ready": target_preparation.get("description_ready"),
+            "preparation_ready": artifacts.get("target_preparation_ready"),
+            "preparation_missing": _string_list(artifacts.get("target_preparation_missing") or target_preparation.get("missing")),
+            "description": {
+                "path": target_description.get("path"),
+                "exists": target_description.get("exists"),
+                "char_length": target_description.get("char_length"),
+                "expected_length": target_description.get("expected_length"),
+                "has_ptgen_description": target_description.get("has_ptgen_description"),
+                "has_external_ids": target_description.get("has_external_ids"),
+                "has_mediainfo_or_bdinfo": target_description.get("has_mediainfo_or_bdinfo"),
+                "has_screenshot_bbcode": target_description.get("has_screenshot_bbcode"),
+                "bbcode_image_count": target_description.get("bbcode_image_count"),
+                "missing": _string_list(target_description.get("missing")),
+            },
         },
     }
 
@@ -6398,6 +6427,9 @@ def _pipeline_closure_audit(closure: dict[str, Any] | None, evidence: dict[str, 
     add("target.duplicate_clean", closure_target.get("duplicate_clean") or evidence_target.get("duplicate_clean"), scope="target", evidence_keys=["closure.target.duplicate_clean", "evidence.target.duplicate_clean"])
     target_rules = closure_target.get("rule_obligations") if isinstance(closure_target.get("rule_obligations"), dict) else evidence_target.get("rule_obligations")
     add("target.rule_obligations", isinstance(target_rules, dict) and target_rules.get("ready"), scope="target", evidence_keys=["closure.target.rule_obligations", "evidence.target.rule_obligations"])
+    target_preparation = closure_target.get("preparation_audit") if isinstance(closure_target.get("preparation_audit"), dict) else evidence_target.get("preparation_audit")
+    if closure_target.get("prepared") or evidence_target.get("prepared") or isinstance(target_preparation, dict):
+        add("target.preparation_ready", isinstance(target_preparation, dict) and target_preparation.get("ready"), scope="target", evidence_keys=["closure.target.preparation_audit", "evidence.target.preparation_audit"])
     if closure_target.get("prepared") or evidence_target.get("prepared") or isinstance(evidence_target.get("materials"), dict):
         add("target.materials_ready", closure_target.get("materials_ready") or evidence_target.get("materials_ready"), scope="target", evidence_keys=["closure.target.materials_ready", "evidence.target.materials_ready"])
     add("target.uploaded_torrent_hash", closure_target.get("uploaded_torrent_hash") or evidence_target.get("uploaded_torrent_hash"), scope="target", evidence_keys=["closure.target.uploaded_torrent_hash", "evidence.target.uploaded_torrent_hash"])
@@ -7403,6 +7435,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
 def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -> dict[str, Any]:
     source = closure_review.get("source") if isinstance(closure_review.get("source"), dict) else {}
     target = closure_review.get("target") if isinstance(closure_review.get("target"), dict) else {}
+    description = target.get("description") if isinstance(target.get("description"), dict) else {}
     checks = closure_review.get("checks") if isinstance(closure_review.get("checks"), dict) else {}
     return {
         "PTCLI_CLOSURE_REVIEW_COMPLETE": _shell_bool(closure_review.get("complete")) if closure_review.get("complete") is not None else None,
@@ -7414,7 +7447,14 @@ def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -
         "PTCLI_CLOSURE_REVIEW_SOURCE_INJECTION_VERIFIED": _shell_bool(source.get("injection_verified")) if source.get("injection_verified") is not None else None,
         "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_HASH": source.get("torrent_hash"),
         "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_FILE": source.get("torrent_file"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_FILE_EVIDENCE": _shell_bool(source.get("torrent_file_evidence")) if source.get("torrent_file_evidence") is not None else None,
         "PTCLI_CLOSURE_REVIEW_SOURCE_INJECTED_HASH": source.get("injected_torrent_hash"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_INJECTION_VISIBLE": _shell_bool(source.get("injection_visible_in_client")) if source.get("injection_visible_in_client") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_SOURCE_SAVE_PATH": source.get("save_path"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_QBIT_CATEGORY": source.get("qbit_category"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_QBIT_TAGS": source.get("qbit_tags"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_PAUSED": _shell_bool(source.get("paused")) if source.get("paused") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_SOURCE_CONTENT_PATH": source.get("content_path"),
         "PTCLI_CLOSURE_REVIEW_TARGET_MODE": target.get("mode"),
         "PTCLI_CLOSURE_REVIEW_TARGET_READY": _shell_bool(target.get("ready")) if target.get("ready") is not None else None,
         "PTCLI_CLOSURE_REVIEW_TARGET_HASH_CONSISTENT": _shell_bool(target.get("hash_consistent")) if target.get("hash_consistent") is not None else None,
@@ -7427,7 +7467,29 @@ def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -
         "PTCLI_CLOSURE_REVIEW_UPLOADED_TORRENT_FILE": target.get("uploaded_torrent_file"),
         "PTCLI_CLOSURE_REVIEW_INJECTED_HASH": target.get("injected_torrent_hash"),
         "PTCLI_CLOSURE_REVIEW_UPLOADED_SAVE_PATH": target.get("uploaded_save_path"),
+        "PTCLI_CLOSURE_REVIEW_TARGET_MATERIALS_READY": _shell_bool(target.get("materials_ready")) if target.get("materials_ready") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_TARGET_METADATA_READY": _shell_bool(target.get("metadata_ready")) if target.get("metadata_ready") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_TARGET_ASSETS_READY": _shell_bool(target.get("assets_ready")) if target.get("assets_ready") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_TARGET_DESCRIPTION_READY": _shell_bool(target.get("description_ready")) if target.get("description_ready") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_TARGET_PREPARATION_READY": _shell_bool(target.get("preparation_ready")) if target.get("preparation_ready") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_TARGET_PREPARATION_MISSING": ",".join(_string_list(target.get("preparation_missing"))),
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_PATH": description.get("path"),
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_LENGTH": description.get("char_length"),
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_EXPECTED_LENGTH": description.get("expected_length"),
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_MISSING": ",".join(_string_list(description.get("missing"))),
         "PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_READY": _summary_check_bool_field(checks, "source.ready"),
+        "PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_TORRENT_FILE": _summary_check_bool_field(checks, "source.torrent_file_evidence"),
+        "PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_TORRENT_HASH": _summary_check_bool_field(checks, "source.torrent_hash"),
+        "PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_INJECTED_HASH": _summary_check_bool_field(checks, "source.injected_torrent_hash"),
+        "PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_INJECTION_VISIBLE": _summary_check_bool_field(checks, "source.injection_visible_in_client"),
+        "PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_INJECTION_VERIFIED": _summary_check_bool_field(checks, "source.injection_verified"),
+        "PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_WAIT": _summary_check_bool_field(checks, "source.wait_evidence"),
+        "PTCLI_CLOSURE_REVIEW_CHECK_TARGET_PREPARATION": _summary_check_bool_field(checks, "target.preparation_ready"),
         "PTCLI_CLOSURE_REVIEW_CHECK_TARGET_UPLOADED_WAIT": _summary_check_bool_field(checks, "target.uploaded_wait_evidence"),
         "PTCLI_CLOSURE_REVIEW_CHECK_TARGET_RULES": _summary_check_bool_field(checks, "target.rule_obligations"),
     }

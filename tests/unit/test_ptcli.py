@@ -667,8 +667,16 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "rule_obligations": rule_obligations,
                     "preparation_audit": {
                         "ready": True,
+                        "materials_ready": True,
+                        "metadata_ready": True,
+                        "assets_ready": True,
+                        "description_ready": True,
                         "missing": [],
                         "description": {
+                            "path": "/tmp/MTEAM-description.txt",
+                            "exists": True,
+                            "char_length": 1000,
+                            "expected_length": 1000,
                             "has_ptgen_description": True,
                             "has_external_ids": True,
                             "has_mediainfo_or_bdinfo": True,
@@ -803,6 +811,18 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["closure_review"]["checks"]["target.uploaded_wait_evidence"] is True
     assert payload["closure_review"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert payload["closure_review"]["target"]["uploaded_torrent_file"] == "/tmp/MTEAM-999.torrent"
+    assert payload["closure_review"]["source"]["torrent_file_evidence"] is True
+    assert payload["closure_review"]["source"]["save_path"] == "/downloads"
+    assert payload["closure_review"]["source"]["content_path"] == "/downloads/Name"
+    assert payload["closure_review"]["target"]["materials_ready"] is True
+    assert payload["closure_review"]["target"]["metadata_ready"] is True
+    assert payload["closure_review"]["target"]["assets_ready"] is True
+    assert payload["closure_review"]["target"]["description_ready"] is True
+    assert payload["closure_review"]["target"]["preparation_ready"] is True
+    assert payload["closure_review"]["target"]["description"]["has_ptgen_description"] is True
+    assert payload["closure_review"]["target"]["description"]["has_external_ids"] is True
+    assert payload["closure_review"]["target"]["description"]["has_mediainfo_or_bdinfo"] is True
+    assert payload["closure_review"]["target"]["description"]["has_screenshot_bbcode"] is True
     assert payload["closure"]["source"]["complete"] is True
     assert payload["closure"]["target"]["injected"] is True
     assert payload["closure_audit"]["ready"] is True
@@ -845,8 +865,16 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "target_rule_obligations": {"ready": True, "count": 2, "missing": []},
         "target_preparation_audit": {
             "ready": True,
+            "materials_ready": True,
+            "metadata_ready": True,
+            "assets_ready": True,
+            "description_ready": True,
             "missing": [],
             "description": {
+                "path": "/tmp/MTEAM-description.txt",
+                "exists": True,
+                "char_length": 1000,
+                "expected_length": 1000,
                 "has_ptgen_description": True,
                 "has_external_ids": True,
                 "has_mediainfo_or_bdinfo": True,
@@ -10374,8 +10402,25 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["closure_review"]["complete"] is True
     assert summary_payload["closure_review"]["missing"] == []
     assert summary_payload["closure_review"]["source"]["torrent_hash"] == source_hash
+    assert summary_payload["closure_review"]["source"]["torrent_file_evidence"] is True
+    assert summary_payload["closure_review"]["source"]["save_path"] == "/downloads"
+    assert summary_payload["closure_review"]["source"]["qbit_category"] == "SOURCE"
+    assert summary_payload["closure_review"]["source"]["qbit_tags"] == "source-tag"
+    assert summary_payload["closure_review"]["source"]["paused"] is True
+    assert summary_payload["closure_review"]["source"]["injection_visible_in_client"] is True
     assert summary_payload["closure_review"]["target"]["uploaded_torrent_hash"] == uploaded_hash
     assert summary_payload["closure_review"]["target"]["uploaded_torrent_file"].endswith("MTEAM-999.torrent")
+    assert summary_payload["closure_review"]["target"]["materials_ready"] is True
+    assert summary_payload["closure_review"]["target"]["metadata_ready"] is True
+    assert summary_payload["closure_review"]["target"]["assets_ready"] is True
+    assert summary_payload["closure_review"]["target"]["description_ready"] is True
+    assert summary_payload["closure_review"]["target"]["preparation_ready"] is True
+    assert summary_payload["closure_review"]["target"]["preparation_missing"] == []
+    assert summary_payload["closure_review"]["target"]["description"]["has_ptgen_description"] is True
+    assert summary_payload["closure_review"]["target"]["description"]["has_external_ids"] is True
+    assert summary_payload["closure_review"]["target"]["description"]["has_mediainfo_or_bdinfo"] is True
+    assert summary_payload["closure_review"]["target"]["description"]["has_screenshot_bbcode"] is True
+    assert summary_payload["closure_review"]["target"]["description"]["bbcode_image_count"] == 1
     assert summary_payload["summary"]["closure_audit"]["ready"] is True
     assert summary_payload["config"] == str(tmp_path / "config.py")
     assert summary_payload["base_dir"] == str(tmp_path)
@@ -10404,9 +10449,28 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "export PTCLI_CLOSURE_REVIEW_COMPLETE=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_MISSING=''\n" in out
     assert f"export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_HASH={source_hash}\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_FILE_EVIDENCE=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_SOURCE_SAVE_PATH=/downloads\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_SOURCE_QBIT_CATEGORY=SOURCE\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_SOURCE_QBIT_TAGS=source-tag\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_SOURCE_PAUSED=1\n" in out
     assert f"export PTCLI_CLOSURE_REVIEW_UPLOADED_TORRENT_HASH={uploaded_hash}\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_TARGET_UPLOADED_WAIT_EVIDENCE=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_TARGET_MATERIALS_READY=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_TARGET_METADATA_READY=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_TARGET_ASSETS_READY=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_TARGET_DESCRIPTION_READY=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_PTGEN=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_SCREENSHOTS=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_READY=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_TORRENT_HASH=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_INJECTED_HASH=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_INJECTION_VISIBLE=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_INJECTION_VERIFIED=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_WAIT=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_CHECK_TARGET_PREPARATION=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_CHECK_TARGET_UPLOADED_WAIT=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_CHECK_TARGET_RULES=1\n" in out
     assert summary_payload["artifacts"]["source_paused"] is True
