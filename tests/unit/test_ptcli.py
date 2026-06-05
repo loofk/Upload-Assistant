@@ -3205,12 +3205,13 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
                     },
                     "target_materials": {
                         "ready": False,
-                        "missing": ["assets.image_host_uploads"],
+                        "assets": {"disc_structure": {"ready": True, "path": "/downloads/Disc/BDMV", "bdmv": True, "type": "BDMV"}},
+                        "missing": ["assets.bdinfo_for_disc", "assets.image_host_uploads"],
                     },
                     "target_materials_ready": False,
-                    "target_materials_missing": ["assets.image_host_uploads"],
-                    "target_materials_warnings": ["Image-host uploads are missing."],
-                    "target_preparation_missing": ["assets.image_host_uploads"],
+                    "target_materials_missing": ["assets.bdinfo_for_disc", "assets.image_host_uploads"],
+                    "target_materials_warnings": ["BDMV disc content requires --bdinfo-file.", "Image-host uploads are missing."],
+                    "target_preparation_missing": ["assets.bdinfo_for_disc", "assets.image_host_uploads"],
                 },
                 "resume_state": {
                     "next_stage": "resume-target-package",
@@ -3232,12 +3233,14 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["present"] is True
     assert diagnostics["generation_ready"] is False
     assert diagnostics["target_materials_ready"] is False
-    assert diagnostics["target_materials_missing"] == ["assets.image_host_uploads"]
-    assert diagnostics["target_preparation_missing"] == ["assets.image_host_uploads"]
+    assert diagnostics["target_materials_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
+    assert diagnostics["target_preparation_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
+    assert diagnostics["disc_structure"]["type"] == "BDMV"
+    assert diagnostics["disc_structure"]["bdmv"] is True
     assert diagnostics["sections"]["prerequisites"]["ok"] is False
     assert diagnostics["sections"]["prerequisites"]["checks"][0]["name"] == "assets.image_host"
     assert diagnostics["sections"]["metadata"]["ptgen_description_length"] == 42
-    assert diagnostics["blockers"] == ["prerequisites: --upload-screenshots requires --image-host.", "Image-host uploads are missing."]
+    assert diagnostics["blockers"] == ["prerequisites: --upload-screenshots requires --image-host.", "BDMV disc content requires --bdinfo-file.", "Image-host uploads are missing."]
 
 
 def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -> None:
@@ -4235,7 +4238,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                         "screenshots": {"ok": True, "count": 3, "screenshot_files": ["/tmp/s1.png", "/tmp/s2.png", "/tmp/s3.png"]},
                         "image_host": {"ok": True, "host": "ptpimg", "count": 3, "image_host_file": "/tmp/image-host-uploads.json"},
                     },
-                    "target_materials": {"ready": True, "missing": []},
+                    "target_materials": {"ready": True, "assets": {"disc_structure": {"ready": True, "path": "/downloads/Disc/BDMV", "bdmv": True, "type": "BDMV"}}, "missing": []},
                     "target_materials_ready": True,
                     "target_preparation_ready": True,
                     "target_materials_missing": [],
@@ -4286,6 +4289,9 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_TARGET_MATERIALS_MISSING=''\n" in out
     assert "export PTCLI_TARGET_PREPARATION_MISSING=''\n" in out
     assert "export PTCLI_MATERIAL_BLOCKERS=''\n" in out
+    assert "export PTCLI_MATERIAL_DISC_TYPE=BDMV\n" in out
+    assert "export PTCLI_MATERIAL_DISC_BDMV=1\n" in out
+    assert "export PTCLI_MATERIAL_DISC_PATH=/downloads/Disc/BDMV\n" in out
     assert "export PTCLI_MATERIAL_PREREQUISITES_OK=1\n" in out
     assert "export PTCLI_MATERIAL_METADATA_OK=1\n" in out
     assert "export PTCLI_MATERIAL_PTGEN_DESCRIPTION_LENGTH=42\n" in out

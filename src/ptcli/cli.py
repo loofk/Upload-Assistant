@@ -2036,6 +2036,8 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
     material_generation = artifacts.get("material_generation") if isinstance(artifacts.get("material_generation"), dict) else {}
     target_materials = artifacts.get("target_materials") if isinstance(artifacts.get("target_materials"), dict) else {}
+    target_assets = target_materials.get("assets") if isinstance(target_materials.get("assets"), dict) else {}
+    disc_structure = target_assets.get("disc_structure") if isinstance(target_assets.get("disc_structure"), dict) else {}
     sections = {
         key: _summary_material_section(material_generation.get(key))
         for key in ("prerequisites", "metadata", "mediainfo", "screenshots", "image_host")
@@ -2055,6 +2057,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "target_preparation_ready": artifacts.get("target_preparation_ready"),
         "target_materials_missing": _string_list(artifacts.get("target_materials_missing") or target_materials.get("missing")),
         "target_preparation_missing": _string_list(artifacts.get("target_preparation_missing")),
+        "disc_structure": disc_structure,
         "sections": sections,
         "blockers": blockers,
     }
@@ -7182,6 +7185,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     mediainfo = sections.get("mediainfo") if isinstance(sections.get("mediainfo"), dict) else {}
     screenshots = sections.get("screenshots") if isinstance(sections.get("screenshots"), dict) else {}
     image_host = sections.get("image_host") if isinstance(sections.get("image_host"), dict) else {}
+    disc_structure = material_diagnostics.get("disc_structure") if isinstance(material_diagnostics.get("disc_structure"), dict) else {}
     return {
         "PTCLI_MATERIAL_PRESENT": _shell_bool(material_diagnostics.get("present")) if "present" in material_diagnostics else None,
         "PTCLI_MATERIAL_GENERATION_PRESENT": _shell_bool(material_diagnostics.get("generation_present")) if "generation_present" in material_diagnostics else None,
@@ -7192,6 +7196,9 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_TARGET_MATERIALS_MISSING": ",".join(_string_list(material_diagnostics.get("target_materials_missing"))),
         "PTCLI_TARGET_PREPARATION_MISSING": ",".join(_string_list(material_diagnostics.get("target_preparation_missing"))),
         "PTCLI_MATERIAL_BLOCKERS": ",".join(_string_list(material_diagnostics.get("blockers"))),
+        "PTCLI_MATERIAL_DISC_TYPE": disc_structure.get("type"),
+        "PTCLI_MATERIAL_DISC_BDMV": _shell_bool(disc_structure.get("bdmv")) if "bdmv" in disc_structure else None,
+        "PTCLI_MATERIAL_DISC_PATH": disc_structure.get("path"),
         "PTCLI_MATERIAL_PREREQUISITES_OK": _summary_material_section_shell_bool(prerequisites),
         "PTCLI_MATERIAL_METADATA_OK": _summary_material_section_shell_bool(metadata),
         "PTCLI_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
