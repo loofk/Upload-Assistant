@@ -2018,6 +2018,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     qbit_wait_retry_hints = _summary_qbit_wait_retry_hints(qbit_wait_diagnostics)
     flow_diagnostics = _summary_flow_diagnostics(payload)
     material_diagnostics = _summary_material_diagnostics(payload)
+    target_upload_diagnostics = _summary_target_upload_diagnostics(payload)
     closure_modes = _summary_closure_modes(payload)
     closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload)
     return {
@@ -2030,6 +2031,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "flow_diagnostics": flow_diagnostics,
         "credential_requirements": flow_diagnostics.get("credential_requirements", []),
         "material_diagnostics": material_diagnostics,
+        "target_upload_diagnostics": target_upload_diagnostics,
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
@@ -2038,6 +2040,31 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "closure_status": closure_status,
         "source_mode": closure_modes.get("source"),
         "target_mode": closure_modes.get("target"),
+    }
+
+
+def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("kind") != "ptcli.target_upload.summary":
+        return {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    completion_review = summary.get("completion_review") if isinstance(summary.get("completion_review"), dict) else {}
+    checks = completion_review.get("checks") if isinstance(completion_review.get("checks"), dict) else {}
+    return {
+        "present": bool(summary),
+        "mode": summary.get("mode"),
+        "ready": summary.get("ready"),
+        "uploaded": summary.get("uploaded"),
+        "completion": {
+            "complete": completion_review.get("complete"),
+            "missing": _string_list(completion_review.get("missing")),
+            "checks": checks,
+            "uploaded_torrent_id": completion_review.get("uploaded_torrent_id"),
+            "uploaded_torrent_hash": completion_review.get("uploaded_torrent_hash"),
+            "uploaded_torrent_path": completion_review.get("uploaded_torrent_path"),
+            "injected_torrent_hash": completion_review.get("injected_torrent_hash"),
+            "uploaded_save_path": completion_review.get("uploaded_save_path"),
+            "preflight_status": completion_review.get("preflight_status"),
+        },
     }
 
 
@@ -7233,6 +7260,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     closure_source = closure_status.get("source") if isinstance(closure_status.get("source"), dict) else {}
     closure_target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
     material_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
+    target_upload_diagnostics = payload.get("target_upload_diagnostics") if isinstance(payload.get("target_upload_diagnostics"), dict) else {}
     qbit_wait_diagnostics = payload.get("qbit_wait_diagnostics") if isinstance(payload.get("qbit_wait_diagnostics"), dict) else {}
     qbit_wait_retry_hints = payload.get("qbit_wait_retry_hints") if isinstance(payload.get("qbit_wait_retry_hints"), dict) else {}
     fields = {
@@ -7300,11 +7328,45 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_SUMMARY_FILE": payload.get("summary_file"),
     }
     fields.update(_summary_check_material_shell_fields(material_diagnostics))
+    fields.update(_summary_check_target_upload_shell_fields(target_upload_diagnostics))
     fields.update(_summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics))
     fields.update(_summary_check_qbit_retry_shell_fields(qbit_wait_retry_hints))
     for key, value in fields.items():
         print(f"export {key}={shlex.quote('' if value is None else str(value))}")
     return 0
+
+
+def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
+    checks = completion.get("checks") if isinstance(completion.get("checks"), dict) else {}
+    return {
+        "PTCLI_TARGET_UPLOAD_PRESENT": _shell_bool(target_upload_diagnostics.get("present")) if "present" in target_upload_diagnostics else None,
+        "PTCLI_TARGET_UPLOAD_MODE": target_upload_diagnostics.get("mode"),
+        "PTCLI_TARGET_UPLOAD_READY": _shell_bool(target_upload_diagnostics.get("ready")) if target_upload_diagnostics.get("ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_UPLOADED": _shell_bool(target_upload_diagnostics.get("uploaded")) if target_upload_diagnostics.get("uploaded") is not None else None,
+        "PTCLI_TARGET_UPLOAD_COMPLETE": _shell_bool(completion.get("complete")) if completion.get("complete") is not None else None,
+        "PTCLI_TARGET_UPLOAD_MISSING": ",".join(_string_list(completion.get("missing"))),
+        "PTCLI_TARGET_UPLOAD_TORRENT_ID": completion.get("uploaded_torrent_id"),
+        "PTCLI_TARGET_UPLOAD_TORRENT_HASH": completion.get("uploaded_torrent_hash"),
+        "PTCLI_TARGET_UPLOAD_TORRENT_PATH": completion.get("uploaded_torrent_path"),
+        "PTCLI_TARGET_UPLOAD_INJECTED_HASH": completion.get("injected_torrent_hash"),
+        "PTCLI_TARGET_UPLOAD_SAVE_PATH": completion.get("uploaded_save_path"),
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_STATUS": completion.get("preflight_status"),
+        "PTCLI_TARGET_UPLOAD_CHECK_PREPARATION_READY": _summary_check_bool_field(checks, "target_preparation_ready"),
+        "PTCLI_TARGET_UPLOAD_CHECK_UPLOADED": _summary_check_bool_field(checks, "uploaded"),
+        "PTCLI_TARGET_UPLOAD_CHECK_TORRENT_FILE": _summary_check_bool_field(checks, "uploaded_torrent_file"),
+        "PTCLI_TARGET_UPLOAD_CHECK_TORRENT_HASH": _summary_check_bool_field(checks, "uploaded_torrent_hash"),
+        "PTCLI_TARGET_UPLOAD_CHECK_INJECTION_VISIBLE": _summary_check_bool_field(checks, "injection_visible_in_client"),
+        "PTCLI_TARGET_UPLOAD_CHECK_INJECTION_VERIFIED": _summary_check_bool_field(checks, "injection_verified"),
+        "PTCLI_TARGET_UPLOAD_CHECK_WAIT_COMPLETE": _summary_check_bool_field(checks, "uploaded_wait_complete"),
+        "PTCLI_TARGET_UPLOAD_CHECK_HASH_CONSISTENT": _summary_check_bool_field(checks, "hash_consistent"),
+        "PTCLI_TARGET_UPLOAD_CHECK_DUPLICATE_CLEAN": _summary_check_bool_field(checks, "duplicate_clean"),
+        "PTCLI_TARGET_UPLOAD_CHECK_RULES_READY": _summary_check_bool_field(checks, "rule_obligations_ready"),
+    }
+
+
+def _summary_check_bool_field(checks: dict[str, Any], key: str) -> str | None:
+    return _shell_bool(checks.get(key)) if key in checks else None
 
 
 def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -> dict[str, Any]:

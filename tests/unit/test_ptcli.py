@@ -13860,7 +13860,7 @@ def test_target_upload_uploaded_torrent_followup_requires_save_path_without_pack
 
 
 @pytest.mark.asyncio
-async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -> None:
+async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, capsys) -> None:
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -14093,6 +14093,28 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path) -
     assert command_argv["retorrent-resume-uploaded-torrent"][:3] == ["python3", "ptcli.py", "retorrent"]
     assert command_argv["verify-seeding"] == ["python3", "ptcli.py", "inspect", "--client", "default", "--json"]
     assert commands["verify-seeding"].startswith("python3 ptcli.py inspect")
+
+    code = main(["summary-check", "--summary-file", str(summary_path), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_TARGET_UPLOAD_PRESENT=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_MODE=live_upload\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_UPLOADED=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_COMPLETE=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_MISSING=''\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_TORRENT_ID=999\n" in out
+    assert f"export PTCLI_TARGET_UPLOAD_TORRENT_HASH={uploaded_hash}\n" in out
+    assert f"export PTCLI_TARGET_UPLOAD_TORRENT_PATH={str(tmp_path / 'MTEAM-999.torrent')}\n" in out
+    assert f"export PTCLI_TARGET_UPLOAD_INJECTED_HASH={uploaded_hash}\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_SAVE_PATH=/downloads/Example\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_STATUS=ready\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_CHECK_PREPARATION_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_CHECK_TORRENT_FILE=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_CHECK_INJECTION_VERIFIED=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_CHECK_WAIT_COMPLETE=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_CHECK_RULES_READY=1\n" in out
 
 
 @pytest.mark.asyncio
