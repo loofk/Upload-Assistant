@@ -1550,6 +1550,50 @@ def test_retorrent_next_actions_explain_target_preparation_ready() -> None:
     ]
 
 
+def test_retorrent_next_actions_expand_missing_target_materials() -> None:
+    actions = ptcli_cli._retorrent_execute_next_actions(
+        {
+            "artifacts": {
+                "target_preparation_missing": [
+                    "metadata.tmdb",
+                    "metadata.ptgen_description",
+                    "assets.mediainfo_or_bdinfo",
+                    "assets.screenshots",
+                    "assets.image_host_uploads",
+                    "description.content",
+                ]
+            }
+        },
+        ["target.preparation_ready"],
+    )
+
+    assert actions[0] == "Regenerate the MTEAM target package after completing IMDb/TMDb/Douban metadata, PTGen/Douban description, MediaInfo/BDInfo, screenshot, and image-host materials."
+    assert any("IMDb/TMDb/Douban metadata" in action for action in actions)
+    assert any("PTGen/Douban description" in action for action in actions)
+    assert any("MediaInfo/BDInfo" in action for action in actions)
+    assert any("screenshots" in action for action in actions)
+    assert any("image host" in action for action in actions)
+    assert any("Regenerate the MTEAM description" in action for action in actions)
+
+
+def test_retorrent_next_actions_expand_closure_review_materials_ready() -> None:
+    actions = ptcli_cli._retorrent_execute_next_actions(
+        {
+            "closure_review": {
+                "target": {
+                    "preparation_missing": ["description.external_ids", "description.screenshot_bbcode"],
+                    "description": {"missing": ["description.mediainfo_or_bdinfo"]},
+                }
+            }
+        },
+        ["target.materials_ready"],
+    )
+
+    assert any("IMDb/TMDb/Douban metadata" in action for action in actions)
+    assert any("screenshots" in action for action in actions)
+    assert any("MediaInfo/BDInfo" in action for action in actions)
+
+
 def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:
     pipeline_result = {
         "status": "ok",

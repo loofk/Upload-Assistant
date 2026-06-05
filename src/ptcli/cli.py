@@ -1066,6 +1066,9 @@ def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: l
         _append_unique_string(actions, action)
     for blocker in blockers:
         _append_unique_string(actions, _retorrent_execute_blocker_next_action(str(blocker)))
+        if str(blocker) in {"target_preparation_ready", "target.preparation_ready", "target.materials_ready"}:
+            for action in _target_preparation_missing_next_actions(_target_preparation_missing_from_pipeline_result(pipeline_result)):
+                _append_unique_string(actions, action)
     pipeline_actions = pipeline_result.get("next_actions")
     if isinstance(pipeline_actions, list) and pipeline_actions:
         for action in pipeline_actions:
@@ -1127,13 +1130,60 @@ def _retorrent_execute_blocker_next_action(blocker: str) -> str:
         return "Verify the uploaded target torrent is active in qBittorrent, then re-run with --wait-uploaded-complete."
     if blocker == "target.uploaded":
         return "Resume the MTEAM target upload stage after duplicate and rule gates are ready."
-    if blocker == "target_preparation_ready":
+    if blocker in {"target_preparation_ready", "target.preparation_ready", "target.materials_ready"}:
         return "Regenerate the MTEAM target package after completing IMDb/TMDb/Douban metadata, PTGen/Douban description, MediaInfo/BDInfo, screenshot, and image-host materials."
     if blocker == "pipeline did not report ready.":
         return "Inspect the pipeline blockers and resume from the first incomplete stage."
     if blocker.startswith("pipeline status is "):
         return "Inspect the pipeline status and stage blockers before retrying retorrent --execute."
     return f"Fix {blocker}"
+
+
+def _target_preparation_missing_from_pipeline_result(pipeline_result: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    artifacts = pipeline_result.get("artifacts") if isinstance(pipeline_result.get("artifacts"), dict) else {}
+    _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
+    _extend_unique_string(missing, _string_list(artifacts.get("target_materials_missing")))
+    closure_review = pipeline_result.get("closure_review") if isinstance(pipeline_result.get("closure_review"), dict) else {}
+    target_review = closure_review.get("target") if isinstance(closure_review.get("target"), dict) else {}
+    _extend_unique_string(missing, _string_list(target_review.get("preparation_missing")))
+    description = target_review.get("description") if isinstance(target_review.get("description"), dict) else {}
+    _extend_unique_string(missing, _string_list(description.get("missing")))
+    evidence = pipeline_result.get("evidence") if isinstance(pipeline_result.get("evidence"), dict) else {}
+    evidence_target = evidence.get("target") if isinstance(evidence.get("target"), dict) else {}
+    preparation_audit = evidence_target.get("preparation_audit") if isinstance(evidence_target.get("preparation_audit"), dict) else {}
+    _extend_unique_string(missing, _string_list(preparation_audit.get("missing")))
+    materials = evidence_target.get("materials") if isinstance(evidence_target.get("materials"), dict) else {}
+    _extend_unique_string(missing, _string_list(materials.get("missing")))
+    return missing
+
+
+def _target_preparation_missing_next_actions(missing: list[str]) -> list[str]:
+    actions: list[str] = []
+    for item in missing:
+        action = _target_preparation_missing_next_action(item)
+        if action:
+            _append_unique_string(actions, action)
+    return actions
+
+
+def _target_preparation_missing_next_action(missing: str) -> str | None:
+    normalized = missing.removeprefix("target.materials.").removeprefix("materials.")
+    if normalized in {"description.ptgen_description", "metadata.ptgen_description"}:
+        return "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package."
+    if normalized.startswith("metadata.") or normalized.startswith("description.external_ids"):
+        return "Fetch or supply IMDb/TMDb/Douban metadata with --enrich-metadata, --metadata-file, --imdb-id, --tmdb-id, or --douban-id, then rerun resume-target-package."
+    if normalized in {"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo"}:
+        return "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun resume-target-package."
+    if normalized == "assets.bdinfo_for_disc":
+        return "Provide BDInfo for BDMV disc content with --bdinfo-file or --generate-bdinfo, then rerun resume-target-package."
+    if normalized in {"assets.screenshots", "description.screenshot_bbcode"}:
+        return "Generate or provide screenshots with --generate-screenshots or --screenshot-file, then rerun resume-target-package."
+    if normalized == "assets.image_host_uploads":
+        return "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package."
+    if normalized == "description.content":
+        return "Regenerate the MTEAM description after metadata, MediaInfo/BDInfo, screenshot, and image-host materials are ready."
+    return None
 
 
 def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespace:
