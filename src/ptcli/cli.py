@@ -4737,6 +4737,9 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         artifacts["target_duplicate_clean"] = evidence_target.get("duplicate_clean")
     if _artifact_value_present(evidence_target.get("rule_obligations")):
         artifacts["target_rule_obligations"] = evidence_target.get("rule_obligations")
+    if _artifact_value_present(evidence_target.get("preparation_audit")):
+        artifacts["target_preparation_audit"] = evidence_target.get("preparation_audit")
+        artifacts["target_preparation_ready"] = bool(evidence_target["preparation_audit"].get("ready")) if isinstance(evidence_target.get("preparation_audit"), dict) else False
     if isinstance(source_download, dict):
         source_result = source_download.get("result")
         if isinstance(source_result, dict):
@@ -5345,6 +5348,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     rule_review = target_prepare_result.get("rule_review") if isinstance(target_prepare_result, dict) else None
     rule_obligations = _rule_obligation_summary(rule_review)
     target_materials = _target_materials_summary(target_prepare_result)
+    target_preparation_audit = _target_preparation_audit(target_prepare_result, target_torrent_file)
     source_downloaded = _stage_completed(source_download) and _torrent_file_present(source_download_result)
     source_injected = _source_injection_verified(inject_source)
     source_complete = _source_wait_completed(wait_complete)
@@ -5405,6 +5409,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "rule_obligations": rule_obligations,
         "materials": target_materials,
         "materials_ready": bool(target_materials.get("ready")),
+        "preparation_audit": target_preparation_audit,
         "package_reused": bool(target_prepare_result.get("reused")) if isinstance(target_prepare_result, dict) else False,
         "uploaded_torrent_reused": bool(downloaded_torrent.get("reused")) if isinstance(downloaded_torrent, dict) else False,
     }
@@ -5502,6 +5507,82 @@ def _target_materials_summary(package: Any) -> dict[str, Any]:
         "warnings": materials.get("warnings") if isinstance(materials.get("warnings"), list) else [],
         "next_actions": materials.get("next_actions") if isinstance(materials.get("next_actions"), list) else [],
     }
+
+
+def _target_preparation_audit(package: Any, target_torrent_file: str | None = None) -> dict[str, Any]:
+    if not isinstance(package, dict):
+        return {"ready": False, "blockers": ["target preparation package is missing."]}
+    materials = _target_materials_summary(package)
+    package_dir = package.get("package_dir")
+    preflight = _target_preparation_preflight(package_dir, target_torrent_file)
+    upload_payload = preflight.get("upload_payload") if isinstance(preflight.get("upload_payload"), dict) else {}
+    description_file = upload_payload.get("description_file") if isinstance(upload_payload.get("description_file"), dict) else {}
+    content = description_file.get("content") if isinstance(description_file.get("content"), dict) else {}
+    material_checks = upload_payload.get("material_checks") if isinstance(upload_payload.get("material_checks"), list) else []
+    payload_checks = [check for check in material_checks if isinstance(check, dict) and str(check.get("name") or "").startswith("payload.")]
+    description_checks = [check for check in material_checks if isinstance(check, dict) and str(check.get("name") or "").startswith("materials.description.")]
+    required_description_checks = {
+        "materials.description.ptgen_description",
+        "materials.description.external_ids",
+        "materials.description.mediainfo_or_bdinfo",
+        "materials.description.screenshot_bbcode",
+    }
+    description_checks_ready = bool(required_description_checks) and all(
+        any(check.get("name") == name and check.get("ok") is True for check in description_checks) for name in required_description_checks
+    )
+    payload_ready = bool(preflight and preflight.get("status") == "ready")
+    blockers: list[str] = []
+    _extend_unique_string(blockers, _string_list(materials.get("warnings")) if not materials.get("ready") else [])
+    _extend_unique_string(blockers, _string_list(preflight.get("blockers")) if preflight else ["target upload preflight could not be built from the package."])
+    return {
+        "ready": bool(materials.get("ready") and description_checks_ready and payload_ready),
+        "materials_ready": bool(materials.get("ready")),
+        "metadata_ready": bool(materials.get("metadata_ready")),
+        "assets_ready": bool(materials.get("assets_ready")),
+        "description_ready": description_checks_ready,
+        "payload_ready": payload_ready,
+        "package_dir": package_dir,
+        "files": package.get("files") if isinstance(package.get("files"), dict) else {},
+        "description": {
+            "path": description_file.get("path"),
+            "exists": bool(description_file.get("exists")),
+            "char_length": description_file.get("char_length"),
+            "expected_length": description_file.get("expected_length"),
+            "has_ptgen_description": bool(content.get("has_ptgen_description")),
+            "has_external_ids": bool(content.get("has_imdb") and content.get("has_tmdb") and content.get("has_douban")),
+            "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
+            "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
+            "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
+        },
+        "payload": {
+            "status": preflight.get("status") if preflight else None,
+            "torrent_file": upload_payload.get("torrent_file") if isinstance(upload_payload.get("torrent_file"), dict) else None,
+            "materials_ready_required": bool(upload_payload.get("materials_ready_required")) if upload_payload else False,
+            "payload_checks_ready": bool(payload_checks) and all(check.get("ok") is True for check in payload_checks),
+            "description_checks_ready": description_checks_ready,
+        },
+        "materials": materials,
+        "missing": _target_preparation_missing(materials, payload_ready, description_checks_ready),
+        "blockers": blockers,
+    }
+
+
+def _target_preparation_preflight(package_dir: Any, target_torrent_file: str | None) -> dict[str, Any]:
+    if not package_dir:
+        return {}
+    try:
+        return build_mteam_upload_preflight(str(package_dir), execute=True, torrent_file=target_torrent_file)
+    except Exception as exc:
+        return {"status": "blocked", "blockers": [f"target upload preflight failed: {exc}"]}
+
+
+def _target_preparation_missing(materials: dict[str, Any], payload_ready: bool, description_ready: bool) -> list[str]:
+    missing = _string_list(materials.get("missing"))
+    if not description_ready:
+        _append_unique_string(missing, "description.content")
+    if not payload_ready:
+        _append_unique_string(missing, "payload.preflight")
+    return missing
 
 
 def _target_material_missing_checks(checks: list[Any], scope: str) -> list[str]:
@@ -5613,6 +5694,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "rule_obligations": target.get("rule_obligations"),
             "materials": target.get("materials"),
             "materials_ready": bool(target.get("materials_ready")),
+            "preparation_audit": target.get("preparation_audit"),
             "torrent_file": target.get("torrent_file"),
             "uploaded_torrent_id": target.get("uploaded_torrent_id"),
             "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),

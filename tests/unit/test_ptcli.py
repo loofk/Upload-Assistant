@@ -9692,8 +9692,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
-    torrent_file = tmp_path / "target.torrent"
-    torrent_file.write_bytes(b"d4:infod")
+    torrent_file = make_mteam_safe_torrent(tmp_path, "target")
     source_torrent = tmp_path / "source-out" / "U2-60635.torrent"
     source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     mediainfo = tmp_path / "MI_FULL_00.txt"
@@ -9841,6 +9840,14 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert payload["evidence"]["target"]["uploaded_torrent_file_evidence"] is True
     assert payload["evidence"]["target"]["materials_ready"] is True
     assert payload["evidence"]["target"]["materials"]["assets"]["image_hosts"]["count"] == 1
+    target_audit = payload["evidence"]["target"]["preparation_audit"]
+    assert target_audit["ready"] is True
+    assert target_audit["description"]["has_ptgen_description"] is True
+    assert target_audit["description"]["has_external_ids"] is True
+    assert target_audit["description"]["has_mediainfo_or_bdinfo"] is True
+    assert target_audit["description"]["has_screenshot_bbcode"] is True
+    assert target_audit["description"]["bbcode_image_count"] == 1
+    assert target_audit["payload"]["description_checks_ready"] is True
     assert payload["closure_audit"]["ready"] is True
     assert payload["closure_audit"]["missing"] == []
     audit_items = {item["name"]: item for item in payload["closure_audit"]["items"]}
@@ -9861,9 +9868,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["complete"] is True
     assert summary_payload["closure_audit"]["ready"] is True
     assert summary_payload["closure_audit"]["missing"] == []
-    assert summary_payload["closure_status"]["complete"] is False
+    assert summary_payload["closure_status"]["complete"] is True
     assert summary_payload["closure_status"]["closure_complete"] is True
-    assert summary_payload["closure_status"]["pipeline_status"] == "blocked"
+    assert summary_payload["closure_status"]["pipeline_status"] == "ok"
     assert summary_payload["closure_status"]["pipeline_blockers"] == summary_payload["blockers"]
     assert summary_payload["closure_status"]["source"]["ready"] is True
     assert summary_payload["closure_status"]["source"]["hash_consistent"] is True
@@ -9883,6 +9890,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "uploaded": {"timeout": 900.0, "interval": 20.0},
     }
     assert summary_payload["artifacts"]["source_torrent_file"].endswith("U2-60635.torrent")
+    assert summary_payload["artifacts"]["target_preparation_ready"] is True
+    assert summary_payload["artifacts"]["target_preparation_audit"]["description"]["has_screenshot_bbcode"] is True
     assert summary_payload["artifacts"]["source_torrent_file_evidence"] is True
     assert summary_payload["artifacts"]["source_torrent_hash"] == source_hash
     assert summary_payload["artifacts"]["source_save_path"] == "/downloads"
