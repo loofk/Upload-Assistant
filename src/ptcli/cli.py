@@ -1168,7 +1168,7 @@ def _target_preparation_missing_next_actions(missing: list[str]) -> list[str]:
 
 
 def _target_preparation_missing_next_action(missing: str) -> str | None:
-    normalized = missing.removeprefix("target.materials.").removeprefix("materials.")
+    normalized = _target_preparation_missing_key(missing)
     if normalized in {"description.ptgen_description", "metadata.ptgen_description"}:
         return "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package."
     if normalized.startswith("metadata.") or normalized.startswith("description.external_ids"):
@@ -1184,6 +1184,86 @@ def _target_preparation_missing_next_action(missing: str) -> str | None:
     if normalized == "description.content":
         return "Regenerate the MTEAM description after metadata, MediaInfo/BDInfo, screenshot, and image-host materials are ready."
     return None
+
+
+def _target_preparation_recovery_hints(missing: list[str]) -> list[dict[str, Any]]:
+    hints: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in missing:
+        hint = _target_preparation_recovery_hint(item)
+        if not hint or str(hint["key"]) in seen:
+            continue
+        seen.add(str(hint["key"]))
+        hints.append(hint)
+    return hints
+
+
+def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
+    normalized = _target_preparation_missing_key(missing)
+    if normalized in {"description.ptgen_description", "metadata.ptgen_description"}:
+        return _material_recovery_hint(
+            "metadata.ptgen_description",
+            "Fetch PTGen/Douban description before regenerating the MTEAM package.",
+            ["--enrich-metadata", "--fetch-ptgen"],
+            ["--metadata-file"],
+        )
+    if normalized.startswith("metadata.") or normalized.startswith("description.external_ids"):
+        return _material_recovery_hint(
+            "metadata.external_ids",
+            "Fetch or supply IMDb/TMDb/Douban metadata before regenerating the MTEAM package.",
+            ["--enrich-metadata"],
+            ["--metadata-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"],
+        )
+    if normalized in {"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo"}:
+        return _material_recovery_hint(
+            "assets.mediainfo_or_bdinfo",
+            "Generate or provide MediaInfo/BDInfo before regenerating the MTEAM package.",
+            ["--generate-mediainfo"],
+            ["--mediainfo-file", "--bdinfo-file"],
+        )
+    if normalized == "assets.bdinfo_for_disc":
+        return _material_recovery_hint(
+            "assets.bdinfo_for_disc",
+            "Generate or provide BDInfo for BDMV content before regenerating the MTEAM package.",
+            ["--generate-bdinfo"],
+            ["--bdinfo-file"],
+        )
+    if normalized in {"assets.screenshots", "description.screenshot_bbcode"}:
+        return _material_recovery_hint(
+            "assets.screenshots",
+            "Generate or provide screenshots before regenerating the MTEAM package.",
+            ["--generate-screenshots", "--screenshot-count"],
+            ["--screenshot-file"],
+        )
+    if normalized == "assets.image_host_uploads":
+        return _material_recovery_hint(
+            "assets.image_host_uploads",
+            "Upload screenshots to an image host or provide existing image-host upload evidence before regenerating the MTEAM package.",
+            ["--upload-screenshots", "--image-host"],
+            ["--image-host-file"],
+        )
+    if normalized == "description.content":
+        return _material_recovery_hint(
+            "description.content",
+            "Regenerate the MTEAM description after metadata and media materials are ready.",
+            ["--prepare-target"],
+            [],
+        )
+    return None
+
+
+def _target_preparation_missing_key(missing: str) -> str:
+    return missing.removeprefix("target.materials.").removeprefix("materials.")
+
+
+def _material_recovery_hint(key: str, reason: str, command_flags: list[str], existing_file_options: list[str]) -> dict[str, Any]:
+    return {
+        "key": key,
+        "resume_stage": "resume-target-package",
+        "reason": reason,
+        "command_flags": command_flags,
+        "existing_file_options": existing_file_options,
+    }
 
 
 def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespace:
@@ -5858,6 +5938,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "target_materials_missing": target_materials_missing,
             "target_preparation_missing": target_preparation_missing,
             "closure": _run_summary_material_closure(artifacts, material_missing),
+            "recovery_hints": _target_preparation_recovery_hints(material_missing),
             "next_actions": _target_preparation_missing_next_actions(material_missing),
         },
         "blockers": blockers,
@@ -7722,6 +7803,7 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
     screenshots = closure.get("screenshots") if isinstance(closure.get("screenshots"), dict) else {}
     image_host = closure.get("image_host") if isinstance(closure.get("image_host"), dict) else {}
     description = closure.get("description") if isinstance(closure.get("description"), dict) else {}
+    recovery_hints = materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else []
     return {
         "PTCLI_RESUME_MATERIALS_PRESENT": _shell_bool(bool(materials)) if resume_state else None,
         "PTCLI_RESUME_TARGET_MATERIALS_READY": _shell_bool(materials.get("target_materials_ready")) if materials.get("target_materials_ready") is not None else None,
@@ -7760,6 +7842,9 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_HINT_COUNT": len(recovery_hints),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_KEYS": ",".join(str(hint.get("key")) for hint in recovery_hints if isinstance(hint, dict) and hint.get("key")),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_HINTS": json.dumps(recovery_hints, ensure_ascii=False) if recovery_hints else None,
         "PTCLI_RESUME_MATERIAL_NEXT_ACTIONS": " | ".join(_string_list(materials.get("next_actions"))),
     }
 

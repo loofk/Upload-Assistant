@@ -10246,6 +10246,12 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["resume_state"]["materials"]["target_preparation_ready"] is False
     assert "metadata.ptgen_description" in summary_payload["resume_state"]["materials"]["target_materials_missing"]
     assert "metadata.ptgen_description" in summary_payload["resume_state"]["materials"]["target_preparation_missing"]
+    recovery_hints = summary_payload["resume_state"]["materials"]["recovery_hints"]
+    recovery_by_key = {hint["key"]: hint for hint in recovery_hints}
+    assert recovery_by_key["metadata.ptgen_description"]["command_flags"] == ["--enrich-metadata", "--fetch-ptgen"]
+    assert recovery_by_key["metadata.ptgen_description"]["existing_file_options"] == ["--metadata-file"]
+    assert recovery_by_key["description.content"]["command_flags"] == ["--prepare-target"]
+    assert all(hint["resume_stage"] == "resume-target-package" for hint in recovery_hints)
     material_closure = summary_payload["resume_state"]["materials"]["closure"]
     assert material_closure["ready"] is False
     assert material_closure["metadata"]["ready"] is False
@@ -10280,6 +10286,9 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_READY=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_PTGEN=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_HINT_COUNT=2\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=metadata.ptgen_description,description.content\n" in out
+    assert "--fetch-ptgen" in out
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
     assert "resume-target-package" in resume_commands
     assert "--prepare-target" in resume_commands["resume-target-package"]
