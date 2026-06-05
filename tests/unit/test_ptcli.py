@@ -1343,6 +1343,7 @@ def test_target_upload_automation_requires_complete_audit_artifacts() -> None:
                 "target_hash_consistent": True,
                 "target_duplicate_clean": True,
                 "target_rule_obligations": True,
+                "target_preparation_ready": True,
                 "uploaded_wait_evidence": False,
             },
         },
@@ -3039,6 +3040,7 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3107,6 +3109,7 @@ def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3151,6 +3154,7 @@ def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) 
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": False,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -3179,6 +3183,58 @@ def test_summary_check_blocks_missing_pipeline_audit_artifact(tmp_path, capsys) 
     assert "missing audit artifact: injection_verified" in payload["blockers"]
     assert "missing audit artifact: target_rule_obligations" in payload["blockers"]
     assert "missing audit artifact: uploaded_wait_evidence" in payload["blockers"]
+
+
+def test_summary_check_prefers_target_package_for_preparation_audit(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": True,
+                "complete": True,
+                "blockers": [],
+                "evidence": {"source": {"mode": "matched"}, "target": {"mode": "live_upload"}},
+                "closure_audit": {"ready": True, "missing": [], "items": []},
+                "resume_commands": [
+                    {"stage": "resume-target-package", "command": "python3 ptcli.py pipeline --prepare-target", "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"]},
+                    {"stage": "resume-target-upload", "command": "python3 ptcli.py pipeline --upload-target", "argv": ["python3", "ptcli.py", "pipeline", "--upload-target"]},
+                ],
+                "resume_state": {
+                    "next_stage": None,
+                    "next_command": None,
+                    "available_stages": ["resume-target-package", "resume-target-upload"],
+                    "artifacts": {
+                        "source_hash_consistent": True,
+                        "source_wait_evidence": True,
+                        "uploaded_torrent_hash": True,
+                        "injected_torrent_hash": True,
+                        "injection_visible_in_client": True,
+                        "injection_verified": True,
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                        "target_preparation_ready": False,
+                        "uploaded_wait_evidence": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert "target_preparation_ready" in payload["missing_artifacts"]
+    assert "missing audit artifact: target_preparation_ready" in payload["blockers"]
+    assert payload["next_stage"] == "resume-target-package"
+    assert payload["next_command"] == "python3 ptcli.py pipeline --prepare-target"
+    assert payload["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target"]
+    assert payload["automation_action"] == "run_next_command"
 
 
 def test_summary_check_prefers_source_resume_for_source_visibility_artifact(tmp_path, capsys) -> None:
@@ -3212,6 +3268,7 @@ def test_summary_check_prefers_source_resume_for_source_visibility_artifact(tmp_
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3256,6 +3313,7 @@ def test_summary_check_prefers_uploaded_resume_for_uploaded_wait_artifact(tmp_pa
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -3293,6 +3351,7 @@ def test_summary_check_prefers_uploaded_resume_for_target_visibility_artifact(tm
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3354,6 +3413,7 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3446,6 +3506,7 @@ def test_summary_check_blocks_complete_pipeline_qbit_wait_mismatch(tmp_path, cap
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3502,6 +3563,7 @@ def test_summary_check_blocks_ready_target_upload_qbit_wait_mismatch(tmp_path, c
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3620,6 +3682,7 @@ def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3670,6 +3733,7 @@ def test_summary_check_print_next_command_outputs_only_command(tmp_path, capsys)
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3705,6 +3769,7 @@ def test_summary_check_print_next_command_is_quiet_when_complete(tmp_path, capsy
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3777,6 +3842,7 @@ def test_summary_check_print_next_argv_outputs_safe_command_argv(tmp_path, capsy
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3812,6 +3878,7 @@ def test_summary_check_print_next_argv_is_quiet_when_complete(tmp_path, capsys) 
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -3843,6 +3910,7 @@ def test_summary_check_print_next_argv_fails_without_safe_argv(tmp_path, capsys)
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -3882,6 +3950,7 @@ def test_summary_check_print_first_runnable_command_outputs_allowlisted_candidat
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -3921,6 +3990,7 @@ def test_summary_check_print_first_runnable_argv_outputs_allowlisted_candidate(t
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -3951,6 +4021,7 @@ def test_summary_check_print_first_runnable_argv_fails_without_runnable_candidat
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4003,6 +4074,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4164,6 +4236,7 @@ def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatc
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4211,6 +4284,7 @@ def test_summary_check_run_first_runnable_command_executes_allowlisted_candidate
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4249,6 +4323,7 @@ def test_summary_check_run_first_runnable_command_fails_without_candidate(tmp_pa
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4305,6 +4380,7 @@ def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) ->
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4368,6 +4444,7 @@ def test_summary_check_exposes_unsupported_next_command_metadata(tmp_path, capsy
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4424,6 +4501,7 @@ def test_summary_check_run_next_command_rejects_non_ptcli_command(tmp_path, monk
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4460,6 +4538,7 @@ def test_summary_check_run_next_command_rejects_non_resume_ptcli_command(tmp_pat
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4503,6 +4582,7 @@ def test_summary_check_marks_placeholder_next_command_not_ready(tmp_path, capsys
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4543,6 +4623,7 @@ def test_summary_check_run_next_command_rejects_placeholder_argv(tmp_path, monke
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4584,6 +4665,7 @@ def test_summary_check_run_next_command_is_noop_when_complete(tmp_path, monkeypa
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -4622,6 +4704,7 @@ def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> Non
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "uploaded_wait_evidence": True,
                     },
                 },
@@ -4658,6 +4741,7 @@ def test_summary_check_prefers_uploaded_resume_for_target_upload_wait_artifact(t
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4690,6 +4774,7 @@ def test_summary_check_falls_back_to_target_upload_recommended_command(tmp_path,
                         "target_hash_consistent": True,
                         "target_duplicate_clean": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                     },
                 },
             }
@@ -4727,6 +4812,7 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
                         "rules_acknowledged": True,
                         "live_upload_confirmation": True,
                         "target_rule_obligations": True,
+                        "target_preparation_ready": True,
                         "target_package_preflight_ready": True,
                         "download_uploaded_torrent": True,
                         "inject_uploaded_torrent": True,
@@ -9957,6 +10043,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "target_hash_consistent": True,
         "target_duplicate_clean": True,
         "target_rule_obligations": True,
+        "target_preparation_ready": True,
     }
     assert summary_payload["artifacts"]["source_torrent_file"] in resume_commands["resume-source-torrent"]
     assert resume_argv["resume-source-torrent"][:3] == ["python3", "ptcli.py", "pipeline"]

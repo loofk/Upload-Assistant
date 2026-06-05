@@ -871,6 +871,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
             "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
+            "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
         },
         "blockers": [str(blocker) for blocker in blockers],
     }
@@ -1824,6 +1825,7 @@ def _target_upload_resume_state(summary: dict[str, Any], artifacts: dict[str, An
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
             "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
+            "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
         },
         "blockers": _string_list(summary.get("blockers")),
     }
@@ -2394,6 +2396,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "target_hash_consistent",
         "target_duplicate_clean",
         "target_rule_obligations",
+        "target_preparation_ready",
         "uploaded_wait_evidence",
     ]
     if _summary_source_injection_audit_required(payload):
@@ -2607,6 +2610,8 @@ def _argv_list(value: Any) -> list[str] | None:
 
 def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, ...]:
     preferred: list[str] = []
+    if "target_preparation_ready" in missing_audit:
+        preferred.append("resume-target-package")
     if any(
         name in missing_audit
         for name in (
@@ -2650,7 +2655,7 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     if any(name in missing_audit for name in ("target_duplicate_clean", "target_rule_obligations", "target.prepared", "target.uploaded", "target.duplicate_clean", "target.rule_obligations")):
         preferred.append("resume-target-upload")
-    preferred.extend(["resume-source-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
+    preferred.extend(["resume-source-torrent", "resume-target-package", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
     return tuple(dict.fromkeys(preferred))
 
 
@@ -4920,8 +4925,9 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     target_torrent_file = artifacts.get("target_torrent_file")
     uploaded_torrent_id = artifacts.get("uploaded_torrent_id")
     target_materials_ready = bool(artifacts.get("target_materials_ready"))
+    target_preparation_ready = bool(artifacts.get("target_preparation_ready"))
     target_package_planned = bool(requested_actions.get("prepare_target") or effective_actions.get("prepare_target") or effective_actions.get("live_target_upload"))
-    if target_package_planned and (not target_package_dir or not target_materials_ready):
+    if target_package_planned and (not target_package_dir or not target_materials_ready or not target_preparation_ready):
         commands.append(
             _ptcli_command_entry(
                 "resume-target-package",
@@ -5104,6 +5110,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
             "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
+            "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
         },
         "blockers": blockers,
     }
@@ -5145,6 +5152,8 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
     if (
         "target.prepared" in blocker_names
         or "target.materials_ready" in blocker_names
+        or "target_preparation_ready" in blocker_names
+        or "missing audit artifact: target_preparation_ready" in blocker_names
         or "closure audit missing: target.materials_ready" in blocker_names
     ):
         preferred_stages.append("resume-target-package")
