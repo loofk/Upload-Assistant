@@ -4227,6 +4227,20 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                     "target_capabilities": [{"tracker": "MTEAM", "target_upload_adapter": "mteam_api", "credential_requirements": ["TRACKERS.MTEAM.api_key"]}],
                     "credential_requirements": ["TRACKERS.U2.passkey", "data/cookies/U2.txt", "TRACKERS.MTEAM.api_key"],
                 },
+                "artifacts": {
+                    "material_generation": {
+                        "prerequisites": {"ok": True, "blockers": []},
+                        "metadata": {"ok": True, "missing": [], "ptgen_description_length": 42},
+                        "mediainfo": {"ok": True, "mediainfo_file": "/tmp/MI_FULL_00.txt"},
+                        "screenshots": {"ok": True, "count": 3, "screenshot_files": ["/tmp/s1.png", "/tmp/s2.png", "/tmp/s3.png"]},
+                        "image_host": {"ok": True, "host": "ptpimg", "count": 3, "image_host_file": "/tmp/image-host-uploads.json"},
+                    },
+                    "target_materials": {"ready": True, "missing": []},
+                    "target_materials_ready": True,
+                    "target_preparation_ready": True,
+                    "target_materials_missing": [],
+                    "target_preparation_missing": [],
+                },
                 "resume_commands": [
                     {
                         "stage": "resume-target-upload",
@@ -4265,6 +4279,22 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_FLOW_SOURCE_ID=60635\n" in out
     assert "export PTCLI_FLOW_TARGET_TRACKERS=MTEAM\n" in out
     assert "export PTCLI_CREDENTIAL_REQUIREMENTS=TRACKERS.U2.passkey,data/cookies/U2.txt,TRACKERS.MTEAM.api_key\n" in out
+    assert "export PTCLI_MATERIAL_PRESENT=1\n" in out
+    assert "export PTCLI_MATERIAL_GENERATION_READY=1\n" in out
+    assert "export PTCLI_TARGET_MATERIALS_READY=1\n" in out
+    assert "export PTCLI_TARGET_PREPARATION_READY=1\n" in out
+    assert "export PTCLI_TARGET_MATERIALS_MISSING=''\n" in out
+    assert "export PTCLI_TARGET_PREPARATION_MISSING=''\n" in out
+    assert "export PTCLI_MATERIAL_BLOCKERS=''\n" in out
+    assert "export PTCLI_MATERIAL_PREREQUISITES_OK=1\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_OK=1\n" in out
+    assert "export PTCLI_MATERIAL_PTGEN_DESCRIPTION_LENGTH=42\n" in out
+    assert "export PTCLI_MATERIAL_MEDIAINFO_OK=1\n" in out
+    assert "export PTCLI_MATERIAL_SCREENSHOTS_OK=1\n" in out
+    assert "export PTCLI_MATERIAL_SCREENSHOTS_COUNT=3\n" in out
+    assert "export PTCLI_MATERIAL_IMAGE_HOST_OK=1\n" in out
+    assert "export PTCLI_MATERIAL_IMAGE_HOST_HOST=ptpimg\n" in out
+    assert "export PTCLI_MATERIAL_IMAGE_HOST_COUNT=3\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=0\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCHES=''\n" in out

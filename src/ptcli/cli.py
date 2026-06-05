@@ -7097,6 +7097,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else {}
     closure_source = closure_status.get("source") if isinstance(closure_status.get("source"), dict) else {}
     closure_target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
+    material_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
     qbit_wait_diagnostics = payload.get("qbit_wait_diagnostics") if isinstance(payload.get("qbit_wait_diagnostics"), dict) else {}
     qbit_wait_retry_hints = payload.get("qbit_wait_retry_hints") if isinstance(payload.get("qbit_wait_retry_hints"), dict) else {}
     fields = {
@@ -7163,11 +7164,46 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_LIVE_SAFE_TO_ATTEMPT": _shell_bool(payload.get("live_safe_to_attempt")),
         "PTCLI_SUMMARY_FILE": payload.get("summary_file"),
     }
+    fields.update(_summary_check_material_shell_fields(material_diagnostics))
     fields.update(_summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics))
     fields.update(_summary_check_qbit_retry_shell_fields(qbit_wait_retry_hints))
     for key, value in fields.items():
         print(f"export {key}={shlex.quote('' if value is None else str(value))}")
     return 0
+
+
+def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    sections = material_diagnostics.get("sections") if isinstance(material_diagnostics.get("sections"), dict) else {}
+    prerequisites = sections.get("prerequisites") if isinstance(sections.get("prerequisites"), dict) else {}
+    metadata = sections.get("metadata") if isinstance(sections.get("metadata"), dict) else {}
+    mediainfo = sections.get("mediainfo") if isinstance(sections.get("mediainfo"), dict) else {}
+    screenshots = sections.get("screenshots") if isinstance(sections.get("screenshots"), dict) else {}
+    image_host = sections.get("image_host") if isinstance(sections.get("image_host"), dict) else {}
+    return {
+        "PTCLI_MATERIAL_PRESENT": _shell_bool(material_diagnostics.get("present")) if "present" in material_diagnostics else None,
+        "PTCLI_MATERIAL_GENERATION_PRESENT": _shell_bool(material_diagnostics.get("generation_present")) if "generation_present" in material_diagnostics else None,
+        "PTCLI_MATERIAL_GENERATION_READY": _shell_bool(material_diagnostics.get("generation_ready")) if material_diagnostics.get("generation_ready") is not None else None,
+        "PTCLI_TARGET_MATERIALS_PRESENT": _shell_bool(material_diagnostics.get("target_materials_present")) if "target_materials_present" in material_diagnostics else None,
+        "PTCLI_TARGET_MATERIALS_READY": _shell_bool(material_diagnostics.get("target_materials_ready")) if material_diagnostics.get("target_materials_ready") is not None else None,
+        "PTCLI_TARGET_PREPARATION_READY": _shell_bool(material_diagnostics.get("target_preparation_ready")) if material_diagnostics.get("target_preparation_ready") is not None else None,
+        "PTCLI_TARGET_MATERIALS_MISSING": ",".join(_string_list(material_diagnostics.get("target_materials_missing"))),
+        "PTCLI_TARGET_PREPARATION_MISSING": ",".join(_string_list(material_diagnostics.get("target_preparation_missing"))),
+        "PTCLI_MATERIAL_BLOCKERS": ",".join(_string_list(material_diagnostics.get("blockers"))),
+        "PTCLI_MATERIAL_PREREQUISITES_OK": _summary_material_section_shell_bool(prerequisites),
+        "PTCLI_MATERIAL_METADATA_OK": _summary_material_section_shell_bool(metadata),
+        "PTCLI_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
+        "PTCLI_MATERIAL_PTGEN_DESCRIPTION_LENGTH": metadata.get("ptgen_description_length"),
+        "PTCLI_MATERIAL_MEDIAINFO_OK": _summary_material_section_shell_bool(mediainfo),
+        "PTCLI_MATERIAL_SCREENSHOTS_OK": _summary_material_section_shell_bool(screenshots),
+        "PTCLI_MATERIAL_SCREENSHOTS_COUNT": screenshots.get("count"),
+        "PTCLI_MATERIAL_IMAGE_HOST_OK": _summary_material_section_shell_bool(image_host),
+        "PTCLI_MATERIAL_IMAGE_HOST_HOST": image_host.get("host"),
+        "PTCLI_MATERIAL_IMAGE_HOST_COUNT": image_host.get("count"),
+    }
+
+
+def _summary_material_section_shell_bool(section: dict[str, Any]) -> str | None:
+    return _shell_bool(section.get("ok")) if "ok" in section and section.get("ok") is not None else None
 
 
 def _summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics: dict[str, Any]) -> dict[str, Any]:
