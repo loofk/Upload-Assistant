@@ -4824,6 +4824,10 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         "source_torrent_hash": payload.get("source_torrent_hash"),
         "target_torrent_file": payload.get("target_torrent_file"),
     }
+    qbit_wait_fields = _qbit_wait_summary_fields(payload)
+    if qbit_wait_fields["qbit_wait_mismatch"]:
+        artifacts["qbit_wait_mismatches"] = qbit_wait_fields["qbit_wait_mismatches"]
+        artifacts["qbit_wait_retry_hints"] = qbit_wait_fields["qbit_wait_retry_hints"]
     if _artifact_value_present(evidence_source.get("hash_consistent")):
         artifacts["source_hash_consistent"] = evidence_source.get("hash_consistent")
     if _artifact_value_present(evidence_source.get("injected_torrent_hash")):

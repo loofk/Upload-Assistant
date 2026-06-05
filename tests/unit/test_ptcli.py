@@ -3718,6 +3718,12 @@ def test_run_summary_exposes_qbit_wait_request_mismatch(tmp_path) -> None:
     assert payload["qbit_wait_mismatches"] == ["source.requested_hash", "uploaded.requested_content_path"]
     assert payload["qbit_wait_diagnostics"]["source"]["observed_hashes"] == ["f" * 40]
     assert payload["qbit_wait_diagnostics"]["uploaded"]["observed_content_paths"] == ["/downloads/Other"]
+    assert payload["artifacts"]["qbit_wait_mismatches"] == ["source.requested_hash", "uploaded.requested_content_path"]
+    assert payload["artifacts"]["qbit_wait_retry_hints"]["source"]["suggested_torrent_hash"] == "f" * 40
+    assert payload["artifacts"]["qbit_wait_retry_hints"]["source"]["suggested_content_path"] == "/downloads/Example"
+    assert payload["artifacts"]["qbit_wait_retry_hints"]["uploaded"]["suggested_torrent_hash"] == "b" * 40
+    assert payload["artifacts"]["qbit_wait_retry_hints"]["uploaded"]["suggested_content_path"] == "/downloads/Other"
+    assert payload["artifacts"]["qbit_wait_retry_hints"]["uploaded"]["suggested_save_path"] == "/downloads"
 
 
 def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -> None:
