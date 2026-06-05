@@ -653,6 +653,16 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "hash_consistent": True,
                     "duplicate_clean": True,
                     "rule_obligations": rule_obligations,
+                    "preparation_audit": {
+                        "ready": True,
+                        "description": {
+                            "has_ptgen_description": True,
+                            "has_external_ids": True,
+                            "has_mediainfo_or_bdinfo": True,
+                            "has_screenshot_bbcode": True,
+                            "bbcode_image_count": 1,
+                        },
+                    },
                     "uploaded_wait_evidence": True,
                 },
             },
@@ -814,6 +824,17 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "target_hash_consistent": True,
         "target_duplicate_clean": True,
         "target_rule_obligations": {"ready": True, "count": 2, "missing": []},
+        "target_preparation_audit": {
+            "ready": True,
+            "description": {
+                "has_ptgen_description": True,
+                "has_external_ids": True,
+                "has_mediainfo_or_bdinfo": True,
+                "has_screenshot_bbcode": True,
+                "bbcode_image_count": 1,
+            },
+        },
+        "target_preparation_ready": True,
     }
     assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
     assert payload["candidate_command_count"] == 1
@@ -871,6 +892,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["target_hash_consistent"] is True
     assert payload["resume_state"]["artifacts"]["target_duplicate_clean"] is True
     assert payload["resume_state"]["artifacts"]["target_rule_obligations"] is True
+    assert payload["resume_state"]["artifacts"]["target_preparation_ready"] is True
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True
@@ -1469,6 +1491,14 @@ def test_retorrent_execute_blockers_require_closure_audit_ready() -> None:
     )
 
     assert blockers == ["target.uploaded_wait_evidence"]
+
+
+def test_retorrent_next_actions_explain_target_preparation_ready() -> None:
+    actions = ptcli_cli._retorrent_execute_next_actions({}, ["target_preparation_ready"])
+
+    assert actions == [
+        "Regenerate the MTEAM target package after completing IMDb/TMDb/Douban metadata, PTGen/Douban description, MediaInfo/BDInfo, screenshot, and image-host materials."
+    ]
 
 
 def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:

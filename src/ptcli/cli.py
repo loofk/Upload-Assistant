@@ -802,6 +802,8 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         "target_hash_consistent",
         "target_duplicate_clean",
         "target_rule_obligations",
+        "target_preparation_audit",
+        "target_preparation_ready",
     ):
         if key in merged and _artifact_value_present(merged.get(key)):
             continue
@@ -809,6 +811,9 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         value = evidence_target.get(target_key) or closure_target.get(target_key) or summary_target.get(target_key)
         if _artifact_value_present(value):
             merged[key] = value
+    preparation_audit = merged.get("target_preparation_audit")
+    if "target_preparation_ready" not in merged and isinstance(preparation_audit, dict):
+        merged["target_preparation_ready"] = bool(preparation_audit.get("ready"))
     if "injection_visible_in_client" not in merged:
         target_injection = evidence_target.get("qbit_closure", {}).get("injection") if isinstance(evidence_target.get("qbit_closure"), dict) else None
         if isinstance(target_injection, dict):
@@ -1031,6 +1036,7 @@ def _target_artifact_evidence_key(artifact_key: str) -> str:
         "target_hash_consistent": "hash_consistent",
         "target_duplicate_clean": "duplicate_clean",
         "target_rule_obligations": "rule_obligations",
+        "target_preparation_audit": "preparation_audit",
         "uploaded_torrent_file_evidence": "uploaded_torrent_file_evidence",
     }.get(artifact_key, artifact_key)
 
@@ -1108,6 +1114,8 @@ def _retorrent_execute_blocker_next_action(blocker: str) -> str:
         return "Verify the uploaded target torrent is active in qBittorrent, then re-run with --wait-uploaded-complete."
     if blocker == "target.uploaded":
         return "Resume the MTEAM target upload stage after duplicate and rule gates are ready."
+    if blocker == "target_preparation_ready":
+        return "Regenerate the MTEAM target package after completing IMDb/TMDb/Douban metadata, PTGen/Douban description, MediaInfo/BDInfo, screenshot, and image-host materials."
     if blocker == "pipeline did not report ready.":
         return "Inspect the pipeline blockers and resume from the first incomplete stage."
     if blocker.startswith("pipeline status is "):
