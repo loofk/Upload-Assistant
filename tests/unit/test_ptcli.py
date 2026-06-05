@@ -3399,6 +3399,13 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["target_materials_ready"] is False
     assert diagnostics["target_materials_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
     assert diagnostics["target_preparation_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
+    assert diagnostics["critical_ready"] is False
+    assert diagnostics["critical_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
+    assert diagnostics["critical_domains"]["media_info"] == {"ready": False, "missing": ["assets.bdinfo_for_disc"]}
+    assert diagnostics["critical_domains"]["image_host"] == {"ready": False, "missing": ["assets.image_host_uploads"]}
+    assert diagnostics["critical_domains"]["metadata"]["ready"] is True
+    assert diagnostics["critical_domains"]["screenshots"]["ready"] is True
+    assert diagnostics["critical_domains"]["description"]["ready"] is True
     assert diagnostics["disc_structure"]["type"] == "BDMV"
     assert diagnostics["disc_structure"]["bdmv"] is True
     assert diagnostics["sections"]["prerequisites"]["ok"] is False
@@ -3408,6 +3415,15 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["image_host_urls"]["img_urls"] == ["https://img.example/thumb.png"]
     assert diagnostics["image_host_urls"]["web_urls"] == ["https://img.example/page"]
     assert diagnostics["blockers"] == ["prerequisites: --upload-screenshots requires --image-host.", "BDMV disc content requires --bdinfo-file.", "Image-host uploads are missing."]
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_MATERIAL_CRITICAL_READY=0\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_MISSING=assets.bdinfo_for_disc,assets.image_host_uploads\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_MEDIA_INFO_READY=0\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_MEDIA_INFO_MISSING=assets.bdinfo_for_disc\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_IMAGE_HOST_READY=0\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_IMAGE_HOST_MISSING=assets.image_host_uploads\n" in out
 
 
 def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -> None:
@@ -10293,6 +10309,13 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert all(hint["resume_stage"] == "resume-target-package" for hint in recovery_hints)
     material_closure = summary_payload["resume_state"]["materials"]["closure"]
     assert material_closure["ready"] is False
+    assert material_closure["critical_ready"] is False
+    assert material_closure["critical_missing"] == ["metadata.ptgen_description", "description.content"]
+    assert material_closure["critical_domains"]["metadata"] == {"ready": False, "missing": ["metadata.ptgen_description"]}
+    assert material_closure["critical_domains"]["description"] == {"ready": False, "missing": ["description.content"]}
+    assert material_closure["critical_domains"]["media_info"]["ready"] is True
+    assert material_closure["critical_domains"]["screenshots"]["ready"] is True
+    assert material_closure["critical_domains"]["image_host"]["ready"] is True
     assert material_closure["metadata"]["ready"] is False
     assert material_closure["metadata"]["imdb_id"] == 1234567
     assert material_closure["metadata"]["tmdb_id"] == 2
@@ -10315,6 +10338,15 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert code == 0
     out = capsys.readouterr().out
     assert "export PTCLI_RESUME_MATERIAL_CLOSURE_READY=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_READY=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_MISSING=metadata.ptgen_description,description.content\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_METADATA_READY=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_METADATA_MISSING=metadata.ptgen_description\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_MEDIA_INFO_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_SCREENSHOTS_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_IMAGE_HOST_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_DESCRIPTION_READY=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_DESCRIPTION_MISSING=description.content\n" in out
     assert "export PTCLI_RESUME_MATERIAL_METADATA_READY=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_METADATA_IMDB_ID=1234567\n" in out
     assert "export PTCLI_RESUME_MATERIAL_METADATA_TMDB_ID=2\n" in out
