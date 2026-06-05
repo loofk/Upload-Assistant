@@ -4942,6 +4942,10 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         "source_torrent_hash": payload.get("source_torrent_hash"),
         "target_torrent_file": payload.get("target_torrent_file"),
     }
+    if isinstance(stages, list):
+        material_generation = _material_generation_artifacts(stages)
+        if material_generation:
+            artifacts["material_generation"] = material_generation
     qbit_wait_fields = _qbit_wait_summary_fields(payload)
     if qbit_wait_fields["qbit_wait_mismatch"]:
         artifacts["qbit_wait_mismatches"] = qbit_wait_fields["qbit_wait_mismatches"]
@@ -5022,6 +5026,72 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         if isinstance(dupe_result, dict):
             artifacts["fresh_duplicate_check"] = dupe_result
     return artifacts
+
+
+def _material_generation_artifacts(stages: list[dict[str, Any]]) -> dict[str, Any]:
+    artifacts: dict[str, Any] = {}
+    prerequisite_stage = _find_stage(stages, "material-prerequisite-check")
+    if isinstance(prerequisite_stage, dict):
+        result = prerequisite_stage.get("result") if isinstance(prerequisite_stage.get("result"), dict) else {}
+        artifacts["prerequisites"] = {
+            "ok": bool(prerequisite_stage.get("ok")),
+            "skipped": bool(prerequisite_stage.get("skipped")),
+            "message": prerequisite_stage.get("error") or prerequisite_stage.get("message"),
+            "checks": result.get("checks") if isinstance(result.get("checks"), list) else [],
+            "blockers": _string_list(result.get("blockers")),
+        }
+    metadata_stage = _find_stage(stages, "metadata-enrich")
+    if isinstance(metadata_stage, dict):
+        result = metadata_stage.get("result") if isinstance(metadata_stage.get("result"), dict) else {}
+        enrichment = result.get("metadata_enrichment") if isinstance(result.get("metadata_enrichment"), dict) else {}
+        artifacts["metadata"] = {
+            "ok": bool(metadata_stage.get("ok")),
+            "skipped": bool(metadata_stage.get("skipped")),
+            "message": metadata_stage.get("error") or metadata_stage.get("message"),
+            "ready": bool(enrichment.get("ready")),
+            "status": enrichment.get("status"),
+            "sources": enrichment.get("sources") if isinstance(enrichment.get("sources"), list) else [],
+            "applied": enrichment.get("applied") if isinstance(enrichment.get("applied"), dict) else {},
+            "missing": _string_list(enrichment.get("missing")),
+            "blockers": [*_string_list(enrichment.get("blockers")), *_string_list(enrichment.get("readiness_blockers"))],
+            "imdb_id": result.get("imdb_id"),
+            "tmdb_id": result.get("tmdb_id"),
+            "douban_id": result.get("douban_id"),
+            "douban_url": result.get("douban_url"),
+            "ptgen_description_length": len(str(result.get("ptgen_description") or "")),
+        }
+    _append_material_file_stage_artifact(artifacts, stages, "mediainfo", "materials-mediainfo", ("mediainfo_file", "mediainfo_summary_file", "mediainfo_json_file"))
+    _append_material_file_stage_artifact(artifacts, stages, "screenshots", "materials-screenshots", ("screenshot_files",))
+    _append_material_file_stage_artifact(artifacts, stages, "image_host", "materials-image-host", ("image_host_file",))
+    return artifacts
+
+
+def _append_material_file_stage_artifact(artifacts: dict[str, Any], stages: list[dict[str, Any]], key: str, stage_name: str, file_keys: tuple[str, ...]) -> None:
+    stage = _find_stage(stages, stage_name)
+    if not isinstance(stage, dict):
+        return
+    result = stage.get("result") if isinstance(stage.get("result"), dict) else {}
+    payload: dict[str, Any] = {
+        "ok": bool(stage.get("ok")),
+        "skipped": bool(stage.get("skipped")),
+        "message": stage.get("error") or stage.get("message"),
+        "status": result.get("status"),
+        "blockers": _string_list(result.get("blockers")),
+    }
+    for file_key in file_keys:
+        if file_key in result:
+            payload[file_key] = result.get(file_key)
+    if "media_file" in result:
+        payload["media_file"] = result.get("media_file")
+    if "count" in result:
+        payload["count"] = result.get("count")
+    if "requested_count" in result:
+        payload["requested_count"] = result.get("requested_count")
+    if "host" in result:
+        payload["host"] = result.get("host")
+    if "items" in result and isinstance(result.get("items"), list):
+        payload["items"] = result.get("items")
+    artifacts[key] = payload
 
 
 def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, Any]) -> list[dict[str, Any]]:

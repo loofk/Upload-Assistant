@@ -9425,6 +9425,9 @@ async def test_pipeline_material_prerequisite_check_blocks_missing_image_host(mo
     assert prerequisite_stage["ok"] is False
     assert "--upload-screenshots requires --image-host" in prerequisite_stage["result"]["blockers"][0]
     assert image_host_stage["ok"] is False
+    assert payload["artifacts"]["material_generation"]["prerequisites"]["ok"] is False
+    assert payload["artifacts"]["material_generation"]["prerequisites"]["blockers"] == prerequisite_stage["result"]["blockers"]
+    assert payload["artifacts"]["material_generation"]["image_host"]["skipped"] is True
     assert any(blocker.startswith("material-prerequisite-check:") for blocker in payload["blockers"])
     assert "Fix the metadata/material prerequisites" in payload["next_actions"][0]
 
@@ -9808,6 +9811,14 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "metadata.ptgen_description" in summary_payload["artifacts"]["target_materials_missing"]
     assert summary_payload["artifacts"]["target_materials_warnings"]
     assert "metadata.ptgen_description" in summary_payload["artifacts"]["target_preparation_missing"]
+    material_generation = summary_payload["artifacts"]["material_generation"]
+    assert material_generation["prerequisites"]["ok"] is True
+    assert material_generation["metadata"]["ok"] is True
+    assert material_generation["metadata"]["missing"] == []
+    assert material_generation["metadata"]["ptgen_description_length"] == 0
+    assert material_generation["mediainfo"]["skipped"] is True
+    assert material_generation["screenshots"]["skipped"] is True
+    assert material_generation["image_host"]["skipped"] is True
     assert summary_payload["status"] == "blocked"
     assert any("target.materials.metadata.ptgen_description" in blocker for blocker in summary_payload["blockers"])
     assert any("PTGen/Douban description" in action for action in summary_payload["next_actions"])
