@@ -13656,6 +13656,19 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
     assert preflight["upload_payload"]["description_file"]["content"]["has_ptgen_description"] is True
     assert preflight["upload_payload"]["description_file"]["content"]["has_screenshot_bbcode"] is True
     assert preflight["upload_payload"]["description_file"]["content"]["has_mediainfo_or_bdinfo"] is True
+    assert preflight["upload_payload"]["description_file"]["content"]["external_links"]["imdb"] == "https://www.imdb.com/title/tt1234567"
+    assert preflight["upload_payload"]["description_file"]["content"]["external_links"]["tmdb"] == "https://www.themoviedb.org/movie/999"
+    assert preflight["upload_payload"]["description_file"]["content"]["external_links"]["douban"] == "https://movie.douban.com/subject/1291546/"
+    review = preflight["upload_payload"]["review"]
+    assert review["description"]["external_links"]["imdb"] == "https://www.imdb.com/title/tt1234567"
+    assert review["description"]["external_links"]["tmdb"] == "https://www.themoviedb.org/movie/999"
+    assert review["description"]["external_links"]["douban"] == "https://movie.douban.com/subject/1291546/"
+    assert review["description"]["bbcode_image_count"] == 1
+    assert review["materials"]["mediainfo_or_bdinfo_source"] == str(mediainfo)
+    assert review["materials"]["mediainfo_or_bdinfo_length"] == len(mediainfo.read_text(encoding="utf-8"))
+    assert review["materials"]["screenshot_file_count"] == 1
+    assert review["materials"]["image_host_count"] == 1
+    assert review["form"]["name"] == source_info["name"]
     assert all(check["ok"] for check in preflight["upload_payload"]["material_checks"])
 
 

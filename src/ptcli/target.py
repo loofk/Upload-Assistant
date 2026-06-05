@@ -297,6 +297,7 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
         "materials_ready_required": enforce_materials,
         "file_field": "file",
         "description_file": description_summary,
+        "review": _mteam_upload_review_summary(form_fields, description_summary, materials),
         "torrent_file": torrent_summary,
         "blockers": blockers,
     }
@@ -1392,6 +1393,7 @@ def _mteam_description_summary(package: dict[str, Any], expected_length: int) ->
 
 def _mteam_description_content_summary(text: str) -> dict[str, Any]:
     img_matches = re.findall(r"\[img(?:=[^\]]+)?\]", text, flags=re.IGNORECASE)
+    external_links = _mteam_description_external_links(text)
     return {
         "has_ptgen_description": "[b]Movie information[/b]" in text and "PTGen/Douban description: missing" not in text,
         "has_screenshot_bbcode": "[b]Screenshots[/b]" in text and bool(img_matches),
@@ -1400,6 +1402,52 @@ def _mteam_description_content_summary(text: str) -> dict[str, Any]:
         "has_imdb": bool(re.search(r"imdb\.com/title/tt\d+|^\[b\]IMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
         "has_tmdb": bool(re.search(r"themoviedb\.org/(?:movie|tv)/\d+|^\[b\]TMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
         "has_douban": bool(re.search(r"movie\.douban\.com/subject/\d+|^\[b\]Douban\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
+        "external_links": external_links,
+    }
+
+
+def _mteam_description_external_links(text: str) -> dict[str, str | None]:
+    return {
+        "imdb": _first_regex_match(r"https?://(?:www\.)?imdb\.com/title/tt\d+/?", text),
+        "tmdb": _first_regex_match(r"https?://(?:www\.)?themoviedb\.org/(?:movie|tv)/\d+/?", text),
+        "douban": _first_regex_match(r"https?://movie\.douban\.com/subject/\d+/?", text),
+    }
+
+
+def _first_regex_match(pattern: str, text: str) -> str | None:
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    return match.group(0) if match else None
+
+
+def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summary: dict[str, Any], materials: dict[str, Any]) -> dict[str, Any]:
+    content = description_summary.get("content") if isinstance(description_summary.get("content"), dict) else {}
+    assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
+    screenshots = assets.get("screenshots") if isinstance(assets.get("screenshots"), dict) else {}
+    image_hosts = assets.get("image_hosts") if isinstance(assets.get("image_hosts"), dict) else {}
+    return {
+        "description": {
+            "path": description_summary.get("path"),
+            "char_length": description_summary.get("char_length"),
+            "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
+            "has_ptgen_description": bool(content.get("has_ptgen_description")),
+            "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
+            "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
+            "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
+        },
+        "materials": {
+            "mediainfo_or_bdinfo_source": _mteam_material_mediainfo_source(materials),
+            "mediainfo_or_bdinfo_length": _mteam_material_mediainfo_length(materials),
+            "screenshot_file_count": int(screenshots.get("count", 0) or 0),
+            "image_host_count": int(image_hosts.get("count", 0) or 0),
+        },
+        "form": {
+            "name": form_fields.get("name"),
+            "smallDescr": form_fields.get("smallDescr"),
+            "category": form_fields.get("category"),
+            "standard": form_fields.get("standard"),
+            "imdb": form_fields.get("imdb"),
+            "douban": form_fields.get("douban"),
+        },
     }
 
 
