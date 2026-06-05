@@ -3008,6 +3008,58 @@ def test_run_summary_resume_commands_include_source_download_retry_without_torre
     assert "--summary-output-dir /tmp/summary" in command
 
 
+def test_run_summary_resume_commands_include_target_torrent_export_retry() -> None:
+    payload = {
+        "source_tracker": "U2",
+        "source_torrent_id": "60635",
+        "target_trackers": ["MTEAM"],
+        "path": "/downloads/Name",
+        "client": "seedbox",
+        "output_options": {"target_torrent_output_dir": "/tmp/exported", "uploaded_output_dir": "/tmp/uploaded", "summary_output_dir": "/tmp/summary"},
+        "wait_options": {"uploaded": {"timeout": 900.0, "interval": 20.0}},
+        "qbit_options": {"uploaded": {"category": "MTEAM", "tags": "retorrent", "paused": True}},
+        "requested_actions": {"prepare_target": True, "upload_target": True, "target_execute": True},
+        "effective_actions": {"live_target_upload": True, "prepare_target": True, "upload_target": True, "target_execute": True, "target_torrent_export": True},
+        "closure": {"complete": False, "blockers": ["target.uploaded"]},
+        "blockers": ["target.uploaded"],
+    }
+    artifacts = {
+        "target_package_dir": "/tmp/package",
+        "target_materials_ready": True,
+        "target_preparation_ready": True,
+        "uploaded_save_path": "/downloads/Name",
+    }
+
+    commands = {command["stage"]: command for command in ptcli_cli._run_summary_resume_commands(payload, artifacts)}
+    resume_state = ptcli_cli._run_summary_resume_state(payload, artifacts, list(commands.values()))
+
+    assert "resume-target-torrent" in commands
+    command = commands["resume-target-torrent"]["command"]
+    argv = commands["resume-target-torrent"]["argv"]
+    assert resume_state["next_stage"] == "resume-target-torrent"
+    assert resume_state["next_command"] == command
+    assert argv[:3] == ["python3", "ptcli.py", "pipeline"]
+    assert "--package-dir /tmp/package" in command
+    assert "--path /downloads/Name" in command
+    assert "--check-dupes" in argv
+    assert "--upload-target" in argv
+    assert "--export-target-torrent" in argv
+    assert "--target-torrent-output-dir /tmp/exported" in command
+    assert "--target-execute" in argv
+    assert "--confirm-upload" in argv
+    assert "--download-uploaded-torrent" in argv
+    assert "--uploaded-output-dir /tmp/uploaded" in command
+    assert "--inject-uploaded-torrent" in argv
+    assert "--uploaded-save-path /downloads/Name" in command
+    assert "--uploaded-qbit-category MTEAM" in command
+    assert "--uploaded-qbit-tags retorrent" in command
+    assert "--uploaded-paused" in argv
+    assert "--wait-uploaded-complete" in argv
+    assert "--uploaded-wait-timeout 900" in command
+    assert "--uploaded-wait-interval 20" in command
+    assert "--summary-output-dir /tmp/summary" in command
+
+
 def test_pipeline_next_actions_reports_closure_blockers() -> None:
     parser = build_parser()
     args = parser.parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--prepare-target", "--json"])

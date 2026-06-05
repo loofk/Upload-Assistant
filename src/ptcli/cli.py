@@ -2670,9 +2670,11 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     if "target_hash_consistent" in missing_audit:
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
+    if any(name in missing_audit for name in ("target.uploaded", "target_torrent_file")):
+        preferred.append("resume-target-torrent")
     if any(name in missing_audit for name in ("target_duplicate_clean", "target_rule_obligations", "target.prepared", "target.uploaded", "target.duplicate_clean", "target.rule_obligations")):
         preferred.append("resume-target-upload")
-    preferred.extend(["resume-source-torrent", "resume-target-package", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
+    preferred.extend(["resume-source-torrent", "resume-target-package", "resume-target-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
     return tuple(dict.fromkeys(preferred))
 
 
@@ -5058,6 +5060,45 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                 ],
             )
         )
+    if target_package_dir and target_package_planned and target_materials_ready and target_preparation_ready and not target_torrent_file:
+        commands.append(
+            _ptcli_command_entry(
+                "resume-target-torrent",
+                [
+                    "pipeline",
+                    "--from",
+                    source_tracker,
+                    "--source-id",
+                    source_torrent_id,
+                    "--to",
+                    target_trackers_arg,
+                    *config_args,
+                    *base_dir_args,
+                    "--client",
+                    client,
+                    *path_args,
+                    "--package-dir",
+                    str(target_package_dir),
+                    "--check-dupes",
+                    "--upload-target",
+                    "--export-target-torrent",
+                    "--target-torrent-output-dir",
+                    str(output_options.get("target_torrent_output_dir") or "./tmp/exported"),
+                    "--target-execute",
+                    "--confirm-upload",
+                    "--download-uploaded-torrent",
+                    *uploaded_output_dir_args,
+                    "--inject-uploaded-torrent",
+                    *uploaded_save_path_args,
+                    *_qbit_resume_args(uploaded_qbit_options, prefix="uploaded-"),
+                    "--wait-uploaded-complete",
+                    *uploaded_wait_args,
+                    "--write-summary",
+                    *summary_output_dir_args,
+                    "--json",
+                ],
+            )
+        )
     if target_package_dir and target_torrent_file:
         commands.append(
             _ptcli_command_entry(
@@ -5250,7 +5291,7 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
     if "target.downloaded" in blocker_names:
         preferred_stages.append("resume-uploaded-torrent-download")
     if "target.uploaded" in blocker_names:
-        preferred_stages.append("resume-target-upload")
+        preferred_stages.extend(["resume-target-torrent", "resume-target-upload"])
     if (
         "target.prepared" in blocker_names
         or "target.materials_ready" in blocker_names
@@ -5271,7 +5312,7 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
     ):
         preferred_stages.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     preferred_stages.extend(stage_generic_preferred)
-    preferred_stages.extend(["resume-source-torrent", "resume-source-download", "resume-target-package", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
+    preferred_stages.extend(["resume-source-torrent", "resume-source-download", "resume-target-package", "resume-target-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
     for stage in preferred_stages:
         command = commands_by_stage.get(stage)
         if command:
