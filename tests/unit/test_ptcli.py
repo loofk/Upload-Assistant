@@ -12229,6 +12229,10 @@ def test_mteam_description_draft_and_upload_gate() -> None:
 
     assert "Retorrent review draft" in description
     assert "[b]Movie information[/b]" in description
+    assert "[b]External links[/b]" in description
+    assert "IMDb: https://www.imdb.com/title/tt1234567" in description
+    assert "TMDb: https://www.themoviedb.org/movie/999" in description
+    assert "Douban: https://movie.douban.com/subject/1291546/" in description
     assert "[img]https://poster.example/poster.jpg[/img]" in description
     assert "![](https://poster.example/poster.jpg)" not in description
     assert "◎简　　介　示例简介" in description
@@ -12300,6 +12304,25 @@ def test_mteam_description_draft_accepts_url_only_image_host_items(tmp_path) -> 
     description = build_mteam_description_draft(preview["meta_draft"], source_info, materials=materials)
 
     assert "[url=https://img.example/screen-1.png][img]https://img.example/screen-1.png[/img][/url]" in description
+
+
+def test_mteam_description_draft_uses_tmdb_tv_link_for_series() -> None:
+    source_info = {
+        "tracker": "CHD",
+        "torrent_id": "12345",
+        "name": "Example.Show.S01.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 7654321,
+        "tmdb_id": 321,
+        "douban_id": "26752088",
+        "torrenthash": "b" * 40,
+        "ptgen_description": "◎译　　名　示例剧集\n◎简　　介　示例简介",
+    }
+    meta_draft = build_mteam_meta_draft(source_info, "/downloads/Example.Show.S01")
+
+    description = build_mteam_description_draft(meta_draft, source_info)
+
+    assert meta_draft["category"] == "TV"
+    assert "TMDb: https://www.themoviedb.org/tv/321" in description
 
 
 def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:

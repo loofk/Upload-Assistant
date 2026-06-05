@@ -636,6 +636,7 @@ def build_mteam_prepare_preview(source_info: dict[str, Any] | None, target_track
 
 
 def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[str, Any] | None, materials: dict[str, Any] | None = None) -> str:
+    external_link_lines = _mteam_description_external_link_lines(meta_draft)
     ptgen_lines = _mteam_description_ptgen_lines(source_info if isinstance(source_info, dict) else {})
     material_lines = _mteam_description_material_lines(materials if isinstance(materials, dict) else {})
     lines = [
@@ -649,6 +650,8 @@ def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[
         f"[b]IMDb[/b]: {meta_draft.get('imdb') or ''}",
         f"[b]TMDb[/b]: {meta_draft.get('tmdb_id') or ''}",
         f"[b]Douban[/b]: {meta_draft.get('douban_url') or meta_draft.get('douban_id') or ''}",
+        "",
+        *external_link_lines,
         "",
         "[b]Source evidence[/b]",
         f"Source tracker: {source_info.get('tracker') if source_info else ''}",
@@ -664,6 +667,23 @@ def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[
         "Confirm source-site and MTEAM rules, transfer permissions, description requirements, screenshots, subtitles, naming, and duplicate status before upload.",
     ]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _mteam_description_external_link_lines(meta_draft: dict[str, Any]) -> list[str]:
+    links = []
+    imdb_id = _normalize_imdb_id(meta_draft.get("imdb_id") or meta_draft.get("imdb"))
+    if imdb_id:
+        links.append(f"IMDb: https://www.imdb.com/title/tt{imdb_id}")
+    tmdb_id = meta_draft.get("tmdb_id")
+    if tmdb_id:
+        tmdb_kind = "tv" if meta_draft.get("category") == "TV" else "movie"
+        links.append(f"TMDb: https://www.themoviedb.org/{tmdb_kind}/{tmdb_id}")
+    douban_url = meta_draft.get("douban_url")
+    if not douban_url and meta_draft.get("douban_id"):
+        douban_url = f"https://movie.douban.com/subject/{meta_draft['douban_id']}/"
+    if douban_url:
+        links.append(f"Douban: {douban_url}")
+    return ["[b]External links[/b]", *links] if links else ["[b]External links[/b]", "External links: missing"]
 
 
 def _mteam_description_ptgen_lines(source_info: dict[str, Any]) -> list[str]:
@@ -1378,7 +1398,7 @@ def _mteam_description_content_summary(text: str) -> dict[str, Any]:
         "bbcode_image_count": len(img_matches),
         "has_mediainfo_or_bdinfo": "[b]MediaInfo[/b]" in text or "[b]BDInfo[/b]" in text,
         "has_imdb": bool(re.search(r"imdb\.com/title/tt\d+|^\[b\]IMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
-        "has_tmdb": bool(re.search(r"^\[b\]TMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
+        "has_tmdb": bool(re.search(r"themoviedb\.org/(?:movie|tv)/\d+|^\[b\]TMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
         "has_douban": bool(re.search(r"movie\.douban\.com/subject/\d+|^\[b\]Douban\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
     }
 
