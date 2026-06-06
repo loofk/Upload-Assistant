@@ -10305,7 +10305,12 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     recovery_by_key = {hint["key"]: hint for hint in recovery_hints}
     assert recovery_by_key["metadata.ptgen_description"]["command_flags"] == ["--enrich-metadata", "--fetch-ptgen"]
     assert recovery_by_key["metadata.ptgen_description"]["existing_file_options"] == ["--metadata-file"]
+    assert recovery_by_key["metadata.ptgen_description"]["resume_command_available"] is True
+    assert recovery_by_key["metadata.ptgen_description"]["resume_command_stage"] == "resume-target-package"
+    assert "--fetch-ptgen" in recovery_by_key["metadata.ptgen_description"]["resume_command_argv"]
     assert recovery_by_key["description.content"]["command_flags"] == ["--prepare-target"]
+    assert recovery_by_key["description.content"]["resume_command_available"] is True
+    assert "--prepare-target" in recovery_by_key["description.content"]["resume_command_argv"]
     assert all(hint["resume_stage"] == "resume-target-package" for hint in recovery_hints)
     material_closure = summary_payload["resume_state"]["materials"]["closure"]
     assert material_closure["ready"] is False
@@ -10359,10 +10364,14 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_HINT_COUNT=2\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=metadata.ptgen_description,description.content\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_AVAILABLE=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_STAGES=resume-target-package,resume-target-package\n" in out
+    assert "PTCLI_RESUME_MATERIAL_FIRST_RECOVERY_COMMAND='python3 ptcli.py pipeline" in out
     assert "--fetch-ptgen" in out
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
     assert "resume-target-package" in resume_commands
     assert "--prepare-target" in resume_commands["resume-target-package"]
+    assert "--fetch-ptgen" in resume_commands["resume-target-package"]
     assert "--check-dupes" in resume_commands["resume-target-package"]
     assert "--target-output-dir" in resume_commands["resume-target-package"]
     assert f"--metadata-file {shlex.quote(str(metadata_file))}" in resume_commands["resume-target-package"]

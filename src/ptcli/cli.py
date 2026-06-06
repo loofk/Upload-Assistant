@@ -1198,6 +1198,40 @@ def _target_preparation_recovery_hints(missing: list[str]) -> list[dict[str, Any
     return hints
 
 
+def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resume_commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not hints:
+        return []
+    command_entry = _resume_command_entry_by_stage(resume_commands, "resume-target-package")
+    command = command_entry.get("command") if command_entry else None
+    argv = command_entry.get("argv") if command_entry and isinstance(command_entry.get("argv"), list) else []
+    enriched: list[dict[str, Any]] = []
+    for hint in hints:
+        command_flags = _material_recovery_action_flags(hint)
+        command_covers_hint = bool(command_entry) and all(flag in argv for flag in command_flags)
+        enriched.append(
+            {
+                **hint,
+                "resume_command_available": command_covers_hint,
+                "resume_command_stage": command_entry.get("stage") if command_entry else None,
+                "resume_command": command if command_covers_hint else None,
+                "resume_command_argv": argv if command_covers_hint else [],
+            }
+        )
+    return enriched
+
+
+def _material_recovery_action_flags(hint: dict[str, Any]) -> list[str]:
+    value_options = {"--screenshot-count", "--image-host"}
+    return [flag for flag in _string_list(hint.get("command_flags")) if flag not in value_options]
+
+
+def _resume_command_entry_by_stage(resume_commands: list[dict[str, Any]], stage: str) -> dict[str, Any] | None:
+    for command in resume_commands:
+        if isinstance(command, dict) and command.get("stage") == stage:
+            return command
+    return None
+
+
 def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
     normalized = _target_preparation_missing_key(missing)
     if normalized in {"description.ptgen_description", "metadata.ptgen_description"}:
@@ -5975,6 +6009,8 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
     target_preparation_missing = _string_list(artifacts.get("target_preparation_missing"))
     material_missing = [*target_materials_missing]
     _extend_unique_string(material_missing, target_preparation_missing)
+    material_recovery_hints = _target_preparation_recovery_hints(material_missing)
+    material_recovery_hints = _attach_material_recovery_resume_commands(material_recovery_hints, resume_commands)
     return {
         "complete": complete,
         "resume_available": bool(resume_commands),
@@ -6019,7 +6055,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "target_materials_missing": target_materials_missing,
             "target_preparation_missing": target_preparation_missing,
             "closure": _run_summary_material_closure(artifacts, material_missing),
-            "recovery_hints": _target_preparation_recovery_hints(material_missing),
+            "recovery_hints": material_recovery_hints,
             "next_actions": _target_preparation_missing_next_actions(material_missing),
         },
         "blockers": blockers,
@@ -6220,11 +6256,14 @@ def _qbit_resume_args(options: dict[str, Any], *, prefix: str) -> list[str]:
 
 def _target_package_material_resume_args(requested_actions: dict[str, Any], effective_actions: dict[str, Any], material_options: dict[str, Any], artifacts: dict[str, Any] | None = None) -> list[str]:
     artifact_options = _target_package_material_artifact_options(artifacts)
+    auto_flags = _target_package_material_auto_flags(artifacts)
     args: list[str] = []
-    include_metadata = bool(requested_actions.get("enrich_metadata") or effective_actions.get("enrich_metadata") or requested_actions.get("fetch_ptgen") or effective_actions.get("fetch_ptgen"))
-    if requested_actions.get("enrich_metadata") or effective_actions.get("enrich_metadata"):
+    include_metadata = bool(
+        requested_actions.get("enrich_metadata") or effective_actions.get("enrich_metadata") or requested_actions.get("fetch_ptgen") or effective_actions.get("fetch_ptgen") or "--enrich-metadata" in auto_flags or "--fetch-ptgen" in auto_flags
+    )
+    if requested_actions.get("enrich_metadata") or effective_actions.get("enrich_metadata") or "--enrich-metadata" in auto_flags:
         args.append("--enrich-metadata")
-    if requested_actions.get("fetch_ptgen") or effective_actions.get("fetch_ptgen"):
+    if requested_actions.get("fetch_ptgen") or effective_actions.get("fetch_ptgen") or "--fetch-ptgen" in auto_flags:
         args.append("--fetch-ptgen")
     if include_metadata:
         _append_option(args, "--metadata-file", material_options.get("metadata_file"))
@@ -6234,22 +6273,44 @@ def _target_package_material_resume_args(requested_actions: dict[str, Any], effe
         _append_option(args, "--douban-url", material_options.get("douban_url"))
     _append_option(args, "--mediainfo-file", material_options.get("mediainfo_file") or artifact_options.get("mediainfo_file"))
     _append_option(args, "--bdinfo-file", material_options.get("bdinfo_file") or artifact_options.get("bdinfo_file"))
-    if requested_actions.get("generate_bdinfo") or effective_actions.get("generate_bdinfo"):
+    if requested_actions.get("generate_bdinfo") or effective_actions.get("generate_bdinfo") or "--generate-bdinfo" in auto_flags:
         args.append("--generate-bdinfo")
         _append_option(args, "--bdinfo-playlist", material_options.get("bdinfo_playlist"))
-    if requested_actions.get("generate_mediainfo") or effective_actions.get("generate_mediainfo"):
+    if requested_actions.get("generate_mediainfo") or effective_actions.get("generate_mediainfo") or "--generate-mediainfo" in auto_flags:
         args.append("--generate-mediainfo")
     screenshot_files = material_options.get("screenshot_files") if isinstance(material_options.get("screenshot_files"), list) else artifact_options.get("screenshot_files")
     for screenshot_file in screenshot_files if isinstance(screenshot_files, list) else []:
         _append_option(args, "--screenshot-file", screenshot_file)
-    if requested_actions.get("generate_screenshots") or effective_actions.get("generate_screenshots"):
+    if requested_actions.get("generate_screenshots") or effective_actions.get("generate_screenshots") or "--generate-screenshots" in auto_flags:
         args.append("--generate-screenshots")
         _append_option(args, "--screenshot-count", material_options.get("screenshot_count"))
     _append_option(args, "--image-host-file", material_options.get("image_host_file") or artifact_options.get("image_host_file"))
-    if requested_actions.get("upload_screenshots") or effective_actions.get("upload_screenshots"):
+    if requested_actions.get("upload_screenshots") or effective_actions.get("upload_screenshots") or "--upload-screenshots" in auto_flags:
         args.append("--upload-screenshots")
         _append_option(args, "--image-host", material_options.get("image_host"))
     return args
+
+
+def _target_package_material_auto_flags(artifacts: dict[str, Any] | None) -> set[str]:
+    artifacts = artifacts if isinstance(artifacts, dict) else {}
+    missing = _string_list(artifacts.get("target_materials_missing"))
+    _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
+    flags: set[str] = set()
+    for item in missing:
+        normalized = _target_preparation_missing_key(item)
+        if normalized in {"metadata.ptgen_description", "description.ptgen_description"}:
+            flags.update({"--enrich-metadata", "--fetch-ptgen"})
+        elif normalized.startswith("metadata.") or normalized == "description.external_ids":
+            flags.add("--enrich-metadata")
+        elif normalized in {"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo"}:
+            flags.add("--generate-mediainfo")
+        elif normalized == "assets.bdinfo_for_disc":
+            flags.add("--generate-bdinfo")
+        elif normalized in {"assets.screenshots", "description.screenshot_bbcode"}:
+            flags.add("--generate-screenshots")
+        elif normalized == "assets.image_host_uploads":
+            flags.add("--upload-screenshots")
+    return flags
 
 
 def _target_package_material_artifact_options(artifacts: dict[str, Any] | None) -> dict[str, Any]:
@@ -7928,6 +7989,7 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
     image_host = closure.get("image_host") if isinstance(closure.get("image_host"), dict) else {}
     description = closure.get("description") if isinstance(closure.get("description"), dict) else {}
     recovery_hints = materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else []
+    first_recovery_command = _first_material_recovery_command(recovery_hints)
     return {
         "PTCLI_RESUME_MATERIALS_PRESENT": _shell_bool(bool(materials)) if resume_state else None,
         "PTCLI_RESUME_TARGET_MATERIALS_READY": _shell_bool(materials.get("target_materials_ready")) if materials.get("target_materials_ready") is not None else None,
@@ -7980,9 +8042,21 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
         "PTCLI_RESUME_MATERIAL_RECOVERY_HINT_COUNT": len(recovery_hints),
         "PTCLI_RESUME_MATERIAL_RECOVERY_KEYS": ",".join(str(hint.get("key")) for hint in recovery_hints if isinstance(hint, dict) and hint.get("key")),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_AVAILABLE": _shell_bool(any(bool(hint.get("resume_command_available")) for hint in recovery_hints if isinstance(hint, dict))),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_STAGES": ",".join(str(hint.get("resume_command_stage")) for hint in recovery_hints if isinstance(hint, dict) and hint.get("resume_command_available") and hint.get("resume_command_stage")),
+        "PTCLI_RESUME_MATERIAL_FIRST_RECOVERY_COMMAND": first_recovery_command.get("command"),
+        "PTCLI_RESUME_MATERIAL_FIRST_RECOVERY_COMMAND_ARGV": json.dumps(first_recovery_command.get("argv"), ensure_ascii=False) if first_recovery_command.get("argv") else None,
         "PTCLI_RESUME_MATERIAL_RECOVERY_HINTS": json.dumps(recovery_hints, ensure_ascii=False) if recovery_hints else None,
         "PTCLI_RESUME_MATERIAL_NEXT_ACTIONS": " | ".join(_string_list(materials.get("next_actions"))),
     }
+
+
+def _first_material_recovery_command(recovery_hints: list[Any]) -> dict[str, Any]:
+    for hint in recovery_hints:
+        if isinstance(hint, dict) and hint.get("resume_command_available"):
+            argv = hint.get("resume_command_argv") if isinstance(hint.get("resume_command_argv"), list) else []
+            return {"command": hint.get("resume_command"), "argv": argv}
+    return {"command": None, "argv": []}
 
 
 def _material_critical_domain_ready(domains: dict[str, Any], name: str) -> bool:
