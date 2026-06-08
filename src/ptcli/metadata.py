@@ -47,6 +47,16 @@ async def enrich_source_metadata(
         elif tmdb_result.get("blocker"):
             blockers.append(str(tmdb_result["blocker"]))
 
+    if base.get("tmdb_id") and not base.get("imdb_id"):
+        imdb_result = await _imdb_from_tmdb(config, base.get("tmdb_id"))
+        if imdb_result.get("imdb_id"):
+            base["imdb_id"] = imdb_result["imdb_id"]
+            applied["imdb_id"] = imdb_result["imdb_id"]
+            field_sources["imdb_id"] = "tmdb_api"
+            sources.append("tmdb_api")
+        elif imdb_result.get("blocker"):
+            blockers.append(str(imdb_result["blocker"]))
+
     if base.get("douban_id") and not base.get("douban_url"):
         base["douban_url"] = f"https://movie.douban.com/subject/{base['douban_id']}/"
         applied["douban_url"] = base["douban_url"]
@@ -179,6 +189,36 @@ async def _tmdb_from_imdb(config: dict[str, Any], imdb_id: Any) -> dict[str, Any
     return {"tmdb_id": normalized} if normalized else {"blocker": "TMDb enrichment returned no TMDb id."}
 
 
+async def _imdb_from_tmdb(config: dict[str, Any], tmdb_id: Any) -> dict[str, Any]:
+    default = config.get("DEFAULT", {}) if isinstance(config, dict) else {}
+    tmdb_api = str(default.get("tmdb_api") or "").strip() if isinstance(default, dict) else ""
+    if not tmdb_api:
+        return {"blocker": "TMDb enrichment requires DEFAULT.tmdb_api."}
+    tmdb_value = _normalize_int(tmdb_id)
+    if not tmdb_value:
+        return {"blocker": "TMDb enrichment requires a valid TMDb id."}
+
+    blockers = []
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for media_type in ("movie", "tv"):
+                response = await client.get(
+                    f"https://api.themoviedb.org/3/{media_type}/{tmdb_value}/external_ids",
+                    params={"api_key": tmdb_api},
+                )
+                if getattr(response, "status_code", 200) == 404:
+                    continue
+                response.raise_for_status()
+                normalized = _imdb_id_from_external_ids_payload(response.json())
+                if normalized:
+                    return {"imdb_id": normalized, "media_type": media_type}
+    except httpx.TimeoutException:
+        return {"blocker": "TMDb external-id enrichment timed out."}
+    except (httpx.HTTPError, ValueError) as exc:
+        blockers.append(f"TMDb external-id enrichment failed: {exc}")
+    return {"blocker": blockers[0] if blockers else "TMDb enrichment returned no IMDb id."}
+
+
 def _tmdb_id_from_find_payload(payload: Any) -> int | None:
     if not isinstance(payload, dict):
         return None
@@ -193,6 +233,12 @@ def _tmdb_id_from_find_payload(payload: Any) -> int | None:
             if normalized:
                 return normalized
     return None
+
+
+def _imdb_id_from_external_ids_payload(payload: Any) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    return _normalize_int(payload.get("imdb_id"))
 
 
 async def _ptgen_from_metadata(config: dict[str, Any], source_info: dict[str, Any], *, base_dir: str | None) -> dict[str, Any]:
