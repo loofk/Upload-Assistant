@@ -911,7 +911,35 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["completion_matrix"]["domains"]["qbit_wait"]["ready"] is True
     assert payload["completion_matrix"]["ready"] is True
     assert payload["completion_next_stages"] == []
+    assert payload["readiness_summary"]["status"] == "complete"
+    assert payload["readiness_summary"]["ready"] is True
+    assert payload["readiness_summary"]["complete"] is True
+    assert payload["readiness_summary"]["completion_ready"] is True
+    assert payload["readiness_summary"]["missing_domains"] == []
+    assert payload["readiness_summary"]["blockers"] == []
+    assert payload["readiness_summary"]["flow_ready"] is None
+    assert payload["readiness_summary"]["source_ready"] is True
+    assert payload["readiness_summary"]["materials_ready"] is True
+    assert payload["readiness_summary"]["rules_ready"] is True
+    assert payload["readiness_summary"]["target_upload_ready"] is True
+    assert payload["readiness_summary"]["qbit_wait_ready"] is True
+    assert payload["readiness_summary"]["ready_for_mteam_upload"] is True
+    assert payload["readiness_summary"]["material_critical_ready"] is True
+    assert payload["readiness_summary"]["target_preflight_ready"] is True
+    assert payload["readiness_summary"]["target_preflight_materials_ready"] is True
+    assert payload["readiness_summary"]["target_preflight_description_ready"] is True
+    assert payload["readiness_summary"]["target_preflight_payload_ready"] is True
+    assert payload["readiness_summary"]["ready_for_uploaded_seeding"] is True
+    assert payload["readiness_summary"]["qbit_wait_mismatch"] is False
+    assert payload["readiness_summary"]["qbit_wait_mismatches"] == []
+    assert payload["readiness_summary"]["next_stage"] is None
+    assert payload["readiness_summary"]["next_command"] is None
+    assert payload["readiness_summary"]["next_command_argv"] == []
+    assert payload["readiness_summary"]["automation_action"] == "complete"
+    assert payload["readiness_summary"]["should_execute_next_command"] is False
+    assert payload["readiness_summary"]["automation_exit_code"] == 0
     assert payload["summary_file"].endswith("ptcli-run-summary.json")
+    assert payload["readiness_summary"]["summary_file"] == payload["summary_file"]
     assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--json"]
     assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--run-next-command"])
     assert payload["artifacts"] == {
@@ -1518,6 +1546,21 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
     assert payload["automation_reason"] == "Next generated ptcli command is ready to run for stage resume-uploaded-torrent."
     assert payload["automation_exit_code"] == 1
     assert payload["should_execute_next_command"] is True
+    assert payload["readiness_summary"]["status"] == "blocked"
+    assert payload["readiness_summary"]["ready"] is False
+    assert payload["readiness_summary"]["complete"] is False
+    assert payload["readiness_summary"]["completion_ready"] is False
+    assert "target_upload" in payload["readiness_summary"]["missing_domains"]
+    assert payload["readiness_summary"]["blockers"] == ["target.injected", "pipeline did not report ready."]
+    assert payload["readiness_summary"]["target_upload_ready"] is False
+    assert payload["readiness_summary"]["qbit_wait_ready"] is True
+    assert payload["readiness_summary"]["qbit_wait_mismatch"] is False
+    assert payload["readiness_summary"]["next_stage"] == "resume-uploaded-torrent"
+    assert payload["readiness_summary"]["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
+    assert payload["readiness_summary"]["next_command_argv"] == ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"]
+    assert payload["readiness_summary"]["automation_action"] == "run_next_command"
+    assert payload["readiness_summary"]["should_execute_next_command"] is True
+    assert payload["readiness_summary"]["automation_exit_code"] == 1
 
 
 def test_target_upload_automation_requires_complete_audit_artifacts() -> None:

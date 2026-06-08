@@ -730,8 +730,10 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     completion_next_stages = _completion_matrix_preferred_stages(completion_matrix, kind="ptcli.pipeline.run_summary")
     resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands, preferred_stages=completion_next_stages)
     resume_command_audit = _resume_command_audit_fields(resume_commands, resume_state.get("next_command"), resume_state.get("next_command_argv"))
+    retorrent_status = "complete" if not blockers else "blocked"
+    retorrent_complete = not blockers
     automation_fields = _retorrent_automation_fields(
-        status="complete" if not blockers else "blocked",
+        status=retorrent_status,
         blockers=blockers,
         qbit_wait_mismatch=bool(qbit_wait_mismatches),
         qbit_wait_mismatches=qbit_wait_mismatches,
@@ -740,8 +742,22 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         resume_command_audit=resume_command_audit,
     )
     summary_file = pipeline_result.get("summary_file")
+    readiness_summary = _retorrent_readiness_summary(
+        status=retorrent_status,
+        ready=ready,
+        complete=retorrent_complete,
+        blockers=blockers,
+        completion_matrix=completion_matrix,
+        material_diagnostics=material_diagnostics,
+        target_upload_diagnostics=target_upload_diagnostics,
+        target_preflight_diagnostics=target_preflight_diagnostics,
+        qbit_wait_mismatches=qbit_wait_mismatches,
+        resume_state=resume_state,
+        automation_fields=automation_fields,
+        summary_file=summary_file,
+    )
     return {
-        "status": "complete" if not blockers else "blocked",
+        "status": retorrent_status,
         "plan": plan_payload,
         "config": args.config,
         "base_dir": args.base_dir,
@@ -762,6 +778,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "target_preflight_diagnostics": target_preflight_diagnostics,
         "completion_matrix": completion_matrix,
         "completion_next_stages": list(completion_next_stages),
+        "readiness_summary": readiness_summary,
         "summary_file": summary_file,
         "automation_handoff": pipeline_result.get("automation_handoff") if isinstance(pipeline_result.get("automation_handoff"), dict) else _summary_automation_handoff(str(summary_file)) if summary_file else None,
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
@@ -776,10 +793,80 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "next_command_argv": resume_state.get("next_command_argv"),
         **resume_command_audit,
         "ready": ready,
-        "complete": not blockers,
+        "complete": retorrent_complete,
         "blockers": blockers,
         **automation_fields,
         "next_actions": next_actions,
+    }
+
+
+def _retorrent_readiness_summary(
+    *,
+    status: str,
+    ready: bool,
+    complete: bool,
+    blockers: list[str],
+    completion_matrix: dict[str, Any],
+    material_diagnostics: dict[str, Any],
+    target_upload_diagnostics: dict[str, Any],
+    target_preflight_diagnostics: dict[str, Any],
+    qbit_wait_mismatches: list[str],
+    resume_state: dict[str, Any],
+    automation_fields: dict[str, Any],
+    summary_file: Any,
+) -> dict[str, Any]:
+    domains = completion_matrix.get("domains") if isinstance(completion_matrix.get("domains"), dict) else {}
+
+    def domain(name: str) -> dict[str, Any]:
+        value = domains.get(name)
+        return value if isinstance(value, dict) else {}
+
+    def domain_ready(name: str) -> bool | None:
+        value = domain(name).get("ready")
+        return value if isinstance(value, bool) else None
+
+    def domain_evidence(name: str) -> dict[str, Any]:
+        evidence = domain(name).get("evidence")
+        return evidence if isinstance(evidence, dict) else {}
+
+    def first_bool(*values: Any) -> bool | None:
+        for value in values:
+            if isinstance(value, bool):
+                return value
+        return None
+
+    materials_evidence = domain_evidence("materials")
+    target_upload_evidence = domain_evidence("target_upload")
+    next_command_argv = _argv_list(resume_state.get("next_command_argv"))
+    return {
+        "status": status,
+        "ready": ready,
+        "complete": complete,
+        "completion_ready": completion_matrix.get("ready") if isinstance(completion_matrix.get("ready"), bool) else None,
+        "missing_domains": _string_list(completion_matrix.get("missing_domains")),
+        "blockers": list(blockers),
+        "next_stage": resume_state.get("next_stage"),
+        "next_command": resume_state.get("next_command"),
+        "next_command_argv": next_command_argv if next_command_argv is not None else [],
+        "automation_action": automation_fields.get("automation_action"),
+        "should_execute_next_command": automation_fields.get("should_execute_next_command"),
+        "automation_exit_code": automation_fields.get("automation_exit_code"),
+        "summary_file": str(summary_file) if summary_file else None,
+        "flow_ready": domain_ready("flow"),
+        "source_ready": domain_ready("source"),
+        "materials_ready": domain_ready("materials"),
+        "rules_ready": domain_ready("rules"),
+        "target_upload_ready": domain_ready("target_upload"),
+        "qbit_wait_ready": domain_ready("qbit_wait"),
+        "ready_for_mteam_upload": first_bool(material_diagnostics.get("ready_for_mteam_upload"), materials_evidence.get("ready_for_mteam_upload")),
+        "material_critical_ready": material_diagnostics.get("critical_ready") if isinstance(material_diagnostics.get("critical_ready"), bool) else None,
+        "target_preflight_ready": target_preflight_diagnostics.get("ready") if isinstance(target_preflight_diagnostics.get("ready"), bool) else None,
+        "target_preflight_materials_ready": target_preflight_diagnostics.get("materials_ready") if isinstance(target_preflight_diagnostics.get("materials_ready"), bool) else None,
+        "target_preflight_description_ready": target_preflight_diagnostics.get("description_ready") if isinstance(target_preflight_diagnostics.get("description_ready"), bool) else None,
+        "target_preflight_payload_ready": target_preflight_diagnostics.get("payload_ready") if isinstance(target_preflight_diagnostics.get("payload_ready"), bool) else None,
+        "ready_for_uploaded_seeding": first_bool(target_upload_diagnostics.get("ready_for_uploaded_seeding"), target_upload_evidence.get("ready_for_uploaded_seeding")),
+        "qbit_wait_mismatch": bool(qbit_wait_mismatches),
+        "qbit_wait_mismatches": list(qbit_wait_mismatches),
     }
 
 
