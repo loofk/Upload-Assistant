@@ -718,6 +718,16 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     resume_commands = pipeline_result.get("resume_commands", [])
     resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands)
     closure_review = pipeline_result.get("closure_review") if isinstance(pipeline_result.get("closure_review"), dict) else _pipeline_closure_review(pipeline_result, artifacts)
+    flow_diagnostics = _summary_flow_diagnostics(pipeline_result)
+    target_upload_diagnostics = _summary_target_upload_diagnostics(pipeline_result)
+    completion_matrix = _summary_completion_matrix(
+        flow_diagnostics=flow_diagnostics,
+        material_diagnostics=material_diagnostics,
+        target_upload_diagnostics=target_upload_diagnostics,
+        closure_review=closure_review,
+        closure_status=closure_status,
+        qbit_wait_mismatches=qbit_wait_mismatches,
+    )
     resume_command_audit = _resume_command_audit_fields(resume_commands, resume_state.get("next_command"), resume_state.get("next_command_argv"))
     automation_fields = _retorrent_automation_fields(
         status="complete" if not blockers else "blocked",
@@ -745,8 +755,11 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "closure_review": closure_review,
         "evidence": evidence,
         "summary": summary,
+        "flow_diagnostics": flow_diagnostics,
         "material_diagnostics": material_diagnostics,
+        "target_upload_diagnostics": target_upload_diagnostics,
         "target_preflight_diagnostics": target_preflight_diagnostics,
+        "completion_matrix": completion_matrix,
         "summary_file": summary_file,
         "automation_handoff": pipeline_result.get("automation_handoff") if isinstance(pipeline_result.get("automation_handoff"), dict) else _summary_automation_handoff(str(summary_file)) if summary_file else None,
         "qbit_wait_diagnostics": qbit_wait_diagnostics,

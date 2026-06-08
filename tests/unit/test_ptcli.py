@@ -738,6 +738,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "material_diagnostics": {
                 "present": True,
                 "ready_for_mteam_upload": True,
+                "target_materials_ready": True,
+                "target_preparation_ready": True,
                 "critical_ready": True,
                 "critical_missing": [],
                 "critical_path": {"ready": True, "next_step": None, "missing": []},
@@ -902,6 +904,11 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["target_preflight_diagnostics"]["materials_ready"] is True
     assert payload["target_preflight_diagnostics"]["description_ready"] is True
     assert payload["target_preflight_diagnostics"]["payload_ready"] is True
+    assert payload["completion_matrix"]["domains"]["materials"]["ready"] is True
+    assert payload["completion_matrix"]["domains"]["materials"]["evidence"]["ready_for_mteam_upload"] is True
+    assert payload["completion_matrix"]["domains"]["target_upload"]["ready"] is True
+    assert payload["completion_matrix"]["domains"]["target_upload"]["evidence"]["ready_for_uploaded_seeding"] is True
+    assert payload["completion_matrix"]["domains"]["qbit_wait"]["ready"] is True
     assert payload["summary_file"].endswith("ptcli-run-summary.json")
     assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--json"]
     assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--run-next-command"])
