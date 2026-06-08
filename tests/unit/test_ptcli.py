@@ -35,6 +35,7 @@ from src.ptcli.target import (
     create_mteam_upload_torrent_candidate,
     extract_mteam_uploaded_torrent_id,
     load_mteam_prepare_package,
+    mteam_upload_torrent_candidate_summary,
     search_mteam_duplicates,
     upload_mteam_from_package,
     write_mteam_prepare_package,
@@ -13541,7 +13542,7 @@ async def test_pipeline_sanitizes_manual_target_torrent_for_upload(monkeypatch, 
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
     (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
-    raw_torrent = tmp_path / "raw.torrent"
+    raw_torrent = tmp_path / "raw.mteam-upload.torrent"
     sanitized_torrent = tmp_path / "exported" / "raw.mteam-upload.torrent"
     uploaded_path = tmp_path / "MTEAM-999.torrent"
     uploaded_hash = write_valid_torrent(uploaded_path, tmp_path / "uploaded-content" / "MTEAM-999.mkv")
@@ -15159,6 +15160,26 @@ def test_create_mteam_upload_torrent_candidate_sanitizes_export(tmp_path) -> Non
     assert sanitized.metainfo["comment"] == ""
     assert sanitized.metainfo["info"]["source"] == "MTEAM"
     assert "url-list" not in sanitized.metainfo
+
+
+def test_mteam_upload_torrent_candidate_summary_verifies_metadata_not_suffix_only(tmp_path) -> None:
+    content = tmp_path / "Example.mkv"
+    content.write_bytes(b"content")
+    unsafe_torrent = tmp_path / "unsafe.mteam-upload.torrent"
+    torrent = Torrent(path=str(content), trackers=["https://source.example/passkey/announce"], comment="private comment")
+    torrent.generate()
+    torrent.write(str(unsafe_torrent), overwrite=True)
+    safe_torrent = make_mteam_safe_torrent(tmp_path, "safe")
+
+    unsafe_summary = mteam_upload_torrent_candidate_summary(str(unsafe_torrent))
+    safe_summary = mteam_upload_torrent_candidate_summary(str(safe_torrent))
+
+    assert unsafe_summary["has_mteam_upload_suffix"] is True
+    assert unsafe_summary["metadata_readable"] is True
+    assert unsafe_summary["mteam_safe"] is False
+    assert safe_summary["has_mteam_upload_suffix"] is True
+    assert safe_summary["metadata_readable"] is True
+    assert safe_summary["mteam_safe"] is True
 
 
 def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:

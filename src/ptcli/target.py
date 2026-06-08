@@ -74,6 +74,22 @@ def create_mteam_upload_torrent_candidate(torrent_file: str, output_dir: str | N
     }
 
 
+def mteam_upload_torrent_candidate_summary(torrent_file: str) -> dict[str, Any]:
+    path = Path(torrent_file).expanduser()
+    summary: dict[str, Any] = {
+        "path": str(path),
+        "filename": path.name,
+        "has_mteam_upload_suffix": path.name.endswith(".mteam-upload.torrent"),
+    }
+    if not path.exists() or not path.is_file():
+        summary.update({"exists": False, "metadata_readable": False, "mteam_safe": False})
+        return summary
+
+    summary["exists"] = True
+    summary.update(_torrent_metadata_summary(path))
+    return summary
+
+
 def write_mteam_prepare_package(
     source_info: dict[str, Any] | None,
     target_trackers: list[str],

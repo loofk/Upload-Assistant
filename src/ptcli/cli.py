@@ -51,6 +51,7 @@ from src.ptcli.target import (
     create_mteam_upload_torrent_candidate,
     download_mteam_uploaded_torrent,
     load_mteam_prepare_package,
+    mteam_upload_torrent_candidate_summary,
     search_mteam_duplicates,
     upload_mteam_from_package,
     write_mteam_prepare_package,
@@ -4791,8 +4792,16 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     if sanitize_target_torrent:
         if not effective_target_torrent_file:
             stages.append({"stage": "target-torrent-sanitize", "ok": False, "skipped": True, "message": "No target torrent file is available to sanitize."})
-        elif str(effective_target_torrent_file).endswith(".mteam-upload.torrent"):
-            stages.append({"stage": "target-torrent-sanitize", "ok": True, "skipped": True, "message": "Target torrent file is already a MTEAM upload candidate."})
+        elif str(effective_target_torrent_file).endswith(".mteam-upload.torrent") and (candidate_summary := mteam_upload_torrent_candidate_summary(effective_target_torrent_file)).get("mteam_safe"):
+            stages.append(
+                {
+                    "stage": "target-torrent-sanitize",
+                    "ok": True,
+                    "skipped": True,
+                    "message": "Target torrent file is already a verified MTEAM upload candidate.",
+                    "result": candidate_summary,
+                }
+            )
         else:
             sanitize_stage = await _pipeline_stage(
                 "target-torrent-sanitize",
