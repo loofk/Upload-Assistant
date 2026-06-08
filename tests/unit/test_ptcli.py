@@ -14469,6 +14469,10 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert summary_payload["artifacts"]["target_torrent_file"]["is_file"] is True
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["path"] == str(tmp_path / "MTEAM-999.torrent")
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["is_file"] is True
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["size_bytes"] > 0
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["metadata_readable"] is True
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["torrent_hash"] == uploaded_hash
+    assert len(summary_payload["artifacts"]["uploaded_torrent_file"]["sha1"]) == 40
     assert summary_payload["artifacts"]["uploaded_torrent_hash"] == uploaded_hash
     assert summary_payload["artifacts"]["injected_torrent_hash"] == uploaded_hash
     assert summary_payload["artifacts"]["injection_visible_in_client"] is True
@@ -14501,6 +14505,13 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert uploaded_followup["uploaded_torrent_hash"] == uploaded_hash
     assert uploaded_followup["injected_torrent_hash"] == uploaded_hash
     assert uploaded_followup["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
+    assert uploaded_followup["uploaded_torrent_file_evidence"]["path"] == str(tmp_path / "MTEAM-999.torrent")
+    assert uploaded_followup["uploaded_torrent_file_evidence"]["exists"] is True
+    assert uploaded_followup["uploaded_torrent_file_evidence"]["is_file"] is True
+    assert uploaded_followup["uploaded_torrent_file_evidence"]["size_bytes"] > 0
+    assert uploaded_followup["uploaded_torrent_file_evidence"]["metadata_readable"] is True
+    assert uploaded_followup["uploaded_torrent_file_evidence"]["torrent_hash"] == uploaded_hash
+    assert len(uploaded_followup["uploaded_torrent_file_evidence"]["sha1"]) == 40
     assert uploaded_followup["uploaded_save_path"] == "/downloads/Example"
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
@@ -14547,6 +14558,10 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert "export PTCLI_UPLOADED_FOLLOWUP_MISSING=''\n" in out
     assert f"export PTCLI_UPLOADED_FOLLOWUP_TORRENT_HASH={uploaded_hash}\n" in out
     assert f"export PTCLI_UPLOADED_FOLLOWUP_INJECTED_HASH={uploaded_hash}\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_TORRENT_EXISTS=1\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_TORRENT_IS_FILE=1\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_TORRENT_METADATA_READABLE=1\n" in out
+    assert f"export PTCLI_UPLOADED_FOLLOWUP_TORRENT_INFOHASH={uploaded_hash}\n" in out
     assert "export PTCLI_UPLOADED_FOLLOWUP_SAVE_PATH=/downloads/Example\n" in out
     assert f"export PTCLI_TARGET_UPLOAD_TORRENT_HASH={uploaded_hash}\n" in out
     assert f"export PTCLI_TARGET_UPLOAD_TORRENT_PATH={str(tmp_path / 'MTEAM-999.torrent')}\n" in out

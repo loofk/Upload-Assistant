@@ -1807,7 +1807,7 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
         "target_preparation_ready": bool(preparation_audit.get("ready")),
         "uploaded_torrent_id": _uploaded_torrent_id_from_result(result) or args.uploaded_torrent_id,
         "uploaded_torrent_hash": _uploaded_torrent_hash_from_result(result),
-        "uploaded_torrent_file": _path_artifact(uploaded_torrent_path),
+        "uploaded_torrent_file": _uploaded_torrent_file_artifact(downloaded_torrent, uploaded_torrent_path),
         "injection_visible_in_client": _injected_torrent_visible(result.get("injected_torrent")),
         "injection_verified": _injected_torrent_verified(result.get("injected_torrent")),
         "injected_torrent_hash": _torrent_hash_from_result(result.get("injected_torrent")),
@@ -1818,6 +1818,19 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
         "target_duplicate_clean": _fresh_duplicate_check_clean(duplicate_check),
         "target_rule_obligations": rule_obligations if isinstance(rule_obligations, dict) else None,
     }
+
+
+def _uploaded_torrent_file_artifact(downloaded_torrent: Any, uploaded_torrent_path: Any) -> dict[str, Any] | None:
+    base = _path_artifact(str(uploaded_torrent_path)) if uploaded_torrent_path else None
+    if not isinstance(downloaded_torrent, dict):
+        return base
+    artifact = dict(base or {})
+    for key in ("torrent_id", "reused", "size_bytes", "sha1", "hash", "torrent_hash", "infohash", "metadata_readable"):
+        if key in downloaded_torrent:
+            artifact[key] = downloaded_torrent.get(key)
+    if "path" not in artifact and downloaded_torrent.get("path"):
+        artifact["path"] = str(downloaded_torrent["path"])
+    return artifact or None
 
 
 def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.Namespace, artifacts: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2067,6 +2080,16 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
         "uploaded_torrent_hash": artifacts.get("uploaded_torrent_hash"),
         "injected_torrent_hash": artifacts.get("injected_torrent_hash"),
         "uploaded_torrent_file": uploaded_torrent_file.get("path"),
+        "uploaded_torrent_file_evidence": {
+            "path": uploaded_torrent_file.get("path"),
+            "exists": uploaded_torrent_file.get("exists"),
+            "is_file": uploaded_torrent_file.get("is_file"),
+            "size_bytes": uploaded_torrent_file.get("size_bytes"),
+            "sha1": uploaded_torrent_file.get("sha1"),
+            "torrent_hash": uploaded_torrent_file.get("torrent_hash") or uploaded_torrent_file.get("hash") or uploaded_torrent_file.get("infohash"),
+            "metadata_readable": uploaded_torrent_file.get("metadata_readable"),
+            "reused": uploaded_torrent_file.get("reused"),
+        },
         "uploaded_save_path": uploaded_save_path.get("path"),
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
@@ -8112,6 +8135,7 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
 def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) -> dict[str, Any]:
     followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
     wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
+    torrent_evidence = followup.get("uploaded_torrent_file_evidence") if isinstance(followup.get("uploaded_torrent_file_evidence"), dict) else {}
     return {
         "PTCLI_UPLOADED_FOLLOWUP_PRESENT": _shell_bool(bool(followup)) if resume_state else None,
         "PTCLI_UPLOADED_FOLLOWUP_READY": _shell_bool(followup.get("ready")) if followup.get("ready") is not None else None,
@@ -8128,6 +8152,13 @@ def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) 
         "PTCLI_UPLOADED_FOLLOWUP_TORRENT_HASH": followup.get("uploaded_torrent_hash"),
         "PTCLI_UPLOADED_FOLLOWUP_INJECTED_HASH": followup.get("injected_torrent_hash"),
         "PTCLI_UPLOADED_FOLLOWUP_TORRENT_FILE": followup.get("uploaded_torrent_file"),
+        "PTCLI_UPLOADED_FOLLOWUP_TORRENT_EXISTS": _shell_bool(torrent_evidence.get("exists")) if torrent_evidence.get("exists") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_TORRENT_IS_FILE": _shell_bool(torrent_evidence.get("is_file")) if torrent_evidence.get("is_file") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_TORRENT_SIZE_BYTES": torrent_evidence.get("size_bytes"),
+        "PTCLI_UPLOADED_FOLLOWUP_TORRENT_SHA1": torrent_evidence.get("sha1"),
+        "PTCLI_UPLOADED_FOLLOWUP_TORRENT_INFOHASH": torrent_evidence.get("torrent_hash"),
+        "PTCLI_UPLOADED_FOLLOWUP_TORRENT_METADATA_READABLE": _shell_bool(torrent_evidence.get("metadata_readable")) if torrent_evidence.get("metadata_readable") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_TORRENT_REUSED": _shell_bool(torrent_evidence.get("reused")) if torrent_evidence.get("reused") is not None else None,
         "PTCLI_UPLOADED_FOLLOWUP_SAVE_PATH": followup.get("uploaded_save_path"),
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_MISMATCH": _shell_bool(followup.get("qbit_wait_mismatch")) if followup.get("qbit_wait_mismatch") is not None else None,
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_MISMATCHES": ",".join(_string_list(followup.get("qbit_wait_mismatches"))),
