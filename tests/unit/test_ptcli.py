@@ -11213,6 +11213,166 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_pipeline_closure_complete_for_chd_to_mteam_nexus_flow(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"CHD": {"passkey": "chd-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "CHD.txt").write_text("uid=1;", encoding="utf-8")
+    source_torrent = tmp_path / "source-out" / "CHD-2468.torrent"
+    source_hash = write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
+    target_torrent = make_mteam_safe_torrent(tmp_path, "target")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+    patch_pipeline_live_material_stages(monkeypatch)
+    uploaded_hash: str | None = None
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(
+            tracker,
+            source_id,
+            (1234567, 2, "CHD.Reference.2024.1080p.BluRay-GROUP", source_hash, "desc"),
+            {"douban_id": "1291546"},
+        )
+
+    async def fake_download_source_torrent(_config, tracker, source_id, output_dir, base_dir=None):
+        _ = (output_dir, base_dir)
+        assert tracker == "CHD"
+        assert source_id == "2468"
+        return source_torrent
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        assert source_info["tracker"] == "CHD"
+        return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
+
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {
+            "client": client_name,
+            "complete": True,
+            "query": {"torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval},
+            "matches": [{"content_path": content_path or "/downloads/CHD.Reference.2024", "hash": torrent_hash or source_hash}],
+        }
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": source_hash}]}
+
+    async def fake_upload_mteam_from_package(*_args, **_kwargs):
+        nonlocal uploaded_hash
+        uploaded_path = tmp_path / "MTEAM-2468.torrent"
+        uploaded_hash = write_valid_torrent(uploaded_path, tmp_path / "uploaded-content" / "MTEAM-2468.mkv")
+        return {"status": "uploaded", "uploaded_torrent_hash": uploaded_hash, "downloaded_torrent": {"torrent_id": "2468", "path": str(uploaded_path)}}
+
+    calls = {"inject": 0}
+
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+        calls["inject"] += 1
+        injected_hash = uploaded_hash if calls["inject"] > 1 and uploaded_hash is not None else source_hash
+        return {
+            "hash": injected_hash,
+            "torrent_path": torrent_path,
+            "save_path": save_path,
+            "category": category,
+            "tags": tags,
+            "paused": paused,
+            "visible_in_client": True,
+            "verified_in_client": True,
+        }
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "upload_mteam_from_package", fake_upload_mteam_from_package)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "CHD",
+            "--source-id",
+            "2468",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--download-source",
+            "--inject-source",
+            "--save-path",
+            "/downloads/CHD.Reference.2024",
+            "--wait-complete",
+            "--check-dupes",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--accept-rules",
+            "--upload-target",
+            "--target-torrent-file",
+            target_torrent,
+            "--target-execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-qbit-category",
+            "MTEAM",
+            "--uploaded-qbit-tags",
+            "retorrent",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["complete"] is True
+    assert payload["closure"]["complete"] is True
+    assert payload["closure"]["blockers"] == []
+    assert payload["closure"]["source"]["downloaded"] is True
+    assert payload["closure"]["source"]["injected"] is True
+    assert payload["closure"]["source"]["complete"] is True
+    assert payload["closure"]["source"]["torrent_hash"] == source_hash
+    assert payload["closure"]["target"]["uploaded_torrent_hash"] == uploaded_hash
+    assert payload["closure"]["target"]["seeding"] is True
+    assert payload["evidence"]["target"]["materials_ready"] is True
+    assert payload["evidence"]["target"]["preparation_audit"]["description"]["has_ptgen_description"] is True
+    assert payload["evidence"]["target"]["preparation_audit"]["description"]["has_external_ids"] is True
+    assert payload["evidence"]["target"]["preparation_audit"]["description"]["has_screenshot_bbcode"] is True
+    assert calls["inject"] == 2
+    summary_payload = json.loads(await asyncio.to_thread(Path(payload["summary_file"]).read_text, encoding="utf-8"))
+    assert summary_payload["source_tracker"] == "CHD"
+    assert summary_payload["input_source_id"] == "2468"
+    assert summary_payload["source_torrent_id"] == "2468"
+    assert summary_payload["closure_review"]["complete"] is True
+    assert summary_payload["closure_review"]["source"]["torrent_hash"] == source_hash
+    assert summary_payload["closure_review"]["target"]["materials_ready"] is True
+    assert summary_payload["closure_review"]["target"]["metadata_ready"] is True
+    assert summary_payload["closure_review"]["target"]["assets_ready"] is True
+    assert summary_payload["closure_review"]["target"]["description_ready"] is True
+    assert summary_payload["closure_review"]["target"]["uploaded_torrent_hash"] == uploaded_hash
+    assert summary_payload["artifacts"]["source_torrent_file"].endswith("CHD-2468.torrent")
+    assert summary_payload["artifacts"]["target_rule_obligations"]["ready"] is True
+    assert summary_payload["resume_state"]["complete"] is True
+    resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}
+    assert "--from CHD" in resume_commands["resume-source-torrent"]
+    assert "--source-id 2468" in resume_commands["resume-source-torrent"]
+    assert "--from CHD" in resume_commands["resume-target-upload"]
+    assert "--source-id 2468" in resume_commands["resume-target-upload"]
+    diagnostics = ptcli_cli._summary_check_diagnostics(summary_payload)
+    assert diagnostics["completion_matrix"]["ready"] is True
+    assert diagnostics["completion_matrix"]["domains"]["materials"]["evidence"]["ready_for_mteam_upload"] is True
+    assert diagnostics["completion_matrix"]["domains"]["target_upload"]["evidence"]["ready_for_uploaded_seeding"] is True
+
+
+@pytest.mark.asyncio
 async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_missing(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},

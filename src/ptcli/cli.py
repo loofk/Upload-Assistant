@@ -2398,6 +2398,7 @@ def _summary_completion_matrix(
     review_target = closure_review.get("target") if isinstance(closure_review.get("target"), dict) else {}
     target_completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
     target_checks = target_completion.get("checks") if isinstance(target_completion.get("checks"), dict) else {}
+    ready_for_uploaded_seeding = _target_upload_ready_for_uploaded_seeding(target_upload_diagnostics, closure_target, review_target)
     domains = {
         "flow": _completion_domain(
             flow_diagnostics.get("ready"),
@@ -2440,7 +2441,7 @@ def _summary_completion_matrix(
             {
                 "mode": target_upload_diagnostics.get("mode") or review_target.get("mode"),
                 "completion_complete": target_completion.get("complete"),
-                "ready_for_uploaded_seeding": target_upload_diagnostics.get("ready_for_uploaded_seeding"),
+                "ready_for_uploaded_seeding": ready_for_uploaded_seeding,
                 "closure_ready": closure_target.get("ready"),
                 "uploaded_wait_evidence": closure_target.get("uploaded_wait_evidence") or review_target.get("uploaded_wait_evidence"),
                 "injection_verified": closure_target.get("injection_verified") or review_target.get("injection_verified"),
@@ -2513,6 +2514,18 @@ def _target_upload_matrix_ready(target_upload_diagnostics: dict[str, Any], closu
         return bool(completion.get("complete"))
     if closure_target or review_target:
         return bool(closure_target.get("ready") or review_target.get("ready"))
+    return None
+
+
+def _target_upload_ready_for_uploaded_seeding(target_upload_diagnostics: dict[str, Any], closure_target: dict[str, Any], review_target: dict[str, Any]) -> bool | None:
+    ready = target_upload_diagnostics.get("ready_for_uploaded_seeding")
+    if isinstance(ready, bool):
+        return ready
+    target_ready = closure_target.get("ready")
+    uploaded_wait_evidence = closure_target.get("uploaded_wait_evidence") or review_target.get("uploaded_wait_evidence")
+    injection_verified = closure_target.get("injection_verified") or review_target.get("injection_verified")
+    if any(isinstance(value, bool) for value in (target_ready, uploaded_wait_evidence, injection_verified)):
+        return bool(target_ready and uploaded_wait_evidence and injection_verified)
     return None
 
 
