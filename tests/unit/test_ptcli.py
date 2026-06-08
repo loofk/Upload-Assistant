@@ -15819,6 +15819,11 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     preflight_diagnostics = diagnostics["target_upload_diagnostics"]["preflight"]
     assert preflight_diagnostics["status"] == "blocked"
     assert preflight_diagnostics["ready"] is False
+    assert "materials.metadata.tmdb" in preflight_diagnostics["missing"]
+    assert "materials.assets.mediainfo_or_bdinfo" in preflight_diagnostics["missing"]
+    assert "description.content" in preflight_diagnostics["missing"]
+    assert "materials.description.external_ids.tmdb" in preflight_diagnostics["description_missing"]
+    assert "materials.description.mediainfo_or_bdinfo" in preflight_diagnostics["description_missing"]
     assert preflight_diagnostics["target_preparation_ready"] is False
     assert preflight_diagnostics["materials_ready"] is False
     assert preflight_diagnostics["metadata_ready"] is False
@@ -15833,6 +15838,11 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert preflight_diagnostics["blockers"]
     shell_fields = ptcli_cli._summary_check_target_upload_shell_fields(diagnostics["target_upload_diagnostics"])
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_READY"] == "0"
+    assert "materials.metadata.tmdb" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MISSING"]
+    assert "materials.assets.mediainfo_or_bdinfo" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MISSING"]
+    assert "description.content" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MISSING"]
+    assert "materials.description.external_ids.tmdb" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_MISSING"]
+    assert "materials.description.mediainfo_or_bdinfo" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_MISSING"]
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MATERIALS_READY"] == "0"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_METADATA_READY"] == "0"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_ASSETS_READY"] == "0"
