@@ -11243,6 +11243,8 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     await asyncio.to_thread(metadata_file.write_text, json.dumps({"tmdb_id": 999, "douban_id": "1291546"}), encoding="utf-8")
     mediainfo = tmp_path / "MI_FULL_00.txt"
     await asyncio.to_thread(mediainfo.write_text, "General\nComplete name : Name.mkv\n", encoding="utf-8")
+    bdinfo = tmp_path / "BD_FULL_00.txt"
+    await asyncio.to_thread(bdinfo.write_text, "DISC INFO:\nDisc Title: Name\n", encoding="utf-8")
     screenshot = tmp_path / "screen-1.png"
     await asyncio.to_thread(screenshot.write_bytes, b"png")
     image_host_file = tmp_path / "image-host-uploads.json"
@@ -11274,6 +11276,9 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
             str(tmp_path / "target"),
             "--mediainfo-file",
             str(mediainfo),
+            "--bdinfo-file",
+            str(bdinfo),
+            "--generate-bdinfo",
             "--generate-mediainfo",
             "--screenshot-file",
             str(screenshot),
@@ -11347,6 +11352,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert material_generation["metadata"]["readiness"]["douban_id"] == {"ready": True, "required": True, "source": "overrides"}
     assert material_generation["metadata"]["readiness"]["douban_url"] == {"ready": True, "required": True, "source": "overrides"}
     assert material_generation["metadata"]["readiness"]["ptgen_description"] == {"ready": False, "required": False, "source": None}
+    assert material_generation["bdinfo"]["skipped"] is True
     assert material_generation["mediainfo"]["skipped"] is True
     assert material_generation["screenshots"]["skipped"] is True
     assert material_generation["image_host"]["skipped"] is True
@@ -11355,6 +11361,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert any("PTGen/Douban description" in action for action in summary_payload["next_actions"])
     assert summary_payload["material_options"]["metadata_file"] == str(metadata_file)
     assert summary_payload["material_options"]["mediainfo_file"] == str(mediainfo)
+    assert summary_payload["material_options"]["bdinfo_file"] == str(bdinfo)
     assert summary_payload["material_options"]["screenshot_files"] == [str(screenshot)]
     assert summary_payload["material_options"]["screenshot_count"] == 2
     assert summary_payload["material_options"]["image_host"] == "ptpimg"
@@ -11398,7 +11405,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert material_closure["metadata"]["readiness"]["ptgen_description"]["required"] is False
     assert "metadata.ptgen_description" in material_closure["metadata"]["missing"]
     assert material_closure["mediainfo"] == {"ready": True, "generated": False, "missing": [], "path": str(mediainfo)}
-    assert material_closure["bdinfo"]["required"] is False
+    assert material_closure["bdinfo"] == {"ready": True, "required": False, "generated": False, "missing": [], "path": str(bdinfo)}
     assert material_closure["screenshots"]["ready"] is True
     assert material_closure["screenshots"]["count"] == 1
     assert material_closure["image_host"]["ready"] is True
@@ -11438,6 +11445,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "export PTCLI_RESUME_MATERIAL_METADATA_DOUBAN_ID=1291546\n" in out
     assert "export PTCLI_RESUME_MATERIAL_PTGEN_DESCRIPTION_LENGTH=0\n" in out
     assert f"export PTCLI_RESUME_MATERIAL_MEDIAINFO_FILE={mediainfo}\n" in out
+    assert f"export PTCLI_RESUME_MATERIAL_BDINFO_FILE={bdinfo}\n" in out
     assert "export PTCLI_RESUME_MATERIAL_SCREENSHOTS_READY=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_READY=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_PTGEN=0\n" in out
@@ -11466,6 +11474,8 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "--target-output-dir" in resume_commands["resume-target-package"]
     assert f"--metadata-file {shlex.quote(str(metadata_file))}" in resume_commands["resume-target-package"]
     assert f"--mediainfo-file {shlex.quote(str(mediainfo))}" in resume_commands["resume-target-package"]
+    assert f"--bdinfo-file {shlex.quote(str(bdinfo))}" in resume_commands["resume-target-package"]
+    assert "--generate-bdinfo" in resume_commands["resume-target-package"]
     assert "--generate-mediainfo" in resume_commands["resume-target-package"]
     assert f"--screenshot-file {shlex.quote(str(screenshot))}" in resume_commands["resume-target-package"]
     assert "--generate-screenshots" in resume_commands["resume-target-package"]
