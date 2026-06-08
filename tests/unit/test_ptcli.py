@@ -3504,6 +3504,8 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["critical_domains"]["description"]["ready"] is True
     assert diagnostics["disc_structure"]["type"] == "BDMV"
     assert diagnostics["disc_structure"]["bdmv"] is True
+    assert diagnostics["bdinfo_required"] is True
+    assert diagnostics["media_info_requirement"] == "bdinfo"
     assert diagnostics["sections"]["prerequisites"]["ok"] is False
     assert diagnostics["sections"]["prerequisites"]["checks"][0]["name"] == "assets.image_host"
     assert diagnostics["sections"]["metadata"]["ptgen_description_length"] == 42
@@ -3520,6 +3522,8 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert "export PTCLI_MATERIAL_CRITICAL_MEDIA_INFO_MISSING=assets.bdinfo_for_disc\n" in out
     assert "export PTCLI_MATERIAL_CRITICAL_IMAGE_HOST_READY=0\n" in out
     assert "export PTCLI_MATERIAL_CRITICAL_IMAGE_HOST_MISSING=assets.image_host_uploads\n" in out
+    assert "export PTCLI_MATERIAL_BDINFO_REQUIRED=1\n" in out
+    assert "export PTCLI_MATERIAL_MEDIA_INFO_REQUIREMENT=bdinfo\n" in out
 
 
 def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_package() -> None:
@@ -3573,6 +3577,28 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
     assert shell_fields["PTCLI_MATERIAL_METADATA_SOURCES"] == "source,ptgen"
     assert shell_fields["PTCLI_MATERIAL_METADATA_APPLIED_KEYS"] == "douban_url"
     assert shell_fields["PTCLI_MATERIAL_METADATA_READINESS_BLOCKERS"] == "Missing metadata after enrichment: tmdb_id"
+
+
+def test_summary_material_diagnostics_marks_bdinfo_optional_for_file_content() -> None:
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "target_materials": {
+                    "ready": False,
+                    "assets": {"disc_structure": {"ready": False, "path": "/downloads/Movie.mkv", "bdmv": False, "type": None}},
+                    "missing": ["assets.mediainfo_or_bdinfo"],
+                },
+                "target_materials_ready": False,
+                "target_materials_missing": ["assets.mediainfo_or_bdinfo"],
+            }
+        }
+    )
+
+    assert diagnostics["bdinfo_required"] is False
+    assert diagnostics["media_info_requirement"] == "mediainfo_or_bdinfo"
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+    assert shell_fields["PTCLI_MATERIAL_BDINFO_REQUIRED"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_MEDIA_INFO_REQUIREMENT"] == "mediainfo_or_bdinfo"
 
 
 def test_summary_material_diagnostics_exposes_description_external_id_readiness() -> None:

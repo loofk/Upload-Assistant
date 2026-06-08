@@ -2559,6 +2559,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     image_host_evidence = _summary_image_host_evidence(sections, target_assets)
     material_missing = _summary_material_missing(artifacts, target_materials)
     critical_missing = _critical_material_missing(material_missing)
+    bdinfo_required = bool(disc_structure.get("bdmv"))
     return {
         "present": bool(material_generation or target_materials),
         "generation_present": bool(material_generation),
@@ -2572,6 +2573,8 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "critical_missing": critical_missing,
         "critical_domains": _material_critical_domains(critical_missing),
         "disc_structure": disc_structure,
+        "bdinfo_required": bdinfo_required,
+        "media_info_requirement": "bdinfo" if bdinfo_required else "mediainfo_or_bdinfo",
         "description": {
             "ready": target_preparation_audit.get("description_ready"),
             "path": description.get("path"),
@@ -8630,6 +8633,8 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_DISC_TYPE": disc_structure.get("type"),
         "PTCLI_MATERIAL_DISC_BDMV": _shell_bool(disc_structure.get("bdmv")) if "bdmv" in disc_structure else None,
         "PTCLI_MATERIAL_DISC_PATH": disc_structure.get("path"),
+        "PTCLI_MATERIAL_BDINFO_REQUIRED": _shell_bool(material_diagnostics.get("bdinfo_required")) if material_diagnostics.get("bdinfo_required") is not None else None,
+        "PTCLI_MATERIAL_MEDIA_INFO_REQUIREMENT": material_diagnostics.get("media_info_requirement"),
         "PTCLI_MATERIAL_PREREQUISITES_OK": _summary_material_section_shell_bool(prerequisites),
         "PTCLI_MATERIAL_METADATA_OK": _summary_material_section_shell_bool(metadata),
         "PTCLI_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
