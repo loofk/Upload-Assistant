@@ -577,6 +577,7 @@ def _source_download_qbit_handoff(args: argparse.Namespace, source_torrent_file:
         args.save_path or "<save-path>",
         "--wait-complete",
         "--accept-rules",
+        "--write-summary",
         "--json",
     ]
     _append_optional_command_arg(command_args, "--config", args.config)

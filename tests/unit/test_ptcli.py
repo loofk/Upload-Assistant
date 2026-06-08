@@ -2793,6 +2793,7 @@ def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> 
     assert payload["source_torrent"]["path"] in payload["next_command_argv"]
     assert "--save-path" in payload["next_command_argv"]
     assert "<save-path>" in payload["next_command_argv"]
+    assert "--write-summary" in payload["next_command_argv"]
 
 
 def test_source_download_generates_ready_qbit_handoff(monkeypatch, capsys, tmp_path) -> None:
@@ -2879,6 +2880,7 @@ def test_source_download_generates_ready_qbit_handoff(monkeypatch, capsys, tmp_p
         "/downloads",
         "--wait-complete",
         "--accept-rules",
+        "--write-summary",
         "--json",
         "--config",
         "/etc/ua/config.py",
