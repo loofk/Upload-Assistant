@@ -2589,6 +2589,44 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _target_preflight_gates(preflight: dict[str, Any] | None, preparation_audit: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not isinstance(preflight, dict) or not preflight:
+        return {
+            "present": False,
+            "status": None,
+            "ready": False,
+            "blockers": ["target upload preflight is missing."],
+            "target_preparation_ready": False,
+            "materials_ready": False,
+            "metadata_ready": False,
+            "assets_ready": False,
+            "description_ready": False,
+            "payload_ready": False,
+            "payload_checks_ready": False,
+            "description_checks_ready": False,
+            "materials_ready_required": False,
+            "torrent_file": None,
+        }
+    audit = preparation_audit if isinstance(preparation_audit, dict) else _target_preparation_audit_from_preflight(preflight)
+    payload = audit.get("payload") if isinstance(audit.get("payload"), dict) else {}
+    return {
+        "present": True,
+        "status": preflight.get("status"),
+        "ready": preflight.get("status") == "ready" and bool(audit.get("ready")),
+        "blockers": _string_list(preflight.get("blockers")) or _string_list(audit.get("blockers")),
+        "target_preparation_ready": bool(audit.get("ready")),
+        "materials_ready": bool(audit.get("materials_ready")),
+        "metadata_ready": bool(audit.get("metadata_ready")),
+        "assets_ready": bool(audit.get("assets_ready")),
+        "description_ready": bool(audit.get("description_ready")),
+        "payload_ready": bool(audit.get("payload_ready")),
+        "payload_checks_ready": bool(payload.get("payload_checks_ready")),
+        "description_checks_ready": bool(payload.get("description_checks_ready")),
+        "materials_ready_required": bool(payload.get("materials_ready_required")),
+        "torrent_file": payload.get("torrent_file") if isinstance(payload.get("torrent_file"), dict) else None,
+    }
+
+
 def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
     material_generation = artifacts.get("material_generation") if isinstance(artifacts.get("material_generation"), dict) else {}
@@ -3691,6 +3729,8 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
     commands_by_stage = {str(command.get("stage")): str(command.get("command")) for command in recommended_commands if isinstance(command, dict)}
     next_command = _doctor_next_command(payload, commands_by_stage)
     next_command_argv = _resume_state_next_command_argv(next_command, recommended_commands)
+    target_preflight = artifacts.get("target_preflight_gates") if isinstance(artifacts.get("target_preflight_gates"), dict) else {}
+    target_preflight_torrent = target_preflight.get("torrent_file") if isinstance(target_preflight.get("torrent_file"), dict) else {}
     return {
         "ready": bool(payload.get("ready")),
         "live_safe_to_attempt": bool(payload.get("live_safe_to_attempt")),
@@ -3714,6 +3754,11 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
             "target_rule_obligations": bool(artifacts.get("target_rule_obligations")),
             "target_package_preflight_ready": bool(artifacts.get("target_package_preflight_ready")),
             "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
+            "target_preflight_gates_ready": bool(target_preflight.get("ready")),
+            "target_preflight_materials_ready": bool(target_preflight.get("materials_ready")),
+            "target_preflight_description_ready": bool(target_preflight.get("description_ready")),
+            "target_preflight_payload_ready": bool(target_preflight.get("payload_ready")),
+            "target_preflight_torrent_safe": bool(target_preflight_torrent.get("mteam_safe")),
             "download_uploaded_torrent": bool(artifacts.get("download_uploaded_torrent")),
             "inject_uploaded_torrent": bool(artifacts.get("inject_uploaded_torrent")),
             "wait_uploaded_complete": bool(artifacts.get("wait_uploaded_complete")),
@@ -3778,6 +3823,7 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
         target_rule_obligations = package_preflight.get("rule_obligation_review") if isinstance(package_preflight.get("rule_obligation_review"), dict) else None
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
     preparation_audit = _target_preparation_audit_from_preflight(package_preflight)
+    target_preflight = _target_preflight_gates(package_preflight, preparation_audit)
     return {
         "content_path": _path_artifact(args.content_path),
         "source_torrent_file": _path_artifact(args.source_torrent_file),
@@ -3785,6 +3831,7 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
         "target_torrent_file": _path_artifact(args.target_torrent_file),
         "target_preparation_audit": preparation_audit,
         "target_preparation_ready": bool(preparation_audit.get("ready")),
+        "target_preflight_gates": target_preflight,
         "uploaded_torrent_id": args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(args.uploaded_torrent_file),
         "effective_uploaded_save_path": _path_artifact(str(effective_uploaded_save_path)) if effective_uploaded_save_path else None,

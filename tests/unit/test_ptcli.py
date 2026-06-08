@@ -7565,7 +7565,126 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
     assert audit["description"]["has_screenshot_bbcode"] is True
     assert audit["description"]["bbcode_image_count"] == 1
     assert summary["artifacts"]["target_preparation_ready"] is True
+    gates = summary["artifacts"]["target_preflight_gates"]
+    assert gates["present"] is True
+    assert gates["status"] == "ready"
+    assert gates["ready"] is True
+    assert gates["target_preparation_ready"] is True
+    assert gates["materials_ready"] is True
+    assert gates["metadata_ready"] is True
+    assert gates["assets_ready"] is True
+    assert gates["description_ready"] is True
+    assert gates["payload_ready"] is True
+    assert gates["payload_checks_ready"] is True
+    assert gates["description_checks_ready"] is True
+    assert gates["materials_ready_required"] is True
+    assert gates["torrent_file"]["mteam_safe"] is True
+    assert gates["torrent_file"]["metadata_readable"] is True
+    assert gates["torrent_file"]["source_flag"] == "MTEAM"
     assert summary["resume_state"]["artifacts"]["target_preparation_ready"] is True
+    assert summary["resume_state"]["artifacts"]["target_preflight_gates_ready"] is True
+    assert summary["resume_state"]["artifacts"]["target_preflight_materials_ready"] is True
+    assert summary["resume_state"]["artifacts"]["target_preflight_description_ready"] is True
+    assert summary["resume_state"]["artifacts"]["target_preflight_payload_ready"] is True
+    assert summary["resume_state"]["artifacts"]["target_preflight_torrent_safe"] is True
+
+
+def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    content_path = tmp_path / "downloads" / "Name"
+    content_path.mkdir(parents=True)
+    target_torrent = make_mteam_safe_torrent(tmp_path, "target")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        content_path=str(content_path),
+        package_dir=package["package_dir"],
+        target_torrent_file=target_torrent,
+        accept_rules=True,
+        target_execute=True,
+        confirm_upload=True,
+        download_uploaded_torrent=True,
+        inject_uploaded_torrent=True,
+        uploaded_save_path=str(content_path),
+        wait_uploaded_complete=True,
+    )
+    args = build_parser().parse_args(
+        [
+            "doctor",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--path",
+            str(content_path),
+            "--package-dir",
+            package["package_dir"],
+            "--target-torrent-file",
+            target_torrent,
+            "--accept-rules",
+            "--target-execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            str(content_path),
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+    )
+
+    summary = ptcli_cli._doctor_summary_payload(payload, args, str(tmp_path / "ptcli-doctor-summary.json"))
+
+    assert payload["ready"] is False
+    assert payload["live_safe_to_attempt"] is False
+    gates = summary["artifacts"]["target_preflight_gates"]
+    assert gates["present"] is True
+    assert gates["status"] == "blocked"
+    assert gates["ready"] is False
+    assert gates["target_preparation_ready"] is False
+    assert gates["materials_ready"] is False
+    assert gates["metadata_ready"] is False
+    assert gates["assets_ready"] is False
+    assert gates["description_ready"] is False
+    assert gates["payload_ready"] is False
+    assert gates["payload_checks_ready"] is True
+    assert gates["description_checks_ready"] is False
+    assert gates["materials_ready_required"] is True
+    assert gates["torrent_file"]["mteam_safe"] is True
+    assert gates["torrent_file"]["metadata_readable"] is True
+    assert gates["torrent_file"]["source_flag"] == "MTEAM"
+    assert summary["resume_state"]["artifacts"]["target_preflight_gates_ready"] is False
+    assert summary["resume_state"]["artifacts"]["target_preflight_materials_ready"] is False
+    assert summary["resume_state"]["artifacts"]["target_preflight_description_ready"] is False
+    assert summary["resume_state"]["artifacts"]["target_preflight_payload_ready"] is False
+    assert summary["resume_state"]["artifacts"]["target_preflight_torrent_safe"] is True
 
 
 def test_doctor_auto_enables_uploaded_torrent_followup_for_live_closure(tmp_path) -> None:
@@ -8295,6 +8414,22 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert summary_payload["artifacts"]["rule_obligations"]["ready"] is True
     assert summary_payload["artifacts"]["target_rule_obligations"]["ready"] is True
     assert summary_payload["artifacts"]["target_package_preflight_ready"] is True
+    gates = summary_payload["artifacts"]["target_preflight_gates"]
+    assert gates["present"] is True
+    assert gates["status"] == "ready"
+    assert gates["ready"] is True
+    assert gates["target_preparation_ready"] is True
+    assert gates["materials_ready"] is True
+    assert gates["metadata_ready"] is True
+    assert gates["assets_ready"] is True
+    assert gates["description_ready"] is True
+    assert gates["payload_ready"] is True
+    assert gates["payload_checks_ready"] is True
+    assert gates["description_checks_ready"] is True
+    assert gates["materials_ready_required"] is True
+    assert gates["torrent_file"]["mteam_safe"] is True
+    assert gates["torrent_file"]["metadata_readable"] is True
+    assert gates["torrent_file"]["source_flag"] == "MTEAM"
     assert summary_payload["artifacts"]["download_uploaded_torrent"] is True
     assert summary_payload["artifacts"]["inject_uploaded_torrent"] is True
     assert summary_payload["artifacts"]["wait_uploaded_complete"] is True
@@ -8341,6 +8476,11 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert summary_payload["resume_state"]["artifacts"]["live_upload_confirmation"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_rule_obligations"] is True
     assert summary_payload["resume_state"]["artifacts"]["target_package_preflight_ready"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_preflight_gates_ready"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_preflight_materials_ready"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_preflight_description_ready"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_preflight_payload_ready"] is True
+    assert summary_payload["resume_state"]["artifacts"]["target_preflight_torrent_safe"] is True
     assert summary_payload["resume_state"]["artifacts"]["download_uploaded_torrent"] is True
     assert summary_payload["resume_state"]["artifacts"]["inject_uploaded_torrent"] is True
     assert summary_payload["resume_state"]["artifacts"]["wait_uploaded_complete"] is True
