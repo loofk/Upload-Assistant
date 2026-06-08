@@ -14020,9 +14020,19 @@ async def test_upload_screenshot_image_hosts_blocks_legacy_imgbox_without_extra_
     assert await asyncio.to_thread(Path(result["image_host_file"]).exists)
 
 
-def test_normalize_metadata_overrides_accepts_urls_and_ids(tmp_path) -> None:
+def test_normalize_metadata_overrides_accepts_urls_ids_and_ptgen_description(tmp_path) -> None:
     metadata_file = tmp_path / "metadata.json"
-    metadata_file.write_text(json.dumps({"imdb": "tt1234567", "tmdb": "999", "douban": "https://movie.douban.com/subject/1291546/"}), encoding="utf-8")
+    metadata_file.write_text(
+        json.dumps(
+            {
+                "imdb": "tt1234567",
+                "tmdb": "999",
+                "douban": "https://movie.douban.com/subject/1291546/",
+                "ptgen_description": "◎译　　名　示例电影\r\n◎简　　介　示例简介",
+            }
+        ),
+        encoding="utf-8",
+    )
 
     overrides = load_metadata_overrides(str(metadata_file))
 
@@ -14031,8 +14041,10 @@ def test_normalize_metadata_overrides_accepts_urls_and_ids(tmp_path) -> None:
         "tmdb_id": 999,
         "douban_id": "1291546",
         "douban_url": "https://movie.douban.com/subject/1291546/",
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
     }
     assert normalize_metadata_overrides({"douban_id": "1291546"})["douban_url"] == "https://movie.douban.com/subject/1291546/"
+    assert normalize_metadata_overrides({"ptgen": {"description": "◎片　　名　嵌套示例"}})["ptgen_description"] == "◎片　　名　嵌套示例"
 
 
 @pytest.mark.asyncio
@@ -14061,6 +14073,29 @@ async def test_enrich_source_metadata_applies_overrides_without_clobbering_exist
     assert result["readiness"]["douban_id"] == {"ready": True, "required": True, "source": "overrides"}
     assert result["readiness"]["douban_url"] == {"ready": True, "required": True, "source": "overrides"}
     assert result["readiness"]["ptgen_description"] == {"ready": False, "required": False, "source": None}
+
+
+@pytest.mark.asyncio
+async def test_enrich_source_metadata_accepts_ptgen_description_override_when_required() -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "name": "Name",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+    }
+
+    result = await enrich_source_metadata({}, source_info, overrides={"ptgen_description": "◎译　　名　示例电影"}, fetch_ptgen=True)
+
+    assert result["ready"] is True
+    assert result["source_info"]["ptgen_description"] == "◎译　　名　示例电影"
+    assert result["applied"]["ptgen_description"] == "◎译　　名　示例电影"
+    assert result["sources"] == ["overrides"]
+    assert result["readiness"]["ptgen_description"] == {"ready": True, "required": True, "source": "overrides"}
 
 
 @pytest.mark.asyncio

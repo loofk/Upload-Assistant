@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 METADATA_KEYS = ("imdb_id", "tmdb_id", "douban_id", "douban_url")
+PTGEN_DESCRIPTION_KEYS = ("ptgen_description", "ptgen", "douban_description", "description")
 
 
 async def enrich_source_metadata(
@@ -57,7 +58,7 @@ async def enrich_source_metadata(
             applied["douban_id"] = douban_id
             field_sources["douban_id"] = field_sources.get("douban_url") or "derived"
 
-    if fetch_ptgen:
+    if fetch_ptgen and not base.get("ptgen_description"):
         ptgen_result = await _ptgen_from_metadata(config, base, base_dir=base_dir)
         if ptgen_result.get("description"):
             base["ptgen_description"] = ptgen_result["description"]
@@ -136,7 +137,22 @@ def normalize_metadata_overrides(payload: dict[str, Any]) -> dict[str, Any]:
         overrides["douban_url"] = douban_url
     elif douban_id:
         overrides["douban_url"] = f"https://movie.douban.com/subject/{douban_id}/"
+    ptgen_description = _normalize_ptgen_description(payload)
+    if ptgen_description:
+        overrides["ptgen_description"] = ptgen_description
     return overrides
+
+
+def _normalize_ptgen_description(payload: dict[str, Any]) -> str | None:
+    for key in PTGEN_DESCRIPTION_KEYS:
+        value = payload.get(key)
+        if value is None:
+            continue
+        text = value.get("description") or value.get("text") or value.get("content") if isinstance(value, dict) else value
+        normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if normalized:
+            return normalized
+    return None
 
 
 async def _tmdb_from_imdb(config: dict[str, Any], imdb_id: Any) -> dict[str, Any]:
