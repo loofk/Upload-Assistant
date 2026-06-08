@@ -871,10 +871,15 @@ def _image_host_asset(path_value: Any) -> dict[str, Any]:
 
 
 def _image_host_item_urls(item: dict[str, Any]) -> tuple[str, str]:
-    raw_url = str(item.get("raw_url") or item.get("url") or "").strip()
-    img_url = str(item.get("img_url") or raw_url).strip()
-    web_url = str(item.get("web_url") or raw_url or img_url).strip()
+    raw_url = _usable_web_url(item.get("raw_url") or item.get("url"))
+    img_url = _usable_web_url(item.get("img_url")) or raw_url
+    web_url = _usable_web_url(item.get("web_url")) or raw_url or img_url
     return img_url, web_url
+
+
+def _usable_web_url(value: Any) -> str:
+    text = str(value or "").strip()
+    return text if re.match(r"^https?://", text, re.IGNORECASE) else ""
 
 
 def _disc_structure_asset(content_path: str | None) -> dict[str, Any]:
