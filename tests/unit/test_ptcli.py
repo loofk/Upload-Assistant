@@ -10741,6 +10741,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["closure_review"]["target"]["preparation_ready"] is True
     assert summary_payload["closure_review"]["target"]["preparation_missing"] == []
     assert summary_payload["closure_review"]["target"]["description"]["has_ptgen_description"] is True
+    assert summary_payload["closure_review"]["target"]["description"]["ptgen_description_length"] == 21
     assert summary_payload["closure_review"]["target"]["description"]["has_external_ids"] is True
     assert summary_payload["closure_review"]["target"]["description"]["external_links"]["imdb"] == "https://www.imdb.com/title/tt1234567"
     assert summary_payload["closure_review"]["target"]["description"]["external_links"]["tmdb"] == "https://www.themoviedb.org/movie/2"
@@ -10800,6 +10801,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "export PTCLI_CLOSURE_REVIEW_TARGET_ASSETS_READY=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_TARGET_DESCRIPTION_READY=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_PTGEN=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_PTGEN_LENGTH=21\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_IMDB_LINK=https://www.imdb.com/title/tt1234567\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_TMDB_LINK=https://www.themoviedb.org/movie/2\n" in out

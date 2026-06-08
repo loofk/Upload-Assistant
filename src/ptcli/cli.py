@@ -2370,6 +2370,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "char_length": description.get("char_length"),
             "expected_length": description.get("expected_length"),
             "has_ptgen_description": description.get("has_ptgen_description"),
+            "ptgen_description_length": description.get("ptgen_description_length"),
             "has_external_ids": description.get("has_external_ids"),
             "external_links": description.get("external_links") if isinstance(description.get("external_links"), dict) else {},
             "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
@@ -2797,6 +2798,7 @@ def _pipeline_closure_review(payload: dict[str, Any], artifacts: dict[str, Any] 
                 "char_length": target_description.get("char_length"),
                 "expected_length": target_description.get("expected_length"),
                 "has_ptgen_description": target_description.get("has_ptgen_description"),
+                "ptgen_description_length": target_description.get("ptgen_description_length"),
                 "has_external_ids": target_description.get("has_external_ids"),
                 "external_links": target_description.get("external_links") if isinstance(target_description.get("external_links"), dict) else {},
                 "has_mediainfo_or_bdinfo": target_description.get("has_mediainfo_or_bdinfo"),
@@ -3735,6 +3737,8 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
     upload_payload = preflight.get("upload_payload") if isinstance(preflight.get("upload_payload"), dict) else {}
     description_file = upload_payload.get("description_file") if isinstance(upload_payload.get("description_file"), dict) else {}
     content = description_file.get("content") if isinstance(description_file.get("content"), dict) else {}
+    review = upload_payload.get("review") if isinstance(upload_payload.get("review"), dict) else {}
+    review_description = review.get("description") if isinstance(review.get("description"), dict) else {}
     material_checks = upload_payload.get("material_checks") if isinstance(upload_payload.get("material_checks"), list) else []
     payload_checks = _target_preparation_checks(material_checks, "payload.")
     description_checks = _target_preparation_checks(material_checks, "materials.description.")
@@ -3776,6 +3780,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
             "char_length": description_file.get("char_length"),
             "expected_length": description_file.get("expected_length"),
             "has_ptgen_description": bool(content.get("has_ptgen_description")),
+            "ptgen_description_length": review_description.get("ptgen_description_length"),
             "has_external_ids": bool(content.get("has_imdb") and content.get("has_tmdb") and content.get("has_douban")),
             "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
@@ -6192,6 +6197,7 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
             "missing": _string_list(description.get("missing")),
             "path": description.get("path"),
             "has_ptgen_description": bool(description.get("has_ptgen_description")),
+            "ptgen_description_length": description.get("ptgen_description_length"),
             "has_external_ids": bool(description.get("has_external_ids")),
             "has_mediainfo_or_bdinfo": bool(description.get("has_mediainfo_or_bdinfo")),
             "has_screenshot_bbcode": bool(description.get("has_screenshot_bbcode")),
@@ -6704,6 +6710,8 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
     upload_payload = preflight.get("upload_payload") if isinstance(preflight.get("upload_payload"), dict) else {}
     description_file = upload_payload.get("description_file") if isinstance(upload_payload.get("description_file"), dict) else {}
     content = description_file.get("content") if isinstance(description_file.get("content"), dict) else {}
+    review = upload_payload.get("review") if isinstance(upload_payload.get("review"), dict) else {}
+    review_description = review.get("description") if isinstance(review.get("description"), dict) else {}
     material_checks = upload_payload.get("material_checks") if isinstance(upload_payload.get("material_checks"), list) else []
     payload_checks = [check for check in material_checks if isinstance(check, dict) and str(check.get("name") or "").startswith("payload.")]
     description_checks = [check for check in material_checks if isinstance(check, dict) and str(check.get("name") or "").startswith("materials.description.")]
@@ -6737,6 +6745,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
             "char_length": description_file.get("char_length"),
             "expected_length": description_file.get("expected_length"),
             "has_ptgen_description": bool(content.get("has_ptgen_description")),
+            "ptgen_description_length": review_description.get("ptgen_description_length"),
             "has_external_ids": bool(content.get("has_imdb") and content.get("has_tmdb") and content.get("has_douban")),
             "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
@@ -8023,6 +8032,7 @@ def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_LENGTH": description.get("char_length"),
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_EXPECTED_LENGTH": description.get("expected_length"),
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_PTGEN_LENGTH": description.get("ptgen_description_length"),
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_IMDB_LINK": external_links.get("imdb"),
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_TMDB_LINK": external_links.get("tmdb"),
@@ -8104,6 +8114,7 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_IMAGE_HOST_FILE": image_host.get("image_host_file"),
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_READY": _shell_bool(description.get("ready")) if description.get("ready") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_PTGEN_LENGTH": description.get("ptgen_description_length"),
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
@@ -8280,6 +8291,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_DESCRIPTION_LENGTH": description.get("char_length"),
         "PTCLI_MATERIAL_DESCRIPTION_EXPECTED_LENGTH": description.get("expected_length"),
         "PTCLI_MATERIAL_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_PTGEN_LENGTH": description.get("ptgen_description_length"),
         "PTCLI_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_IMDB_LINK": description_links.get("imdb"),
         "PTCLI_MATERIAL_DESCRIPTION_TMDB_LINK": description_links.get("tmdb"),

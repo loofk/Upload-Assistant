@@ -1431,6 +1431,7 @@ def _first_regex_match(pattern: str, text: str) -> str | None:
 
 def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summary: dict[str, Any], materials: dict[str, Any]) -> dict[str, Any]:
     content = description_summary.get("content") if isinstance(description_summary.get("content"), dict) else {}
+    metadata = materials.get("metadata") if isinstance(materials.get("metadata"), dict) else {}
     assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
     screenshots = assets.get("screenshots") if isinstance(assets.get("screenshots"), dict) else {}
     image_hosts = assets.get("image_hosts") if isinstance(assets.get("image_hosts"), dict) else {}
@@ -1440,6 +1441,7 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
             "char_length": description_summary.get("char_length"),
             "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
             "has_ptgen_description": bool(content.get("has_ptgen_description")),
+            "ptgen_description_length": metadata.get("ptgen_description_length"),
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
