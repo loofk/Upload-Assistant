@@ -3495,6 +3495,11 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["target_materials_ready"] is False
     assert diagnostics["target_materials_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
     assert diagnostics["target_preparation_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
+    assert diagnostics["ready_for_mteam_upload"] is False
+    assert diagnostics["upload_material_gates"] == {"critical_ready": False, "target_materials_ready": False, "target_preparation_ready": False}
+    assert "critical material missing: assets.bdinfo_for_disc" in diagnostics["upload_material_blockers"]
+    assert "target materials are not ready" in diagnostics["upload_material_blockers"]
+    assert "target preparation is not ready" in diagnostics["upload_material_blockers"]
     assert diagnostics["critical_ready"] is False
     assert diagnostics["critical_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
     assert diagnostics["critical_domains"]["media_info"] == {"ready": False, "missing": ["assets.bdinfo_for_disc"]}
@@ -3516,6 +3521,10 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
     assert code == 0
     out = capsys.readouterr().out
+    assert "export PTCLI_READY_FOR_MTEAM_UPLOAD=0\n" in out
+    assert "export PTCLI_MATERIAL_UPLOAD_BLOCKERS=" in out
+    assert "target materials are not ready" in out
+    assert "target preparation is not ready" in out
     assert "export PTCLI_MATERIAL_CRITICAL_READY=0\n" in out
     assert "export PTCLI_MATERIAL_CRITICAL_MISSING=assets.bdinfo_for_disc,assets.image_host_uploads\n" in out
     assert "export PTCLI_MATERIAL_CRITICAL_MEDIA_INFO_READY=0\n" in out
@@ -3599,6 +3608,44 @@ def test_summary_material_diagnostics_marks_bdinfo_optional_for_file_content() -
     shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
     assert shell_fields["PTCLI_MATERIAL_BDINFO_REQUIRED"] == "0"
     assert shell_fields["PTCLI_MATERIAL_MEDIA_INFO_REQUIREMENT"] == "mediainfo_or_bdinfo"
+
+
+def test_summary_material_diagnostics_exposes_ready_for_mteam_upload() -> None:
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "target_materials": {
+                    "ready": True,
+                    "assets": {"disc_structure": {"ready": False, "path": "/downloads/Movie.mkv", "bdmv": False, "type": None}},
+                    "missing": [],
+                },
+                "target_materials_ready": True,
+                "target_preparation_ready": True,
+                "target_preparation_audit": {
+                    "description_ready": True,
+                    "description": {
+                        "has_ptgen_description": True,
+                        "has_external_ids": True,
+                        "has_mediainfo_or_bdinfo": True,
+                        "has_screenshot_bbcode": True,
+                        "missing": [],
+                    },
+                },
+            }
+        }
+    )
+
+    assert diagnostics["ready_for_mteam_upload"] is True
+    assert diagnostics["upload_material_gates"] == {"critical_ready": True, "target_materials_ready": True, "target_preparation_ready": True}
+    assert diagnostics["upload_material_blockers"] == []
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+    assert shell_fields["PTCLI_READY_FOR_MTEAM_UPLOAD"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_UPLOAD_BLOCKERS"] == ""
+    assert json.loads(shell_fields["PTCLI_MATERIAL_UPLOAD_GATES"]) == {
+        "critical_ready": True,
+        "target_materials_ready": True,
+        "target_preparation_ready": True,
+    }
 
 
 def test_summary_material_diagnostics_exposes_description_external_id_readiness() -> None:

@@ -2560,15 +2560,28 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     material_missing = _summary_material_missing(artifacts, target_materials)
     critical_missing = _critical_material_missing(material_missing)
     bdinfo_required = bool(disc_structure.get("bdmv"))
+    target_materials_ready = artifacts.get("target_materials_ready") if "target_materials_ready" in artifacts else target_materials.get("ready")
+    target_preparation_ready = artifacts.get("target_preparation_ready")
+    if target_preparation_ready is None and artifacts.get("target_preparation_missing"):
+        target_preparation_ready = False
+    ready_for_mteam_upload = bool(critical_missing == [] and target_materials_ready is True and target_preparation_ready is True)
+    upload_material_gates = {
+        "critical_ready": not critical_missing,
+        "target_materials_ready": target_materials_ready,
+        "target_preparation_ready": target_preparation_ready,
+    }
     return {
         "present": bool(material_generation or target_materials),
         "generation_present": bool(material_generation),
         "target_materials_present": bool(target_materials),
         "generation_ready": all(bool(section.get("ok")) for section in sections.values()) if sections else None,
-        "target_materials_ready": artifacts.get("target_materials_ready") if "target_materials_ready" in artifacts else target_materials.get("ready"),
-        "target_preparation_ready": artifacts.get("target_preparation_ready"),
+        "target_materials_ready": target_materials_ready,
+        "target_preparation_ready": target_preparation_ready,
         "target_materials_missing": _string_list(artifacts.get("target_materials_missing") or target_materials.get("missing")),
         "target_preparation_missing": _string_list(artifacts.get("target_preparation_missing")),
+        "ready_for_mteam_upload": ready_for_mteam_upload,
+        "upload_material_gates": upload_material_gates,
+        "upload_material_blockers": _material_upload_blockers(upload_material_gates, material_missing, critical_missing),
         "critical_ready": not critical_missing,
         "critical_missing": critical_missing,
         "critical_domains": _material_critical_domains(critical_missing),
@@ -2605,6 +2618,20 @@ def _summary_material_missing(artifacts: dict[str, Any], target_materials: dict[
     missing = _string_list(artifacts.get("target_materials_missing") or target_materials.get("missing"))
     _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
     return missing
+
+
+def _material_upload_blockers(gates: dict[str, Any], material_missing: list[str], critical_missing: list[str]) -> list[str]:
+    blockers: list[str] = []
+    if gates.get("critical_ready") is not True:
+        _extend_unique_string(blockers, [f"critical material missing: {item}" for item in critical_missing])
+    if gates.get("target_materials_ready") is not True:
+        _append_unique_string(blockers, "target materials are not ready")
+    if gates.get("target_preparation_ready") is not True:
+        _append_unique_string(blockers, "target preparation is not ready")
+    if not blockers:
+        return []
+    _extend_unique_string(blockers, [f"material missing: {item}" for item in material_missing if item not in critical_missing])
+    return blockers
 
 
 def _summary_target_material_metadata_section(target_materials: dict[str, Any]) -> dict[str, Any]:
@@ -8617,6 +8644,9 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_TARGET_PREPARATION_READY": _shell_bool(material_diagnostics.get("target_preparation_ready")) if material_diagnostics.get("target_preparation_ready") is not None else None,
         "PTCLI_TARGET_MATERIALS_MISSING": ",".join(_string_list(material_diagnostics.get("target_materials_missing"))),
         "PTCLI_TARGET_PREPARATION_MISSING": ",".join(_string_list(material_diagnostics.get("target_preparation_missing"))),
+        "PTCLI_READY_FOR_MTEAM_UPLOAD": _shell_bool(material_diagnostics.get("ready_for_mteam_upload")) if material_diagnostics.get("ready_for_mteam_upload") is not None else None,
+        "PTCLI_MATERIAL_UPLOAD_BLOCKERS": "|".join(_string_list(material_diagnostics.get("upload_material_blockers"))),
+        "PTCLI_MATERIAL_UPLOAD_GATES": json.dumps(material_diagnostics.get("upload_material_gates"), ensure_ascii=False) if isinstance(material_diagnostics.get("upload_material_gates"), dict) else None,
         "PTCLI_MATERIAL_CRITICAL_READY": _shell_bool(material_diagnostics.get("critical_ready")) if material_diagnostics.get("critical_ready") is not None else None,
         "PTCLI_MATERIAL_CRITICAL_MISSING": ",".join(_string_list(material_diagnostics.get("critical_missing"))),
         "PTCLI_MATERIAL_CRITICAL_METADATA_READY": _shell_bool(_material_critical_domain_ready(critical_domains, "metadata")),
