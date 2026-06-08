@@ -8323,6 +8323,60 @@ def test_doctor_accepts_resume_files_for_live_closure(tmp_path) -> None:
     assert any(check["name"] == "download_uploaded_torrent" and check["ok"] is True and "already available" in check["message"] for check in payload["checks"])
 
 
+def test_doctor_resume_files_still_require_target_materials(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    content_path = tmp_path / "downloads" / "Name"
+    content_path.mkdir(parents=True)
+    source_torrent = tmp_path / "U2-60635.torrent"
+    source_torrent.write_bytes(b"d4:infod")
+    uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        content_path=str(content_path),
+        source_torrent_file=str(source_torrent),
+        package_dir=package["package_dir"],
+        uploaded_torrent_file=str(uploaded_torrent),
+        accept_rules=True,
+        target_execute=True,
+        confirm_upload=True,
+        inject_uploaded_torrent=True,
+        uploaded_save_path=str(content_path),
+        wait_uploaded_complete=True,
+    )
+
+    checks = {check["name"]: check for check in payload["checks"]}
+
+    assert payload["ready"] is False
+    assert payload["live_safe_to_attempt"] is False
+    assert checks["uploaded_torrent_file"]["ok"] is True
+    assert checks["download_uploaded_torrent"]["ok"] is True
+    assert checks["target_materials"]["ok"] is False
+    assert checks["target_materials_metadata_tmdb"]["ok"] is False
+    assert checks["target_materials_assets_image_host_uploads"]["ok"] is False
+
+
 def test_doctor_surfaces_duplicate_package_blocker(tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -8811,7 +8865,7 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path=str(content_path), output_dir=str(tmp_path / "target"))
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     code = main(
@@ -8918,7 +8972,7 @@ def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path,
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path=str(content_path), output_dir=str(tmp_path / "target"))
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
     code = main(

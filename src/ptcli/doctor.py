@@ -319,8 +319,6 @@ def _target_material_checks(preflight: dict[str, Any] | None, target_execute: bo
         return [_check("target_materials", True, "Live upload is not requested.")]
     if not isinstance(preflight, dict):
         return [_check("target_materials", False, "MTEAM material readiness cannot be checked without a target package preflight.")]
-    if preflight.get("uploaded_recovery"):
-        return [_check("target_materials", True, "Uploaded torrent recovery does not re-submit MTEAM materials.")]
     upload_payload = preflight.get("upload_payload")
     if not isinstance(upload_payload, dict):
         return [_check("target_materials", False, "MTEAM upload payload summary is missing material checks.")]
