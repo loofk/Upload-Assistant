@@ -3951,7 +3951,7 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
 
 
 def _doctor_next_command(payload: dict[str, Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
-    preferred_stages = ["resume-uploaded-torrent", "resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes"] if payload.get("live_safe_to_attempt") else ["doctor-retry"]
+    preferred_stages = ["resume-uploaded-torrent", "resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes"] if payload.get("live_safe_to_attempt") else ["resume-target-package", "doctor-retry"]
     for stage in preferred_stages:
         command = commands_by_stage.get(stage)
         if command:
@@ -4007,8 +4007,9 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
     preparation_audit = _target_preparation_audit_from_preflight(package_preflight)
     target_preflight = _target_preflight_gates(package_preflight, preparation_audit)
+    content_path = args.content_path or package_preflight.get("content_path")
     return {
-        "content_path": _path_artifact(args.content_path),
+        "content_path": _path_artifact(str(content_path)) if content_path else None,
         "source_torrent_file": _path_artifact(args.source_torrent_file),
         "package_dir": _path_artifact(args.package_dir),
         "target_torrent_file": _path_artifact(args.target_torrent_file),
@@ -4053,6 +4054,9 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
     commands = [
         _ptcli_command_entry("doctor-retry", _doctor_retry_args(args)),
     ]
+    target_package_resume = _doctor_target_package_resume_command(args, artifacts)
+    if target_package_resume:
+        commands.append(target_package_resume)
     if not payload.get("live_safe_to_attempt"):
         return commands
 
@@ -4164,6 +4168,45 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
     _append_uploaded_wait_options(pipeline_args, args)
     commands.append(_ptcli_command_entry("pipeline-live", pipeline_args))
     return commands
+
+
+def _doctor_target_package_resume_command(args: argparse.Namespace, artifacts: dict[str, Any]) -> dict[str, Any] | None:
+    material_missing = _string_list(artifacts.get("target_preparation_missing"))
+    if not material_missing:
+        return None
+    content_path = _artifact_path(artifacts.get("content_path"))
+    if not content_path:
+        return None
+    package_dir = _artifact_path(artifacts.get("package_dir"))
+    target_output_dir = str(Path(package_dir).expanduser().parent) if package_dir else "./tmp/target"
+    resume_args = [
+        "pipeline",
+        "--from",
+        normalize_tracker(args.source_tracker),
+        "--source-id",
+        extract_torrent_id(args.source_id),
+        "--to",
+        ",".join(parse_tracker_list(args.target_trackers)),
+        "--client",
+        args.client,
+        "--path",
+        content_path,
+        "--check-dupes",
+        "--prepare-target",
+        "--target-output-dir",
+        target_output_dir,
+        "--accept-rules",
+        "--write-summary",
+        "--json",
+        *_target_package_material_resume_args({}, {}, {}, artifacts),
+    ]
+    if args.config:
+        resume_args.extend(["--config", args.config])
+    if args.base_dir:
+        resume_args.extend(["--base-dir", args.base_dir])
+    if args.summary_output_dir:
+        resume_args.extend(["--summary-output-dir", args.summary_output_dir])
+    return _ptcli_command_entry("resume-target-package", resume_args)
 
 
 def _artifact_path(artifact: Any) -> str | None:

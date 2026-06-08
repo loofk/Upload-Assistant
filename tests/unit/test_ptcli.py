@@ -8228,6 +8228,14 @@ def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
     assert summary["material_diagnostics"]["critical_path"]["next_step"] == "metadata"
     assert "metadata.ptgen_description" in summary["material_diagnostics"]["critical_path"]["missing"]
     assert "description.content" in summary["material_diagnostics"]["critical_path"]["missing"]
+    commands = {command["stage"]: command for command in summary["recommended_commands"]}
+    assert "resume-target-package" in commands
+    assert summary["resume_state"]["next_stage"] == "resume-target-package"
+    assert summary["resume_state"]["next_command"] == commands["resume-target-package"]["command"]
+    assert "--prepare-target" in commands["resume-target-package"]["argv"]
+    assert "--fetch-ptgen" in commands["resume-target-package"]["argv"]
+    assert "--target-output-dir" in commands["resume-target-package"]["argv"]
+    assert str(content_path) in commands["resume-target-package"]["argv"]
     assert summary["resume_state"]["artifacts"]["target_preflight_gates_ready"] is False
     assert summary["resume_state"]["artifacts"]["target_preflight_materials_ready"] is False
     assert summary["resume_state"]["artifacts"]["target_preflight_description_ready"] is False
