@@ -26,11 +26,13 @@ async def enrich_source_metadata(
     applied: dict[str, Any] = {}
     blockers: list[str] = []
     sources: list[str] = []
+    field_sources = _initial_metadata_field_sources(base)
     override_values = normalize_metadata_overrides(overrides or {})
     for key, value in override_values.items():
         if value and not base.get(key):
             base[key] = value
             applied[key] = value
+            field_sources[key] = "overrides"
     if applied:
         sources.append("overrides")
 
@@ -39,6 +41,7 @@ async def enrich_source_metadata(
         if tmdb_result.get("tmdb_id"):
             base["tmdb_id"] = tmdb_result["tmdb_id"]
             applied["tmdb_id"] = tmdb_result["tmdb_id"]
+            field_sources["tmdb_id"] = "tmdb_api"
             sources.append("tmdb_api")
         elif tmdb_result.get("blocker"):
             blockers.append(str(tmdb_result["blocker"]))
@@ -46,26 +49,31 @@ async def enrich_source_metadata(
     if base.get("douban_id") and not base.get("douban_url"):
         base["douban_url"] = f"https://movie.douban.com/subject/{base['douban_id']}/"
         applied["douban_url"] = base["douban_url"]
+        field_sources["douban_url"] = field_sources.get("douban_id") or "derived"
     if base.get("douban_url") and not base.get("douban_id"):
         douban_id = _normalize_douban_id(base.get("douban_url"))
         if douban_id:
             base["douban_id"] = douban_id
             applied["douban_id"] = douban_id
+            field_sources["douban_id"] = field_sources.get("douban_url") or "derived"
 
     if fetch_ptgen:
         ptgen_result = await _ptgen_from_metadata(config, base, base_dir=base_dir)
         if ptgen_result.get("description"):
             base["ptgen_description"] = ptgen_result["description"]
             applied["ptgen_description"] = {"length": len(str(ptgen_result["description"]))}
+            field_sources["ptgen_description"] = "ptgen"
             sources.append("ptgen")
         if ptgen_result.get("ptgen"):
             base["ptgen"] = ptgen_result["ptgen"]
         if ptgen_result.get("douban_id") and not base.get("douban_id"):
             base["douban_id"] = ptgen_result["douban_id"]
             applied["douban_id"] = ptgen_result["douban_id"]
+            field_sources["douban_id"] = "ptgen"
         if ptgen_result.get("douban_url") and not base.get("douban_url"):
             base["douban_url"] = ptgen_result["douban_url"]
             applied["douban_url"] = ptgen_result["douban_url"]
+            field_sources["douban_url"] = "ptgen"
         if ptgen_result.get("blocker"):
             blockers.append(str(ptgen_result["blocker"]))
 
@@ -76,8 +84,28 @@ async def enrich_source_metadata(
         "source_info": base,
         "applied": applied,
         "missing": missing,
+        "readiness": _metadata_readiness(base, field_sources, fetch_ptgen=fetch_ptgen),
         "sources": sources,
         "blockers": blockers,
+    }
+
+
+def _initial_metadata_field_sources(source_info: dict[str, Any]) -> dict[str, str]:
+    field_sources = {key: "source" for key in METADATA_KEYS if source_info.get(key)}
+    if source_info.get("ptgen_description"):
+        field_sources["ptgen_description"] = "source"
+    return field_sources
+
+
+def _metadata_readiness(source_info: dict[str, Any], field_sources: dict[str, str], *, fetch_ptgen: bool) -> dict[str, Any]:
+    keys = (*METADATA_KEYS, "ptgen_description")
+    return {
+        key: {
+            "ready": bool(source_info.get(key)),
+            "required": key != "ptgen_description" or fetch_ptgen,
+            "source": field_sources.get(key),
+        }
+        for key in keys
     }
 
 

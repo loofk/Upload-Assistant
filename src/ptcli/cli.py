@@ -2378,6 +2378,7 @@ def _summary_material_section(section: Any) -> dict[str, Any]:
     for key in (
         "ready",
         "missing",
+        "readiness",
         "sources",
         "applied",
         "imdb_id",
@@ -4500,7 +4501,7 @@ async def _pipeline_metadata_enrichment_stage(config: dict[str, Any], args: argp
     enriched_source = result.get("source_info") if isinstance(result.get("source_info"), dict) else source_info
     stage_result = {
         **enriched_source,
-        "metadata_enrichment": {key: result.get(key) for key in ("status", "ready", "applied", "missing", "sources", "blockers")},
+        "metadata_enrichment": {key: result.get(key) for key in ("status", "ready", "applied", "missing", "readiness", "sources", "blockers")},
     }
     readiness_blockers = _metadata_enrichment_readiness_blockers(result, fetch_ptgen=bool(getattr(args, "fetch_ptgen", False)))
     stage_result["metadata_enrichment"]["readiness_blockers"] = readiness_blockers
@@ -5647,6 +5648,7 @@ def _material_generation_artifacts(stages: list[dict[str, Any]]) -> dict[str, An
             "status": enrichment.get("status"),
             "sources": enrichment.get("sources") if isinstance(enrichment.get("sources"), list) else [],
             "applied": enrichment.get("applied") if isinstance(enrichment.get("applied"), dict) else {},
+            "readiness": enrichment.get("readiness") if isinstance(enrichment.get("readiness"), dict) else {},
             "missing": _string_list(enrichment.get("missing")),
             "blockers": [*_string_list(enrichment.get("blockers")), *_string_list(enrichment.get("readiness_blockers"))],
             "imdb_id": result.get("imdb_id"),
@@ -6097,6 +6099,7 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
             "ready": metadata_ready,
             "generated": _material_generation_section_ready(metadata_section),
             "missing": _missing_with_prefix(material_missing, "metadata."),
+            "readiness": metadata_section.get("readiness") if isinstance(metadata_section.get("readiness"), dict) else {},
             "imdb_id": target_metadata.get("imdb_id") or metadata_section.get("imdb_id"),
             "tmdb_id": target_metadata.get("tmdb_id") or metadata_section.get("tmdb_id"),
             "douban_id": target_metadata.get("douban_id") or metadata_section.get("douban_id"),
@@ -8013,6 +8016,7 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_METADATA_READY": _shell_bool(metadata.get("ready")) if metadata.get("ready") is not None else None,
         "PTCLI_RESUME_MATERIAL_METADATA_GENERATED": _shell_bool(metadata.get("generated")) if metadata.get("generated") is not None else None,
         "PTCLI_RESUME_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
+        "PTCLI_RESUME_MATERIAL_METADATA_READINESS": json.dumps(metadata.get("readiness"), ensure_ascii=False) if isinstance(metadata.get("readiness"), dict) and metadata.get("readiness") else None,
         "PTCLI_RESUME_MATERIAL_METADATA_IMDB_ID": metadata.get("imdb_id"),
         "PTCLI_RESUME_MATERIAL_METADATA_TMDB_ID": metadata.get("tmdb_id"),
         "PTCLI_RESUME_MATERIAL_METADATA_DOUBAN_ID": metadata.get("douban_id"),
@@ -8137,6 +8141,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     sections = material_diagnostics.get("sections") if isinstance(material_diagnostics.get("sections"), dict) else {}
     prerequisites = sections.get("prerequisites") if isinstance(sections.get("prerequisites"), dict) else {}
     metadata = sections.get("metadata") if isinstance(sections.get("metadata"), dict) else {}
+    metadata_readiness = metadata.get("readiness") if isinstance(metadata.get("readiness"), dict) else {}
     bdinfo = sections.get("bdinfo") if isinstance(sections.get("bdinfo"), dict) else {}
     mediainfo = sections.get("mediainfo") if isinstance(sections.get("mediainfo"), dict) else {}
     screenshots = sections.get("screenshots") if isinstance(sections.get("screenshots"), dict) else {}
@@ -8174,6 +8179,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_PREREQUISITES_OK": _summary_material_section_shell_bool(prerequisites),
         "PTCLI_MATERIAL_METADATA_OK": _summary_material_section_shell_bool(metadata),
         "PTCLI_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
+        "PTCLI_MATERIAL_METADATA_READINESS": json.dumps(metadata_readiness, ensure_ascii=False) if metadata_readiness else None,
         "PTCLI_MATERIAL_METADATA_SOURCES": ",".join(_string_list(metadata.get("sources"))),
         "PTCLI_MATERIAL_METADATA_APPLIED_KEYS": ",".join(sorted(str(key) for key in metadata.get("applied", {}) if isinstance(metadata.get("applied"), dict))),
         "PTCLI_MATERIAL_METADATA_IMDB_ID": metadata.get("imdb_id"),

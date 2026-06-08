@@ -10279,6 +10279,11 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert material_generation["metadata"]["ok"] is True
     assert material_generation["metadata"]["missing"] == []
     assert material_generation["metadata"]["ptgen_description_length"] == 0
+    assert material_generation["metadata"]["readiness"]["imdb_id"] == {"ready": True, "required": True, "source": "source"}
+    assert material_generation["metadata"]["readiness"]["tmdb_id"] == {"ready": True, "required": True, "source": "source"}
+    assert material_generation["metadata"]["readiness"]["douban_id"] == {"ready": True, "required": True, "source": "overrides"}
+    assert material_generation["metadata"]["readiness"]["douban_url"] == {"ready": True, "required": True, "source": "overrides"}
+    assert material_generation["metadata"]["readiness"]["ptgen_description"] == {"ready": False, "required": False, "source": None}
     assert material_generation["mediainfo"]["skipped"] is True
     assert material_generation["screenshots"]["skipped"] is True
     assert material_generation["image_host"]["skipped"] is True
@@ -10326,6 +10331,8 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert material_closure["metadata"]["tmdb_id"] == 2
     assert material_closure["metadata"]["douban_id"] == "1291546"
     assert material_closure["metadata"]["ptgen_description_length"] == 0
+    assert material_closure["metadata"]["readiness"]["ptgen_description"]["ready"] is False
+    assert material_closure["metadata"]["readiness"]["ptgen_description"]["required"] is False
     assert "metadata.ptgen_description" in material_closure["metadata"]["missing"]
     assert material_closure["mediainfo"] == {"ready": True, "generated": False, "missing": [], "path": str(mediainfo)}
     assert material_closure["bdinfo"]["required"] is False
@@ -10353,6 +10360,8 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "export PTCLI_RESUME_MATERIAL_CRITICAL_DESCRIPTION_READY=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_CRITICAL_DESCRIPTION_MISSING=description.content\n" in out
     assert "export PTCLI_RESUME_MATERIAL_METADATA_READY=0\n" in out
+    assert "PTCLI_RESUME_MATERIAL_METADATA_READINESS=" in out
+    assert "ptgen_description" in out
     assert "export PTCLI_RESUME_MATERIAL_METADATA_IMDB_ID=1234567\n" in out
     assert "export PTCLI_RESUME_MATERIAL_METADATA_TMDB_ID=2\n" in out
     assert "export PTCLI_RESUME_MATERIAL_METADATA_DOUBAN_ID=1291546\n" in out
@@ -13044,6 +13053,11 @@ async def test_enrich_source_metadata_applies_overrides_without_clobbering_exist
     assert result["source_info"]["douban_url"] == "https://movie.douban.com/subject/1291546/"
     assert result["applied"]["tmdb_id"] == 999
     assert "imdb_id" not in result["applied"]
+    assert result["readiness"]["imdb_id"] == {"ready": True, "required": True, "source": "source"}
+    assert result["readiness"]["tmdb_id"] == {"ready": True, "required": True, "source": "overrides"}
+    assert result["readiness"]["douban_id"] == {"ready": True, "required": True, "source": "overrides"}
+    assert result["readiness"]["douban_url"] == {"ready": True, "required": True, "source": "overrides"}
+    assert result["readiness"]["ptgen_description"] == {"ready": False, "required": False, "source": None}
 
 
 @pytest.mark.asyncio
@@ -13065,6 +13079,7 @@ async def test_enrich_source_metadata_derives_douban_id_from_existing_url() -> N
     assert result["ready"] is True
     assert result["source_info"]["douban_id"] == "1291546"
     assert result["applied"]["douban_id"] == "1291546"
+    assert result["readiness"]["douban_id"] == {"ready": True, "required": True, "source": "source"}
 
 
 @pytest.mark.asyncio
@@ -13111,6 +13126,7 @@ async def test_enrich_source_metadata_fetches_tmdb_without_legacy_tmdb_manager(m
     assert result["source_info"]["tmdb_id"] == 999
     assert result["sources"] == ["tmdb_api"]
     assert result["applied"]["tmdb_id"] == 999
+    assert result["readiness"]["tmdb_id"] == {"ready": True, "required": True, "source": "tmdb_api"}
 
 
 @pytest.mark.asyncio
