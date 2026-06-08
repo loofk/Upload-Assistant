@@ -11120,6 +11120,59 @@ async def test_pipeline_prepare_target_blocks_unhashed_existing_qbit_content(mon
 
 
 @pytest.mark.asyncio
+async def test_pipeline_promotes_matched_qbit_hash_when_source_hash_is_missing(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (1, 2, "Name", None, "desc"), {})
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "b" * 40}]}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            "/downloads/Name",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    verify_stage = next(stage for stage in payload["stages"] if stage["stage"] == "source-content-verify")
+    assert verify_stage["ok"] is True
+    assert verify_stage["result"]["expected_hash"] is None
+    assert verify_stage["result"]["matched_hashes"] == ["b" * 40]
+    assert payload["source_torrent_hash"] == "b" * 40
+    assert payload["closure"]["source"]["torrent_hash"] == "b" * 40
+    assert payload["evidence"]["source"]["torrent_hash"] == "b" * 40
+    assert payload["evidence"]["source"]["mode"] == "matched"
+    assert payload["closure_audit"]["ready"] is False
+    assert next(item for item in payload["closure_audit"]["items"] if item["name"] == "source.hash_consistent")["ok"] is True
+
+
+@pytest.mark.asyncio
 async def test_pipeline_check_dupes_runs_after_source_info(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},

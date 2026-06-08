@@ -4696,7 +4696,10 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             lambda payload: payload,
         )
         stages.append(match_result)
-        stages.append(_source_content_verify_stage(match_result, effective_source_torrent_hash))
+        source_content_verify_stage = _source_content_verify_stage(match_result, effective_source_torrent_hash)
+        stages.append(source_content_verify_stage)
+        if source_content_verify_stage.get("ok"):
+            effective_source_torrent_hash = effective_source_torrent_hash or _torrent_hash_from_stage(match_result)
     else:
         stages.append({"stage": "match", "ok": True, "skipped": True, "message": "--path not provided; qBittorrent match skipped."})
 
