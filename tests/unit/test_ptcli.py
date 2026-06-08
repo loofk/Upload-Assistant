@@ -16801,6 +16801,11 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
             "--uploaded-qbit-tags",
             "retorrent",
             "--uploaded-paused",
+            "--wait-uploaded-complete",
+            "--uploaded-wait-timeout",
+            "900",
+            "--uploaded-wait-interval",
+            "20",
             "--write-summary",
             "--summary-output-dir",
             str(tmp_path / "summary"),
@@ -16840,13 +16845,19 @@ def test_target_upload_summary_recommends_uploaded_id_resume(tmp_path) -> None:
     assert "--uploaded-qbit-category MTEAM" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-qbit-tags retorrent" in commands["resume-uploaded-torrent-download"]
     assert "--uploaded-paused" in commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-wait-timeout 900" in commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-wait-interval 20" in commands["resume-uploaded-torrent-download"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["resume-uploaded-torrent-download"]
+    assert "--uploaded-wait-timeout 900" in commands["target-upload-retry"]
+    assert "--uploaded-wait-interval 20" in commands["target-upload-retry"]
     assert "--uploaded-torrent-id 999" in commands["retorrent-resume-uploaded-torrent-download"]
     assert f"--config {shlex.quote(str(tmp_path / 'custom-config.py'))}" in commands["retorrent-resume-uploaded-torrent-download"]
     assert "--download-uploaded-torrent" in commands["retorrent-resume-uploaded-torrent-download"]
     assert "--from U2" in commands["retorrent-resume-uploaded-torrent-download"]
     assert "--source-id 60635" in commands["retorrent-resume-uploaded-torrent-download"]
     assert "--uploaded-save-path /mnt/seedbox/Example" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert "--uploaded-wait-timeout 900" in commands["retorrent-resume-uploaded-torrent-download"]
+    assert "--uploaded-wait-interval 20" in commands["retorrent-resume-uploaded-torrent-download"]
     assert f"--summary-output-dir {shlex.quote(str(tmp_path / 'summary'))}" in commands["retorrent-resume-uploaded-torrent-download"]
     assert command_argv["retorrent-resume-uploaded-torrent-download"][:3] == ["python3", "ptcli.py", "retorrent"]
 
