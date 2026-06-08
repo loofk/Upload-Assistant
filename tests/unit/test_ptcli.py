@@ -15316,7 +15316,26 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    material_dir = tmp_path / "materials"
+    material_dir.mkdir()
+    mediainfo = material_dir / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshot = material_dir / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host_file = material_dir / "image-host-uploads.json"
+    image_host_file.write_text(
+        json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}),
+        encoding="utf-8",
+    )
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        "/downloads/Example",
+        str(tmp_path),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
 
     preflight = build_mteam_upload_preflight(package["package_dir"], torrent_file=str(torrent_file))
@@ -15910,7 +15929,27 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    material_dir = tmp_path / "target-upload-materials"
+    material_dir.mkdir()
+    mediainfo = material_dir / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.Movie.2024.mkv\n", encoding="utf-8")
+    screenshot = material_dir / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host_file = material_dir / "image-host-uploads.json"
+    image_host_file.write_text(json.dumps({"items": [{"img_url": "https://img.example/screen-1.png", "web_url": "https://img.example/view/screen-1"}]}), encoding="utf-8")
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        "/downloads/Example",
+        str(tmp_path),
+        accept_rules=True,
+        material_files={
+            "mediainfo_file": str(mediainfo),
+            "screenshot_files": [str(screenshot)],
+            "image_host_file": str(image_host_file),
+        },
+    )
     torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
     preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
     args = build_parser().parse_args(["target-upload", "--package-dir", package["package_dir"], "--torrent-file", str(torrent_file), "--execute", "--confirm-upload"])
@@ -15924,14 +15963,14 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert preflight_diagnostics["status"] == "blocked"
     assert preflight_diagnostics["ready"] is False
     assert "materials.metadata.tmdb" in preflight_diagnostics["missing"]
-    assert "materials.assets.mediainfo_or_bdinfo" in preflight_diagnostics["missing"]
+    assert "materials.assets.mediainfo_or_bdinfo" not in preflight_diagnostics["missing"]
     assert "description.content" in preflight_diagnostics["missing"]
     assert "materials.description.external_ids.tmdb" in preflight_diagnostics["description_missing"]
-    assert "materials.description.mediainfo_or_bdinfo" in preflight_diagnostics["description_missing"]
+    assert "materials.description.mediainfo_or_bdinfo" not in preflight_diagnostics["description_missing"]
     assert preflight_diagnostics["target_preparation_ready"] is False
     assert preflight_diagnostics["materials_ready"] is False
     assert preflight_diagnostics["metadata_ready"] is False
-    assert preflight_diagnostics["assets_ready"] is False
+    assert preflight_diagnostics["assets_ready"] is True
     assert preflight_diagnostics["description_ready"] is False
     assert preflight_diagnostics["payload_ready"] is False
     assert preflight_diagnostics["payload_checks_ready"] is True
@@ -15946,7 +15985,7 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert material_diagnostics["critical_path"]["ready"] is False
     assert material_diagnostics["critical_path"]["next_step"] == "metadata"
     assert "metadata.tmdb" in material_diagnostics["critical_path"]["missing"]
-    assert "assets.mediainfo_or_bdinfo" in material_diagnostics["critical_path"]["missing"]
+    assert "assets.mediainfo_or_bdinfo" not in material_diagnostics["critical_path"]["missing"]
     assert "description.content" in material_diagnostics["critical_path"]["missing"]
     commands = {command["stage"]: command for command in summary_payload["recommended_commands"]}
     assert "resume-target-package" in commands
@@ -15954,20 +15993,21 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert summary_payload["resume_state"]["next_command"] == commands["resume-target-package"]["command"]
     assert "--prepare-target" in commands["resume-target-package"]["argv"]
     assert "--enrich-metadata" in commands["resume-target-package"]["argv"]
-    assert "--generate-mediainfo" in commands["resume-target-package"]["argv"]
-    assert "--generate-screenshots" in commands["resume-target-package"]["argv"]
-    assert "--upload-screenshots" in commands["resume-target-package"]["argv"]
+    assert "--mediainfo-file" in commands["resume-target-package"]["argv"]
+    assert str(mediainfo) in commands["resume-target-package"]["argv"]
+    assert "--screenshot-file" in commands["resume-target-package"]["argv"]
+    assert str(screenshot) in commands["resume-target-package"]["argv"]
+    assert "--image-host-file" in commands["resume-target-package"]["argv"]
+    assert str(image_host_file) in commands["resume-target-package"]["argv"]
     assert "/downloads/Example" in commands["resume-target-package"]["argv"]
     shell_fields = ptcli_cli._summary_check_target_upload_shell_fields(diagnostics["target_upload_diagnostics"])
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_READY"] == "0"
     assert "materials.metadata.tmdb" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MISSING"]
-    assert "materials.assets.mediainfo_or_bdinfo" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MISSING"]
     assert "description.content" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MISSING"]
     assert "materials.description.external_ids.tmdb" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_MISSING"]
-    assert "materials.description.mediainfo_or_bdinfo" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_MISSING"]
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MATERIALS_READY"] == "0"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_METADATA_READY"] == "0"
-    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_ASSETS_READY"] == "0"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_ASSETS_READY"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_READY"] == "0"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_PAYLOAD_READY"] == "0"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_PAYLOAD_CHECKS_READY"] == "1"
