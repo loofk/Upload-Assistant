@@ -722,9 +722,7 @@ def _mteam_description_material_lines(materials: dict[str, Any]) -> list[str]:
         for item in items:
             if not isinstance(item, dict):
                 continue
-            raw_url = str(item.get("raw_url") or item.get("url") or "")
-            img_url = str(item.get("img_url") or raw_url)
-            web_url = str(item.get("web_url") or raw_url)
+            img_url, web_url = _image_host_item_urls(item)
             if img_url and web_url:
                 lines.append(f"[url={web_url}][img]{img_url}[/img][/url]")
     else:
@@ -773,7 +771,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
         _material_check("mediainfo_or_bdinfo", bool(mediainfo.get("ready") or bdinfo.get("ready")), "MediaInfo/BDInfo is present.", "MediaInfo/BDInfo has not been generated into the package yet."),
         _material_check("bdinfo_for_disc", not disc_structure.get("bdmv") or bool(bdinfo.get("ready")), "BDInfo requirement for disc content is satisfied.", "BDMV disc content requires --bdinfo-file for MTEAM target preparation."),
         _material_check("screenshots", bool(screenshots.get("ready")), "Screenshots are present.", "Screenshots have not been generated into the package yet."),
-        _material_check("image_host_uploads", bool(image_hosts.get("ready")), "Image host uploads are present.", "Screenshot image-host upload results are missing."),
+        _material_check("image_host_uploads", bool(image_hosts.get("ready")), "Image host uploads are present.", "Screenshot image-host upload results are missing usable image URLs."),
         _material_check("description_draft", True, "MTEAM description draft has been generated.", "MTEAM description draft is missing."),
     ]
     warnings = [check["message"] for check in [*metadata_checks, *asset_checks] if not check["ok"]]
@@ -861,12 +859,22 @@ def _image_host_asset(path_value: Any) -> dict[str, Any]:
             raw_items = payload.get("items") or payload.get("images") or payload.get("uploaded_images")
             if isinstance(raw_items, list):
                 items = raw_items
+    valid_items = [item for item in items if isinstance(item, dict) and all(_image_host_item_urls(item))]
     return {
         **artifact,
-        "ready": bool(artifact.get("ready") and items),
+        "ready": bool(artifact.get("ready") and items and len(valid_items) == len(items)),
         "count": len(items),
+        "valid_count": len(valid_items),
+        "invalid_count": len(items) - len(valid_items),
         "items": items,
     }
+
+
+def _image_host_item_urls(item: dict[str, Any]) -> tuple[str, str]:
+    raw_url = str(item.get("raw_url") or item.get("url") or "").strip()
+    img_url = str(item.get("img_url") or raw_url).strip()
+    web_url = str(item.get("web_url") or raw_url or img_url).strip()
+    return img_url, web_url
 
 
 def _disc_structure_asset(content_path: str | None) -> dict[str, Any]:
