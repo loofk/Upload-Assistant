@@ -1722,7 +1722,29 @@ def test_material_recovery_resume_command_covers_screenshot_coverage() -> None:
     assert enriched[0]["key"] == "assets.image_host_uploads"
     assert enriched[0]["resume_command_available"] is True
     assert enriched[0]["resume_command_stage"] == "resume-target-package"
+    assert enriched[0]["required_command_flags"] == ["--upload-screenshots"]
+    assert enriched[0]["missing_command_flags"] == []
     assert "--upload-screenshots" in enriched[0]["resume_command_argv"]
+
+
+def test_material_recovery_resume_command_reports_missing_flags() -> None:
+    hints = ptcli_cli._target_preparation_recovery_hints(["metadata.ptgen_description"])
+    commands = [
+        {
+            "stage": "resume-target-package",
+            "command": "python3 ptcli.py pipeline --prepare-target --enrich-metadata",
+            "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata"],
+        }
+    ]
+
+    enriched = ptcli_cli._attach_material_recovery_resume_commands(hints, commands)
+
+    assert enriched[0]["key"] == "metadata.ptgen_description"
+    assert enriched[0]["required_command_flags"] == ["--enrich-metadata", "--fetch-ptgen"]
+    assert enriched[0]["missing_command_flags"] == ["--fetch-ptgen"]
+    assert enriched[0]["resume_command_available"] is False
+    assert enriched[0]["resume_command"] is None
+    assert enriched[0]["resume_command_argv"] == []
 
 
 def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:
@@ -11210,6 +11232,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=metadata.ptgen_description,description.content\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_AVAILABLE=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_STAGES=resume-target-package,resume-target-package\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_FLAGS=''\n" in out
     assert "PTCLI_RESUME_MATERIAL_FIRST_RECOVERY_COMMAND='python3 ptcli.py pipeline" in out
     assert "--fetch-ptgen" in out
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}

@@ -1223,10 +1223,13 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
     enriched: list[dict[str, Any]] = []
     for hint in hints:
         command_flags = _material_recovery_action_flags(hint)
-        command_covers_hint = bool(command_entry) and all(flag in argv for flag in command_flags)
+        missing_command_flags = [flag for flag in command_flags if flag not in argv]
+        command_covers_hint = bool(command_entry) and not missing_command_flags
         enriched.append(
             {
                 **hint,
+                "required_command_flags": command_flags,
+                "missing_command_flags": missing_command_flags if command_entry else command_flags,
                 "resume_command_available": command_covers_hint,
                 "resume_command_stage": command_entry.get("stage") if command_entry else None,
                 "resume_command": command if command_covers_hint else None,
@@ -8774,11 +8777,20 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_RECOVERY_KEYS": ",".join(str(hint.get("key")) for hint in recovery_hints if isinstance(hint, dict) and hint.get("key")),
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_AVAILABLE": _shell_bool(any(bool(hint.get("resume_command_available")) for hint in recovery_hints if isinstance(hint, dict))),
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_STAGES": ",".join(str(hint.get("resume_command_stage")) for hint in recovery_hints if isinstance(hint, dict) and hint.get("resume_command_available") and hint.get("resume_command_stage")),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_FLAGS": ",".join(_material_recovery_missing_flags(recovery_hints)),
         "PTCLI_RESUME_MATERIAL_FIRST_RECOVERY_COMMAND": first_recovery_command.get("command"),
         "PTCLI_RESUME_MATERIAL_FIRST_RECOVERY_COMMAND_ARGV": json.dumps(first_recovery_command.get("argv"), ensure_ascii=False) if first_recovery_command.get("argv") else None,
         "PTCLI_RESUME_MATERIAL_RECOVERY_HINTS": json.dumps(recovery_hints, ensure_ascii=False) if recovery_hints else None,
         "PTCLI_RESUME_MATERIAL_NEXT_ACTIONS": " | ".join(_string_list(materials.get("next_actions"))),
     }
+
+
+def _material_recovery_missing_flags(recovery_hints: list[Any]) -> list[str]:
+    missing: list[str] = []
+    for hint in recovery_hints:
+        if isinstance(hint, dict):
+            _extend_unique_string(missing, _string_list(hint.get("missing_command_flags")))
+    return missing
 
 
 def _first_material_recovery_command(recovery_hints: list[Any]) -> dict[str, Any]:
