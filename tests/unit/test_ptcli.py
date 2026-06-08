@@ -3518,6 +3518,41 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
     assert shell_fields["PTCLI_MATERIAL_METADATA_READINESS_BLOCKERS"] == "Missing metadata after enrichment: tmdb_id"
 
 
+def test_summary_material_diagnostics_exposes_description_external_id_readiness() -> None:
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "target_preparation_audit": {
+                    "description_ready": False,
+                    "description": {
+                        "has_external_ids": False,
+                        "external_id_readiness": {"imdb": True, "tmdb": False, "douban": True},
+                        "external_id_missing": ["tmdb"],
+                        "external_links": {
+                            "imdb": "https://www.imdb.com/title/tt1234567",
+                            "tmdb": None,
+                            "douban": "https://movie.douban.com/subject/1291546/",
+                        },
+                        "missing": ["materials.description.external_ids.tmdb"],
+                    },
+                },
+                "target_preparation_ready": False,
+            }
+        }
+    )
+
+    description = diagnostics["description"]
+    assert description["has_external_ids"] is False
+    assert description["external_id_readiness"] == {"imdb": True, "tmdb": False, "douban": True}
+    assert description["external_id_missing"] == ["tmdb"]
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+    assert json.loads(shell_fields["PTCLI_MATERIAL_DESCRIPTION_EXTERNAL_ID_READINESS"]) == {"imdb": True, "tmdb": False, "douban": True}
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_EXTERNAL_ID_MISSING"] == "tmdb"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_HAS_IMDB"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_HAS_TMDB"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_HAS_DOUBAN"] == "1"
+
+
 def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(

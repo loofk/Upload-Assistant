@@ -2554,6 +2554,8 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "has_ptgen_description": description.get("has_ptgen_description"),
             "ptgen_description_length": description.get("ptgen_description_length"),
             "has_external_ids": description.get("has_external_ids"),
+            "external_id_readiness": description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {},
+            "external_id_missing": _string_list(description.get("external_id_missing")),
             "external_links": description.get("external_links") if isinstance(description.get("external_links"), dict) else {},
             "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
             "media_info": description.get("media_info") if isinstance(description.get("media_info"), dict) else {},
@@ -8570,6 +8572,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     disc_structure = material_diagnostics.get("disc_structure") if isinstance(material_diagnostics.get("disc_structure"), dict) else {}
     description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
     description_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
+    description_external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
     media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
     screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
     critical_domains = material_diagnostics.get("critical_domains") if isinstance(material_diagnostics.get("critical_domains"), dict) else {}
@@ -8631,6 +8634,11 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_PTGEN_LENGTH": description.get("ptgen_description_length"),
         "PTCLI_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_EXTERNAL_ID_READINESS": json.dumps(description_external_id_readiness, ensure_ascii=False) if description_external_id_readiness else None,
+        "PTCLI_MATERIAL_DESCRIPTION_EXTERNAL_ID_MISSING": ",".join(_string_list(description.get("external_id_missing"))),
+        "PTCLI_MATERIAL_DESCRIPTION_HAS_IMDB": _shell_bool(description_external_id_readiness.get("imdb")) if "imdb" in description_external_id_readiness else None,
+        "PTCLI_MATERIAL_DESCRIPTION_HAS_TMDB": _shell_bool(description_external_id_readiness.get("tmdb")) if "tmdb" in description_external_id_readiness else None,
+        "PTCLI_MATERIAL_DESCRIPTION_HAS_DOUBAN": _shell_bool(description_external_id_readiness.get("douban")) if "douban" in description_external_id_readiness else None,
         "PTCLI_MATERIAL_DESCRIPTION_IMDB_LINK": description_links.get("imdb"),
         "PTCLI_MATERIAL_DESCRIPTION_TMDB_LINK": description_links.get("tmdb"),
         "PTCLI_MATERIAL_DESCRIPTION_DOUBAN_LINK": description_links.get("douban"),
