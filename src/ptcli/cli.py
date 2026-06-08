@@ -6518,6 +6518,7 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
     description_ready = bool(preparation.get("description_ready"))
     bdinfo_required = bool(disc_structure.get("bdmv"))
     critical_missing = _critical_material_missing(material_missing)
+    target_screenshot_paths = _string_list(screenshot_asset.get("paths"))
     return {
         "ready": bool(target_materials.get("ready") and preparation.get("ready")),
         "critical_ready": not critical_missing,
@@ -6559,7 +6560,7 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
             "missing": _missing_with_prefix(material_missing, "assets.screenshots"),
             "count": int(screenshot_asset.get("count", 0) or screenshot_generation.get("count", 0) or 0),
             "requested_count": screenshot_generation.get("requested_count"),
-            "files": screenshot_generation.get("screenshot_files") if isinstance(screenshot_generation.get("screenshot_files"), list) else [],
+            "files": screenshot_generation.get("screenshot_files") if isinstance(screenshot_generation.get("screenshot_files"), list) else target_screenshot_paths,
         },
         "image_host": {
             "ready": bool(image_host_asset.get("ready")),

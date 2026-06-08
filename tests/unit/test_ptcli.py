@@ -10685,6 +10685,125 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
 
 
 @pytest.mark.asyncio
+async def test_pipeline_summary_recovers_missing_image_host_uploads(monkeypatch, tmp_path, capsys) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(
+            tracker,
+            source_id,
+            (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"),
+            {"douban_id": "1291546", "douban_url": "https://movie.douban.com/subject/1291546/"},
+        )
+
+    async def fake_enrich_source_metadata(_config, source_info, *, overrides=None, fetch_ptgen=False, base_dir=None):
+        _ = (overrides, fetch_ptgen, base_dir)
+        enriched = {**source_info, "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介"}
+        return {"status": "enriched", "ready": True, "source_info": enriched, "applied": {"ptgen_description": {"length": 21}}, "missing": [], "sources": ["ptgen"], "blockers": []}
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "enrich_source_metadata", fake_enrich_source_metadata)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    await asyncio.to_thread(mediainfo.write_text, "General\nComplete name : Name.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    await asyncio.to_thread(screenshot.write_bytes, b"png")
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            "/downloads/Name",
+            "--enrich-metadata",
+            "--fetch-ptgen",
+            "--check-dupes",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--mediainfo-file",
+            str(mediainfo),
+            "--screenshot-file",
+            str(screenshot),
+            "--accept-rules",
+            "--write-summary",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    summary_path = Path(payload["summary_file"])
+    summary_payload = json.loads(await asyncio.to_thread(summary_path.read_text, encoding="utf-8"))
+    assert summary_payload["status"] == "blocked"
+    assert summary_payload["artifacts"]["target_materials_ready"] is False
+    assert "assets.image_host_uploads" in summary_payload["artifacts"]["target_materials_missing"]
+    assert "description.content" in summary_payload["artifacts"]["target_preparation_missing"]
+    material_closure = summary_payload["resume_state"]["materials"]["closure"]
+    assert material_closure["critical_ready"] is False
+    assert material_closure["critical_domains"]["metadata"]["ready"] is True
+    assert material_closure["critical_domains"]["media_info"]["ready"] is True
+    assert material_closure["critical_domains"]["screenshots"]["ready"] is True
+    assert material_closure["critical_domains"]["image_host"] == {"ready": False, "missing": ["assets.image_host_uploads"]}
+    assert material_closure["critical_domains"]["description"] == {"ready": False, "missing": ["description.content"]}
+    assert material_closure["screenshots"]["ready"] is True
+    assert material_closure["screenshots"]["count"] == 1
+    assert material_closure["screenshots"]["files"] == [str(screenshot)]
+    assert material_closure["image_host"]["ready"] is False
+    assert material_closure["image_host"]["count"] == 0
+    assert material_closure["description"]["has_ptgen_description"] is True
+    assert material_closure["description"]["has_external_ids"] is True
+    assert material_closure["description"]["has_mediainfo_or_bdinfo"] is True
+    assert material_closure["description"]["has_screenshot_bbcode"] is False
+    assert material_closure["description"]["screenshot_coverage"]["ready"] is True
+    recovery_by_key = {hint["key"]: hint for hint in summary_payload["resume_state"]["materials"]["recovery_hints"]}
+    assert recovery_by_key["assets.image_host_uploads"]["command_flags"] == ["--upload-screenshots", "--image-host"]
+    assert recovery_by_key["assets.image_host_uploads"]["existing_file_options"] == ["--image-host-file"]
+    assert recovery_by_key["assets.image_host_uploads"]["resume_command_available"] is True
+    assert "--upload-screenshots" in recovery_by_key["assets.image_host_uploads"]["resume_command_argv"]
+    assert "--screenshot-file" in recovery_by_key["assets.image_host_uploads"]["resume_command_argv"]
+
+    code = main(["summary-check", "--summary-file", str(summary_path), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_IMAGE_HOST_READY=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_IMAGE_HOST_MISSING=assets.image_host_uploads\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_SCREENSHOTS_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_SCREENSHOTS_COUNT=1\n" in out
+    assert f"export PTCLI_RESUME_MATERIAL_SCREENSHOTS_FILES={screenshot}\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_READY=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_COUNT=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=assets.image_host_uploads,description.content\n" in out
+    assert "--upload-screenshots" in out
+
+
+@pytest.mark.asyncio
 async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
