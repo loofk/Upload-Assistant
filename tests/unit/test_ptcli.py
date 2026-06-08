@@ -5026,6 +5026,8 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
     assert "export PTCLI_QBIT_WAIT_SOURCE_FIRST_CANDIDATE_STATE=uploading\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_FIRST_CANDIDATE_PROGRESS=1.0\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_RETRY_REASON='source qBittorrent wait matched a different torrent/content than requested_hash.'\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_RETRY_ACTION='Resolve the source qBittorrent wait mismatch before rerunning:" in out
+    assert f"Suggested retry values from qBittorrent: hash={'f' * 40}, path=/downloads/Expected, save_path=/downloads." in out
 
 
 def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, capsys) -> None:
@@ -16161,6 +16163,8 @@ def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path, capsys) 
     assert f"export PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH={'b' * 40}\n" in out
     assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH=/downloads/Other\n" in out
     assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH=/downloads\n" in out
+    assert "export PTCLI_QBIT_WAIT_UPLOADED_RETRY_ACTION='Resolve the uploaded qBittorrent wait mismatch before rerunning:" in out
+    assert f"Suggested retry values from qBittorrent: hash={'b' * 40}, path=/downloads/Other, save_path=/downloads." in out
 
 
 @pytest.mark.asyncio

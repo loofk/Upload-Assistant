@@ -8996,6 +8996,7 @@ def _summary_check_qbit_retry_shell_fields(qbit_wait_retry_hints: dict[str, Any]
                 f"{prefix}_FIRST_CANDIDATE_STATE": first_candidate.get("state"),
                 f"{prefix}_FIRST_CANDIDATE_PROGRESS": first_candidate.get("progress"),
                 f"{prefix}_RETRY_REASON": hint.get("reason"),
+                f"{prefix}_RETRY_ACTION": _qbit_wait_retry_action(scope, hint) if hint.get("retry_recommended") is True else None,
             }
         )
     return fields
