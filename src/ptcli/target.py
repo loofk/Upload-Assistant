@@ -1481,22 +1481,35 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
     assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
     screenshots = assets.get("screenshots") if isinstance(assets.get("screenshots"), dict) else {}
     image_hosts = assets.get("image_hosts") if isinstance(assets.get("image_hosts"), dict) else {}
+    expected_image_urls = _mteam_expected_image_urls(materials)
+    description_image_urls = _mteam_description_image_urls_from_content(content)
+    missing_image_urls = [url for url in expected_image_urls if url not in description_image_urls]
     return {
         "description": {
             "path": description_summary.get("path"),
             "char_length": description_summary.get("char_length"),
             "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
+            "external_id_readiness": content.get("external_id_readiness") if isinstance(content.get("external_id_readiness"), dict) else {},
+            "external_id_missing": content.get("external_id_missing") if isinstance(content.get("external_id_missing"), list) else [],
             "has_ptgen_description": bool(content.get("has_ptgen_description")),
             "ptgen_description_length": metadata.get("ptgen_description_length"),
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
+            "bbcode_image_urls": description_image_urls,
+            "screenshot_coverage": {
+                "ready": not missing_image_urls,
+                "expected_urls": expected_image_urls,
+                "description_urls": description_image_urls,
+                "missing_urls": missing_image_urls,
+            },
         },
         "materials": {
             "mediainfo_or_bdinfo_source": _mteam_material_mediainfo_source(materials),
             "mediainfo_or_bdinfo_length": _mteam_material_mediainfo_length(materials),
             "screenshot_file_count": int(screenshots.get("count", 0) or 0),
             "image_host_count": int(image_hosts.get("count", 0) or 0),
+            "image_host_urls": expected_image_urls,
         },
         "form": {
             "name": form_fields.get("name"),

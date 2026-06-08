@@ -15571,11 +15571,21 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
     assert review["description"]["external_links"]["imdb"] == "https://www.imdb.com/title/tt1234567"
     assert review["description"]["external_links"]["tmdb"] == "https://www.themoviedb.org/movie/999"
     assert review["description"]["external_links"]["douban"] == "https://movie.douban.com/subject/1291546/"
+    assert review["description"]["external_id_readiness"] == {"imdb": True, "tmdb": True, "douban": True}
+    assert review["description"]["external_id_missing"] == []
     assert review["description"]["bbcode_image_count"] == 1
+    assert review["description"]["bbcode_image_urls"] == ["https://img.example/thumb.png"]
+    assert review["description"]["screenshot_coverage"] == {
+        "ready": True,
+        "expected_urls": ["https://img.example/thumb.png"],
+        "description_urls": ["https://img.example/thumb.png"],
+        "missing_urls": [],
+    }
     assert review["materials"]["mediainfo_or_bdinfo_source"] == str(mediainfo)
     assert review["materials"]["mediainfo_or_bdinfo_length"] == len(mediainfo.read_text(encoding="utf-8"))
     assert review["materials"]["screenshot_file_count"] == 1
     assert review["materials"]["image_host_count"] == 1
+    assert review["materials"]["image_host_urls"] == ["https://img.example/thumb.png"]
     assert review["form"]["name"] == source_info["name"]
     coverage_check = next(check for check in preflight["upload_payload"]["material_checks"] if check["name"] == "materials.description.screenshot_coverage")
     assert coverage_check["ok"] is True
@@ -15653,6 +15663,14 @@ def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_descri
     assert coverage_check["missing_urls"] == ["https://img.example/thumb-2.png"]
     blockers = preflight["upload_payload"]["blockers"]
     assert any("materials.description.screenshot_coverage" in blocker for blocker in blockers)
+    review = preflight["upload_payload"]["review"]
+    assert review["description"]["screenshot_coverage"] == {
+        "ready": False,
+        "expected_urls": ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png"],
+        "description_urls": ["https://img.example/thumb-1.png"],
+        "missing_urls": ["https://img.example/thumb-2.png"],
+    }
+    assert review["materials"]["image_host_urls"] == ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png"]
     audit = ptcli_cli._target_preparation_audit(package_from_disk, str(torrent_file))
     assert audit["description_ready"] is False
     assert "materials.description.screenshot_coverage" in audit["description"]["missing"]
