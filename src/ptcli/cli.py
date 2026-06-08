@@ -826,6 +826,8 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         merged["target_preparation_ready"] = bool(preparation_audit.get("ready"))
     if "target_preparation_missing" not in merged and isinstance(preparation_audit, dict):
         merged["target_preparation_missing"] = _string_list(preparation_audit.get("missing"))
+    if "target_preflight_gates" not in merged and isinstance(preparation_audit, dict):
+        merged["target_preflight_gates"] = _target_preflight_gates({"status": "ready" if preparation_audit.get("ready") else "blocked"}, preparation_audit)
     if "injection_visible_in_client" not in merged:
         target_injection = evidence_target.get("qbit_closure", {}).get("injection") if isinstance(evidence_target.get("qbit_closure"), dict) else None
         if isinstance(target_injection, dict):
@@ -850,6 +852,8 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
         next_command_argv = _resume_state_next_command_argv(fallback, commands)
     elif not complete and next_command_argv is None:
         next_command_argv = _resume_state_next_command_argv({"stage": next_stage, "command": next_command}, commands)
+    target_preflight = artifacts.get("target_preflight_gates") if isinstance(artifacts.get("target_preflight_gates"), dict) else {}
+    target_preflight_torrent = target_preflight.get("torrent_file") if isinstance(target_preflight.get("torrent_file"), dict) else {}
     return {
         "complete": complete,
         "pipeline_complete": _retorrent_pipeline_complete(pipeline_result, pipeline_resume),
@@ -889,6 +893,11 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
             "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
             "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
+            "target_preflight_gates_ready": bool(target_preflight.get("ready")),
+            "target_preflight_materials_ready": bool(target_preflight.get("materials_ready")),
+            "target_preflight_description_ready": bool(target_preflight.get("description_ready")),
+            "target_preflight_payload_ready": bool(target_preflight.get("payload_ready")),
+            "target_preflight_torrent_safe": bool(target_preflight_torrent.get("mteam_safe")),
         },
         "blockers": [str(blocker) for blocker in blockers],
     }

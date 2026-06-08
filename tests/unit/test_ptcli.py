@@ -710,6 +710,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                         "metadata_ready": True,
                         "assets_ready": True,
                         "description_ready": True,
+                        "payload_ready": True,
                         "missing": [],
                         "description": {
                             "path": "/tmp/MTEAM-description.txt",
@@ -721,6 +722,12 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                             "has_mediainfo_or_bdinfo": True,
                             "has_screenshot_bbcode": True,
                             "bbcode_image_count": 1,
+                        },
+                        "payload": {
+                            "torrent_file": {"path": "/tmp/mteam.torrent", "mteam_safe": True, "metadata_readable": True, "source_flag": "MTEAM"},
+                            "materials_ready_required": True,
+                            "payload_checks_ready": True,
+                            "description_checks_ready": True,
                         },
                     },
                     "uploaded_wait_evidence": True,
@@ -908,6 +915,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "metadata_ready": True,
             "assets_ready": True,
             "description_ready": True,
+            "payload_ready": True,
             "missing": [],
             "description": {
                 "path": "/tmp/MTEAM-description.txt",
@@ -920,9 +928,31 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                 "has_screenshot_bbcode": True,
                 "bbcode_image_count": 1,
             },
+            "payload": {
+                "torrent_file": {"path": "/tmp/mteam.torrent", "mteam_safe": True, "metadata_readable": True, "source_flag": "MTEAM"},
+                "materials_ready_required": True,
+                "payload_checks_ready": True,
+                "description_checks_ready": True,
+            },
         },
         "target_preparation_ready": True,
         "target_preparation_missing": [],
+        "target_preflight_gates": {
+            "present": True,
+            "status": "ready",
+            "ready": True,
+            "blockers": [],
+            "target_preparation_ready": True,
+            "materials_ready": True,
+            "metadata_ready": True,
+            "assets_ready": True,
+            "description_ready": True,
+            "payload_ready": True,
+            "payload_checks_ready": True,
+            "description_checks_ready": True,
+            "materials_ready_required": True,
+            "torrent_file": {"path": "/tmp/mteam.torrent", "mteam_safe": True, "metadata_readable": True, "source_flag": "MTEAM"},
+        },
     }
     assert payload["resume_commands"] == [{"stage": "resume-uploaded-torrent-download", "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999"}]
     assert payload["candidate_command_count"] == 1
@@ -981,6 +1011,11 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["target_duplicate_clean"] is True
     assert payload["resume_state"]["artifacts"]["target_rule_obligations"] is True
     assert payload["resume_state"]["artifacts"]["target_preparation_ready"] is True
+    assert payload["resume_state"]["artifacts"]["target_preflight_gates_ready"] is True
+    assert payload["resume_state"]["artifacts"]["target_preflight_materials_ready"] is True
+    assert payload["resume_state"]["artifacts"]["target_preflight_description_ready"] is True
+    assert payload["resume_state"]["artifacts"]["target_preflight_payload_ready"] is True
+    assert payload["resume_state"]["artifacts"]["target_preflight_torrent_safe"] is True
     assert pipeline_args.download_source is True
     assert pipeline_args.inject_source is True
     assert pipeline_args.wait_complete is True
