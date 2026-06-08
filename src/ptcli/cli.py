@@ -7183,10 +7183,31 @@ def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[st
         blockers.append("target.hash_consistent")
     if target.get("uploaded") and not target.get("duplicate_clean"):
         blockers.append("target.duplicate_clean")
+    if target.get("prepared") and _target_preparation_gate_required(target) and not target.get("materials_ready"):
+        blockers.append("target.materials_ready")
     rule_obligations = target.get("rule_obligations")
     if target.get("uploaded") and (not isinstance(rule_obligations, dict) or not rule_obligations.get("ready")):
         blockers.append("target.rule_obligations")
     return blockers
+
+
+def _target_preparation_gate_required(target: dict[str, Any]) -> bool:
+    preparation_audit = target.get("preparation_audit")
+    if isinstance(preparation_audit, dict):
+        payload = preparation_audit.get("payload")
+        if isinstance(payload, dict) and payload.get("materials_ready_required"):
+            return True
+    materials = target.get("materials")
+    if not isinstance(materials, dict):
+        return False
+    if materials.get("ready"):
+        return True
+    missing = _string_list(materials.get("missing"))
+    if missing and missing != ["materials"]:
+        return True
+    metadata = materials.get("metadata")
+    assets = materials.get("assets")
+    return bool(metadata or assets)
 
 
 def _fresh_duplicate_check_clean(fresh_duplicate_check: Any) -> bool:

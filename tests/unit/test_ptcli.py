@@ -7043,6 +7043,107 @@ def test_pipeline_closure_requires_target_rule_obligations() -> None:
     assert evidence["target"]["rule_obligations"]["missing"] == ["source_download_and_retorrent", "mteam_upload_and_seed"]
 
 
+def test_pipeline_closure_requires_target_materials_when_package_exists() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {
+            "stage": "target-prepare",
+            "ok": True,
+            "result": {
+                "package_dir": "/tmp/U2-60635-to-MTEAM",
+                "rule_review": mteam_clean_rule_review(),
+                "materials": {
+                    "ready": False,
+                    "metadata": {"imdb_id": None, "tmdb_id": None, "douban_id": None},
+                    "assets": {"screenshots": {"ready": False}, "image_hosts": {"ready": False}},
+                    "checks": {
+                        "metadata": [{"name": "imdb_id", "ok": False}, {"name": "tmdb_id", "ok": False}, {"name": "douban_id", "ok": False}],
+                        "assets": [{"name": "screenshots", "ok": False}, {"name": "image_hosts", "ok": False}],
+                    },
+                },
+            },
+        },
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                "uploaded_torrent_hash": "b" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "b" * 40},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "query": {"torrent_hash": "b" * 40}, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+
+    assert closure["complete"] is False
+    assert "target.materials_ready" in closure["blockers"]
+    assert closure["target"]["materials_ready"] is False
+    assert closure["target"]["preparation_audit"]["missing"] == [
+        "metadata.imdb_id",
+        "metadata.tmdb_id",
+        "metadata.douban_id",
+        "assets.screenshots",
+        "assets.image_hosts",
+        "description.content",
+        "payload.preflight",
+    ]
+
+
+def test_pipeline_closure_requires_target_preparation_when_materials_exist() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "skipped": True},
+        {"stage": "inject-source", "ok": True, "skipped": True},
+        {"stage": "wait-complete", "ok": True, "skipped": True},
+        {"stage": "match", "ok": True, "result": {"matches": [{"content_path": "/downloads/Name", "hash": "a" * 40}]}},
+        {
+            "stage": "target-prepare",
+            "ok": True,
+            "result": {
+                "rule_review": mteam_clean_rule_review(),
+                "materials": {
+                    "ready": True,
+                    "metadata": {"imdb_id": "1234567", "tmdb_id": 999, "douban_id": "1291546"},
+                    "assets": {"screenshots": {"ready": True}, "image_hosts": {"ready": True}},
+                    "checks": {
+                        "metadata": [{"name": "imdb_id", "ok": True}, {"name": "tmdb_id", "ok": True}, {"name": "douban_id", "ok": True}],
+                        "assets": [{"name": "screenshots", "ok": True}, {"name": "image_hosts", "ok": True}],
+                    },
+                },
+            },
+        },
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                "uploaded_torrent_hash": "b" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent", "hash": "b" * 40},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "query": {"torrent_hash": "b" * 40}, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+    evidence = ptcli_cli._pipeline_evidence(closure)
+    audit = ptcli_cli._pipeline_closure_audit(closure, evidence)
+
+    assert closure["complete"] is True
+    assert "target.materials_ready" not in closure["blockers"]
+    assert closure["target"]["materials_ready"] is True
+    assert closure["target"]["preparation_audit"]["missing"] == ["description.content", "payload.preflight"]
+    assert audit["ready"] is False
+    assert "target.preparation_ready" in audit["missing"]
+
+
 def test_pipeline_closure_requires_source_injection_client_verification() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"torrent_path": "/tmp/U2-60635.torrent"}},
@@ -10846,7 +10947,11 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     screenshot = tmp_path / "screen-1.png"
     await asyncio.to_thread(screenshot.write_bytes, b"png")
     image_host_file = tmp_path / "image-host-uploads.json"
-    await asyncio.to_thread(image_host_file.write_text, json.dumps([{"url": "https://img.example/screen-1.png"}]), encoding="utf-8")
+    await asyncio.to_thread(
+        image_host_file.write_text,
+        json.dumps([{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]),
+        encoding="utf-8",
+    )
     parser = build_parser()
     args = parser.parse_args(
         [
@@ -10904,7 +11009,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert summary_payload["input_source_id"] == source_url
     assert summary_payload["source_torrent_id"] == "60635"
     assert summary_payload["closure"]["complete"] is False
-    assert summary_payload["closure"]["blockers"] == ["target.uploaded", "target.downloaded", "target.injected"]
+    assert summary_payload["closure"]["blockers"] == ["target.uploaded", "target.downloaded", "target.injected", "target.materials_ready"]
     assert summary_payload["requested_actions"] == payload["requested_actions"]
     assert summary_payload["effective_actions"] == payload["effective_actions"]
     assert payload["flow_check"]["source_capability"]["source_download_adapter"] == "nexusphp_passkey"
@@ -11011,7 +11116,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     }
     assert material_closure["description"]["has_mediainfo_or_bdinfo"] is True
     assert material_closure["description"]["has_screenshot_bbcode"] is True
-    assert material_closure["description"]["bbcode_image_urls"] == ["https://img.example/screen-1.png"]
+    assert material_closure["description"]["bbcode_image_urls"] == ["https://img.example/thumb.png"]
     assert any("PTGen/Douban description" in action for action in summary_payload["resume_state"]["materials"]["next_actions"])
     code = main(["summary-check", "--summary-file", str(summary_path), "--print-shell"])
     assert code == 0
@@ -11046,7 +11151,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_IMDB_LINK=https://www.imdb.com/title/tt1234567\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_TMDB_LINK=https://www.themoviedb.org/movie/2\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_DOUBAN_LINK=https://movie.douban.com/subject/1291546/\n" in out
-    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_URLS=https://img.example/screen-1.png\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_URLS=https://img.example/thumb.png\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_HINT_COUNT=2\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=metadata.ptgen_description,description.content\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_AVAILABLE=1\n" in out
@@ -12234,13 +12339,14 @@ async def test_pipeline_reuses_existing_target_package_for_upload(monkeypatch, t
         "torrent_id": "60635",
         "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
         "imdb_id": 1234567,
-        "tmdb_id": None,
-        "douban_id": None,
-        "douban_url": None,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, output_dir=str(tmp_path / "target"))
     torrent_file = make_mteam_safe_torrent(tmp_path, "resume-upload")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
@@ -12299,13 +12405,14 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
         "torrent_id": "60635",
         "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
         "imdb_id": 1234567,
-        "tmdb_id": None,
-        "douban_id": None,
-        "douban_url": None,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, output_dir=str(tmp_path / "target"))
     uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
     uploaded_hash = str(Torrent.read(str(uploaded_torrent), validate=False).infohash)
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
@@ -12409,13 +12516,14 @@ async def test_pipeline_uploaded_torrent_file_resume_auto_waits_when_inject_requ
         "torrent_id": "60635",
         "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
         "imdb_id": 1234567,
-        "tmdb_id": None,
-        "douban_id": None,
-        "douban_url": None,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, output_dir=str(tmp_path / "target"))
     uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
     uploaded_hash = str(Torrent.read(str(uploaded_torrent), validate=False).infohash)
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
