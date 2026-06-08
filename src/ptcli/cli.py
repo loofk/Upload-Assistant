@@ -3104,7 +3104,14 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit], *[f"closure audit missing: {name}" for name in missing_closure_audit]]
     _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(diagnostics))
-    next_command = _summary_next_command(payload, resume_state, _pipeline_summary_preferred_stages([*missing_audit, *missing_closure_audit]))
+    next_command = _summary_next_command(
+        payload,
+        resume_state,
+        (
+            *_completion_matrix_preferred_stages(diagnostics.get("completion_matrix"), kind=str(payload.get("kind") or "")),
+            *_pipeline_summary_preferred_stages([*missing_audit, *missing_closure_audit]),
+        ),
+    )
     check_status = "ok" if complete and ready and not blockers else "blocked"
     closure_status = _closure_status_summary({**payload, "status": check_status, "blockers": blockers})
     return _summary_check_result({
@@ -3140,7 +3147,14 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(diagnostics))
-    next_command = _summary_next_command(payload, resume_state, _target_upload_summary_preferred_stages(missing_audit))
+    next_command = _summary_next_command(
+        payload,
+        resume_state,
+        (
+            *_target_upload_summary_preferred_stages(missing_audit),
+            *_completion_matrix_preferred_stages(diagnostics.get("completion_matrix"), kind=str(payload.get("kind") or "")),
+        ),
+    )
     return _summary_check_result({
         "status": "ok" if ready and not blockers else "blocked",
         "kind": payload.get("kind"),
@@ -3358,6 +3372,26 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
     if any(name in missing_audit for name in ("target_duplicate_clean", "target_rule_obligations", "target.prepared", "target.uploaded", "target.duplicate_clean", "target.rule_obligations")):
         preferred.append("resume-target-upload")
     preferred.extend(["resume-source-torrent", "resume-target-package", "resume-target-torrent", "resume-target-upload", "resume-uploaded-torrent-download", "resume-uploaded-torrent"])
+    return tuple(dict.fromkeys(preferred))
+
+
+def _completion_matrix_preferred_stages(completion_matrix: Any, *, kind: str) -> tuple[str, ...]:
+    if not isinstance(completion_matrix, dict):
+        return ()
+    preferred: list[str] = []
+    missing_domains = _string_list(completion_matrix.get("missing_domains"))
+    for domain in missing_domains:
+        if domain == "source":
+            preferred.extend(["resume-source-torrent", "resume-source-download"])
+        elif domain == "materials":
+            preferred.append("resume-target-package")
+        elif domain == "rules":
+            preferred.append("target-upload-retry" if kind == "ptcli.target_upload.summary" else "resume-target-upload")
+        elif domain in {"target_upload", "qbit_wait"}:
+            if kind == "ptcli.target_upload.summary":
+                preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
+            else:
+                preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download", "resume-target-upload", "resume-target-torrent"])
     return tuple(dict.fromkeys(preferred))
 
 

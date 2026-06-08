@@ -3072,6 +3072,18 @@ def test_resume_next_command_uses_stage_blocker_details() -> None:
     assert generic_target["stage"] == "resume-target-upload"
 
 
+def test_completion_matrix_preferred_stages_map_domains_to_resume_commands() -> None:
+    matrix = {"missing_domains": ["materials", "target_upload", "qbit_wait", "rules", "source"]}
+
+    pipeline_stages = ptcli_cli._completion_matrix_preferred_stages(matrix, kind="ptcli.pipeline.run_summary")
+    target_upload_stages = ptcli_cli._completion_matrix_preferred_stages(matrix, kind="ptcli.target_upload.summary")
+
+    assert pipeline_stages[:4] == ("resume-target-package", "resume-uploaded-torrent", "resume-uploaded-torrent-download", "resume-target-upload")
+    assert "resume-source-torrent" in pipeline_stages
+    assert target_upload_stages[:4] == ("resume-target-package", "resume-uploaded-torrent", "resume-uploaded-torrent-download", "target-upload-retry")
+    assert "resume-source-download" in target_upload_stages
+
+
 def test_target_package_resume_args_reuse_generated_material_artifacts() -> None:
     args = ptcli_cli._target_package_material_resume_args(
         {"generate_mediainfo": True, "generate_screenshots": True, "upload_screenshots": True},
