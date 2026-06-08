@@ -2065,6 +2065,8 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
     qbit_retry_hints = qbit_wait_fields.get("qbit_wait_retry_hints") if isinstance(qbit_wait_fields.get("qbit_wait_retry_hints"), dict) else {}
     uploaded_retry_hint = qbit_retry_hints.get("uploaded") if isinstance(qbit_retry_hints.get("uploaded"), dict) else {}
     qbit_wait_mismatches = _string_list(qbit_wait_fields.get("qbit_wait_mismatches"))
+    uploaded_wait = summary.get("uploaded_wait") if isinstance(summary.get("uploaded_wait"), dict) else {}
+    uploaded_wait_query = uploaded_wait.get("query") if isinstance(uploaded_wait.get("query"), dict) else {}
     return {
         "ready": ready,
         "uploaded": uploaded,
@@ -2093,6 +2095,7 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
         "uploaded_save_path": uploaded_save_path.get("path"),
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
+        "uploaded_wait_query": uploaded_wait_query,
         "wait_retry": uploaded_retry_hint if uploaded_retry_hint else None,
         "next_actions": _target_upload_followup_next_actions(missing),
     }
@@ -2309,6 +2312,7 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
     completion_review = summary.get("completion_review") if isinstance(summary.get("completion_review"), dict) else {}
     checks = completion_review.get("checks") if isinstance(completion_review.get("checks"), dict) else {}
+    uploaded_wait_query = completion_review.get("uploaded_wait_query") if isinstance(completion_review.get("uploaded_wait_query"), dict) else {}
     return {
         "present": bool(summary),
         "mode": summary.get("mode"),
@@ -2323,6 +2327,7 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
             "uploaded_torrent_path": completion_review.get("uploaded_torrent_path"),
             "injected_torrent_hash": completion_review.get("injected_torrent_hash"),
             "uploaded_save_path": completion_review.get("uploaded_save_path"),
+            "uploaded_wait_query": uploaded_wait_query,
             "preflight_status": completion_review.get("preflight_status"),
         },
     }
@@ -8152,6 +8157,7 @@ def _material_critical_domain_missing(domains: dict[str, Any], name: str) -> lis
 def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[str, Any]) -> dict[str, Any]:
     completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
     checks = completion.get("checks") if isinstance(completion.get("checks"), dict) else {}
+    wait_query = completion.get("uploaded_wait_query") if isinstance(completion.get("uploaded_wait_query"), dict) else {}
     return {
         "PTCLI_TARGET_UPLOAD_PRESENT": _shell_bool(target_upload_diagnostics.get("present")) if "present" in target_upload_diagnostics else None,
         "PTCLI_TARGET_UPLOAD_MODE": target_upload_diagnostics.get("mode"),
@@ -8164,6 +8170,10 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
         "PTCLI_TARGET_UPLOAD_TORRENT_PATH": completion.get("uploaded_torrent_path"),
         "PTCLI_TARGET_UPLOAD_INJECTED_HASH": completion.get("injected_torrent_hash"),
         "PTCLI_TARGET_UPLOAD_SAVE_PATH": completion.get("uploaded_save_path"),
+        "PTCLI_TARGET_UPLOAD_WAIT_QUERY_HASH": wait_query.get("torrent_hash"),
+        "PTCLI_TARGET_UPLOAD_WAIT_QUERY_CONTENT_PATH": wait_query.get("content_path"),
+        "PTCLI_TARGET_UPLOAD_WAIT_QUERY_TIMEOUT": wait_query.get("timeout"),
+        "PTCLI_TARGET_UPLOAD_WAIT_QUERY_INTERVAL": wait_query.get("interval"),
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_STATUS": completion.get("preflight_status"),
         "PTCLI_TARGET_UPLOAD_CHECK_PREPARATION_READY": _summary_check_bool_field(checks, "target_preparation_ready"),
         "PTCLI_TARGET_UPLOAD_CHECK_UPLOADED": _summary_check_bool_field(checks, "uploaded"),
@@ -8181,6 +8191,7 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
 def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) -> dict[str, Any]:
     followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
     wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
+    wait_query = followup.get("uploaded_wait_query") if isinstance(followup.get("uploaded_wait_query"), dict) else {}
     torrent_evidence = followup.get("uploaded_torrent_file_evidence") if isinstance(followup.get("uploaded_torrent_file_evidence"), dict) else {}
     return {
         "PTCLI_UPLOADED_FOLLOWUP_PRESENT": _shell_bool(bool(followup)) if resume_state else None,
@@ -8208,6 +8219,10 @@ def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) 
         "PTCLI_UPLOADED_FOLLOWUP_SAVE_PATH": followup.get("uploaded_save_path"),
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_MISMATCH": _shell_bool(followup.get("qbit_wait_mismatch")) if followup.get("qbit_wait_mismatch") is not None else None,
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_MISMATCHES": ",".join(_string_list(followup.get("qbit_wait_mismatches"))),
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_QUERY_HASH": wait_query.get("torrent_hash"),
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_QUERY_CONTENT_PATH": wait_query.get("content_path"),
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_QUERY_TIMEOUT": wait_query.get("timeout"),
+        "PTCLI_UPLOADED_FOLLOWUP_WAIT_QUERY_INTERVAL": wait_query.get("interval"),
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_RETRY_RECOMMENDED": _shell_bool(wait_retry.get("retry_recommended")) if wait_retry.get("retry_recommended") is not None else None,
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH": wait_retry.get("suggested_torrent_hash"),
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH": wait_retry.get("suggested_content_path"),

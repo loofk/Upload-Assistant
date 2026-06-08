@@ -14638,6 +14638,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert uploaded_followup["uploaded_torrent_file_evidence"]["torrent_hash"] == uploaded_hash
     assert len(uploaded_followup["uploaded_torrent_file_evidence"]["sha1"]) == 40
     assert uploaded_followup["uploaded_save_path"] == "/downloads/Example"
+    assert uploaded_followup["uploaded_wait_query"] == {"torrent_hash": uploaded_hash, "content_path": "/downloads/Example", "timeout": 42.0, "interval": 3.0}
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert "target-upload-retry" in commands
@@ -14692,6 +14693,14 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert f"export PTCLI_TARGET_UPLOAD_TORRENT_PATH={str(tmp_path / 'MTEAM-999.torrent')}\n" in out
     assert f"export PTCLI_TARGET_UPLOAD_INJECTED_HASH={uploaded_hash}\n" in out
     assert "export PTCLI_TARGET_UPLOAD_SAVE_PATH=/downloads/Example\n" in out
+    assert f"export PTCLI_TARGET_UPLOAD_WAIT_QUERY_HASH={uploaded_hash}\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_WAIT_QUERY_CONTENT_PATH=/downloads/Example\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_WAIT_QUERY_TIMEOUT=42.0\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_WAIT_QUERY_INTERVAL=3.0\n" in out
+    assert f"export PTCLI_UPLOADED_FOLLOWUP_WAIT_QUERY_HASH={uploaded_hash}\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_QUERY_CONTENT_PATH=/downloads/Example\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_QUERY_TIMEOUT=42.0\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_QUERY_INTERVAL=3.0\n" in out
     assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_STATUS=ready\n" in out
     assert "export PTCLI_TARGET_UPLOAD_CHECK_PREPARATION_READY=1\n" in out
     assert "export PTCLI_TARGET_UPLOAD_CHECK_TORRENT_FILE=1\n" in out
