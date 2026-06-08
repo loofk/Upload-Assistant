@@ -10719,6 +10719,10 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["closure_review"]["missing"] == []
     assert summary_payload["closure_review"]["source"]["torrent_hash"] == source_hash
     assert summary_payload["closure_review"]["source"]["torrent_file_evidence"] is True
+    assert summary_payload["closure_review"]["source"]["torrent_file_artifact"]["exists"] is True
+    assert summary_payload["closure_review"]["source"]["torrent_file_artifact"]["is_file"] is True
+    assert summary_payload["closure_review"]["source"]["torrent_file_artifact"]["torrent_hash"] == source_hash
+    assert summary_payload["closure_review"]["source"]["torrent_file_artifact"]["metadata_readable"] is True
     assert summary_payload["closure_review"]["source"]["save_path"] == "/downloads"
     assert summary_payload["closure_review"]["source"]["qbit_category"] == "SOURCE"
     assert summary_payload["closure_review"]["source"]["qbit_tags"] == "source-tag"
@@ -10757,6 +10761,13 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["target_preparation_ready"] is True
     assert summary_payload["artifacts"]["target_preparation_audit"]["description"]["has_screenshot_bbcode"] is True
     assert summary_payload["artifacts"]["source_torrent_file_evidence"] is True
+    assert summary_payload["artifacts"]["source_torrent_file_artifact"]["path"].endswith("U2-60635.torrent")
+    assert summary_payload["artifacts"]["source_torrent_file_artifact"]["exists"] is True
+    assert summary_payload["artifacts"]["source_torrent_file_artifact"]["is_file"] is True
+    assert summary_payload["artifacts"]["source_torrent_file_artifact"]["size_bytes"] > 0
+    assert len(summary_payload["artifacts"]["source_torrent_file_artifact"]["sha1"]) == 40
+    assert summary_payload["artifacts"]["source_torrent_file_artifact"]["torrent_hash"] == source_hash
+    assert summary_payload["artifacts"]["source_torrent_file_artifact"]["metadata_readable"] is True
     assert summary_payload["artifacts"]["source_torrent_hash"] == source_hash
     assert summary_payload["artifacts"]["source_save_path"] == "/downloads"
     assert summary_payload["artifacts"]["source_qbit_category"] == "SOURCE"
@@ -10770,6 +10781,10 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "export PTCLI_CLOSURE_REVIEW_MISSING=''\n" in out
     assert f"export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_HASH={source_hash}\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_FILE_EVIDENCE=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_EXISTS=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_IS_FILE=1\n" in out
+    assert f"export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_INFOHASH={source_hash}\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_METADATA_READABLE=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_SOURCE_SAVE_PATH=/downloads\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_SOURCE_QBIT_CATEGORY=SOURCE\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_SOURCE_QBIT_TAGS=source-tag\n" in out

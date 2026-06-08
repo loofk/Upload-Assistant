@@ -2745,6 +2745,7 @@ def _pipeline_closure_review(payload: dict[str, Any], artifacts: dict[str, Any] 
         _append_unique_string(missing, "pipeline.blockers")
     if _string_list(closure_status.get("closure_blockers")):
         _append_unique_string(missing, "closure.blockers")
+    source_torrent_artifact = artifacts.get("source_torrent_file_artifact") if isinstance(artifacts.get("source_torrent_file_artifact"), dict) else {}
     return {
         "complete": bool(closure_status.get("complete")) and not missing,
         "missing": missing,
@@ -2758,6 +2759,7 @@ def _pipeline_closure_review(payload: dict[str, Any], artifacts: dict[str, Any] 
             "torrent_hash": artifacts.get("source_torrent_hash"),
             "torrent_file": artifacts.get("source_torrent_file"),
             "torrent_file_evidence": artifacts.get("source_torrent_file_evidence"),
+            "torrent_file_artifact": source_torrent_artifact,
             "injected_torrent_hash": artifacts.get("source_injected_torrent_hash"),
             "injection_visible_in_client": artifacts.get("source_injection_visible_in_client"),
             "save_path": artifacts.get("source_save_path"),
@@ -4799,6 +4801,7 @@ def _torrent_file_evidence(torrent_file: str | Path, *, require_metadata: bool =
     payload: dict[str, Any] = {
         "path": str(path),
         "exists": path.is_file(),
+        "is_file": path.is_file(),
     }
     if path.is_file():
         data = path.read_bytes()
@@ -5598,6 +5601,22 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         if isinstance(source_result, dict):
             artifacts["source_torrent_file"] = source_result.get("path")
             artifacts["source_torrent_file_evidence"] = _torrent_file_evidence_complete(source_result)
+            artifacts["source_torrent_file_artifact"] = {
+                key: source_result.get(key)
+                for key in (
+                    "path",
+                    "exists",
+                    "is_file",
+                    "size_bytes",
+                    "sha1",
+                    "hash",
+                    "torrent_hash",
+                    "infohash",
+                    "metadata_readable",
+                    "reused",
+                )
+                if _artifact_value_present(source_result.get(key))
+            }
     if isinstance(inject_source, dict):
         inject_result = inject_source.get("result")
         if isinstance(inject_result, dict):
@@ -7945,6 +7964,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
 def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -> dict[str, Any]:
     source = closure_review.get("source") if isinstance(closure_review.get("source"), dict) else {}
     target = closure_review.get("target") if isinstance(closure_review.get("target"), dict) else {}
+    source_torrent_artifact = source.get("torrent_file_artifact") if isinstance(source.get("torrent_file_artifact"), dict) else {}
     description = target.get("description") if isinstance(target.get("description"), dict) else {}
     external_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
     checks = closure_review.get("checks") if isinstance(closure_review.get("checks"), dict) else {}
@@ -7959,6 +7979,13 @@ def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -
         "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_HASH": source.get("torrent_hash"),
         "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_FILE": source.get("torrent_file"),
         "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_FILE_EVIDENCE": _shell_bool(source.get("torrent_file_evidence")) if source.get("torrent_file_evidence") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_EXISTS": _shell_bool(source_torrent_artifact.get("exists")) if source_torrent_artifact.get("exists") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_IS_FILE": _shell_bool(source_torrent_artifact.get("is_file")) if source_torrent_artifact.get("is_file") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_SIZE_BYTES": source_torrent_artifact.get("size_bytes"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_SHA1": source_torrent_artifact.get("sha1"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_INFOHASH": source_torrent_artifact.get("torrent_hash") or source_torrent_artifact.get("infohash") or source_torrent_artifact.get("hash"),
+        "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_METADATA_READABLE": _shell_bool(source_torrent_artifact.get("metadata_readable")) if source_torrent_artifact.get("metadata_readable") is not None else None,
+        "PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_REUSED": _shell_bool(source_torrent_artifact.get("reused")) if source_torrent_artifact.get("reused") is not None else None,
         "PTCLI_CLOSURE_REVIEW_SOURCE_INJECTED_HASH": source.get("injected_torrent_hash"),
         "PTCLI_CLOSURE_REVIEW_SOURCE_INJECTION_VISIBLE": _shell_bool(source.get("injection_visible_in_client")) if source.get("injection_visible_in_client") is not None else None,
         "PTCLI_CLOSURE_REVIEW_SOURCE_SAVE_PATH": source.get("save_path"),
