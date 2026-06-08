@@ -1666,6 +1666,30 @@ def test_target_package_material_auto_flags_include_specific_external_ids() -> N
     assert "--fetch-ptgen" in flags
 
 
+def test_target_package_material_auto_flags_include_screenshot_coverage() -> None:
+    flags = ptcli_cli._target_package_material_auto_flags({"target_preparation_missing": ["description.screenshot_coverage"]})
+
+    assert "--upload-screenshots" in flags
+
+
+def test_material_recovery_resume_command_covers_screenshot_coverage() -> None:
+    hints = ptcli_cli._target_preparation_recovery_hints(["description.screenshot_coverage"])
+    commands = [
+        {
+            "stage": "resume-target-package",
+            "command": "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg",
+            "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots", "--image-host", "ptpimg"],
+        }
+    ]
+
+    enriched = ptcli_cli._attach_material_recovery_resume_commands(hints, commands)
+
+    assert enriched[0]["key"] == "assets.image_host_uploads"
+    assert enriched[0]["resume_command_available"] is True
+    assert enriched[0]["resume_command_stage"] == "resume-target-package"
+    assert "--upload-screenshots" in enriched[0]["resume_command_argv"]
+
+
 def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:
     pipeline_result = {
         "status": "ok",

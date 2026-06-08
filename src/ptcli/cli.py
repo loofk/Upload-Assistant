@@ -6692,7 +6692,7 @@ def _target_package_material_auto_flags(artifacts: dict[str, Any] | None) -> set
             flags.add("--generate-bdinfo")
         elif normalized in {"assets.screenshots", "description.screenshot_bbcode"}:
             flags.add("--generate-screenshots")
-        elif normalized == "assets.image_host_uploads":
+        elif normalized in {"assets.image_host_uploads", "description.screenshot_coverage"}:
             flags.add("--upload-screenshots")
     return flags
 
