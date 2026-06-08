@@ -909,6 +909,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["completion_matrix"]["domains"]["target_upload"]["ready"] is True
     assert payload["completion_matrix"]["domains"]["target_upload"]["evidence"]["ready_for_uploaded_seeding"] is True
     assert payload["completion_matrix"]["domains"]["qbit_wait"]["ready"] is True
+    assert payload["completion_matrix"]["ready"] is True
+    assert payload["completion_next_stages"] == []
     assert payload["summary_file"].endswith("ptcli-run-summary.json")
     assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--json"]
     assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--run-next-command"])
@@ -1502,6 +1504,11 @@ async def test_retorrent_execute_blocks_when_pipeline_closure_is_incomplete(monk
     assert payload["next_command"] == "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent"
     assert payload["next_command_argv"] == ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"]
     assert payload["resume_state"]["blockers"] == ["target.injected", "pipeline did not report ready."]
+    assert payload["completion_matrix"]["ready"] is False
+    assert "target_upload" in payload["completion_matrix"]["missing_domains"]
+    assert payload["completion_matrix"]["domains"]["target_upload"]["ready"] is False
+    assert "resume-uploaded-torrent" in payload["completion_next_stages"]
+    assert "resume-uploaded-torrent-download" in payload["completion_next_stages"]
     assert payload["candidate_command_count"] == 1
     assert payload["runnable_command_count"] == 1
     assert payload["next_command_ready"] is True

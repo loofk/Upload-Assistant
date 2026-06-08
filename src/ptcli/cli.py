@@ -716,7 +716,6 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     qbit_wait_retry_hints = _summary_qbit_wait_retry_hints(qbit_wait_diagnostics)
     closure_status = pipeline_result.get("closure_status") if isinstance(pipeline_result.get("closure_status"), dict) else _closure_status_summary(pipeline_result)
     resume_commands = pipeline_result.get("resume_commands", [])
-    resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands)
     closure_review = pipeline_result.get("closure_review") if isinstance(pipeline_result.get("closure_review"), dict) else _pipeline_closure_review(pipeline_result, artifacts)
     flow_diagnostics = _summary_flow_diagnostics(pipeline_result)
     target_upload_diagnostics = _summary_target_upload_diagnostics(pipeline_result)
@@ -728,6 +727,8 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         closure_status=closure_status,
         qbit_wait_mismatches=qbit_wait_mismatches,
     )
+    completion_next_stages = _completion_matrix_preferred_stages(completion_matrix, kind="ptcli.pipeline.run_summary")
+    resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands, preferred_stages=completion_next_stages)
     resume_command_audit = _resume_command_audit_fields(resume_commands, resume_state.get("next_command"), resume_state.get("next_command_argv"))
     automation_fields = _retorrent_automation_fields(
         status="complete" if not blockers else "blocked",
@@ -760,6 +761,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "target_upload_diagnostics": target_upload_diagnostics,
         "target_preflight_diagnostics": target_preflight_diagnostics,
         "completion_matrix": completion_matrix,
+        "completion_next_stages": list(completion_next_stages),
         "summary_file": summary_file,
         "automation_handoff": pipeline_result.get("automation_handoff") if isinstance(pipeline_result.get("automation_handoff"), dict) else _summary_automation_handoff(str(summary_file)) if summary_file else None,
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
@@ -859,7 +861,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
     return merged
 
 
-def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: dict[str, Any], blockers: list[str], resume_commands: Any) -> dict[str, Any]:
+def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: dict[str, Any], blockers: list[str], resume_commands: Any, preferred_stages: tuple[str, ...] = ()) -> dict[str, Any]:
     pipeline_resume = pipeline_result.get("resume_state") if isinstance(pipeline_result.get("resume_state"), dict) else {}
     complete = not blockers
     commands = resume_commands if isinstance(resume_commands, list) else []
@@ -868,7 +870,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
     next_command = None if complete else pipeline_resume.get("next_command")
     next_command_argv = None if complete else _argv_list(pipeline_resume.get("next_command_argv"))
     if not complete and not next_command:
-        fallback = _resume_next_command(blockers, commands_by_stage)
+        fallback = _resume_next_command_from_stages(preferred_stages, commands_by_stage) or _resume_next_command(blockers, commands_by_stage)
         next_stage = fallback.get("stage")
         next_command = fallback.get("command")
         next_command_argv = _resume_state_next_command_argv(fallback, commands)
@@ -7176,6 +7178,14 @@ def _resume_next_command(blockers: list[Any], commands_by_stage: dict[str, str])
         if command:
             return {"stage": stage, "command": command}
     return {"stage": None, "command": None}
+
+
+def _resume_next_command_from_stages(preferred_stages: tuple[str, ...], commands_by_stage: dict[str, str]) -> dict[str, str | None] | None:
+    for stage in preferred_stages:
+        command = commands_by_stage.get(stage)
+        if command:
+            return {"stage": stage, "command": command}
+    return None
 
 
 def _qbit_resume_args(options: dict[str, Any], *, prefix: str) -> list[str]:
