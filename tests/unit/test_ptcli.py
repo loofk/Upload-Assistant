@@ -3604,6 +3604,9 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["image_host_urls"]["raw_urls"] == ["https://img.example/raw.png"]
     assert diagnostics["image_host_urls"]["img_urls"] == ["https://img.example/thumb.png"]
     assert diagnostics["image_host_urls"]["web_urls"] == ["https://img.example/page"]
+    assert diagnostics["image_host_urls"]["item_count"] == 1
+    assert diagnostics["image_host_urls"]["valid_count"] == 1
+    assert diagnostics["image_host_urls"]["invalid_count"] == 0
     assert diagnostics["blockers"] == ["prerequisites: --upload-screenshots requires --image-host.", "BDMV disc content requires --bdinfo-file.", "Image-host uploads are missing."]
     code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
     assert code == 0
@@ -3620,6 +3623,9 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert "export PTCLI_MATERIAL_CRITICAL_IMAGE_HOST_MISSING=assets.image_host_uploads\n" in out
     assert "export PTCLI_MATERIAL_BDINFO_REQUIRED=1\n" in out
     assert "export PTCLI_MATERIAL_MEDIA_INFO_REQUIREMENT=bdinfo\n" in out
+    assert "export PTCLI_MATERIAL_IMAGE_HOST_ITEM_COUNT=1\n" in out
+    assert "export PTCLI_MATERIAL_IMAGE_HOST_VALID_COUNT=1\n" in out
+    assert "export PTCLI_MATERIAL_IMAGE_HOST_INVALID_COUNT=0\n" in out
 
 
 def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_package() -> None:
@@ -3673,6 +3679,41 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
     assert shell_fields["PTCLI_MATERIAL_METADATA_SOURCES"] == "source,ptgen"
     assert shell_fields["PTCLI_MATERIAL_METADATA_APPLIED_KEYS"] == "douban_url"
     assert shell_fields["PTCLI_MATERIAL_METADATA_READINESS_BLOCKERS"] == "Missing metadata after enrichment: tmdb_id"
+
+
+def test_summary_material_diagnostics_exposes_invalid_image_host_url_counts() -> None:
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "target_materials": {
+                    "ready": False,
+                    "assets": {
+                        "image_hosts": {
+                            "ready": False,
+                            "count": 1,
+                            "valid_count": 0,
+                            "invalid_count": 1,
+                            "items": [{"local_file": "/tmp/screen-1.png"}],
+                        }
+                    },
+                    "missing": ["assets.image_host_uploads"],
+                },
+                "target_materials_ready": False,
+                "target_materials_missing": ["assets.image_host_uploads"],
+            }
+        }
+    )
+
+    assert diagnostics["image_host_urls"]["raw_urls"] == []
+    assert diagnostics["image_host_urls"]["img_urls"] == []
+    assert diagnostics["image_host_urls"]["web_urls"] == []
+    assert diagnostics["image_host_urls"]["item_count"] == 1
+    assert diagnostics["image_host_urls"]["valid_count"] == 0
+    assert diagnostics["image_host_urls"]["invalid_count"] == 1
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_ITEM_COUNT"] == 1
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_VALID_COUNT"] == 0
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_INVALID_COUNT"] == 1
 
 
 def test_summary_material_diagnostics_marks_bdinfo_optional_for_file_content() -> None:

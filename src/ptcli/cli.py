@@ -2850,23 +2850,35 @@ def _summary_image_host_evidence(sections: dict[str, Any], target_assets: dict[s
     return target_image_hosts or generated
 
 
-def _image_host_url_summary(items: Any) -> dict[str, list[str]]:
+def _image_host_url_summary(items: Any) -> dict[str, Any]:
     raw_urls: list[str] = []
     img_urls: list[str] = []
     web_urls: list[str] = []
+    item_count = 0
+    valid_count = 0
     for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict):
             continue
+        item_count += 1
         raw_url = _nonempty_str(item.get("raw_url") or item.get("url"))
         img_url = _nonempty_str(item.get("img_url") or raw_url)
-        web_url = _nonempty_str(item.get("web_url") or item.get("url_viewer") or raw_url)
+        web_url = _nonempty_str(item.get("web_url") or item.get("url_viewer") or raw_url or img_url)
+        if img_url and web_url:
+            valid_count += 1
         if raw_url:
             _append_unique_string(raw_urls, raw_url)
         if img_url:
             _append_unique_string(img_urls, img_url)
         if web_url:
             _append_unique_string(web_urls, web_url)
-    return {"raw_urls": raw_urls, "img_urls": img_urls, "web_urls": web_urls}
+    return {
+        "raw_urls": raw_urls,
+        "img_urls": img_urls,
+        "web_urls": web_urls,
+        "item_count": item_count,
+        "valid_count": valid_count,
+        "invalid_count": item_count - valid_count,
+    }
 
 
 def _nonempty_str(value: Any) -> str | None:
@@ -8915,6 +8927,9 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_IMAGE_HOST_OK": _summary_material_section_shell_bool(image_host),
         "PTCLI_MATERIAL_IMAGE_HOST_HOST": image_host.get("host"),
         "PTCLI_MATERIAL_IMAGE_HOST_COUNT": image_host.get("count"),
+        "PTCLI_MATERIAL_IMAGE_HOST_ITEM_COUNT": image_host_urls.get("item_count"),
+        "PTCLI_MATERIAL_IMAGE_HOST_VALID_COUNT": image_host_urls.get("valid_count"),
+        "PTCLI_MATERIAL_IMAGE_HOST_INVALID_COUNT": image_host_urls.get("invalid_count"),
         "PTCLI_MATERIAL_IMAGE_HOST_RAW_URLS": ",".join(_string_list(image_host_urls.get("raw_urls"))),
         "PTCLI_MATERIAL_IMAGE_HOST_IMG_URLS": ",".join(_string_list(image_host_urls.get("img_urls"))),
         "PTCLI_MATERIAL_IMAGE_HOST_WEB_URLS": ",".join(_string_list(image_host_urls.get("web_urls"))),
