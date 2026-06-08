@@ -1179,7 +1179,7 @@ def _target_preparation_missing_next_action(missing: str) -> str | None:
         return "Provide BDInfo for BDMV disc content with --bdinfo-file or --generate-bdinfo, then rerun resume-target-package."
     if normalized in {"assets.screenshots", "description.screenshot_bbcode"}:
         return "Generate or provide screenshots with --generate-screenshots or --screenshot-file, then rerun resume-target-package."
-    if normalized == "assets.image_host_uploads":
+    if normalized in {"assets.image_host_uploads", "description.screenshot_coverage"}:
         return "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package."
     if normalized == "description.content":
         return "Regenerate the MTEAM description after metadata, MediaInfo/BDInfo, screenshot, and image-host materials are ready."
@@ -1269,7 +1269,7 @@ def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
             ["--generate-screenshots", "--screenshot-count"],
             ["--screenshot-file"],
         )
-    if normalized == "assets.image_host_uploads":
+    if normalized in {"assets.image_host_uploads", "description.screenshot_coverage"}:
         return _material_recovery_hint(
             "assets.image_host_uploads",
             "Upload screenshots to an image host or provide existing image-host upload evidence before regenerating the MTEAM package.",
@@ -3741,6 +3741,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
         "materials.description.external_ids",
         "materials.description.mediainfo_or_bdinfo",
         "materials.description.screenshot_bbcode",
+        "materials.description.screenshot_coverage",
     }
     description_checks_ready = all(any(check.get("name") == name and check.get("ok") is True for check in description_checks) for name in required_description_checks)
     payload_checks_ready = bool(payload_checks) and all(check.get("ok") is True for check in payload_checks)
@@ -6208,7 +6209,7 @@ def _material_critical_domains(critical_missing: list[str]) -> dict[str, Any]:
         "metadata": ["metadata.imdb", "metadata.tmdb", "metadata.douban", "metadata.ptgen_description", "description.external_ids", "description.ptgen_description"],
         "media_info": ["assets.mediainfo_or_bdinfo", "assets.bdinfo_for_disc", "description.mediainfo_or_bdinfo"],
         "screenshots": ["assets.screenshots", "description.screenshot_bbcode"],
-        "image_host": ["assets.image_host_uploads"],
+        "image_host": ["assets.image_host_uploads", "description.screenshot_coverage"],
         "description": ["description.content"],
     }
     return {
@@ -6706,6 +6707,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
         "materials.description.external_ids",
         "materials.description.mediainfo_or_bdinfo",
         "materials.description.screenshot_bbcode",
+        "materials.description.screenshot_coverage",
     }
     description_checks_ready = bool(required_description_checks) and all(
         any(check.get("name") == name and check.get("ok") is True for check in description_checks) for name in required_description_checks

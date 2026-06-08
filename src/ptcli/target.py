@@ -1480,6 +1480,22 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
         ),
     ]
     content = description_summary.get("content") if isinstance(description_summary.get("content"), dict) else {}
+    expected_image_urls = _mteam_expected_image_urls(materials)
+    description_image_urls = _mteam_description_image_urls_from_content(content)
+    missing_image_urls = [url for url in expected_image_urls if url not in description_image_urls]
+    screenshot_coverage_check = _payload_field_check(
+        "materials.description.screenshot_coverage",
+        not missing_image_urls,
+        "MTEAM description references every image-host screenshot URL.",
+        "MTEAM description is missing one or more image-host screenshot URLs.",
+    )
+    screenshot_coverage_check.update(
+        {
+            "expected_urls": expected_image_urls,
+            "description_urls": description_image_urls,
+            "missing_urls": missing_image_urls,
+        }
+    )
     material_checks.extend(
         [
             _payload_field_check(
@@ -1506,6 +1522,7 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
                 "MTEAM description includes screenshot BBCode from image-host uploads.",
                 "MTEAM description is missing screenshot BBCode from image-host uploads.",
             ),
+            screenshot_coverage_check,
         ]
     )
     materials = materials if isinstance(materials, dict) else {}
@@ -1523,6 +1540,34 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
                     )
                 )
     return material_checks
+
+
+def _mteam_expected_image_urls(materials: dict[str, Any] | None) -> list[str]:
+    materials = materials if isinstance(materials, dict) else {}
+    assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
+    image_hosts = assets.get("image_hosts") if isinstance(assets.get("image_hosts"), dict) else {}
+    items = image_hosts.get("items") if isinstance(image_hosts.get("items"), list) else []
+    urls: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("img_url") or item.get("raw_url") or item.get("url") or "").strip()
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _mteam_description_image_urls_from_content(content: dict[str, Any]) -> list[str]:
+    return [url for url in _target_string_list(content.get("bbcode_image_urls")) if url]
+
+
+def _target_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if item is not None]
+    return [str(value)]
+
 
 def _mteam_material_mediainfo_source(materials: dict[str, Any]) -> str | None:
     assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}

@@ -14111,7 +14111,77 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
     assert review["materials"]["screenshot_file_count"] == 1
     assert review["materials"]["image_host_count"] == 1
     assert review["form"]["name"] == source_info["name"]
+    coverage_check = next(check for check in preflight["upload_payload"]["material_checks"] if check["name"] == "materials.description.screenshot_coverage")
+    assert coverage_check["ok"] is True
+    assert coverage_check["expected_urls"] == ["https://img.example/thumb.png"]
+    assert coverage_check["description_urls"] == ["https://img.example/thumb.png"]
+    assert coverage_check["missing_urls"] == []
     assert all(check["ok"] for check in preflight["upload_payload"]["material_checks"])
+
+
+def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_description(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshots = []
+    for index in (1, 2):
+        screenshot = tmp_path / f"screen-{index}.png"
+        screenshot.write_bytes(b"png")
+        screenshots.append(str(screenshot))
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {"raw_url": "https://img.example/raw-1.png", "img_url": "https://img.example/thumb-1.png", "web_url": "https://img.example/page-1"},
+                    {"raw_url": "https://img.example/raw-2.png", "img_url": "https://img.example/thumb-2.png", "web_url": "https://img.example/page-2"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+    }
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        "/downloads/Example",
+        str(tmp_path),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": screenshots, "image_host_file": str(image_host_file)},
+    )
+    package_from_disk = load_mteam_prepare_package(package["package_dir"])
+    description_path = Path(package_from_disk["files"]["description_draft"])
+    description_text = description_path.read_text(encoding="utf-8")
+    description_path.write_text(description_text.replace("[url=https://img.example/page-2][img]https://img.example/thumb-2.png[/img][/url]", ""), encoding="utf-8")
+    package_from_disk["description_length"] = len(description_path.read_text(encoding="utf-8"))
+    manifest_path = Path(package_from_disk["files"]["manifest"])
+    manifest_path.write_text(json.dumps(package_from_disk, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    coverage_check = next(check for check in preflight["upload_payload"]["material_checks"] if check["name"] == "materials.description.screenshot_coverage")
+    assert coverage_check["ok"] is False
+    assert coverage_check["expected_urls"] == ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png"]
+    assert coverage_check["description_urls"] == ["https://img.example/thumb-1.png"]
+    assert coverage_check["missing_urls"] == ["https://img.example/thumb-2.png"]
+    blockers = preflight["upload_payload"]["blockers"]
+    assert any("materials.description.screenshot_coverage" in blocker for blocker in blockers)
+    audit = ptcli_cli._target_preparation_audit(package_from_disk, str(torrent_file))
+    assert audit["description_ready"] is False
+    assert "materials.description.screenshot_coverage" in audit["description"]["missing"]
 
 
 def test_mteam_upload_preflight_execute_blocks_stale_description_materials(tmp_path) -> None:
