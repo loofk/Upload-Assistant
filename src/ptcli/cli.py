@@ -5060,7 +5060,11 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     artifacts = _run_summary_artifacts(payload, str(payload.get("summary_file") or ""))
     payload["artifacts"] = artifacts
     payload["closure_review"] = _pipeline_closure_review(payload, artifacts)
+    payload["material_diagnostics"] = _summary_material_diagnostics({"artifacts": artifacts})
+    payload["target_preflight_diagnostics"] = _summary_target_preflight_diagnostics({"artifacts": artifacts})
     summary["closure_review"] = payload["closure_review"]
+    summary["material_diagnostics"] = payload["material_diagnostics"]
+    summary["target_preflight_diagnostics"] = payload["target_preflight_diagnostics"]
     resume_commands = _run_summary_resume_commands(payload, artifacts)
     payload["resume_commands"] = resume_commands
     payload["resume_state"] = _run_summary_resume_state(payload, artifacts, resume_commands)
@@ -5950,12 +5954,17 @@ def _append_unique_string(items: list[str], item: str) -> None:
 
 def _pipeline_run_summary(stages: list[dict[str, Any]], ready: bool, blockers: list[str], closure: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
     stage_statuses = [_pipeline_stage_status(stage) for stage in stages]
+    artifacts = _run_summary_artifacts({"closure": closure, "evidence": evidence, "stages": stages}, "")
+    material_diagnostics = _summary_material_diagnostics({"artifacts": artifacts})
+    target_preflight_diagnostics = _summary_target_preflight_diagnostics({"artifacts": artifacts})
     return {
         "ready": ready,
         "complete": bool(closure.get("complete")),
         "status": "complete" if ready and closure.get("complete") else "blocked" if blockers or closure.get("blockers") else "incomplete",
         "blockers": blockers or (closure.get("blockers") if isinstance(closure.get("blockers"), list) else []),
         "closure_audit": _pipeline_closure_audit(closure, evidence),
+        "material_diagnostics": material_diagnostics,
+        "target_preflight_diagnostics": target_preflight_diagnostics,
         "stage_statuses": stage_statuses,
         "failed_stages": [stage["stage"] for stage in stage_statuses if not stage["ok"]],
         "completed_stages": [stage["stage"] for stage in stage_statuses if stage["ok"] and not stage["skipped"]],
@@ -6264,6 +6273,8 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
     artifacts = _run_summary_artifacts(payload, str(destination))
     resume_commands = _run_summary_resume_commands(payload, artifacts)
     closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else _pipeline_closure_review(payload, artifacts)
+    material_diagnostics = _summary_material_diagnostics({"artifacts": artifacts})
+    target_preflight_diagnostics = _summary_target_preflight_diagnostics({"artifacts": artifacts})
     summary_payload = {
         "schema_version": 1,
         "kind": "ptcli.pipeline.run_summary",
@@ -6294,6 +6305,8 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "closure_audit": payload.get("closure_audit"),
         "closure_status": payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload),
         "closure_review": closure_review,
+        "material_diagnostics": material_diagnostics,
+        "target_preflight_diagnostics": target_preflight_diagnostics,
         "flow_check": payload.get("flow_check"),
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),
@@ -6352,6 +6365,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         artifacts["target_preparation_audit"] = evidence_target.get("preparation_audit")
         artifacts["target_preparation_ready"] = bool(evidence_target["preparation_audit"].get("ready")) if isinstance(evidence_target.get("preparation_audit"), dict) else False
         artifacts["target_preparation_missing"] = _string_list(evidence_target["preparation_audit"].get("missing")) if isinstance(evidence_target.get("preparation_audit"), dict) else []
+        artifacts["target_preflight_gates"] = _target_preflight_gates({"status": "ready" if artifacts["target_preparation_ready"] else "blocked"}, artifacts["target_preparation_audit"])
     if _artifact_value_present(evidence_target.get("payload_review")):
         artifacts["target_payload_review"] = evidence_target.get("payload_review")
     if isinstance(source_download, dict):

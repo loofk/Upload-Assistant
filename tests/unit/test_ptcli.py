@@ -12109,6 +12109,34 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["target_preparation_audit"]["description"]["has_screenshot_bbcode"] is True
     assert summary_payload["artifacts"]["target_payload_review"]["description"]["has_ptgen_description"] is True
     assert summary_payload["artifacts"]["target_payload_review"]["materials"]["image_host_urls"] == ["https://img.example/thumb.png"]
+    assert summary_payload["material_diagnostics"]["present"] is True
+    assert summary_payload["material_diagnostics"]["ready_for_mteam_upload"] is True
+    assert summary_payload["material_diagnostics"]["critical_ready"] is True
+    assert summary_payload["material_diagnostics"]["critical_missing"] == []
+    assert summary_payload["material_diagnostics"]["critical_path"]["ready"] is True
+    assert summary_payload["material_diagnostics"]["critical_path"]["next_step"] is None
+    assert summary_payload["material_diagnostics"]["image_host_urls"]["img_urls"] == ["https://img.example/thumb.png"]
+    assert summary_payload["target_preflight_diagnostics"]["ready"] is True
+    assert summary_payload["target_preflight_diagnostics"]["target_preparation_ready"] is True
+    assert summary_payload["target_preflight_diagnostics"]["materials_ready"] is True
+    assert summary_payload["target_preflight_diagnostics"]["description_ready"] is True
+    assert summary_payload["target_preflight_diagnostics"]["payload_ready"] is True
+    assert summary_payload["target_preflight_diagnostics"]["materials_ready_required"] is True
+    material_closure = summary_payload["resume_state"]["materials"]["closure"]
+    assert material_closure["ready"] is True
+    assert material_closure["critical_ready"] is True
+    assert material_closure["critical_missing"] == []
+    assert material_closure["critical_path"]["ready"] is True
+    assert material_closure["critical_path"]["next_step"] is None
+    assert material_closure["metadata"]["ready"] is True
+    assert material_closure["metadata"]["ptgen_description_length"] == 21
+    assert material_closure["mediainfo"]["ready"] is True
+    assert material_closure["screenshots"]["ready"] is True
+    assert material_closure["image_host"]["ready"] is True
+    assert material_closure["image_host"]["urls"]["img_urls"] == ["https://img.example/thumb.png"]
+    assert material_closure["description"]["ready"] is True
+    assert material_closure["description"]["external_id_readiness"] == {"imdb": True, "tmdb": True, "douban": True}
+    assert material_closure["description"]["bbcode_image_urls"] == ["https://img.example/thumb.png"]
     assert summary_payload["artifacts"]["source_torrent_file_evidence"] is True
     assert summary_payload["artifacts"]["source_torrent_file_artifact"]["path"].endswith("U2-60635.torrent")
     assert summary_payload["artifacts"]["source_torrent_file_artifact"]["exists"] is True
@@ -12133,6 +12161,17 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "export PTCLI_COMPLETION_FLOW_READY=1\n" in out
     assert "export PTCLI_COMPLETION_SOURCE_READY=1\n" in out
     assert "export PTCLI_COMPLETION_MATERIALS_READY=1\n" in out
+    assert "export PTCLI_READY_FOR_MTEAM_UPLOAD=1\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_READY=1\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_PATH_READY=1\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_READY=1\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_MATERIALS_READY=1\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_DESCRIPTION_READY=1\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_PAYLOAD_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CLOSURE_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_IMG_URLS=https://img.example/thumb.png\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_URLS=https://img.example/thumb.png\n" in out
     assert "export PTCLI_COMPLETION_RULES_READY=1\n" in out
     assert "export PTCLI_COMPLETION_TARGET_UPLOAD_READY=1\n" in out
     assert "export PTCLI_COMPLETION_QBIT_WAIT_READY=1\n" in out
