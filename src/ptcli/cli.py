@@ -813,6 +813,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         "target_duplicate_clean",
         "target_rule_obligations",
         "target_preparation_audit",
+        "target_payload_review",
         "target_preparation_ready",
         "target_preparation_missing",
     ):
@@ -1059,6 +1060,7 @@ def _target_artifact_evidence_key(artifact_key: str) -> str:
         "target_duplicate_clean": "duplicate_clean",
         "target_rule_obligations": "rule_obligations",
         "target_preparation_audit": "preparation_audit",
+        "target_payload_review": "payload_review",
         "target_preparation_missing": "preparation_missing",
         "uploaded_torrent_file_evidence": "uploaded_torrent_file_evidence",
     }.get(artifact_key, artifact_key)
@@ -2674,6 +2676,10 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
 def _target_upload_payload_review_from_summary(payload: dict[str, Any]) -> dict[str, Any]:
     preflight = payload.get("preflight") if isinstance(payload.get("preflight"), dict) else {}
     upload_payload = preflight.get("upload_payload") if isinstance(preflight.get("upload_payload"), dict) else {}
+    return _payload_review_summary_from_upload_payload(upload_payload)
+
+
+def _payload_review_summary_from_upload_payload(upload_payload: dict[str, Any]) -> dict[str, Any]:
     review = upload_payload.get("review") if isinstance(upload_payload.get("review"), dict) else {}
     description = review.get("description") if isinstance(review.get("description"), dict) else {}
     materials = review.get("materials") if isinstance(review.get("materials"), dict) else {}
@@ -4278,6 +4284,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
     review = upload_payload.get("review") if isinstance(upload_payload.get("review"), dict) else {}
     review_description = review.get("description") if isinstance(review.get("description"), dict) else {}
     review_materials = review.get("materials") if isinstance(review.get("materials"), dict) else {}
+    payload_review = _payload_review_summary_from_upload_payload(upload_payload)
     material_checks = upload_payload.get("material_checks") if isinstance(upload_payload.get("material_checks"), list) else []
     payload_checks = _target_preparation_checks(material_checks, "payload.")
     description_checks = _target_preparation_checks(material_checks, "materials.description.")
@@ -4344,6 +4351,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
             "payload_checks_ready": payload_checks_ready,
             "description_checks_ready": description_checks_ready,
         },
+        "payload_review": payload_review,
         "missing": missing,
         "blockers": blockers,
     }
@@ -6176,6 +6184,8 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         artifacts["target_preparation_audit"] = evidence_target.get("preparation_audit")
         artifacts["target_preparation_ready"] = bool(evidence_target["preparation_audit"].get("ready")) if isinstance(evidence_target.get("preparation_audit"), dict) else False
         artifacts["target_preparation_missing"] = _string_list(evidence_target["preparation_audit"].get("missing")) if isinstance(evidence_target.get("preparation_audit"), dict) else []
+    if _artifact_value_present(evidence_target.get("payload_review")):
+        artifacts["target_payload_review"] = evidence_target.get("payload_review")
     if isinstance(source_download, dict):
         source_result = source_download.get("result")
         if isinstance(source_result, dict):
@@ -7142,6 +7152,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     rule_obligations = _rule_obligation_summary(rule_review)
     target_materials = _target_materials_summary(target_prepare_result)
     target_preparation_audit = _target_preparation_audit(target_prepare_result, target_torrent_file)
+    target_payload_review = target_preparation_audit.get("payload_review") if isinstance(target_preparation_audit.get("payload_review"), dict) else {}
     source_downloaded = _stage_completed(source_download) and _torrent_file_present(source_download_result)
     source_injected = _source_injection_verified(inject_source)
     source_complete = _source_wait_completed(wait_complete)
@@ -7203,6 +7214,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "materials": target_materials,
         "materials_ready": bool(target_materials.get("ready")),
         "preparation_audit": target_preparation_audit,
+        "payload_review": target_payload_review,
         "package_reused": bool(target_prepare_result.get("reused")) if isinstance(target_prepare_result, dict) else False,
         "uploaded_torrent_reused": bool(downloaded_torrent.get("reused")) if isinstance(downloaded_torrent, dict) else False,
     }
@@ -7336,6 +7348,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
     review = upload_payload.get("review") if isinstance(upload_payload.get("review"), dict) else {}
     review_description = review.get("description") if isinstance(review.get("description"), dict) else {}
     review_materials = review.get("materials") if isinstance(review.get("materials"), dict) else {}
+    payload_review = _payload_review_summary_from_upload_payload(upload_payload)
     material_checks = upload_payload.get("material_checks") if isinstance(upload_payload.get("material_checks"), list) else []
     payload_checks = [check for check in material_checks if isinstance(check, dict) and str(check.get("name") or "").startswith("payload.")]
     description_checks = [check for check in material_checks if isinstance(check, dict) and str(check.get("name") or "").startswith("materials.description.")]
@@ -7394,6 +7407,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
             "payload_checks_ready": bool(payload_checks) and all(check.get("ok") is True for check in payload_checks),
             "description_checks_ready": description_checks_ready,
         },
+        "payload_review": payload_review,
         "materials": materials,
         "missing": _target_preparation_missing(materials, payload_ready, description_checks_ready),
         "blockers": blockers,
@@ -7536,6 +7550,7 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "materials": target.get("materials"),
             "materials_ready": bool(target.get("materials_ready")),
             "preparation_audit": target.get("preparation_audit"),
+            "payload_review": target.get("payload_review"),
             "torrent_file": target.get("torrent_file"),
             "uploaded_torrent_id": target.get("uploaded_torrent_id"),
             "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),

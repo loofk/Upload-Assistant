@@ -1812,6 +1812,27 @@ def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:
     assert blockers == ["qBittorrent wait mismatch: uploaded.requested_content_path"]
 
 
+def test_retorrent_execute_artifacts_preserve_target_payload_review() -> None:
+    payload_review = {
+        "present": True,
+        "description": {
+            "has_ptgen_description": True,
+            "external_id_readiness": {"imdb": True, "tmdb": True, "douban": True},
+            "screenshot_coverage": {
+                "ready": True,
+                "expected_urls": ["https://img.example/thumb.png"],
+                "description_urls": ["https://img.example/thumb.png"],
+                "missing_urls": [],
+            },
+        },
+        "materials": {"image_host_urls": ["https://img.example/thumb.png"]},
+    }
+
+    artifacts = ptcli_cli._retorrent_execute_artifacts({"artifacts": {}}, {"target": {"payload_review": payload_review}}, {"target": {}})
+
+    assert artifacts["target_payload_review"] == payload_review
+
+
 @pytest.mark.asyncio
 async def test_retorrent_execute_blocks_when_pipeline_closure_audit_is_incomplete(monkeypatch, tmp_path) -> None:
     torrent_file = tmp_path / "target.torrent"
@@ -11513,6 +11534,14 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
     assert payload["closure"]["target"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
     assert payload["evidence"]["target"]["uploaded_torrent_id"] == "999"
     assert payload["evidence"]["target"]["fresh_duplicate_check"]["searched"] is True
+    payload_review = payload["evidence"]["target"]["payload_review"]
+    assert payload_review["present"] is True
+    assert payload_review["description"]["external_id_readiness"] == {"imdb": True, "tmdb": True, "douban": True}
+    assert payload_review["description"]["has_ptgen_description"] is True
+    assert payload_review["description"]["has_mediainfo_or_bdinfo"] is True
+    assert payload_review["description"]["has_screenshot_bbcode"] is True
+    assert payload_review["description"]["screenshot_coverage"]["ready"] is True
+    assert payload_review["materials"]["image_host_urls"] == ["https://img.example/thumb.png"]
 
 
 @pytest.mark.asyncio
@@ -11682,6 +11711,11 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert target_audit["description"]["bbcode_image_count"] == 1
     assert target_audit["description"]["missing"] == []
     assert target_audit["payload"]["description_checks_ready"] is True
+    assert target_audit["payload_review"]["present"] is True
+    assert target_audit["payload_review"]["description"]["external_id_readiness"] == {"imdb": True, "tmdb": True, "douban": True}
+    assert target_audit["payload_review"]["description"]["screenshot_coverage"]["ready"] is True
+    assert payload["evidence"]["target"]["payload_review"]["description"]["bbcode_image_urls"] == ["https://img.example/thumb.png"]
+    assert payload["evidence"]["target"]["payload_review"]["materials"]["image_host_urls"] == ["https://img.example/thumb.png"]
     assert payload["closure_audit"]["ready"] is True
     assert payload["closure_audit"]["missing"] == []
     audit_items = {item["name"]: item for item in payload["closure_audit"]["items"]}
@@ -11742,6 +11776,13 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["closure_review"]["target"]["description"]["has_screenshot_bbcode"] is True
     assert summary_payload["closure_review"]["target"]["description"]["bbcode_image_count"] == 1
     assert summary_payload["closure_review"]["target"]["description"]["bbcode_image_urls"] == ["https://img.example/thumb.png"]
+    assert summary_payload["evidence"]["target"]["payload_review"]["description"]["external_links"]["douban"] == "https://movie.douban.com/subject/1291546/"
+    assert summary_payload["evidence"]["target"]["payload_review"]["description"]["screenshot_coverage"] == {
+        "ready": True,
+        "expected_urls": ["https://img.example/thumb.png"],
+        "description_urls": ["https://img.example/thumb.png"],
+        "missing_urls": [],
+    }
     assert summary_payload["summary"]["closure_audit"]["ready"] is True
     assert summary_payload["config"] == str(tmp_path / "config.py")
     assert summary_payload["base_dir"] == str(tmp_path)
@@ -11757,6 +11798,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["source_torrent_file"].endswith("U2-60635.torrent")
     assert summary_payload["artifacts"]["target_preparation_ready"] is True
     assert summary_payload["artifacts"]["target_preparation_audit"]["description"]["has_screenshot_bbcode"] is True
+    assert summary_payload["artifacts"]["target_payload_review"]["description"]["has_ptgen_description"] is True
+    assert summary_payload["artifacts"]["target_payload_review"]["materials"]["image_host_urls"] == ["https://img.example/thumb.png"]
     assert summary_payload["artifacts"]["source_torrent_file_evidence"] is True
     assert summary_payload["artifacts"]["source_torrent_file_artifact"]["path"].endswith("U2-60635.torrent")
     assert summary_payload["artifacts"]["source_torrent_file_artifact"]["exists"] is True
