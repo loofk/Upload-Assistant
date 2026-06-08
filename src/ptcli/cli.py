@@ -2283,6 +2283,14 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else _pipeline_closure_review(payload)
     closure_modes = _summary_closure_modes(payload)
     closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload)
+    completion_matrix = _summary_completion_matrix(
+        flow_diagnostics=flow_diagnostics,
+        material_diagnostics=material_diagnostics,
+        target_upload_diagnostics=target_upload_diagnostics,
+        closure_review=closure_review,
+        closure_status=closure_status,
+        qbit_wait_mismatches=qbit_wait_mismatches,
+    )
     return {
         "schema_version": schema_version,
         "expected_schema_version": SUMMARY_SCHEMA_VERSION,
@@ -2301,9 +2309,151 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "qbit_wait_retry_hints": qbit_wait_retry_hints,
         "closure_modes": closure_modes,
         "closure_status": closure_status,
+        "completion_matrix": completion_matrix,
         "source_mode": closure_modes.get("source"),
         "target_mode": closure_modes.get("target"),
     }
+
+
+def _summary_completion_matrix(
+    *,
+    flow_diagnostics: dict[str, Any],
+    material_diagnostics: dict[str, Any],
+    target_upload_diagnostics: dict[str, Any],
+    closure_review: dict[str, Any],
+    closure_status: dict[str, Any],
+    qbit_wait_mismatches: list[str],
+) -> dict[str, Any]:
+    closure_source = closure_status.get("source") if isinstance(closure_status.get("source"), dict) else {}
+    closure_target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
+    review_target = closure_review.get("target") if isinstance(closure_review.get("target"), dict) else {}
+    target_completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
+    target_checks = target_completion.get("checks") if isinstance(target_completion.get("checks"), dict) else {}
+    domains = {
+        "flow": _completion_domain(
+            flow_diagnostics.get("ready"),
+            [] if flow_diagnostics.get("ready") is True else _string_list(flow_diagnostics.get("credential_requirements")),
+            {"source_tracker": flow_diagnostics.get("source_tracker"), "target_trackers": _string_list(flow_diagnostics.get("target_trackers"))},
+        ),
+        "source": _completion_domain(
+            _source_matrix_ready(closure_source),
+            _false_keys(closure_source, ("ready", "hash_consistent", "wait_evidence", "injection_verified")),
+            {
+                "mode": closure_source.get("mode"),
+                "hash_consistent": closure_source.get("hash_consistent"),
+                "wait_evidence": closure_source.get("wait_evidence"),
+                "injection_verified": closure_source.get("injection_verified"),
+            },
+        ),
+        "materials": _completion_domain(
+            _material_matrix_ready(material_diagnostics, review_target),
+            _material_matrix_missing(material_diagnostics, review_target),
+            {
+                "target_materials_ready": material_diagnostics.get("target_materials_ready"),
+                "target_preparation_ready": material_diagnostics.get("target_preparation_ready") or review_target.get("preparation_ready"),
+                "critical_ready": material_diagnostics.get("critical_ready"),
+                "description_ready": review_target.get("description_ready"),
+            },
+        ),
+        "rules": _completion_domain(
+            _rules_matrix_ready(closure_target, review_target, target_checks),
+            ["rule_obligations_ready"] if _rules_matrix_ready(closure_target, review_target, target_checks) is False else [],
+            {
+                "closure_ready": closure_target.get("rule_obligations_ready"),
+                "review_ready": review_target.get("rule_obligations_ready"),
+                "target_upload_check": target_checks.get("rule_obligations_ready"),
+            },
+        ),
+        "target_upload": _completion_domain(
+            _target_upload_matrix_ready(target_upload_diagnostics, closure_target, review_target),
+            _target_upload_matrix_missing(target_upload_diagnostics, closure_target, review_target),
+            {
+                "mode": target_upload_diagnostics.get("mode") or review_target.get("mode"),
+                "completion_complete": target_completion.get("complete"),
+                "closure_ready": closure_target.get("ready"),
+                "uploaded_wait_evidence": closure_target.get("uploaded_wait_evidence") or review_target.get("uploaded_wait_evidence"),
+                "injection_verified": closure_target.get("injection_verified") or review_target.get("injection_verified"),
+            },
+        ),
+        "qbit_wait": _completion_domain(
+            not qbit_wait_mismatches,
+            qbit_wait_mismatches,
+            {
+                "mismatch": bool(qbit_wait_mismatches),
+                "source_wait_evidence": closure_source.get("wait_evidence"),
+                "uploaded_wait_evidence": closure_target.get("uploaded_wait_evidence") or review_target.get("uploaded_wait_evidence"),
+            },
+        ),
+    }
+    required = [name for name, domain in domains.items() if domain["ready"] is not None]
+    missing_domains = [name for name in required if domains[name]["ready"] is not True]
+    return {
+        "ready": bool(required) and not missing_domains,
+        "required": required,
+        "missing_domains": missing_domains,
+        "domains": domains,
+    }
+
+
+def _completion_domain(ready: Any, missing: list[str], evidence: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ready": ready if isinstance(ready, bool) else None,
+        "missing": _string_list(missing),
+        "evidence": evidence,
+    }
+
+
+def _false_keys(payload: dict[str, Any], keys: tuple[str, ...]) -> list[str]:
+    return [key for key in keys if payload.get(key) is False]
+
+
+def _material_matrix_ready(material_diagnostics: dict[str, Any], review_target: dict[str, Any]) -> bool | None:
+    if material_diagnostics.get("present"):
+        return bool(material_diagnostics.get("critical_ready") and material_diagnostics.get("target_materials_ready") and material_diagnostics.get("target_preparation_ready"))
+    if review_target:
+        return bool(review_target.get("materials_ready") and review_target.get("preparation_ready") and review_target.get("description_ready"))
+    return None
+
+
+def _source_matrix_ready(closure_source: dict[str, Any]) -> bool | None:
+    has_evidence = bool(closure_source.get("mode")) or any(closure_source.get(key) is True for key in ("ready", "hash_consistent", "wait_evidence", "injection_verified"))
+    if not has_evidence:
+        return None
+    return bool(closure_source.get("ready"))
+
+
+def _material_matrix_missing(material_diagnostics: dict[str, Any], review_target: dict[str, Any]) -> list[str]:
+    missing = _string_list(material_diagnostics.get("critical_missing"))
+    _extend_unique_string(missing, _string_list(material_diagnostics.get("target_materials_missing")))
+    _extend_unique_string(missing, _string_list(material_diagnostics.get("target_preparation_missing") or review_target.get("preparation_missing")))
+    return missing
+
+
+def _rules_matrix_ready(closure_target: dict[str, Any], review_target: dict[str, Any], target_checks: dict[str, Any]) -> bool | None:
+    for value in (target_checks.get("rule_obligations_ready"), review_target.get("rule_obligations_ready"), closure_target.get("rule_obligations_ready")):
+        if isinstance(value, bool):
+            return value
+    return None
+
+
+def _target_upload_matrix_ready(target_upload_diagnostics: dict[str, Any], closure_target: dict[str, Any], review_target: dict[str, Any]) -> bool | None:
+    completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
+    if target_upload_diagnostics.get("present"):
+        return bool(completion.get("complete"))
+    if closure_target or review_target:
+        return bool(closure_target.get("ready") or review_target.get("ready"))
+    return None
+
+
+def _target_upload_matrix_missing(target_upload_diagnostics: dict[str, Any], closure_target: dict[str, Any], review_target: dict[str, Any]) -> list[str]:
+    completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
+    missing = _string_list(completion.get("missing"))
+    if target_upload_diagnostics.get("present"):
+        return missing
+    for key in ("ready", "hash_consistent", "duplicate_clean", "uploaded_wait_evidence", "injection_verified"):
+        if closure_target.get(key) is False or review_target.get(key) is False:
+            _append_unique_string(missing, key)
+    return missing
 
 
 def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
@@ -7904,6 +8054,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     material_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
     target_upload_diagnostics = payload.get("target_upload_diagnostics") if isinstance(payload.get("target_upload_diagnostics"), dict) else {}
     closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else {}
+    completion_matrix = payload.get("completion_matrix") if isinstance(payload.get("completion_matrix"), dict) else {}
     qbit_wait_diagnostics = payload.get("qbit_wait_diagnostics") if isinstance(payload.get("qbit_wait_diagnostics"), dict) else {}
     qbit_wait_retry_hints = payload.get("qbit_wait_retry_hints") if isinstance(payload.get("qbit_wait_retry_hints"), dict) else {}
     resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
@@ -7955,6 +8106,9 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_CLOSURE_STATUS_AUDIT_MISSING": ",".join(_string_list(closure_status.get("audit_missing"))),
         "PTCLI_CLOSURE_STATUS_QBIT_WAIT_MISMATCH": _shell_bool(closure_status.get("qbit_wait_mismatch")) if "qbit_wait_mismatch" in closure_status else None,
         "PTCLI_CLOSURE_STATUS_QBIT_WAIT_MISMATCHES": ",".join(_string_list(closure_status.get("qbit_wait_mismatches"))),
+        "PTCLI_COMPLETION_MATRIX_READY": _shell_bool(completion_matrix.get("ready")) if completion_matrix.get("ready") is not None else None,
+        "PTCLI_COMPLETION_MATRIX_REQUIRED": ",".join(_string_list(completion_matrix.get("required"))),
+        "PTCLI_COMPLETION_MATRIX_MISSING_DOMAINS": ",".join(_string_list(completion_matrix.get("missing_domains"))),
         "PTCLI_CLOSURE_SOURCE_READY": _shell_bool(closure_source.get("ready")) if "ready" in closure_source else None,
         "PTCLI_CLOSURE_SOURCE_HASH_CONSISTENT": _shell_bool(closure_source.get("hash_consistent")) if "hash_consistent" in closure_source else None,
         "PTCLI_CLOSURE_SOURCE_WAIT_EVIDENCE": _shell_bool(closure_source.get("wait_evidence")) if "wait_evidence" in closure_source else None,
@@ -7972,6 +8126,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_SUMMARY_FILE": payload.get("summary_file"),
     }
     fields.update(_summary_check_closure_review_shell_fields(closure_review))
+    fields.update(_summary_check_completion_matrix_shell_fields(completion_matrix))
     fields.update(_summary_check_material_shell_fields(material_diagnostics))
     fields.update(_summary_check_target_upload_shell_fields(target_upload_diagnostics))
     fields.update(_summary_check_resume_material_shell_fields(resume_state))
@@ -7981,6 +8136,17 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     for key, value in fields.items():
         print(f"export {key}={shlex.quote('' if value is None else str(value))}")
     return 0
+
+
+def _summary_check_completion_matrix_shell_fields(completion_matrix: dict[str, Any]) -> dict[str, Any]:
+    domains = completion_matrix.get("domains") if isinstance(completion_matrix.get("domains"), dict) else {}
+    fields: dict[str, Any] = {}
+    for name in ("flow", "source", "materials", "rules", "target_upload", "qbit_wait"):
+        domain = domains.get(name) if isinstance(domains.get(name), dict) else {}
+        prefix = f"PTCLI_COMPLETION_{name.upper()}"
+        fields[f"{prefix}_READY"] = _shell_bool(domain.get("ready")) if domain.get("ready") is not None else None
+        fields[f"{prefix}_MISSING"] = ",".join(_string_list(domain.get("missing")))
+    return fields
 
 
 def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -> dict[str, Any]:

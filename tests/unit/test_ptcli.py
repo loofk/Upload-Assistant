@@ -10784,6 +10784,14 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     out = capsys.readouterr().out
     assert "export PTCLI_CLOSURE_REVIEW_COMPLETE=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_MISSING=''\n" in out
+    assert "export PTCLI_COMPLETION_MATRIX_READY=1\n" in out
+    assert "export PTCLI_COMPLETION_MATRIX_MISSING_DOMAINS=''\n" in out
+    assert "export PTCLI_COMPLETION_FLOW_READY=1\n" in out
+    assert "export PTCLI_COMPLETION_SOURCE_READY=1\n" in out
+    assert "export PTCLI_COMPLETION_MATERIALS_READY=1\n" in out
+    assert "export PTCLI_COMPLETION_RULES_READY=1\n" in out
+    assert "export PTCLI_COMPLETION_TARGET_UPLOAD_READY=1\n" in out
+    assert "export PTCLI_COMPLETION_QBIT_WAIT_READY=1\n" in out
     assert f"export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_HASH={source_hash}\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_FILE_EVIDENCE=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_SOURCE_TORRENT_EXISTS=1\n" in out
@@ -14678,6 +14686,11 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert "export PTCLI_TARGET_UPLOAD_READY=1\n" in out
     assert "export PTCLI_TARGET_UPLOAD_UPLOADED=1\n" in out
     assert "export PTCLI_TARGET_UPLOAD_COMPLETE=1\n" in out
+    assert "export PTCLI_COMPLETION_MATRIX_READY=1\n" in out
+    assert "export PTCLI_COMPLETION_MATRIX_MISSING_DOMAINS=''\n" in out
+    assert "export PTCLI_COMPLETION_RULES_READY=1\n" in out
+    assert "export PTCLI_COMPLETION_TARGET_UPLOAD_READY=1\n" in out
+    assert "export PTCLI_COMPLETION_QBIT_WAIT_READY=1\n" in out
     assert "export PTCLI_TARGET_UPLOAD_MISSING=''\n" in out
     assert "export PTCLI_TARGET_UPLOAD_TORRENT_ID=999\n" in out
     assert "export PTCLI_UPLOADED_FOLLOWUP_READY=1\n" in out
