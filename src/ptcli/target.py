@@ -1403,15 +1403,22 @@ def _mteam_description_summary(package: dict[str, Any], expected_length: int) ->
 def _mteam_description_content_summary(text: str) -> dict[str, Any]:
     image_urls = _mteam_description_image_urls(text)
     external_links = _mteam_description_external_links(text)
+    external_id_readiness = {
+        "imdb": bool(re.search(r"imdb\.com/title/tt\d+|^\[b\]IMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
+        "tmdb": bool(re.search(r"themoviedb\.org/(?:movie|tv)/\d+|^\[b\]TMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
+        "douban": bool(re.search(r"movie\.douban\.com/subject/\d+|^\[b\]Douban\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
+    }
     return {
         "has_ptgen_description": "[b]Movie information[/b]" in text and "PTGen/Douban description: missing" not in text,
         "has_screenshot_bbcode": "[b]Screenshots[/b]" in text and bool(image_urls),
         "bbcode_image_count": len(image_urls),
         "bbcode_image_urls": image_urls,
         "has_mediainfo_or_bdinfo": "[b]MediaInfo[/b]" in text or "[b]BDInfo[/b]" in text,
-        "has_imdb": bool(re.search(r"imdb\.com/title/tt\d+|^\[b\]IMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
-        "has_tmdb": bool(re.search(r"themoviedb\.org/(?:movie|tv)/\d+|^\[b\]TMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
-        "has_douban": bool(re.search(r"movie\.douban\.com/subject/\d+|^\[b\]Douban\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
+        "has_imdb": external_id_readiness["imdb"],
+        "has_tmdb": external_id_readiness["tmdb"],
+        "has_douban": external_id_readiness["douban"],
+        "external_id_readiness": external_id_readiness,
+        "external_id_missing": [name for name, ready in external_id_readiness.items() if not ready],
         "external_links": external_links,
     }
 
@@ -1520,6 +1527,24 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
                 bool(content.get("has_imdb")) and bool(content.get("has_tmdb")) and bool(content.get("has_douban")),
                 "MTEAM description includes IMDb, TMDb, and Douban references.",
                 "MTEAM description is missing one or more IMDb/TMDb/Douban references.",
+            ),
+            _payload_field_check(
+                "materials.description.external_ids.imdb",
+                bool(content.get("has_imdb")),
+                "MTEAM description includes an IMDb reference.",
+                "MTEAM description is missing an IMDb reference.",
+            ),
+            _payload_field_check(
+                "materials.description.external_ids.tmdb",
+                bool(content.get("has_tmdb")),
+                "MTEAM description includes a TMDb reference.",
+                "MTEAM description is missing a TMDb reference.",
+            ),
+            _payload_field_check(
+                "materials.description.external_ids.douban",
+                bool(content.get("has_douban")),
+                "MTEAM description includes a Douban reference.",
+                "MTEAM description is missing a Douban reference.",
             ),
             _payload_field_check(
                 "materials.description.mediainfo_or_bdinfo",

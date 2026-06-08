@@ -14236,6 +14236,51 @@ def test_mteam_upload_preflight_execute_requires_materials_even_when_none_suppli
     assert any("materials.assets.image_host_uploads" in blocker for blocker in blockers)
 
 
+def test_mteam_upload_preflight_exposes_missing_description_external_id(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}), encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+    }
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        "/downloads/Example",
+        str(tmp_path),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    content = preflight["upload_payload"]["description_file"]["content"]
+    assert content["external_id_readiness"] == {"imdb": True, "tmdb": False, "douban": True}
+    assert content["external_id_missing"] == ["tmdb"]
+    blockers = preflight["upload_payload"]["blockers"]
+    assert any("materials.description.external_ids.tmdb" in blocker for blocker in blockers)
+    assert not any("materials.description.external_ids.imdb" in blocker for blocker in blockers)
+    assert not any("materials.description.external_ids.douban" in blocker for blocker in blockers)
+    audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
+    assert audit["description"]["external_id_readiness"] == {"imdb": True, "tmdb": False, "douban": True}
+    assert audit["description"]["external_id_missing"] == ["tmdb"]
+
+
 def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> None:
     mediainfo = tmp_path / "MI_FULL_00.txt"
     mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
@@ -14277,6 +14322,8 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
     assert preflight["upload_payload"]["description_file"]["content"]["external_links"]["imdb"] == "https://www.imdb.com/title/tt1234567"
     assert preflight["upload_payload"]["description_file"]["content"]["external_links"]["tmdb"] == "https://www.themoviedb.org/movie/999"
     assert preflight["upload_payload"]["description_file"]["content"]["external_links"]["douban"] == "https://movie.douban.com/subject/1291546/"
+    assert preflight["upload_payload"]["description_file"]["content"]["external_id_readiness"] == {"imdb": True, "tmdb": True, "douban": True}
+    assert preflight["upload_payload"]["description_file"]["content"]["external_id_missing"] == []
     review = preflight["upload_payload"]["review"]
     assert review["description"]["external_links"]["imdb"] == "https://www.imdb.com/title/tt1234567"
     assert review["description"]["external_links"]["tmdb"] == "https://www.themoviedb.org/movie/999"
@@ -14294,6 +14341,8 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
     assert coverage_check["missing_urls"] == []
     assert all(check["ok"] for check in preflight["upload_payload"]["material_checks"])
     audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
+    assert audit["description"]["external_id_readiness"] == {"imdb": True, "tmdb": True, "douban": True}
+    assert audit["description"]["external_id_missing"] == []
     assert audit["description"]["media_info"] == {
         "has_excerpt": True,
         "source": str(mediainfo),
