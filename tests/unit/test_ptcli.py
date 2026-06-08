@@ -5767,6 +5767,89 @@ def test_summary_check_reports_target_upload_completion(tmp_path, capsys) -> Non
     assert payload["available_stages"] == ["verify-seeding"]
 
 
+def test_summary_check_blocks_incomplete_target_upload_followup(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-target-upload-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.target_upload.summary",
+                "summary": {
+                    "ready": True,
+                    "uploaded": True,
+                    "uploaded_torrent_id": "999",
+                    "blockers": [],
+                    "completion_review": {
+                        "complete": False,
+                        "missing": ["uploaded_torrent_file", "injection_verified", "uploaded_wait_complete"],
+                        "checks": {
+                            "uploaded": True,
+                            "uploaded_torrent_id": True,
+                            "uploaded_torrent_file": False,
+                            "injection_verified": False,
+                            "uploaded_wait_complete": False,
+                        },
+                    },
+                },
+                "recommended_commands": [
+                    {
+                        "stage": "resume-uploaded-torrent-download",
+                        "command": "python3 ptcli.py target-upload --uploaded-torrent-id 999 --download-uploaded-torrent --inject-uploaded-torrent",
+                        "argv": [
+                            "python3",
+                            "ptcli.py",
+                            "target-upload",
+                            "--uploaded-torrent-id",
+                            "999",
+                            "--download-uploaded-torrent",
+                            "--inject-uploaded-torrent",
+                        ],
+                    }
+                ],
+                "resume_state": {
+                    "ready": True,
+                    "resume_available": True,
+                    "next_stage": "resume-uploaded-torrent-download",
+                    "next_command": "python3 ptcli.py target-upload --uploaded-torrent-id 999 --download-uploaded-torrent --inject-uploaded-torrent",
+                    "next_command_argv": [
+                        "python3",
+                        "ptcli.py",
+                        "target-upload",
+                        "--uploaded-torrent-id",
+                        "999",
+                        "--download-uploaded-torrent",
+                        "--inject-uploaded-torrent",
+                    ],
+                    "artifacts": {
+                        "uploaded_torrent_id": True,
+                        "uploaded_torrent_file": False,
+                        "injection_verified": False,
+                        "uploaded_wait_evidence": False,
+                    },
+                    "uploaded_followup": {
+                        "ready": False,
+                        "ready_for_uploaded_seeding": False,
+                        "missing": ["downloaded", "injection_verified", "uploaded_wait_evidence"],
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "blocked"
+    assert payload["ready"] is True
+    assert payload["complete"] is False
+    assert payload["live_safe_to_attempt"] is False
+    assert payload["next_stage"] == "resume-uploaded-torrent-download"
+    assert payload["next_command_argv"][:5] == ["python3", "ptcli.py", "target-upload", "--uploaded-torrent-id", "999"]
+    assert payload["blockers"] == ["target upload follow-up incomplete: uploaded_torrent_file, injection_verified, uploaded_wait_complete."]
+
+
 def test_summary_check_prefers_uploaded_resume_for_target_upload_wait_artifact(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-target-upload-summary.json"
     summary_file.write_text(

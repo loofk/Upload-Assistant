@@ -3484,12 +3484,15 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
 
 def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
     diagnostics = _summary_check_diagnostics(payload)
+    target_upload_diagnostics = diagnostics.get("target_upload_diagnostics") if isinstance(diagnostics.get("target_upload_diagnostics"), dict) else {}
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
     resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
     blockers = _string_list(summary.get("blockers")) or _string_list(resume_state.get("blockers"))
     ready = bool(summary.get("ready"))
+    complete = _target_upload_summary_complete(target_upload_diagnostics, ready)
+    _extend_unique_string(blockers, _target_upload_summary_completion_blockers(target_upload_diagnostics, ready, complete))
     artifact_status = _summary_artifact_status(resume_state)
-    missing_audit = _target_upload_missing_audit_artifacts(resume_state) if ready else []
+    missing_audit = _target_upload_missing_audit_artifacts(resume_state) if ready and complete else []
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(diagnostics))
@@ -3502,13 +3505,13 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         ),
     )
     return _summary_check_result({
-        "status": "ok" if ready and not blockers else "blocked",
+        "status": "ok" if ready and complete and not blockers else "blocked",
         "kind": payload.get("kind"),
         "summary_file": summary_file,
         "automation_handoff": _summary_automation_handoff(summary_file),
         "ready": ready,
-        "complete": ready,
-        "live_safe_to_attempt": ready and not blockers,
+        "complete": complete,
+        "live_safe_to_attempt": ready and complete and not blockers,
         "blockers": blockers,
         "next_stage": next_command.get("stage"),
         "next_command": next_command.get("command"),
@@ -3519,6 +3522,29 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         **diagnostics,
         **artifact_status,
     })
+
+
+def _target_upload_summary_complete(target_upload_diagnostics: dict[str, Any], ready: bool) -> bool:
+    completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
+    if isinstance(completion.get("complete"), bool):
+        return bool(completion.get("complete"))
+    uploaded_followup = target_upload_diagnostics.get("uploaded_followup") if isinstance(target_upload_diagnostics.get("uploaded_followup"), dict) else {}
+    for key in ("ready_for_uploaded_seeding", "ready"):
+        if isinstance(uploaded_followup.get(key), bool):
+            return bool(uploaded_followup.get(key))
+    return ready
+
+
+def _target_upload_summary_completion_blockers(target_upload_diagnostics: dict[str, Any], ready: bool, complete: bool) -> list[str]:
+    if not ready or complete:
+        return []
+    completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
+    if not isinstance(completion.get("complete"), bool):
+        return []
+    missing = _string_list(completion.get("missing"))
+    if not missing:
+        return ["target upload follow-up is incomplete."]
+    return [f"target upload follow-up incomplete: {', '.join(missing)}."]
 
 
 def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
