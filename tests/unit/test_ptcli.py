@@ -5616,6 +5616,30 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
                 "ready": True,
                 "live_safe_to_attempt": True,
                 "failed_check_names": [],
+                "artifacts": {
+                    "target_preflight_gates": {
+                        "present": True,
+                        "source": "doctor",
+                        "status": "ready",
+                        "ready": True,
+                        "blockers": [],
+                        "target_preparation_ready": True,
+                        "materials_ready": True,
+                        "metadata_ready": True,
+                        "assets_ready": True,
+                        "description_ready": True,
+                        "payload_ready": True,
+                        "payload_checks_ready": True,
+                        "description_checks_ready": True,
+                        "materials_ready_required": True,
+                        "torrent_file": {
+                            "path": "/tmp/exported/mteam.torrent",
+                            "mteam_safe": True,
+                            "metadata_readable": True,
+                            "source_flag": "MTEAM",
+                        },
+                    }
+                },
                 "resume_state": {
                     "next_stage": "pipeline-live",
                     "next_command": "python3 ptcli.py pipeline --target-execute",
@@ -5648,6 +5672,30 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
     assert payload["next_stage"] == "pipeline-live"
     assert payload["target_mode"] == "live_upload"
     assert payload["closure_modes"]["target"] == "live_upload"
+    preflight = payload["target_preflight_diagnostics"]
+    assert preflight["present"] is True
+    assert preflight["source"] == "doctor"
+    assert preflight["status"] == "ready"
+    assert preflight["ready"] is True
+    assert preflight["materials_ready"] is True
+    assert preflight["description_ready"] is True
+    assert preflight["payload_ready"] is True
+    assert preflight["torrent_file"]["path"] == "/tmp/exported/mteam.torrent"
+    assert preflight["torrent_file"]["source_flag"] == "MTEAM"
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_TARGET_PREFLIGHT_PRESENT=1\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_SOURCE=doctor\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_READY=1\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_MATERIALS_READY=1\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_DESCRIPTION_READY=1\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_PAYLOAD_READY=1\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_TORRENT_PATH=/tmp/exported/mteam.torrent\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_TORRENT_MTEAM_SAFE=1\n" in out
+    assert "export PTCLI_TARGET_PREFLIGHT_TORRENT_SOURCE_FLAG=MTEAM\n" in out
 
 
 def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> None:

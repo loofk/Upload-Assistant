@@ -2349,6 +2349,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     flow_diagnostics = _summary_flow_diagnostics(payload)
     material_diagnostics = _summary_material_diagnostics(payload)
     target_upload_diagnostics = _summary_target_upload_diagnostics(payload)
+    target_preflight_diagnostics = _summary_target_preflight_diagnostics(payload, target_upload_diagnostics)
     closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else _pipeline_closure_review(payload)
     closure_modes = _summary_closure_modes(payload)
     closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else _closure_status_summary(payload)
@@ -2371,6 +2372,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "credential_requirements": flow_diagnostics.get("credential_requirements", []),
         "material_diagnostics": material_diagnostics,
         "target_upload_diagnostics": target_upload_diagnostics,
+        "target_preflight_diagnostics": target_preflight_diagnostics,
         "closure_review": closure_review,
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
@@ -2381,6 +2383,42 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "completion_matrix": completion_matrix,
         "source_mode": closure_modes.get("source"),
         "target_mode": closure_modes.get("target"),
+    }
+
+
+def _summary_target_preflight_diagnostics(payload: dict[str, Any], target_upload_diagnostics: dict[str, Any] | None = None) -> dict[str, Any]:
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    doctor_preflight = artifacts.get("target_preflight_gates") if isinstance(artifacts.get("target_preflight_gates"), dict) else {}
+    upload_diagnostics = target_upload_diagnostics if isinstance(target_upload_diagnostics, dict) else {}
+    upload_preflight = upload_diagnostics.get("preflight") if isinstance(upload_diagnostics.get("preflight"), dict) else {}
+    preflight = doctor_preflight or upload_preflight
+    if not preflight:
+        return {
+            "present": False,
+            "source": None,
+            "status": None,
+            "ready": None,
+            "blockers": [],
+            "torrent_file": None,
+        }
+    source = "doctor" if doctor_preflight else "target_upload"
+    torrent_file = preflight.get("torrent_file") if isinstance(preflight.get("torrent_file"), dict) else None
+    return {
+        "present": True,
+        "source": source,
+        "status": preflight.get("status"),
+        "ready": preflight.get("ready"),
+        "blockers": _string_list(preflight.get("blockers")),
+        "target_preparation_ready": preflight.get("target_preparation_ready"),
+        "materials_ready": preflight.get("materials_ready"),
+        "metadata_ready": preflight.get("metadata_ready"),
+        "assets_ready": preflight.get("assets_ready"),
+        "description_ready": preflight.get("description_ready"),
+        "payload_ready": preflight.get("payload_ready"),
+        "payload_checks_ready": preflight.get("payload_checks_ready"),
+        "description_checks_ready": preflight.get("description_checks_ready"),
+        "materials_ready_required": preflight.get("materials_ready_required"),
+        "torrent_file": torrent_file,
     }
 
 
@@ -8369,6 +8407,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     closure_target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
     material_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
     target_upload_diagnostics = payload.get("target_upload_diagnostics") if isinstance(payload.get("target_upload_diagnostics"), dict) else {}
+    target_preflight_diagnostics = payload.get("target_preflight_diagnostics") if isinstance(payload.get("target_preflight_diagnostics"), dict) else {}
     closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else {}
     completion_matrix = payload.get("completion_matrix") if isinstance(payload.get("completion_matrix"), dict) else {}
     qbit_wait_diagnostics = payload.get("qbit_wait_diagnostics") if isinstance(payload.get("qbit_wait_diagnostics"), dict) else {}
@@ -8444,6 +8483,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     fields.update(_summary_check_closure_review_shell_fields(closure_review))
     fields.update(_summary_check_completion_matrix_shell_fields(completion_matrix))
     fields.update(_summary_check_material_shell_fields(material_diagnostics))
+    fields.update(_summary_check_target_preflight_shell_fields(target_preflight_diagnostics))
     fields.update(_summary_check_target_upload_shell_fields(target_upload_diagnostics))
     fields.update(_summary_check_resume_material_shell_fields(resume_state))
     fields.update(_summary_check_uploaded_followup_shell_fields(resume_state))
@@ -8452,6 +8492,30 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     for key, value in fields.items():
         print(f"export {key}={shlex.quote('' if value is None else str(value))}")
     return 0
+
+
+def _summary_check_target_preflight_shell_fields(target_preflight_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    torrent_file = target_preflight_diagnostics.get("torrent_file") if isinstance(target_preflight_diagnostics.get("torrent_file"), dict) else {}
+    return {
+        "PTCLI_TARGET_PREFLIGHT_PRESENT": _shell_bool(target_preflight_diagnostics.get("present")) if "present" in target_preflight_diagnostics else None,
+        "PTCLI_TARGET_PREFLIGHT_SOURCE": target_preflight_diagnostics.get("source"),
+        "PTCLI_TARGET_PREFLIGHT_STATUS": target_preflight_diagnostics.get("status"),
+        "PTCLI_TARGET_PREFLIGHT_READY": _shell_bool(target_preflight_diagnostics.get("ready")) if target_preflight_diagnostics.get("ready") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_BLOCKERS": "|".join(_string_list(target_preflight_diagnostics.get("blockers"))),
+        "PTCLI_TARGET_PREFLIGHT_PREPARATION_READY": _shell_bool(target_preflight_diagnostics.get("target_preparation_ready")) if target_preflight_diagnostics.get("target_preparation_ready") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_MATERIALS_READY": _shell_bool(target_preflight_diagnostics.get("materials_ready")) if target_preflight_diagnostics.get("materials_ready") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_METADATA_READY": _shell_bool(target_preflight_diagnostics.get("metadata_ready")) if target_preflight_diagnostics.get("metadata_ready") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_ASSETS_READY": _shell_bool(target_preflight_diagnostics.get("assets_ready")) if target_preflight_diagnostics.get("assets_ready") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_DESCRIPTION_READY": _shell_bool(target_preflight_diagnostics.get("description_ready")) if target_preflight_diagnostics.get("description_ready") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_PAYLOAD_READY": _shell_bool(target_preflight_diagnostics.get("payload_ready")) if target_preflight_diagnostics.get("payload_ready") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_PAYLOAD_CHECKS_READY": _shell_bool(target_preflight_diagnostics.get("payload_checks_ready")) if target_preflight_diagnostics.get("payload_checks_ready") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_DESCRIPTION_CHECKS_READY": _shell_bool(target_preflight_diagnostics.get("description_checks_ready")) if target_preflight_diagnostics.get("description_checks_ready") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_MATERIALS_READY_REQUIRED": _shell_bool(target_preflight_diagnostics.get("materials_ready_required")) if target_preflight_diagnostics.get("materials_ready_required") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_TORRENT_PATH": torrent_file.get("path"),
+        "PTCLI_TARGET_PREFLIGHT_TORRENT_MTEAM_SAFE": _shell_bool(torrent_file.get("mteam_safe")) if torrent_file.get("mteam_safe") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_TORRENT_METADATA_READABLE": _shell_bool(torrent_file.get("metadata_readable")) if torrent_file.get("metadata_readable") is not None else None,
+        "PTCLI_TARGET_PREFLIGHT_TORRENT_SOURCE_FLAG": torrent_file.get("source_flag"),
+    }
 
 
 def _summary_check_completion_matrix_shell_fields(completion_matrix: dict[str, Any]) -> dict[str, Any]:
