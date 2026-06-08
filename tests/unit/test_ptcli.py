@@ -3692,6 +3692,37 @@ def test_summary_material_diagnostics_exposes_description_external_id_readiness(
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_HAS_DOUBAN"] == "1"
 
 
+def test_resume_material_shell_fields_expose_description_external_id_readiness() -> None:
+    resume_state = {
+        "materials": {
+            "closure": {
+                "description": {
+                    "ready": False,
+                    "has_external_ids": False,
+                    "external_id_readiness": {"imdb": True, "tmdb": False, "douban": True},
+                    "external_id_missing": ["tmdb"],
+                    "external_links": {
+                        "imdb": "https://www.imdb.com/title/tt1234567",
+                        "tmdb": None,
+                        "douban": "https://movie.douban.com/subject/1291546/",
+                    },
+                }
+            }
+        }
+    }
+
+    shell_fields = ptcli_cli._summary_check_resume_material_shell_fields(resume_state)
+
+    assert json.loads(shell_fields["PTCLI_RESUME_MATERIAL_DESCRIPTION_EXTERNAL_ID_READINESS"]) == {"imdb": True, "tmdb": False, "douban": True}
+    assert shell_fields["PTCLI_RESUME_MATERIAL_DESCRIPTION_EXTERNAL_ID_MISSING"] == "tmdb"
+    assert shell_fields["PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_IMDB"] == "1"
+    assert shell_fields["PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_TMDB"] == "0"
+    assert shell_fields["PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_DOUBAN"] == "1"
+    assert shell_fields["PTCLI_RESUME_MATERIAL_DESCRIPTION_IMDB_LINK"] == "https://www.imdb.com/title/tt1234567"
+    assert shell_fields["PTCLI_RESUME_MATERIAL_DESCRIPTION_TMDB_LINK"] is None
+    assert shell_fields["PTCLI_RESUME_MATERIAL_DESCRIPTION_DOUBAN_LINK"] == "https://movie.douban.com/subject/1291546/"
+
+
 def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
@@ -10629,6 +10660,13 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert material_closure["description"]["ready"] is False
     assert material_closure["description"]["has_ptgen_description"] is False
     assert material_closure["description"]["has_external_ids"] is True
+    assert material_closure["description"]["external_id_readiness"] == {"imdb": True, "tmdb": True, "douban": True}
+    assert material_closure["description"]["external_id_missing"] == []
+    assert material_closure["description"]["external_links"] == {
+        "imdb": "https://www.imdb.com/title/tt1234567",
+        "tmdb": "https://www.themoviedb.org/movie/2",
+        "douban": "https://movie.douban.com/subject/1291546/",
+    }
     assert material_closure["description"]["has_mediainfo_or_bdinfo"] is True
     assert material_closure["description"]["has_screenshot_bbcode"] is True
     assert material_closure["description"]["bbcode_image_urls"] == ["https://img.example/screen-1.png"]
@@ -10658,6 +10696,14 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_READY=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_PTGEN=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
+    assert "PTCLI_RESUME_MATERIAL_DESCRIPTION_EXTERNAL_ID_READINESS=" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_EXTERNAL_ID_MISSING=''\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_IMDB=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_TMDB=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_DOUBAN=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_IMDB_LINK=https://www.imdb.com/title/tt1234567\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_TMDB_LINK=https://www.themoviedb.org/movie/2\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_DOUBAN_LINK=https://movie.douban.com/subject/1291546/\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_URLS=https://img.example/screen-1.png\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_HINT_COUNT=2\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=metadata.ptgen_description,description.content\n" in out

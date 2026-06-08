@@ -6503,6 +6503,8 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
     description = preparation.get("description") if isinstance(preparation.get("description"), dict) else {}
     media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
     screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
+    external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
+    external_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
     disc_structure = target_assets.get("disc_structure") if isinstance(target_assets.get("disc_structure"), dict) else {}
     metadata_section = generation.get("metadata") if isinstance(generation.get("metadata"), dict) else {}
     bdinfo_asset = target_assets.get("bdinfo") if isinstance(target_assets.get("bdinfo"), dict) else {}
@@ -6577,6 +6579,9 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
             "has_ptgen_description": bool(description.get("has_ptgen_description")),
             "ptgen_description_length": description.get("ptgen_description_length"),
             "has_external_ids": bool(description.get("has_external_ids")),
+            "external_id_readiness": external_id_readiness,
+            "external_id_missing": _string_list(description.get("external_id_missing")),
+            "external_links": external_links,
             "has_mediainfo_or_bdinfo": bool(description.get("has_mediainfo_or_bdinfo")),
             "media_info": {
                 "has_excerpt": bool(media_info.get("has_excerpt")) if "has_excerpt" in media_info else bool(description.get("has_mediainfo_or_bdinfo")),
@@ -8489,6 +8494,8 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
     description = closure.get("description") if isinstance(closure.get("description"), dict) else {}
     media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
     screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
+    external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
+    external_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
     recovery_hints = materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else []
     first_recovery_command = _first_material_recovery_command(recovery_hints)
     return {
@@ -8540,6 +8547,14 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_PTGEN_LENGTH": description.get("ptgen_description_length"),
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_EXTERNAL_ID_READINESS": json.dumps(external_id_readiness, ensure_ascii=False) if external_id_readiness else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_EXTERNAL_ID_MISSING": ",".join(_string_list(description.get("external_id_missing"))),
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_IMDB": _shell_bool(external_id_readiness.get("imdb")) if "imdb" in external_id_readiness else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_TMDB": _shell_bool(external_id_readiness.get("tmdb")) if "tmdb" in external_id_readiness else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_DOUBAN": _shell_bool(external_id_readiness.get("douban")) if "douban" in external_id_readiness else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_IMDB_LINK": external_links.get("imdb"),
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_TMDB_LINK": external_links.get("tmdb"),
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_DOUBAN_LINK": external_links.get("douban"),
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_MEDIAINFO_SOURCE": media_info.get("source"),
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_MEDIAINFO_LENGTH": media_info.get("length"),
