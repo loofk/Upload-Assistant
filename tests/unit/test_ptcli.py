@@ -15948,6 +15948,16 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert "metadata.tmdb" in material_diagnostics["critical_path"]["missing"]
     assert "assets.mediainfo_or_bdinfo" in material_diagnostics["critical_path"]["missing"]
     assert "description.content" in material_diagnostics["critical_path"]["missing"]
+    commands = {command["stage"]: command for command in summary_payload["recommended_commands"]}
+    assert "resume-target-package" in commands
+    assert summary_payload["resume_state"]["next_stage"] == "resume-target-package"
+    assert summary_payload["resume_state"]["next_command"] == commands["resume-target-package"]["command"]
+    assert "--prepare-target" in commands["resume-target-package"]["argv"]
+    assert "--enrich-metadata" in commands["resume-target-package"]["argv"]
+    assert "--generate-mediainfo" in commands["resume-target-package"]["argv"]
+    assert "--generate-screenshots" in commands["resume-target-package"]["argv"]
+    assert "--upload-screenshots" in commands["resume-target-package"]["argv"]
+    assert "/downloads/Example" in commands["resume-target-package"]["argv"]
     shell_fields = ptcli_cli._summary_check_target_upload_shell_fields(diagnostics["target_upload_diagnostics"])
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_READY"] == "0"
     assert "materials.metadata.tmdb" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MISSING"]

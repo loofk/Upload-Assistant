@@ -1905,6 +1905,9 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
     retry_args = _target_upload_retry_args(args)
     if not args.uploaded_save_path and retry_save_path:
         retry_args.extend(["--uploaded-save-path", retry_save_path])
+    target_package_resume = _target_upload_target_package_resume_command(args, artifacts)
+    if target_package_resume:
+        commands.append(target_package_resume)
     commands.append(_ptcli_command_entry("target-upload-retry", retry_args))
     if isinstance(package_artifact, dict) and uploaded_torrent_id and not (isinstance(uploaded_torrent_artifact, dict) and uploaded_torrent_artifact.get("path")):
         download_args = [
@@ -1979,6 +1982,47 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
     if summary.get("ready"):
         commands.append(_ptcli_command_entry("verify-seeding", ["inspect", "--client", args.client, "--json"]))
     return commands
+
+
+def _target_upload_target_package_resume_command(args: argparse.Namespace, artifacts: dict[str, Any]) -> dict[str, Any] | None:
+    material_missing = _string_list(artifacts.get("target_preparation_missing"))
+    _extend_unique_string(material_missing, _string_list(artifacts.get("target_materials_missing")))
+    if not material_missing:
+        return None
+    package_dir = _artifact_path(artifacts.get("package_dir")) or args.package_dir
+    source_info = _source_info_from_existing_target_package(package_dir)
+    if not isinstance(source_info, dict) or not source_info.get("tracker") or not source_info.get("torrent_id"):
+        return None
+    content_path = _artifact_path(artifacts.get("package_content_path"))
+    if not content_path:
+        return None
+    target_output_dir = str(Path(package_dir).expanduser().parent) if package_dir else "./tmp/target"
+    resume_args = [
+        "pipeline",
+        "--from",
+        normalize_tracker(str(source_info["tracker"])),
+        "--source-id",
+        str(source_info["torrent_id"]),
+        "--to",
+        "MTEAM",
+        "--client",
+        args.client,
+        "--path",
+        content_path,
+        "--check-dupes",
+        "--prepare-target",
+        "--target-output-dir",
+        target_output_dir,
+        "--accept-rules",
+        "--write-summary",
+        "--json",
+        *_target_package_material_resume_args({}, {}, {}, artifacts),
+    ]
+    if args.config:
+        resume_args.extend(["--config", args.config])
+    if args.summary_output_dir:
+        resume_args.extend(["--summary-output-dir", args.summary_output_dir])
+    return _ptcli_command_entry("resume-target-package", resume_args)
 
 
 def _uploaded_wait_retry_hint(qbit_wait_fields: dict[str, Any] | None) -> dict[str, Any]:
@@ -2240,6 +2284,8 @@ def _target_upload_next_command(summary: dict[str, Any], commands_by_stage: dict
     )
     if needs_retry:
         preferred_stages.append("target-upload-retry")
+    if any(blocker.startswith(("materials.", "target.materials.", "description.")) for blocker in blockers) or any(item.startswith(("materials.", "target.materials.", "description.")) for item in completion_missing):
+        preferred_stages.insert(0, "resume-target-package")
     if "downloaded_torrent" in blocker_text or not summary.get("downloaded"):
         preferred_stages.append("resume-uploaded-torrent-download")
     if (
@@ -2252,7 +2298,7 @@ def _target_upload_next_command(summary: dict[str, Any], commands_by_stage: dict
         preferred_stages.append("resume-uploaded-torrent")
     if not needs_retry and summary.get("injected") and (summary.get("seeding_verified") or uploaded_wait_complete):
         preferred_stages.append("target-upload-retry")
-    preferred_stages.extend(["resume-uploaded-torrent-download", "resume-uploaded-torrent", "target-upload-retry"])
+    preferred_stages.extend(["resume-target-package", "resume-uploaded-torrent-download", "resume-uploaded-torrent", "target-upload-retry"])
     for stage in preferred_stages:
         command = commands_by_stage.get(stage)
         if command:
