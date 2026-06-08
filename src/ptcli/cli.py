@@ -2421,6 +2421,7 @@ def _summary_completion_matrix(
                 "target_materials_ready": material_diagnostics.get("target_materials_ready"),
                 "target_preparation_ready": material_diagnostics.get("target_preparation_ready") or review_target.get("preparation_ready"),
                 "critical_ready": material_diagnostics.get("critical_ready"),
+                "ready_for_mteam_upload": material_diagnostics.get("ready_for_mteam_upload"),
                 "description_ready": review_target.get("description_ready"),
             },
         ),
@@ -2439,6 +2440,7 @@ def _summary_completion_matrix(
             {
                 "mode": target_upload_diagnostics.get("mode") or review_target.get("mode"),
                 "completion_complete": target_completion.get("complete"),
+                "ready_for_uploaded_seeding": target_upload_diagnostics.get("ready_for_uploaded_seeding"),
                 "closure_ready": closure_target.get("ready"),
                 "uploaded_wait_evidence": closure_target.get("uploaded_wait_evidence") or review_target.get("uploaded_wait_evidence"),
                 "injection_verified": closure_target.get("injection_verified") or review_target.get("injection_verified"),
@@ -2532,11 +2534,15 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
     completion_review = summary.get("completion_review") if isinstance(summary.get("completion_review"), dict) else {}
     checks = completion_review.get("checks") if isinstance(completion_review.get("checks"), dict) else {}
     uploaded_wait_query = completion_review.get("uploaded_wait_query") if isinstance(completion_review.get("uploaded_wait_query"), dict) else {}
+    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    uploaded_followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
     return {
         "present": bool(summary),
         "mode": summary.get("mode"),
         "ready": summary.get("ready"),
         "uploaded": summary.get("uploaded"),
+        "ready_for_uploaded_seeding": uploaded_followup.get("ready_for_uploaded_seeding") if "ready_for_uploaded_seeding" in uploaded_followup else uploaded_followup.get("ready"),
+        "uploaded_followup": uploaded_followup,
         "completion": {
             "complete": completion_review.get("complete"),
             "missing": _string_list(completion_review.get("missing")),
@@ -8369,9 +8375,14 @@ def _summary_check_completion_matrix_shell_fields(completion_matrix: dict[str, A
     fields: dict[str, Any] = {}
     for name in ("flow", "source", "materials", "rules", "target_upload", "qbit_wait"):
         domain = domains.get(name) if isinstance(domains.get(name), dict) else {}
+        evidence = domain.get("evidence") if isinstance(domain.get("evidence"), dict) else {}
         prefix = f"PTCLI_COMPLETION_{name.upper()}"
         fields[f"{prefix}_READY"] = _shell_bool(domain.get("ready")) if domain.get("ready") is not None else None
         fields[f"{prefix}_MISSING"] = ",".join(_string_list(domain.get("missing")))
+        if name == "materials":
+            fields[f"{prefix}_READY_FOR_MTEAM_UPLOAD"] = _shell_bool(evidence.get("ready_for_mteam_upload")) if evidence.get("ready_for_mteam_upload") is not None else None
+        if name == "target_upload":
+            fields[f"{prefix}_READY_FOR_UPLOADED_SEEDING"] = _shell_bool(evidence.get("ready_for_uploaded_seeding")) if evidence.get("ready_for_uploaded_seeding") is not None else None
     return fields
 
 

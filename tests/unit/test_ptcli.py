@@ -3646,6 +3646,15 @@ def test_summary_material_diagnostics_exposes_ready_for_mteam_upload() -> None:
         "target_materials_ready": True,
         "target_preparation_ready": True,
     }
+    matrix = ptcli_cli._summary_completion_matrix(
+        flow_diagnostics={},
+        material_diagnostics=diagnostics,
+        target_upload_diagnostics={},
+        closure_review={},
+        closure_status={},
+        qbit_wait_mismatches=[],
+    )
+    assert matrix["domains"]["materials"]["evidence"]["ready_for_mteam_upload"] is True
 
 
 def test_summary_material_diagnostics_exposes_description_external_id_readiness() -> None:
@@ -15007,6 +15016,9 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert len(uploaded_followup["uploaded_torrent_file_evidence"]["sha1"]) == 40
     assert uploaded_followup["uploaded_save_path"] == "/downloads/Example"
     assert uploaded_followup["uploaded_wait_query"] == {"torrent_hash": uploaded_hash, "content_path": "/downloads/Example", "timeout": 42.0, "interval": 3.0}
+    diagnostics = ptcli_cli._summary_check_diagnostics(summary_payload)
+    assert diagnostics["target_upload_diagnostics"]["ready_for_uploaded_seeding"] is True
+    assert diagnostics["completion_matrix"]["domains"]["target_upload"]["evidence"]["ready_for_uploaded_seeding"] is True
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert "target-upload-retry" in commands
@@ -15050,6 +15062,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert "export PTCLI_COMPLETION_MATRIX_MISSING_DOMAINS=''\n" in out
     assert "export PTCLI_COMPLETION_RULES_READY=1\n" in out
     assert "export PTCLI_COMPLETION_TARGET_UPLOAD_READY=1\n" in out
+    assert "export PTCLI_COMPLETION_TARGET_UPLOAD_READY_FOR_UPLOADED_SEEDING=1\n" in out
     assert "export PTCLI_COMPLETION_QBIT_WAIT_READY=1\n" in out
     assert "export PTCLI_TARGET_UPLOAD_MISSING=''\n" in out
     assert "export PTCLI_TARGET_UPLOAD_TORRENT_ID=999\n" in out
