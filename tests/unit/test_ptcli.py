@@ -5980,7 +5980,26 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
                             "metadata_readable": True,
                             "source_flag": "MTEAM",
                         },
-                    }
+                    },
+                    "target_preparation_audit": {
+                        "ready": True,
+                        "materials_ready": True,
+                        "metadata_ready": True,
+                        "assets_ready": True,
+                        "description_ready": True,
+                        "payload_ready": True,
+                        "missing": [],
+                        "description": {
+                            "has_ptgen_description": True,
+                            "has_external_ids": True,
+                            "has_mediainfo_or_bdinfo": True,
+                            "has_screenshot_bbcode": True,
+                            "missing": [],
+                        },
+                    },
+                    "target_preparation_ready": True,
+                    "target_preparation_missing": [],
+                    "target_materials_ready": True,
                 },
                 "resume_state": {
                     "next_stage": "pipeline-live",
@@ -6024,6 +6043,8 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
     assert preflight["payload_ready"] is True
     assert preflight["torrent_file"]["path"] == "/tmp/exported/mteam.torrent"
     assert preflight["torrent_file"]["source_flag"] == "MTEAM"
+    assert payload["material_diagnostics"]["present"] is True
+    assert payload["material_diagnostics"]["critical_path"]["ready"] is True
 
     code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
 
@@ -6038,6 +6059,7 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
     assert "export PTCLI_TARGET_PREFLIGHT_TORRENT_PATH=/tmp/exported/mteam.torrent\n" in out
     assert "export PTCLI_TARGET_PREFLIGHT_TORRENT_MTEAM_SAFE=1\n" in out
     assert "export PTCLI_TARGET_PREFLIGHT_TORRENT_SOURCE_FLAG=MTEAM\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_PATH_READY=1\n" in out
 
 
 def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> None:
@@ -8078,6 +8100,13 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
     assert audit["description"]["has_screenshot_bbcode"] is True
     assert audit["description"]["bbcode_image_count"] == 1
     assert summary["artifacts"]["target_preparation_ready"] is True
+    assert summary["artifacts"]["target_materials_ready"] is True
+    assert summary["artifacts"]["target_preparation_missing"] == []
+    material_diagnostics = summary["material_diagnostics"]
+    assert material_diagnostics["present"] is True
+    assert material_diagnostics["ready_for_mteam_upload"] is True
+    assert material_diagnostics["critical_path"]["ready"] is True
+    assert material_diagnostics["critical_path"]["next_step"] is None
     gates = summary["artifacts"]["target_preflight_gates"]
     assert gates["present"] is True
     assert gates["status"] == "ready"
@@ -8193,6 +8222,12 @@ def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
     assert gates["torrent_file"]["mteam_safe"] is True
     assert gates["torrent_file"]["metadata_readable"] is True
     assert gates["torrent_file"]["source_flag"] == "MTEAM"
+    assert summary["material_diagnostics"]["present"] is True
+    assert summary["material_diagnostics"]["ready_for_mteam_upload"] is False
+    assert summary["material_diagnostics"]["critical_path"]["ready"] is False
+    assert summary["material_diagnostics"]["critical_path"]["next_step"] == "metadata"
+    assert "metadata.ptgen_description" in summary["material_diagnostics"]["critical_path"]["missing"]
+    assert "description.content" in summary["material_diagnostics"]["critical_path"]["missing"]
     assert summary["resume_state"]["artifacts"]["target_preflight_gates_ready"] is False
     assert summary["resume_state"]["artifacts"]["target_preflight_materials_ready"] is False
     assert summary["resume_state"]["artifacts"]["target_preflight_description_ready"] is False

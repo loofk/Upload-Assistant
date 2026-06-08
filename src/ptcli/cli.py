@@ -2783,6 +2783,8 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     critical_missing = _critical_material_missing(material_missing)
     bdinfo_required = bool(disc_structure.get("bdmv"))
     target_materials_ready = artifacts.get("target_materials_ready") if "target_materials_ready" in artifacts else target_materials.get("ready")
+    if target_materials_ready is None and "materials_ready" in target_preparation_audit:
+        target_materials_ready = target_preparation_audit.get("materials_ready")
     target_preparation_ready = artifacts.get("target_preparation_ready")
     if target_preparation_ready is None and artifacts.get("target_preparation_missing"):
         target_preparation_ready = False
@@ -2801,7 +2803,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         material_missing=material_missing,
     )
     return {
-        "present": bool(material_generation or target_materials),
+        "present": bool(material_generation or target_materials or target_preparation_audit),
         "generation_present": bool(material_generation),
         "target_materials_present": bool(target_materials),
         "generation_ready": all(bool(section.get("ok")) for section in sections.values()) if sections else None,
@@ -3870,6 +3872,7 @@ def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, s
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
     failed_checks = [check for check in checks if isinstance(check, dict) and not check.get("ok")]
     artifacts = _doctor_summary_artifacts(args, payload, payload.get("effective_uploaded_save_path"))
+    material_diagnostics = _summary_material_diagnostics({"artifacts": artifacts})
     recommended_commands = _doctor_recommended_commands(payload, args, artifacts)
     return {
         "schema_version": 1,
@@ -3889,6 +3892,7 @@ def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, s
         "client": args.client,
         "inputs": _doctor_summary_inputs(args),
         "artifacts": artifacts,
+        "material_diagnostics": material_diagnostics,
         "failed_checks": failed_checks,
         "failed_check_names": [str(check.get("name")) for check in failed_checks if isinstance(check, dict)],
         "effective_uploaded_save_path": payload.get("effective_uploaded_save_path"),
@@ -4010,6 +4014,8 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
         "target_torrent_file": _path_artifact(args.target_torrent_file),
         "target_preparation_audit": preparation_audit,
         "target_preparation_ready": bool(preparation_audit.get("ready")),
+        "target_preparation_missing": _string_list(preparation_audit.get("missing")),
+        "target_materials_ready": preparation_audit.get("materials_ready"),
         "target_preflight_gates": target_preflight,
         "uploaded_torrent_id": args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(args.uploaded_torrent_file),
