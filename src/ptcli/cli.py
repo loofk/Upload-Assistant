@@ -2496,6 +2496,10 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         for key in ("prerequisites", "metadata", "bdinfo", "mediainfo", "screenshots", "image_host")
         if isinstance(material_generation.get(key), dict)
     }
+    if "metadata" not in sections:
+        target_metadata_section = _summary_target_material_metadata_section(target_materials)
+        if target_metadata_section:
+            sections["metadata"] = target_metadata_section
     blockers: list[str] = []
     for key, section in sections.items():
         section_blockers = _string_list(section.get("all_blockers")) or _string_list(section.get("blockers"))
@@ -2544,6 +2548,29 @@ def _summary_material_missing(artifacts: dict[str, Any], target_materials: dict[
     missing = _string_list(artifacts.get("target_materials_missing") or target_materials.get("missing"))
     _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
     return missing
+
+
+def _summary_target_material_metadata_section(target_materials: dict[str, Any]) -> dict[str, Any]:
+    metadata = target_materials.get("metadata") if isinstance(target_materials.get("metadata"), dict) else {}
+    if not metadata:
+        return {}
+    return {
+        "ok": bool(target_materials.get("metadata_ready")),
+        "ready": metadata.get("enrichment_ready"),
+        "status": metadata.get("enrichment_status"),
+        "sources": metadata.get("sources") if isinstance(metadata.get("sources"), list) else [],
+        "applied": metadata.get("applied") if isinstance(metadata.get("applied"), dict) else {},
+        "readiness": metadata.get("readiness") if isinstance(metadata.get("readiness"), dict) else {},
+        "missing": _string_list(metadata.get("missing")),
+        "blockers": _string_list(metadata.get("blockers")),
+        "readiness_blockers": _string_list(metadata.get("readiness_blockers")),
+        "all_blockers": [*_string_list(metadata.get("blockers")), *_string_list(metadata.get("readiness_blockers"))],
+        "imdb_id": metadata.get("imdb_id"),
+        "tmdb_id": metadata.get("tmdb_id"),
+        "douban_id": metadata.get("douban_id"),
+        "douban_url": metadata.get("douban_url"),
+        "ptgen_description_length": metadata.get("ptgen_description_length"),
+    }
 
 
 def _summary_material_section(section: Any) -> dict[str, Any]:
@@ -6345,7 +6372,9 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
             "ready": metadata_ready,
             "generated": _material_generation_section_ready(metadata_section),
             "missing": _missing_with_prefix(material_missing, "metadata."),
-            "readiness": metadata_section.get("readiness") if isinstance(metadata_section.get("readiness"), dict) else {},
+            "readiness": target_metadata.get("readiness") if isinstance(target_metadata.get("readiness"), dict) else metadata_section.get("readiness") if isinstance(metadata_section.get("readiness"), dict) else {},
+            "sources": target_metadata.get("sources") if isinstance(target_metadata.get("sources"), list) else metadata_section.get("sources") if isinstance(metadata_section.get("sources"), list) else [],
+            "applied": target_metadata.get("applied") if isinstance(target_metadata.get("applied"), dict) else metadata_section.get("applied") if isinstance(metadata_section.get("applied"), dict) else {},
             "imdb_id": target_metadata.get("imdb_id") or metadata_section.get("imdb_id"),
             "tmdb_id": target_metadata.get("tmdb_id") or metadata_section.get("tmdb_id"),
             "douban_id": target_metadata.get("douban_id") or metadata_section.get("douban_id"),

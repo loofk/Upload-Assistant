@@ -755,6 +755,7 @@ def _read_material_text_excerpt(path: str, limit: int = 20000) -> str:
 def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[str, Any] | None, content_path: str | None, material_files: dict[str, Any] | None = None) -> dict[str, Any]:
     meta_draft = preview.get("meta_draft") if isinstance(preview.get("meta_draft"), dict) else {}
     material_files = material_files if isinstance(material_files, dict) else {}
+    metadata_enrichment = source_info.get("metadata_enrichment") if isinstance(source_info, dict) and isinstance(source_info.get("metadata_enrichment"), dict) else {}
     source_description_length = int(source_info.get("description_length", 0) or 0) if isinstance(source_info, dict) else 0
     mediainfo = _material_file_asset(material_files.get("mediainfo_file"))
     bdinfo = _material_file_asset(material_files.get("bdinfo_file"))
@@ -794,6 +795,14 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "douban_url": meta_draft.get("douban_url"),
             "source_description_available": source_description_length > 0,
             "ptgen_description_length": ptgen_description_length,
+            "enrichment_status": metadata_enrichment.get("status"),
+            "enrichment_ready": metadata_enrichment.get("ready") if isinstance(metadata_enrichment.get("ready"), bool) else None,
+            "sources": metadata_enrichment.get("sources") if isinstance(metadata_enrichment.get("sources"), list) else [],
+            "applied": metadata_enrichment.get("applied") if isinstance(metadata_enrichment.get("applied"), dict) else {},
+            "readiness": metadata_enrichment.get("readiness") if isinstance(metadata_enrichment.get("readiness"), dict) else {},
+            "missing": metadata_enrichment.get("missing") if isinstance(metadata_enrichment.get("missing"), list) else [],
+            "blockers": metadata_enrichment.get("blockers") if isinstance(metadata_enrichment.get("blockers"), list) else [],
+            "readiness_blockers": metadata_enrichment.get("readiness_blockers") if isinstance(metadata_enrichment.get("readiness_blockers"), list) else [],
         },
         "assets": {
             "mediainfo": mediainfo,

@@ -3438,6 +3438,59 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert "export PTCLI_MATERIAL_CRITICAL_IMAGE_HOST_MISSING=assets.image_host_uploads\n" in out
 
 
+def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_package() -> None:
+    readiness = {
+        "imdb_id": {"ready": True, "required": True, "source": "source"},
+        "tmdb_id": {"ready": False, "required": True, "source": None},
+        "douban_id": {"ready": True, "required": True, "source": "ptgen"},
+        "douban_url": {"ready": True, "required": True, "source": "ptgen"},
+        "ptgen_description": {"ready": True, "required": True, "source": "ptgen"},
+    }
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "target_materials": {
+                    "ready": False,
+                    "metadata_ready": False,
+                    "metadata": {
+                        "imdb_id": 1234567,
+                        "tmdb_id": None,
+                        "douban_id": "1291546",
+                        "douban_url": "https://movie.douban.com/subject/1291546/",
+                        "ptgen_description_length": 42,
+                        "enrichment_status": "enriched",
+                        "enrichment_ready": False,
+                        "sources": ["source", "ptgen"],
+                        "applied": {"douban_url": "https://movie.douban.com/subject/1291546/"},
+                        "readiness": readiness,
+                        "missing": ["tmdb_id"],
+                        "blockers": ["TMDb enrichment returned no TMDb id."],
+                        "readiness_blockers": ["Missing metadata after enrichment: tmdb_id"],
+                    },
+                    "missing": ["metadata.tmdb"],
+                },
+                "target_materials_ready": False,
+            }
+        }
+    )
+
+    metadata = diagnostics["sections"]["metadata"]
+    assert metadata["ok"] is False
+    assert metadata["status"] == "enriched"
+    assert metadata["sources"] == ["source", "ptgen"]
+    assert metadata["applied"] == {"douban_url": "https://movie.douban.com/subject/1291546/"}
+    assert metadata["readiness"] == readiness
+    assert metadata["missing"] == ["tmdb_id"]
+    assert metadata["readiness_blockers"] == ["Missing metadata after enrichment: tmdb_id"]
+    assert diagnostics["blockers"] == ["metadata: TMDb enrichment returned no TMDb id.", "metadata: Missing metadata after enrichment: tmdb_id"]
+
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+    assert json.loads(shell_fields["PTCLI_MATERIAL_METADATA_READINESS"]) == readiness
+    assert shell_fields["PTCLI_MATERIAL_METADATA_SOURCES"] == "source,ptgen"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_APPLIED_KEYS"] == "douban_url"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_READINESS_BLOCKERS"] == "Missing metadata after enrichment: tmdb_id"
+
+
 def test_summary_check_blocks_missing_pipeline_closure_audit(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
@@ -12796,6 +12849,22 @@ def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
         "douban_url": "https://movie.douban.com/subject/1291546/",
         "torrenthash": "a" * 40,
         "description_length": 100,
+        "metadata_enrichment": {
+            "status": "enriched",
+            "ready": False,
+            "sources": ["source", "overrides"],
+            "applied": {"douban_url": "https://movie.douban.com/subject/1291546/"},
+            "missing": [],
+            "readiness": {
+                "imdb_id": {"ready": True, "required": True, "source": "source"},
+                "tmdb_id": {"ready": True, "required": True, "source": "source"},
+                "douban_id": {"ready": True, "required": True, "source": "source"},
+                "douban_url": {"ready": True, "required": True, "source": "overrides"},
+                "ptgen_description": {"ready": False, "required": True, "source": None},
+            },
+            "blockers": [],
+            "readiness_blockers": ["PTGen/Douban description is missing after enrichment."],
+        },
     }
     preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
 
@@ -12812,6 +12881,12 @@ def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
     assert asset_checks["image_host_uploads"]["ok"] is False
     assert materials["metadata"]["source_description_available"] is True
     assert materials["metadata"]["ptgen_description_length"] == 0
+    assert materials["metadata"]["enrichment_status"] == "enriched"
+    assert materials["metadata"]["enrichment_ready"] is False
+    assert materials["metadata"]["sources"] == ["source", "overrides"]
+    assert materials["metadata"]["applied"] == {"douban_url": "https://movie.douban.com/subject/1291546/"}
+    assert materials["metadata"]["readiness"]["ptgen_description"] == {"ready": False, "required": True, "source": None}
+    assert materials["metadata"]["readiness_blockers"] == ["PTGen/Douban description is missing after enrichment."]
     assert materials["ready"] is False
     assert "Fetch or supply IMDb/TMDb/Douban metadata" in materials["next_actions"][0]
     assert "Generate MediaInfo or BDInfo" in materials["next_actions"][1]
