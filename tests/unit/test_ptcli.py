@@ -4201,7 +4201,7 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["automation_action"] == "resolve_qbit_wait_mismatch"
-    assert f"source suggested retry values: hash={'f' * 40}, path=/downloads/Expected, save_path=/downloads." in payload["automation_reason"]
+    assert f"source suggested retry values: hash={'f' * 40}, path=/downloads/Other, save_path=/downloads." in payload["automation_reason"]
     assert payload["next_stage"] == "resume-source-torrent"
     assert payload["next_command"] == "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent"
     assert payload["next_command_ready"] is True
@@ -4227,7 +4227,7 @@ def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> N
     retry_hint = payload["qbit_wait_retry_hints"]["source"]
     assert retry_hint["retry_recommended"] is True
     assert retry_hint["suggested_torrent_hash"] == "f" * 40
-    assert retry_hint["suggested_content_path"] == "/downloads/Expected"
+    assert retry_hint["suggested_content_path"] == "/downloads/Other"
     assert retry_hint["suggested_save_path"] == "/downloads"
     assert retry_hint["observed_candidate_count"] == 2
     assert retry_hint["observed_candidates"] == [
@@ -5071,7 +5071,7 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
     assert code == 0
     out = capsys.readouterr().out
     assert "export PTCLI_AUTOMATION_ACTION=resolve_qbit_wait_mismatch\n" in out
-    assert f"export PTCLI_AUTOMATION_REASON='qBittorrent wait evidence mismatched the requested torrent/content: source.requested_hash. source suggested retry values: hash={'f' * 40}, path=/downloads/Expected, save_path=/downloads.'\n" in out
+    assert f"export PTCLI_AUTOMATION_REASON='qBittorrent wait evidence mismatched the requested torrent/content: source.requested_hash. source suggested retry values: hash={'f' * 40}, path=/downloads/Other, save_path=/downloads.'\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=0\n" in out
     assert "export PTCLI_BLOCKERS='source.wait_evidence,qBittorrent wait mismatch: source.requested_hash'\n" in out
     assert "export PTCLI_MISSING_ARTIFACTS=source_wait_evidence\n" in out
@@ -5095,7 +5095,7 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
     assert "export PTCLI_QBIT_WAIT_SOURCE_ANY_COMPLETE=1\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_RETRY_RECOMMENDED=1\n" in out
     assert f"export PTCLI_QBIT_WAIT_SOURCE_SUGGESTED_HASH={'f' * 40}\n" in out
-    assert "export PTCLI_QBIT_WAIT_SOURCE_SUGGESTED_CONTENT_PATH=/downloads/Expected\n" in out
+    assert "export PTCLI_QBIT_WAIT_SOURCE_SUGGESTED_CONTENT_PATH=/downloads/Other\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_SUGGESTED_SAVE_PATH=/downloads\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_OBSERVED_CANDIDATE_COUNT=2\n" in out
     assert f"export PTCLI_QBIT_WAIT_SOURCE_FIRST_CANDIDATE_HASH={'f' * 40}\n" in out
@@ -5105,7 +5105,7 @@ def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) 
     assert "export PTCLI_QBIT_WAIT_SOURCE_FIRST_CANDIDATE_PROGRESS=1.0\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_RETRY_REASON='source qBittorrent wait matched a different torrent/content than requested_hash.'\n" in out
     assert "export PTCLI_QBIT_WAIT_SOURCE_RETRY_ACTION='Resolve the source qBittorrent wait mismatch before rerunning:" in out
-    assert f"Suggested retry values from qBittorrent: hash={'f' * 40}, path=/downloads/Expected, save_path=/downloads." in out
+    assert f"Suggested retry values from qBittorrent: hash={'f' * 40}, path=/downloads/Other, save_path=/downloads." in out
 
 
 def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, capsys) -> None:

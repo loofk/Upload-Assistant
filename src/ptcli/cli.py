@@ -3042,7 +3042,11 @@ def _summary_qbit_wait_retry_hints(qbit_wait_diagnostics: dict[str, Any]) -> dic
         observed_save_path = _first_string(diagnostics.get("observed_save_paths"))
         observed_candidates = _qbit_wait_observed_candidates(diagnostics)
         suggested_hash = observed_hash if diagnostics.get("requested_hash_matched") is False or not diagnostics.get("requested_hash") else diagnostics.get("requested_hash")
-        suggested_content_path = observed_content_path if diagnostics.get("requested_content_path_matched") is False or not diagnostics.get("requested_content_path") else diagnostics.get("requested_content_path")
+        suggested_content_path = (
+            observed_content_path
+            if diagnostics.get("requested_hash_matched") is False or diagnostics.get("requested_content_path_matched") is False or not diagnostics.get("requested_content_path")
+            else diagnostics.get("requested_content_path")
+        )
         hints[str(scope)] = {
             "retry_recommended": request_mismatch,
             "suggested_torrent_hash": suggested_hash,
