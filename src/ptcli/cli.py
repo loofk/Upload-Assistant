@@ -5913,6 +5913,7 @@ def _pipeline_effective_actions(
         "wait_uploaded_complete": bool(args.wait_uploaded_complete),
         "enrich_metadata": bool(getattr(args, "enrich_metadata", False)),
         "fetch_ptgen": bool(getattr(args, "fetch_ptgen", False)),
+        "generate_bdinfo": bool(getattr(args, "generate_bdinfo", False)),
         "generate_mediainfo": bool(getattr(args, "generate_mediainfo", False)),
         "generate_screenshots": bool(getattr(args, "generate_screenshots", False)),
         "upload_screenshots": bool(getattr(args, "upload_screenshots", False)),

@@ -1046,6 +1046,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.target_torrent_file == str(torrent_file)
     assert pipeline_args.sanitize_target_torrent is True
     assert pipeline_args.mediainfo_file == str(tmp_path / "MEDIAINFO.txt")
+    assert pipeline_args.generate_bdinfo is True
     assert pipeline_args.generate_mediainfo is True
     assert pipeline_args.generate_screenshots is True
     assert pipeline_args.screenshot_count == 2
@@ -1311,6 +1312,7 @@ async def test_retorrent_execute_defaults_to_export_target_torrent(monkeypatch) 
     assert captured_args["args"].uploaded_output_dir == "./tmp/uploaded"
     assert captured_args["args"].enrich_metadata is True
     assert captured_args["args"].fetch_ptgen is True
+    assert captured_args["args"].generate_bdinfo is True
     assert captured_args["args"].generate_mediainfo is True
     assert captured_args["args"].generate_screenshots is True
     assert captured_args["args"].upload_screenshots is True
@@ -1343,6 +1345,7 @@ async def test_retorrent_execute_can_disable_default_material_chain(monkeypatch)
             "/downloads/Name",
             "--no-enrich-metadata",
             "--no-fetch-ptgen",
+            "--no-generate-bdinfo",
             "--no-generate-mediainfo",
             "--no-generate-screenshots",
             "--no-upload-screenshots",
@@ -1355,6 +1358,7 @@ async def test_retorrent_execute_can_disable_default_material_chain(monkeypatch)
     assert payload["ready"] is True
     assert captured_args["args"].enrich_metadata is False
     assert captured_args["args"].fetch_ptgen is False
+    assert captured_args["args"].generate_bdinfo is False
     assert captured_args["args"].generate_mediainfo is False
     assert captured_args["args"].generate_screenshots is False
     assert captured_args["args"].upload_screenshots is False
@@ -10994,15 +10998,20 @@ async def test_pipeline_target_execute_defaults_to_generating_materials(monkeypa
     payload = await ptcli_cli.pipeline_payload(args)
 
     assert payload["requested_actions"]["generate_mediainfo"] is False
+    assert payload["requested_actions"]["generate_bdinfo"] is False
     assert payload["requested_actions"]["generate_screenshots"] is False
     assert payload["requested_actions"]["upload_screenshots"] is False
     assert payload["requested_actions"]["enrich_metadata"] is False
     assert payload["requested_actions"]["fetch_ptgen"] is False
     assert payload["effective_actions"]["enrich_metadata"] is True
     assert payload["effective_actions"]["fetch_ptgen"] is True
+    assert payload["effective_actions"]["generate_bdinfo"] is True
     assert payload["effective_actions"]["generate_mediainfo"] is True
     assert payload["effective_actions"]["generate_screenshots"] is True
     assert payload["effective_actions"]["upload_screenshots"] is True
+    bdinfo_stage = next(stage for stage in payload["stages"] if stage["stage"] == "materials-bdinfo")
+    assert bdinfo_stage["ok"] is True
+    assert bdinfo_stage["skipped"] is True
     assert next(stage for stage in payload["stages"] if stage["stage"] == "materials-mediainfo")["ok"] is True
     assert next(stage for stage in payload["stages"] if stage["stage"] == "materials-screenshots")["ok"] is True
     assert next(stage for stage in payload["stages"] if stage["stage"] == "materials-image-host")["ok"] is True
