@@ -2351,6 +2351,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
             "has_screenshot_bbcode": description.get("has_screenshot_bbcode"),
             "bbcode_image_count": description.get("bbcode_image_count"),
+            "bbcode_image_urls": _string_list(description.get("bbcode_image_urls")),
             "missing": _string_list(description.get("missing")),
         },
         "sections": sections,
@@ -2772,6 +2773,7 @@ def _pipeline_closure_review(payload: dict[str, Any], artifacts: dict[str, Any] 
                 "has_mediainfo_or_bdinfo": target_description.get("has_mediainfo_or_bdinfo"),
                 "has_screenshot_bbcode": target_description.get("has_screenshot_bbcode"),
                 "bbcode_image_count": target_description.get("bbcode_image_count"),
+                "bbcode_image_urls": _string_list(target_description.get("bbcode_image_urls")),
                 "missing": _string_list(target_description.get("missing")),
             },
         },
@@ -3749,6 +3751,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
+            "bbcode_image_urls": _string_list(content.get("bbcode_image_urls")),
             "missing": description_missing,
         },
         "payload": {
@@ -6144,6 +6147,7 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
             "has_mediainfo_or_bdinfo": bool(description.get("has_mediainfo_or_bdinfo")),
             "has_screenshot_bbcode": bool(description.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(description.get("bbcode_image_count", 0) or 0),
+            "bbcode_image_urls": _string_list(description.get("bbcode_image_urls")),
         },
     }
 
@@ -6688,6 +6692,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
+            "bbcode_image_urls": _string_list(content.get("bbcode_image_urls")),
             "missing": description_missing,
         },
         "payload": {
@@ -7967,6 +7972,7 @@ def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
+        "PTCLI_CLOSURE_REVIEW_DESCRIPTION_IMAGE_URLS": ",".join(_string_list(description.get("bbcode_image_urls"))),
         "PTCLI_CLOSURE_REVIEW_DESCRIPTION_MISSING": ",".join(_string_list(description.get("missing"))),
         "PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_READY": _summary_check_bool_field(checks, "source.ready"),
         "PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_TORRENT_FILE": _summary_check_bool_field(checks, "source.torrent_file_evidence"),
@@ -8044,6 +8050,7 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_URLS": ",".join(_string_list(description.get("bbcode_image_urls"))),
         "PTCLI_RESUME_MATERIAL_RECOVERY_HINT_COUNT": len(recovery_hints),
         "PTCLI_RESUME_MATERIAL_RECOVERY_KEYS": ",".join(str(hint.get("key")) for hint in recovery_hints if isinstance(hint, dict) and hint.get("key")),
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_AVAILABLE": _shell_bool(any(bool(hint.get("resume_command_available")) for hint in recovery_hints if isinstance(hint, dict))),
@@ -8210,6 +8217,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
+        "PTCLI_MATERIAL_DESCRIPTION_IMAGE_URLS": ",".join(_string_list(description.get("bbcode_image_urls"))),
         "PTCLI_MATERIAL_DESCRIPTION_MISSING": ",".join(_string_list(description.get("missing"))),
     }
 

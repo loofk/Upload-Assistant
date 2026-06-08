@@ -4460,6 +4460,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                             "has_mediainfo_or_bdinfo": True,
                             "has_screenshot_bbcode": True,
                             "bbcode_image_count": 3,
+                            "bbcode_image_urls": ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png"],
                         },
                     },
                     "target_materials_missing": [],
@@ -4543,6 +4544,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT=3\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_IMAGE_URLS=https://img.example/thumb-1.png,https://img.example/thumb-2.png\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_MISSING=''\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=0\n" in out
@@ -10345,6 +10347,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert material_closure["description"]["has_external_ids"] is True
     assert material_closure["description"]["has_mediainfo_or_bdinfo"] is True
     assert material_closure["description"]["has_screenshot_bbcode"] is True
+    assert material_closure["description"]["bbcode_image_urls"] == ["https://img.example/screen-1.png"]
     assert any("PTGen/Douban description" in action for action in summary_payload["resume_state"]["materials"]["next_actions"])
     code = main(["summary-check", "--summary-file", str(summary_path), "--print-shell"])
     assert code == 0
@@ -10371,6 +10374,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_READY=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_PTGEN=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_URLS=https://img.example/screen-1.png\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_HINT_COUNT=2\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=metadata.ptgen_description,description.content\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_AVAILABLE=1\n" in out
@@ -10736,6 +10740,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["closure_review"]["target"]["description"]["has_mediainfo_or_bdinfo"] is True
     assert summary_payload["closure_review"]["target"]["description"]["has_screenshot_bbcode"] is True
     assert summary_payload["closure_review"]["target"]["description"]["bbcode_image_count"] == 1
+    assert summary_payload["closure_review"]["target"]["description"]["bbcode_image_urls"] == ["https://img.example/thumb.png"]
     assert summary_payload["summary"]["closure_audit"]["ready"] is True
     assert summary_payload["config"] == str(tmp_path / "config.py")
     assert summary_payload["base_dir"] == str(tmp_path)
@@ -10782,6 +10787,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_DOUBAN_LINK=https://movie.douban.com/subject/1291546/\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_HAS_SCREENSHOTS=1\n" in out
+    assert "export PTCLI_CLOSURE_REVIEW_DESCRIPTION_IMAGE_URLS=https://img.example/thumb.png\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_READY=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_TORRENT_HASH=1\n" in out
     assert "export PTCLI_CLOSURE_REVIEW_CHECK_SOURCE_INJECTED_HASH=1\n" in out
@@ -14075,6 +14081,7 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
     assert preflight["upload_payload"]["form_fields"]["mediainfo"]["length"] == len(mediainfo.read_text(encoding="utf-8"))
     assert preflight["upload_payload"]["description_file"]["content"]["has_ptgen_description"] is True
     assert preflight["upload_payload"]["description_file"]["content"]["has_screenshot_bbcode"] is True
+    assert preflight["upload_payload"]["description_file"]["content"]["bbcode_image_urls"] == ["https://img.example/thumb.png"]
     assert preflight["upload_payload"]["description_file"]["content"]["has_mediainfo_or_bdinfo"] is True
     assert preflight["upload_payload"]["description_file"]["content"]["external_links"]["imdb"] == "https://www.imdb.com/title/tt1234567"
     assert preflight["upload_payload"]["description_file"]["content"]["external_links"]["tmdb"] == "https://www.themoviedb.org/movie/999"

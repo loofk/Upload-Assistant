@@ -1392,18 +1392,28 @@ def _mteam_description_summary(package: dict[str, Any], expected_length: int) ->
 
 
 def _mteam_description_content_summary(text: str) -> dict[str, Any]:
-    img_matches = re.findall(r"\[img(?:=[^\]]+)?\]", text, flags=re.IGNORECASE)
+    image_urls = _mteam_description_image_urls(text)
     external_links = _mteam_description_external_links(text)
     return {
         "has_ptgen_description": "[b]Movie information[/b]" in text and "PTGen/Douban description: missing" not in text,
-        "has_screenshot_bbcode": "[b]Screenshots[/b]" in text and bool(img_matches),
-        "bbcode_image_count": len(img_matches),
+        "has_screenshot_bbcode": "[b]Screenshots[/b]" in text and bool(image_urls),
+        "bbcode_image_count": len(image_urls),
+        "bbcode_image_urls": image_urls,
         "has_mediainfo_or_bdinfo": "[b]MediaInfo[/b]" in text or "[b]BDInfo[/b]" in text,
         "has_imdb": bool(re.search(r"imdb\.com/title/tt\d+|^\[b\]IMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
         "has_tmdb": bool(re.search(r"themoviedb\.org/(?:movie|tv)/\d+|^\[b\]TMDb\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
         "has_douban": bool(re.search(r"movie\.douban\.com/subject/\d+|^\[b\]Douban\[/b\]:\s*\d+", text, flags=re.IGNORECASE | re.MULTILINE)),
         "external_links": external_links,
     }
+
+
+def _mteam_description_image_urls(text: str) -> list[str]:
+    urls: list[str] = []
+    for match in re.finditer(r"\[img(?:=[^\]]+)?\](.*?)\[/img\]", text, flags=re.IGNORECASE | re.DOTALL):
+        url = match.group(1).strip()
+        if url and url not in urls:
+            urls.append(url)
+    return urls
 
 
 def _mteam_description_external_links(text: str) -> dict[str, str | None]:
