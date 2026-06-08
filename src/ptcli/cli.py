@@ -6826,10 +6826,10 @@ def _target_package_material_resume_args(requested_actions: dict[str, Any], effe
         args.append("--fetch-ptgen")
     if include_metadata:
         _append_option(args, "--metadata-file", material_options.get("metadata_file"))
-        _append_option(args, "--imdb-id", material_options.get("imdb_id"))
-        _append_option(args, "--tmdb-id", material_options.get("tmdb_id"))
-        _append_option(args, "--douban-id", material_options.get("douban_id"))
-        _append_option(args, "--douban-url", material_options.get("douban_url"))
+        _append_option(args, "--imdb-id", material_options.get("imdb_id") or artifact_options.get("imdb_id"))
+        _append_option(args, "--tmdb-id", material_options.get("tmdb_id") or artifact_options.get("tmdb_id"))
+        _append_option(args, "--douban-id", material_options.get("douban_id") or artifact_options.get("douban_id"))
+        _append_option(args, "--douban-url", material_options.get("douban_url") or artifact_options.get("douban_url"))
     _append_option(args, "--mediainfo-file", material_options.get("mediainfo_file") or artifact_options.get("mediainfo_file"))
     _append_option(args, "--bdinfo-file", material_options.get("bdinfo_file") or artifact_options.get("bdinfo_file"))
     if requested_actions.get("generate_bdinfo") or effective_actions.get("generate_bdinfo") or "--generate-bdinfo" in auto_flags:
@@ -6888,7 +6888,13 @@ def _target_package_material_artifact_options(artifacts: dict[str, Any] | None) 
     target_mediainfo = target_assets.get("mediainfo") if isinstance(target_assets.get("mediainfo"), dict) else {}
     target_screenshots = target_assets.get("screenshots") if isinstance(target_assets.get("screenshots"), dict) else {}
     target_image_host = target_assets.get("image_hosts") if isinstance(target_assets.get("image_hosts"), dict) else {}
+    metadata = generation.get("metadata") if isinstance(generation.get("metadata"), dict) else {}
+    target_metadata = target_materials.get("metadata") if isinstance(target_materials.get("metadata"), dict) else {}
     return {
+        "imdb_id": metadata.get("imdb_id") or target_metadata.get("imdb_id"),
+        "tmdb_id": metadata.get("tmdb_id") or target_metadata.get("tmdb_id"),
+        "douban_id": metadata.get("douban_id") or target_metadata.get("douban_id"),
+        "douban_url": metadata.get("douban_url") or target_metadata.get("douban_url"),
         "bdinfo_file": bdinfo.get("bdinfo_file") or target_bdinfo.get("path"),
         "mediainfo_file": mediainfo.get("mediainfo_file") or target_mediainfo.get("path"),
         "screenshot_files": screenshots.get("screenshot_files") if isinstance(screenshots.get("screenshot_files"), list) else target_screenshots.get("paths"),

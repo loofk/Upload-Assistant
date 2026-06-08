@@ -3173,6 +3173,58 @@ def test_target_package_resume_args_reuse_generated_material_artifacts() -> None
     assert "ptpimg" in args
 
 
+def test_target_package_resume_args_reuse_generated_metadata_ids() -> None:
+    args = ptcli_cli._target_package_material_resume_args(
+        {"enrich_metadata": True},
+        {},
+        {},
+        {
+            "material_generation": {
+                "metadata": {
+                    "imdb_id": 1234567,
+                    "tmdb_id": 999,
+                    "douban_id": "1291546",
+                    "douban_url": "https://movie.douban.com/subject/1291546/",
+                }
+            }
+        },
+    )
+
+    assert "--enrich-metadata" in args
+    assert "--imdb-id" in args
+    assert "1234567" in args
+    assert "--tmdb-id" in args
+    assert "999" in args
+    assert "--douban-id" in args
+    assert "1291546" in args
+    assert "--douban-url" in args
+    assert "https://movie.douban.com/subject/1291546/" in args
+
+
+def test_target_package_resume_args_reuse_package_metadata_ids() -> None:
+    args = ptcli_cli._target_package_material_resume_args(
+        {},
+        {"fetch_ptgen": True},
+        {"tmdb_id": "111"},
+        {
+            "target_materials": {
+                "metadata": {
+                    "imdb_id": 7654321,
+                    "tmdb_id": 999,
+                    "douban_id": "3541415",
+                    "douban_url": "https://movie.douban.com/subject/3541415/",
+                }
+            }
+        },
+    )
+
+    assert "--fetch-ptgen" in args
+    assert args[args.index("--imdb-id") + 1] == "7654321"
+    assert args[args.index("--tmdb-id") + 1] == "111"
+    assert args[args.index("--douban-id") + 1] == "3541415"
+    assert args[args.index("--douban-url") + 1] == "https://movie.douban.com/subject/3541415/"
+
+
 def test_run_summary_resume_commands_prefer_artifact_save_paths() -> None:
     payload = {
         "source_tracker": "U2",
