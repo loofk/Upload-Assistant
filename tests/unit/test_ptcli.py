@@ -11513,6 +11513,14 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert material_closure["screenshots"]["count"] == 1
     assert material_closure["image_host"]["ready"] is True
     assert material_closure["image_host"]["count"] == 1
+    assert material_closure["image_host"]["urls"] == {
+        "raw_urls": ["https://img.example/raw.png"],
+        "img_urls": ["https://img.example/thumb.png"],
+        "web_urls": ["https://img.example/page"],
+        "item_count": 1,
+        "valid_count": 1,
+        "invalid_count": 0,
+    }
     assert material_closure["description"]["ready"] is False
     assert material_closure["description"]["has_ptgen_description"] is False
     assert material_closure["description"]["has_external_ids"] is True
@@ -11551,6 +11559,11 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert f"export PTCLI_RESUME_MATERIAL_BDINFO_FILE={bdinfo}\n" in out
     assert "export PTCLI_RESUME_MATERIAL_SCREENSHOTS_READY=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_READY=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_ITEM_COUNT=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_VALID_COUNT=1\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_INVALID_COUNT=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_IMG_URLS=https://img.example/thumb.png\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_WEB_URLS=https://img.example/page\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_PTGEN=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS=1\n" in out
     assert "PTCLI_RESUME_MATERIAL_DESCRIPTION_EXTERNAL_ID_READINESS=" in out
@@ -11680,6 +11693,7 @@ async def test_pipeline_summary_recovers_missing_image_host_uploads(monkeypatch,
     assert material_closure["screenshots"]["files"] == [str(screenshot)]
     assert material_closure["image_host"]["ready"] is False
     assert material_closure["image_host"]["count"] == 0
+    assert material_closure["image_host"]["urls"] == {"raw_urls": [], "img_urls": [], "web_urls": [], "item_count": 0, "valid_count": 0, "invalid_count": 0}
     assert material_closure["description"]["has_ptgen_description"] is True
     assert material_closure["description"]["has_external_ids"] is True
     assert material_closure["description"]["has_mediainfo_or_bdinfo"] is True
@@ -11703,6 +11717,9 @@ async def test_pipeline_summary_recovers_missing_image_host_uploads(monkeypatch,
     assert f"export PTCLI_RESUME_MATERIAL_SCREENSHOTS_FILES={screenshot}\n" in out
     assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_READY=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_COUNT=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_ITEM_COUNT=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_VALID_COUNT=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_INVALID_COUNT=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_READY=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=assets.image_host_uploads,description.content\n" in out

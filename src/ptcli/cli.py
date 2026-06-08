@@ -6893,6 +6893,7 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
     mediainfo_generation = generation.get("mediainfo") if isinstance(generation.get("mediainfo"), dict) else {}
     screenshot_generation = generation.get("screenshots") if isinstance(generation.get("screenshots"), dict) else {}
     image_host_generation = generation.get("image_host") if isinstance(generation.get("image_host"), dict) else {}
+    image_host_items = image_host_asset.get("items") if isinstance(image_host_asset.get("items"), list) else image_host_generation.get("items")
     metadata_ready = bool(target_materials.get("metadata_ready"))
     assets_ready = bool(target_materials.get("assets_ready"))
     description_ready = bool(preparation.get("description_ready"))
@@ -6957,6 +6958,7 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
             "host": image_host_generation.get("host"),
             "count": int(image_host_asset.get("count", 0) or image_host_generation.get("count", 0) or 0),
             "image_host_file": image_host_generation.get("image_host_file"),
+            "urls": _image_host_url_summary(image_host_items),
         },
         "description": {
             "ready": description_ready,
@@ -8988,6 +8990,7 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
     bdinfo = closure.get("bdinfo") if isinstance(closure.get("bdinfo"), dict) else {}
     screenshots = closure.get("screenshots") if isinstance(closure.get("screenshots"), dict) else {}
     image_host = closure.get("image_host") if isinstance(closure.get("image_host"), dict) else {}
+    image_host_urls = image_host.get("urls") if isinstance(image_host.get("urls"), dict) else {}
     description = closure.get("description") if isinstance(closure.get("description"), dict) else {}
     media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
     screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
@@ -9045,6 +9048,12 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_IMAGE_HOST_HOST": image_host.get("host"),
         "PTCLI_RESUME_MATERIAL_IMAGE_HOST_COUNT": image_host.get("count"),
         "PTCLI_RESUME_MATERIAL_IMAGE_HOST_FILE": image_host.get("image_host_file"),
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_ITEM_COUNT": image_host_urls.get("item_count"),
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_VALID_COUNT": image_host_urls.get("valid_count"),
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_INVALID_COUNT": image_host_urls.get("invalid_count"),
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_RAW_URLS": ",".join(_string_list(image_host_urls.get("raw_urls"))),
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_IMG_URLS": ",".join(_string_list(image_host_urls.get("img_urls"))),
+        "PTCLI_RESUME_MATERIAL_IMAGE_HOST_WEB_URLS": ",".join(_string_list(image_host_urls.get("web_urls"))),
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_READY": _shell_bool(description.get("ready")) if description.get("ready") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_PTGEN": _shell_bool(description.get("has_ptgen_description")) if description.get("has_ptgen_description") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_PTGEN_LENGTH": description.get("ptgen_description_length"),
