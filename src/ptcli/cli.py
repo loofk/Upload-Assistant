@@ -2630,6 +2630,7 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
     preparation_audit = summary.get("target_preparation_audit") if isinstance(summary.get("target_preparation_audit"), dict) else {}
     preparation_payload = preparation_audit.get("payload") if isinstance(preparation_audit.get("payload"), dict) else {}
     preflight_torrent = preparation_payload.get("torrent_file") if isinstance(preparation_payload.get("torrent_file"), dict) else {}
+    payload_review = _target_upload_payload_review_from_summary(payload)
     resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
     uploaded_followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
     return {
@@ -2665,6 +2666,44 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
             "description_checks_ready": preparation_payload.get("description_checks_ready"),
             "materials_ready_required": preparation_payload.get("materials_ready_required"),
             "torrent_file": preflight_torrent,
+        },
+        "payload_review": payload_review,
+    }
+
+
+def _target_upload_payload_review_from_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    preflight = payload.get("preflight") if isinstance(payload.get("preflight"), dict) else {}
+    upload_payload = preflight.get("upload_payload") if isinstance(preflight.get("upload_payload"), dict) else {}
+    review = upload_payload.get("review") if isinstance(upload_payload.get("review"), dict) else {}
+    description = review.get("description") if isinstance(review.get("description"), dict) else {}
+    materials = review.get("materials") if isinstance(review.get("materials"), dict) else {}
+    external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
+    screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
+    return {
+        "present": bool(review),
+        "description": {
+            "external_links": description.get("external_links") if isinstance(description.get("external_links"), dict) else {},
+            "external_id_readiness": external_id_readiness,
+            "external_id_missing": _string_list(description.get("external_id_missing")),
+            "has_ptgen_description": description.get("has_ptgen_description"),
+            "ptgen_description_length": description.get("ptgen_description_length"),
+            "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
+            "has_screenshot_bbcode": description.get("has_screenshot_bbcode"),
+            "bbcode_image_count": description.get("bbcode_image_count"),
+            "bbcode_image_urls": _string_list(description.get("bbcode_image_urls")),
+            "screenshot_coverage": {
+                "ready": screenshot_coverage.get("ready"),
+                "expected_urls": _string_list(screenshot_coverage.get("expected_urls")),
+                "description_urls": _string_list(screenshot_coverage.get("description_urls")),
+                "missing_urls": _string_list(screenshot_coverage.get("missing_urls")),
+            },
+        },
+        "materials": {
+            "mediainfo_or_bdinfo_source": materials.get("mediainfo_or_bdinfo_source"),
+            "mediainfo_or_bdinfo_length": materials.get("mediainfo_or_bdinfo_length"),
+            "screenshot_file_count": materials.get("screenshot_file_count"),
+            "image_host_count": materials.get("image_host_count"),
+            "image_host_urls": _string_list(materials.get("image_host_urls")),
         },
     }
 
@@ -8824,6 +8863,12 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
     wait_query = completion.get("uploaded_wait_query") if isinstance(completion.get("uploaded_wait_query"), dict) else {}
     preflight = target_upload_diagnostics.get("preflight") if isinstance(target_upload_diagnostics.get("preflight"), dict) else {}
     preflight_torrent = preflight.get("torrent_file") if isinstance(preflight.get("torrent_file"), dict) else {}
+    payload_review = target_upload_diagnostics.get("payload_review") if isinstance(target_upload_diagnostics.get("payload_review"), dict) else {}
+    payload_description = payload_review.get("description") if isinstance(payload_review.get("description"), dict) else {}
+    payload_materials = payload_review.get("materials") if isinstance(payload_review.get("materials"), dict) else {}
+    external_id_readiness = payload_description.get("external_id_readiness") if isinstance(payload_description.get("external_id_readiness"), dict) else {}
+    external_links = payload_description.get("external_links") if isinstance(payload_description.get("external_links"), dict) else {}
+    screenshot_coverage = payload_description.get("screenshot_coverage") if isinstance(payload_description.get("screenshot_coverage"), dict) else {}
     return {
         "PTCLI_TARGET_UPLOAD_PRESENT": _shell_bool(target_upload_diagnostics.get("present")) if "present" in target_upload_diagnostics else None,
         "PTCLI_TARGET_UPLOAD_MODE": target_upload_diagnostics.get("mode"),
@@ -8856,6 +8901,29 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_MTEAM_SAFE": _shell_bool(preflight_torrent.get("mteam_safe")) if preflight_torrent.get("mteam_safe") is not None else None,
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_METADATA_READABLE": _shell_bool(preflight_torrent.get("metadata_readable")) if preflight_torrent.get("metadata_readable") is not None else None,
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_SOURCE_FLAG": preflight_torrent.get("source_flag"),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_REVIEW_PRESENT": _shell_bool(payload_review.get("present")) if "present" in payload_review else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_PTGEN": _shell_bool(payload_description.get("has_ptgen_description")) if payload_description.get("has_ptgen_description") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_PTGEN_LENGTH": payload_description.get("ptgen_description_length"),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_EXTERNAL_IDS": _shell_bool(all(external_id_readiness.get(name) is True for name in ("imdb", "tmdb", "douban"))) if external_id_readiness else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_EXTERNAL_ID_MISSING": ",".join(_string_list(payload_description.get("external_id_missing"))),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_IMDB": _shell_bool(external_id_readiness.get("imdb")) if "imdb" in external_id_readiness else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_TMDB": _shell_bool(external_id_readiness.get("tmdb")) if "tmdb" in external_id_readiness else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_DOUBAN": _shell_bool(external_id_readiness.get("douban")) if "douban" in external_id_readiness else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_IMDB_LINK": external_links.get("imdb"),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_TMDB_LINK": external_links.get("tmdb"),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_DOUBAN_LINK": external_links.get("douban"),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(payload_description.get("has_mediainfo_or_bdinfo")) if payload_description.get("has_mediainfo_or_bdinfo") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIAINFO_SOURCE": payload_materials.get("mediainfo_or_bdinfo_source"),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIAINFO_LENGTH": payload_materials.get("mediainfo_or_bdinfo_length"),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_SCREENSHOTS": _shell_bool(payload_description.get("has_screenshot_bbcode")) if payload_description.get("has_screenshot_bbcode") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_IMAGE_COUNT": payload_description.get("bbcode_image_count"),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_IMAGE_URLS": ",".join(_string_list(payload_description.get("bbcode_image_urls"))),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_IMAGE_HOST_COUNT": payload_materials.get("image_host_count"),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_IMAGE_HOST_URLS": ",".join(_string_list(payload_materials.get("image_host_urls"))),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_COVERAGE_READY": _shell_bool(screenshot_coverage.get("ready")) if screenshot_coverage.get("ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_COVERAGE_EXPECTED_URLS": ",".join(_string_list(screenshot_coverage.get("expected_urls"))),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_COVERAGE_DESCRIPTION_URLS": ",".join(_string_list(screenshot_coverage.get("description_urls"))),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_COVERAGE_MISSING_URLS": ",".join(_string_list(screenshot_coverage.get("missing_urls"))),
         "PTCLI_TARGET_UPLOAD_CHECK_PREPARATION_READY": _summary_check_bool_field(checks, "target_preparation_ready"),
         "PTCLI_TARGET_UPLOAD_CHECK_UPLOADED": _summary_check_bool_field(checks, "uploaded"),
         "PTCLI_TARGET_UPLOAD_CHECK_TORRENT_FILE": _summary_check_bool_field(checks, "uploaded_torrent_file"),

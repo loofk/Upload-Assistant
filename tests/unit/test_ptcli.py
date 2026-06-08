@@ -16121,6 +16121,37 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert preflight_diagnostics["torrent_file"]["mteam_safe"] is True
     assert preflight_diagnostics["torrent_file"]["metadata_readable"] is True
     assert preflight_diagnostics["torrent_file"]["source_flag"] == "MTEAM"
+    payload_review = diagnostics["target_upload_diagnostics"]["payload_review"]
+    assert payload_review["present"] is True
+    assert payload_review["description"]["external_id_readiness"] == {"imdb": True, "tmdb": True, "douban": True}
+    assert payload_review["description"]["external_id_missing"] == []
+    assert payload_review["description"]["external_links"] == {
+        "imdb": "https://www.imdb.com/title/tt1234567",
+        "tmdb": "https://www.themoviedb.org/movie/999",
+        "douban": "https://movie.douban.com/subject/1291546/",
+    }
+    assert payload_review["description"]["has_ptgen_description"] is True
+    assert payload_review["description"]["has_mediainfo_or_bdinfo"] is True
+    assert payload_review["description"]["has_screenshot_bbcode"] is True
+    assert payload_review["description"]["bbcode_image_urls"] == ["https://img.example/thumb.png"]
+    assert payload_review["description"]["screenshot_coverage"] == {
+        "ready": True,
+        "expected_urls": ["https://img.example/thumb.png"],
+        "description_urls": ["https://img.example/thumb.png"],
+        "missing_urls": [],
+    }
+    assert payload_review["materials"]["image_host_urls"] == ["https://img.example/thumb.png"]
+    shell_fields = ptcli_cli._summary_check_target_upload_shell_fields(diagnostics["target_upload_diagnostics"])
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_REVIEW_PRESENT"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_PTGEN"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_EXTERNAL_IDS"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_EXTERNAL_ID_MISSING"] == ""
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_IMDB"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_TMDB"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_DOUBAN"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_IMAGE_URLS"] == "https://img.example/thumb.png"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_IMAGE_HOST_URLS"] == "https://img.example/thumb.png"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_COVERAGE_READY"] == "1"
     assert diagnostics["completion_matrix"]["domains"]["target_upload"]["evidence"]["ready_for_uploaded_seeding"] is True
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
