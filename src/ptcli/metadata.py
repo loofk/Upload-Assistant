@@ -149,6 +149,12 @@ def normalize_metadata_overrides(payload: dict[str, Any]) -> dict[str, Any]:
         overrides["douban_url"] = f"https://movie.douban.com/subject/{douban_id}/"
     ptgen_description = _normalize_ptgen_description(payload)
     if ptgen_description:
+        text_overrides = _metadata_overrides_from_text(ptgen_description)
+        for key, value in text_overrides.items():
+            if key not in overrides and value:
+                overrides[key] = value
+        if "douban_id" in overrides and "douban_url" not in overrides:
+            overrides["douban_url"] = f"https://movie.douban.com/subject/{overrides['douban_id']}/"
         overrides["ptgen_description"] = ptgen_description
     return overrides
 
@@ -162,6 +168,45 @@ def _normalize_ptgen_description(payload: dict[str, Any]) -> str | None:
         normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
         if normalized:
             return normalized
+    return None
+
+
+def _metadata_overrides_from_text(text: str) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    imdb_id = _extract_imdb_id_from_text(text)
+    tmdb_id = _extract_tmdb_id_from_text(text)
+    douban_id = _extract_douban_id_from_text(text)
+    if imdb_id:
+        overrides["imdb_id"] = imdb_id
+    if tmdb_id:
+        overrides["tmdb_id"] = tmdb_id
+    if douban_id:
+        overrides["douban_id"] = douban_id
+        overrides["douban_url"] = f"https://movie.douban.com/subject/{douban_id}/"
+    return overrides
+
+
+def _extract_imdb_id_from_text(text: str) -> int | None:
+    for pattern in (r"imdb\.com/title/tt(\d{5,10})", r"\btt(\d{5,10})\b", r"\bimdb(?:[_\s:-]*id)?[^\d]{0,40}(\d{5,10})\b"):
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return _normalize_int(match.group(1))
+    return None
+
+
+def _extract_tmdb_id_from_text(text: str) -> int | None:
+    for pattern in (r"themoviedb\.org/(?:movie|tv)/(\d{2,10})", r"\btmdb(?:[_\s:-]*id)?[^\d]{0,40}(\d{2,10})\b"):
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return _normalize_int(match.group(1))
+    return None
+
+
+def _extract_douban_id_from_text(text: str) -> str | None:
+    for pattern in (r"douban\.com/subject/(\d{5,})", r"(?:douban|豆瓣)[^\d]{0,40}(\d{5,})"):
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return str(match.group(1))
     return None
 
 

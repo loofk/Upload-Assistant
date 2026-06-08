@@ -14410,6 +14410,43 @@ def test_normalize_metadata_overrides_accepts_urls_ids_and_ptgen_description(tmp
     assert normalize_metadata_overrides({"ptgen": {"description": "◎片　　名　嵌套示例"}})["ptgen_description"] == "◎片　　名　嵌套示例"
 
 
+def test_normalize_metadata_overrides_extracts_ids_from_ptgen_description() -> None:
+    overrides = normalize_metadata_overrides(
+        {
+            "ptgen_description": "\n".join(
+                [
+                    "IMDb: https://www.imdb.com/title/tt1234567/",
+                    "TMDb: https://www.themoviedb.org/movie/999",
+                    "豆瓣: https://movie.douban.com/subject/1291546/",
+                    "◎译　　名　示例电影",
+                ]
+            )
+        }
+    )
+
+    assert overrides["imdb_id"] == 1234567
+    assert overrides["tmdb_id"] == 999
+    assert overrides["douban_id"] == "1291546"
+    assert overrides["douban_url"] == "https://movie.douban.com/subject/1291546/"
+    assert "◎译　　名　示例电影" in overrides["ptgen_description"]
+
+
+def test_normalize_metadata_overrides_prefers_explicit_ids_over_ptgen_text() -> None:
+    overrides = normalize_metadata_overrides(
+        {
+            "imdb_id": "tt7654321",
+            "tmdb_id": 111,
+            "douban_id": "26752088",
+            "ptgen_description": "IMDb: tt1234567\nTMDb: https://www.themoviedb.org/tv/999\nDouban: https://movie.douban.com/subject/1291546/",
+        }
+    )
+
+    assert overrides["imdb_id"] == 7654321
+    assert overrides["tmdb_id"] == 111
+    assert overrides["douban_id"] == "26752088"
+    assert overrides["douban_url"] == "https://movie.douban.com/subject/26752088/"
+
+
 @pytest.mark.asyncio
 async def test_enrich_source_metadata_applies_overrides_without_clobbering_existing() -> None:
     source_info = {
