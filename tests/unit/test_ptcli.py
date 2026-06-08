@@ -15073,7 +15073,22 @@ def test_material_generation_artifacts_keep_metadata_blockers_separate() -> None
 def test_pipeline_stage_blocker_next_action_explains_bdmv_bdinfo_requirement() -> None:
     action = ptcli_cli._pipeline_stage_blocker_next_action("target.materials.assets.bdinfo_for_disc: BDMV disc content requires --bdinfo-file for MTEAM target preparation.")
 
-    assert action == "Provide a BDInfo text file with --bdinfo-file for BDMV disc content, then regenerate the MTEAM target package."
+    assert action == "Provide BDInfo for BDMV disc content with --bdinfo-file or --generate-bdinfo, then rerun resume-target-package."
+
+
+def test_pipeline_stage_blocker_next_action_uses_specific_material_recovery() -> None:
+    cases = {
+        "target.materials.metadata.tmdb: TMDb id is missing.": "Fetch TMDb metadata with --enrich-metadata or supply it with --metadata-file/--tmdb-id, then rerun resume-target-package.",
+        "target.materials.metadata.douban: Douban id/url is missing.": "Fetch Douban metadata with --fetch-ptgen or supply it with --metadata-file/--douban-id/--douban-url, then rerun resume-target-package.",
+        "target.materials.metadata.ptgen_description: PTGen/Douban description text is missing.": "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
+        "target.materials.assets.mediainfo_or_bdinfo: MediaInfo/BDInfo has not been generated.": "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun resume-target-package.",
+        "target.materials.assets.screenshots: Screenshots are missing.": "Generate or provide screenshots with --generate-screenshots or --screenshot-file, then rerun resume-target-package.",
+        "target.materials.assets.image_host_uploads: Image host uploads are missing.": "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
+        "target.materials.description.screenshot_coverage: Description has fewer hosted screenshots than local screenshots.": "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
+    }
+
+    for blocker, expected in cases.items():
+        assert ptcli_cli._pipeline_stage_blocker_next_action(blocker) == expected
 
 
 def test_mteam_upload_gate_surfaces_duplicate_blocker() -> None:
