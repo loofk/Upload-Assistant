@@ -1678,6 +1678,14 @@ def test_target_preparation_missing_next_actions_explain_specific_external_ids()
     assert any("--imdb-id" in action for action in actions)
 
 
+def test_target_preparation_missing_next_actions_include_ptgen_for_generic_external_ids() -> None:
+    actions = ptcli_cli._target_preparation_missing_next_actions(["description.external_ids"])
+
+    assert actions == [
+        "Fetch or supply IMDb/TMDb/Douban metadata with --enrich-metadata, --fetch-ptgen, --metadata-file, --imdb-id, --tmdb-id, or --douban-id, then rerun resume-target-package."
+    ]
+
+
 def test_target_preparation_recovery_hints_explain_specific_external_ids() -> None:
     hints = ptcli_cli._target_preparation_recovery_hints(
         ["description.external_ids.tmdb", "description.external_ids.douban", "metadata.imdb"]
@@ -1692,10 +1700,25 @@ def test_target_preparation_recovery_hints_explain_specific_external_ids() -> No
     assert by_key["metadata.imdb_id"]["existing_file_options"] == ["--metadata-file", "--imdb-id"]
 
 
+def test_target_preparation_recovery_hints_include_ptgen_for_generic_external_ids() -> None:
+    hints = ptcli_cli._target_preparation_recovery_hints(["description.external_ids"])
+
+    assert hints[0]["key"] == "metadata.external_ids"
+    assert hints[0]["command_flags"] == ["--enrich-metadata", "--fetch-ptgen"]
+    assert hints[0]["existing_file_options"] == ["--metadata-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"]
+
+
 def test_target_package_material_auto_flags_include_specific_external_ids() -> None:
     flags = ptcli_cli._target_package_material_auto_flags(
         {"target_preparation_missing": ["description.external_ids.tmdb", "description.external_ids.douban"]}
     )
+
+    assert "--enrich-metadata" in flags
+    assert "--fetch-ptgen" in flags
+
+
+def test_target_package_material_auto_flags_include_ptgen_for_generic_external_ids() -> None:
+    flags = ptcli_cli._target_package_material_auto_flags({"target_preparation_missing": ["description.external_ids"]})
 
     assert "--enrich-metadata" in flags
     assert "--fetch-ptgen" in flags
