@@ -11,7 +11,17 @@
 
 ## Delivery Priority
 
-继续推进时按“关键闭环优先，体验和瘦身后置”的顺序交付。
+继续推进时按“真实关键闭环优先，机器可恢复次之，扩站和瘦身后置”的顺序交付。判断下一步是否该做，优先看它是否能让 U2/CHD -> MTEAM 的真实转种少一个人工断点；如果不能，就放到 P1/P2/P3。
+
+### Critical Path Order
+
+P0 内部也要严格按下面顺序推进，避免先优化边缘体验而漏掉 live 转种必需材料：
+
+1. 源站和 qBittorrent 闭环：读取 U2/CHD 详情、下载源种、注入 QB、等待完成、从 QB 结果推导内容路径，并让 summary 能恢复到同一条源站任务。
+2. 目标站材料闭环：基于内容路径和源站信息生成 MTEAM 必需材料，包括 IMDb/TMDb、豆瓣/PTGen、MediaInfo/BDInfo、视频截图、图床 URL、描述草稿和转载来源说明。
+3. MTEAM 上传闭环：查重、规则确认、字段映射、目标候选种子净化、安全 gate、live upload、下载 MTEAM 新种、注入 QB 并等待做种。
+4. 自动化闭环：把所有失败收敛到 blockers、next_actions、resume_commands、summary-check 和 shell/JSON 字段，保证盒子脚本或 AI agent 可以安全续跑。
+5. 体验和瘦身：只有 P0/P1 稳定后，再做命令别名、输出美化、扩站、Docker 精简和 legacy 删除。
 
 ### P0: U2/CHD -> MTEAM live closure
 
@@ -19,10 +29,14 @@
 
 - 源站详情读取、源种下载、qBittorrent 注入和等待完成可审计。
 - 从源站详情或外部元数据补齐 IMDb、TMDb 和豆瓣 ID；没有 ID 时必须在 blockers 中说明缺口，不能静默生成低质量描述。
-- 基于 IMDb/TMDb/豆瓣生成 MTEAM 所需描述，包括 PTGen/豆瓣简介、IMDb/TMDb/Douban 外部链接、MediaInfo/BDInfo、截图 BBCode 和转载来源信息。
-- 对本地内容生成 MediaInfo/BDInfo；影片类内容必须支持视频截图并上传图床，图床失败时 live upload 不应继续，除非目标站规则明确允许且用户显式放行。
+- 通过 IMDb/TMDb 获取片名、年份、类型、剧集/电影类型和外部链接；当 TMDb API key 缺失或查询失败时，summary 必须给出可恢复的 metadata blocker。
+- 获取豆瓣 ID/URL 和 PTGen/豆瓣简介；MTEAM 描述缺少豆瓣/PTGen 内容时不能进入 live upload ready。
+- 对本地内容生成 MediaInfo/BDInfo；影片类内容必须支持视频截图并上传图床，图床失败或只生成本地图片但没有可用 URL 时 live upload 不应继续。
+- 基于 IMDb/TMDb/豆瓣生成 MTEAM 所需描述，包括 PTGen/豆瓣简介、IMDb/TMDb/Douban 外部链接、MediaInfo/BDInfo、截图 BBCode、图床 URL 和转载来源信息。
 - MTEAM 查重、规则 obligation、字段映射、目标种子安全净化和 live upload gate 全部 ready。
 - 上传成功后下载 MTEAM 新种，注入 qBittorrent 做种，并在 summary/evidence 中暴露 hash、路径、规则确认和可恢复命令。
+
+P0 的实现不以“命令能跑完”为唯一标准，而以材料和规则 gate 是否足够硬为标准。只要缺少截图图床、IMDb/TMDb、豆瓣/PTGen、MediaInfo/BDInfo 或站规确认中的任一项，live upload 必须返回 blocked，并给出下一条可执行恢复命令或明确的人工动作。
 
 ### P1: automation hardening
 
@@ -30,6 +44,7 @@
 
 - `doctor` / `summary-check` 对运行时依赖、cookie/API、qBittorrent、图床、外部元数据服务给出机器可读诊断。
 - 所有失败都能落到 `blockers`、`next_actions`、`resume_commands` 和稳定 JSON 字段。
+- 对材料链单独暴露诊断字段，例如 metadata 是否含 IMDb/TMDb/豆瓣、MediaInfo/BDInfo 是否存在、截图数量、图床 URL 有效数量、描述是否 ready。
 - focused Docker/requirements 只包含 ptcli 闭环必需依赖，避免旧 Web UI/Discord 依赖泄漏到盒子 CLI。
 
 ### P2: more mainland PT flows
