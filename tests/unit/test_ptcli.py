@@ -15920,6 +15920,7 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     diagnostics = ptcli_cli._summary_check_diagnostics(summary_payload)
 
     preflight_diagnostics = diagnostics["target_upload_diagnostics"]["preflight"]
+    material_diagnostics = diagnostics["material_diagnostics"]
     assert preflight_diagnostics["status"] == "blocked"
     assert preflight_diagnostics["ready"] is False
     assert "materials.metadata.tmdb" in preflight_diagnostics["missing"]
@@ -15939,6 +15940,14 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert preflight_diagnostics["torrent_file"]["mteam_safe"] is True
     assert preflight_diagnostics["torrent_file"]["metadata_readable"] is True
     assert preflight_diagnostics["blockers"]
+    assert summary_payload["material_diagnostics"]["present"] is True
+    assert material_diagnostics["present"] is True
+    assert material_diagnostics["ready_for_mteam_upload"] is False
+    assert material_diagnostics["critical_path"]["ready"] is False
+    assert material_diagnostics["critical_path"]["next_step"] == "metadata"
+    assert "metadata.tmdb" in material_diagnostics["critical_path"]["missing"]
+    assert "assets.mediainfo_or_bdinfo" in material_diagnostics["critical_path"]["missing"]
+    assert "description.content" in material_diagnostics["critical_path"]["missing"]
     shell_fields = ptcli_cli._summary_check_target_upload_shell_fields(diagnostics["target_upload_diagnostics"])
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_READY"] == "0"
     assert "materials.metadata.tmdb" in shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MISSING"]
@@ -17009,6 +17018,10 @@ def test_target_upload_summary_exposes_target_preparation_audit(tmp_path) -> Non
     assert audit["description"]["bbcode_image_count"] == 1
     assert summary_payload["summary"]["target_preparation_ready"] is True
     assert summary_payload["artifacts"]["target_preparation_ready"] is True
+    assert summary_payload["material_diagnostics"]["present"] is True
+    assert summary_payload["material_diagnostics"]["ready_for_mteam_upload"] is True
+    assert summary_payload["material_diagnostics"]["critical_path"]["ready"] is True
+    assert summary_payload["material_diagnostics"]["critical_path"]["next_step"] is None
     assert summary_payload["resume_state"]["artifacts"]["target_preparation_ready"] is True
 
 

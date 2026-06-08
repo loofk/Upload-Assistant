@@ -1820,6 +1820,7 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
     destination = destination_dir / "ptcli-target-upload-summary.json"
     summary = _target_upload_summary(result, preflight, args)
     artifacts = _target_upload_summary_artifacts(result, preflight, args, str(destination))
+    material_diagnostics = _summary_material_diagnostics({"artifacts": artifacts})
     qbit_wait_fields = _qbit_wait_summary_fields({"summary": summary, "result": result})
     recommended_commands = _target_upload_recommended_commands(summary, args, artifacts, qbit_wait_fields=qbit_wait_fields)
     payload = {
@@ -1833,6 +1834,7 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
         "wait_options": _target_upload_wait_options(args),
         "summary": summary,
         "artifacts": artifacts,
+        "material_diagnostics": material_diagnostics,
         "recommended_commands": recommended_commands,
         "resume_state": _target_upload_resume_state(summary, artifacts, recommended_commands),
         "preflight": preflight,
@@ -1850,13 +1852,19 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
     rule_obligations = preflight.get("rule_obligation_review")
     duplicate_check = result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else _duplicate_check_from_target_package(preflight)
     preparation_audit = _target_preparation_audit_from_preflight(preflight)
+    target_materials = _target_package_materials_from_dir(args.package_dir)
     return {
         "summary_file": summary_file,
         "package_dir": _path_artifact(args.package_dir),
         "package_content_path": _path_artifact(package_content_path),
         "target_torrent_file": _path_artifact(args.torrent_file),
+        "target_materials": target_materials,
         "target_preparation_audit": preparation_audit,
         "target_preparation_ready": bool(preparation_audit.get("ready")),
+        "target_materials_ready": preparation_audit.get("materials_ready"),
+        "target_materials_missing": _string_list(target_materials.get("missing")),
+        "target_materials_warnings": _string_list(target_materials.get("warnings")),
+        "target_preparation_missing": _string_list(preparation_audit.get("missing")),
         "uploaded_torrent_id": _uploaded_torrent_id_from_result(result) or args.uploaded_torrent_id,
         "uploaded_torrent_hash": _uploaded_torrent_hash_from_result(result),
         "uploaded_torrent_file": _uploaded_torrent_file_artifact(downloaded_torrent, uploaded_torrent_path),
@@ -4007,7 +4015,7 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
     preparation_audit = _target_preparation_audit_from_preflight(package_preflight)
     target_preflight = _target_preflight_gates(package_preflight, preparation_audit)
-    target_materials = _doctor_target_materials(args.package_dir)
+    target_materials = _target_package_materials_from_dir(args.package_dir)
     content_path = args.content_path or package_preflight.get("content_path")
     return {
         "content_path": _path_artifact(str(content_path)) if content_path else None,
@@ -4054,7 +4062,7 @@ def _path_artifact(path: str | None) -> dict[str, Any] | None:
     }
 
 
-def _doctor_target_materials(package_dir: Any) -> dict[str, Any]:
+def _target_package_materials_from_dir(package_dir: Any) -> dict[str, Any]:
     if not package_dir:
         return {}
     try:
