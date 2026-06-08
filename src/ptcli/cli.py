@@ -2112,6 +2112,7 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
         "rule_obligations_ready": rule_obligations_ready,
     }
     missing = [name for name, ok in checks.items() if not ok]
+    blockers = _target_upload_followup_blockers(missing)
     qbit_retry_hints = qbit_wait_fields.get("qbit_wait_retry_hints") if isinstance(qbit_wait_fields.get("qbit_wait_retry_hints"), dict) else {}
     uploaded_retry_hint = qbit_retry_hints.get("uploaded") if isinstance(qbit_retry_hints.get("uploaded"), dict) else {}
     qbit_wait_mismatches = _string_list(qbit_wait_fields.get("qbit_wait_mismatches"))
@@ -2119,6 +2120,9 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
     uploaded_wait_query = uploaded_wait.get("query") if isinstance(uploaded_wait.get("query"), dict) else {}
     return {
         "ready": ready,
+        "ready_for_uploaded_seeding": ready,
+        "gates": checks,
+        "blockers": blockers,
         "uploaded": uploaded,
         "downloaded": downloaded,
         "injected": injected,
@@ -2149,6 +2153,21 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
         "wait_retry": uploaded_retry_hint if uploaded_retry_hint else None,
         "next_actions": _target_upload_followup_next_actions(missing),
     }
+
+
+def _target_upload_followup_blockers(missing: list[str]) -> list[str]:
+    labels = {
+        "uploaded": "target upload did not report a completed MTEAM upload",
+        "downloaded": "uploaded MTEAM torrent file has not been downloaded or provided",
+        "uploaded_torrent_hash": "uploaded MTEAM torrent hash evidence is missing",
+        "injected_torrent_hash": "uploaded MTEAM torrent has not been injected into qBittorrent",
+        "injection_verified": "uploaded MTEAM torrent injection is not verified in qBittorrent",
+        "uploaded_wait_evidence": "qBittorrent has not reported the uploaded MTEAM torrent as complete",
+        "hash_consistent": "uploaded torrent hash and qBittorrent injected hash are not verified consistent",
+        "duplicate_clean": "fresh MTEAM duplicate check evidence is not clean",
+        "rule_obligations_ready": "source and MTEAM rule obligations are not ready",
+    }
+    return [labels.get(item, item) for item in missing]
 
 
 def _target_upload_followup_next_actions(missing: list[str]) -> list[str]:
@@ -8575,9 +8594,13 @@ def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) 
     wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
     wait_query = followup.get("uploaded_wait_query") if isinstance(followup.get("uploaded_wait_query"), dict) else {}
     torrent_evidence = followup.get("uploaded_torrent_file_evidence") if isinstance(followup.get("uploaded_torrent_file_evidence"), dict) else {}
+    gates = followup.get("gates") if isinstance(followup.get("gates"), dict) else {}
     return {
         "PTCLI_UPLOADED_FOLLOWUP_PRESENT": _shell_bool(bool(followup)) if resume_state else None,
         "PTCLI_UPLOADED_FOLLOWUP_READY": _shell_bool(followup.get("ready")) if followup.get("ready") is not None else None,
+        "PTCLI_READY_FOR_UPLOADED_SEEDING": _shell_bool(followup.get("ready_for_uploaded_seeding")) if followup.get("ready_for_uploaded_seeding") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_GATES": json.dumps(gates, ensure_ascii=False) if gates else None,
+        "PTCLI_UPLOADED_FOLLOWUP_BLOCKERS": "|".join(_string_list(followup.get("blockers"))),
         "PTCLI_UPLOADED_FOLLOWUP_UPLOADED": _shell_bool(followup.get("uploaded")) if followup.get("uploaded") is not None else None,
         "PTCLI_UPLOADED_FOLLOWUP_DOWNLOADED": _shell_bool(followup.get("downloaded")) if followup.get("downloaded") is not None else None,
         "PTCLI_UPLOADED_FOLLOWUP_INJECTED": _shell_bool(followup.get("injected")) if followup.get("injected") is not None else None,

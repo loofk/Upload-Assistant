@@ -14984,6 +14984,12 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert summary_payload["resume_state"]["artifacts"]["target_rule_obligations"] is True
     uploaded_followup = summary_payload["resume_state"]["uploaded_followup"]
     assert uploaded_followup["ready"] is True
+    assert uploaded_followup["ready_for_uploaded_seeding"] is True
+    assert uploaded_followup["gates"]["uploaded"] is True
+    assert uploaded_followup["gates"]["downloaded"] is True
+    assert uploaded_followup["gates"]["injection_verified"] is True
+    assert uploaded_followup["gates"]["uploaded_wait_evidence"] is True
+    assert uploaded_followup["blockers"] == []
     assert uploaded_followup["missing"] == []
     assert uploaded_followup["uploaded"] is True
     assert uploaded_followup["downloaded"] is True
@@ -15048,6 +15054,9 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert "export PTCLI_TARGET_UPLOAD_MISSING=''\n" in out
     assert "export PTCLI_TARGET_UPLOAD_TORRENT_ID=999\n" in out
     assert "export PTCLI_UPLOADED_FOLLOWUP_READY=1\n" in out
+    assert "export PTCLI_READY_FOR_UPLOADED_SEEDING=1\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_BLOCKERS=''\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_GATES=" in out
     assert "export PTCLI_UPLOADED_FOLLOWUP_MISSING=''\n" in out
     assert f"export PTCLI_UPLOADED_FOLLOWUP_TORRENT_HASH={uploaded_hash}\n" in out
     assert f"export PTCLI_UPLOADED_FOLLOWUP_INJECTED_HASH={uploaded_hash}\n" in out
@@ -15636,9 +15645,15 @@ async def test_target_upload_download_only_records_uploaded_torrent_file_evidenc
     assert result["summary"]["mode"] == "resumed_uploaded_id"
     assert result["resume_state"]["ready"] is True
     assert result["resume_state"]["uploaded_followup"]["ready"] is False
+    assert result["resume_state"]["uploaded_followup"]["ready_for_uploaded_seeding"] is False
     assert result["resume_state"]["uploaded_followup"]["downloaded"] is True
     assert result["resume_state"]["uploaded_followup"]["uploaded_torrent_hash"] == result["downloaded_torrent"]["torrent_hash"]
     assert result["resume_state"]["uploaded_followup"]["missing"] == ["injected_torrent_hash", "injection_verified", "uploaded_wait_evidence"]
+    assert result["resume_state"]["uploaded_followup"]["gates"]["downloaded"] is True
+    assert result["resume_state"]["uploaded_followup"]["gates"]["injection_verified"] is False
+    assert result["resume_state"]["uploaded_followup"]["gates"]["uploaded_wait_evidence"] is False
+    assert "uploaded MTEAM torrent injection is not verified in qBittorrent" in result["resume_state"]["uploaded_followup"]["blockers"]
+    assert "qBittorrent has not reported the uploaded MTEAM torrent as complete" in result["resume_state"]["uploaded_followup"]["blockers"]
     assert any("Inject the uploaded MTEAM torrent" in action for action in result["resume_state"]["uploaded_followup"]["next_actions"])
     assert any("Wait for qBittorrent" in action for action in result["resume_state"]["uploaded_followup"]["next_actions"])
     assert result["resume_state"]["next_stage"] == "resume-uploaded-torrent"
