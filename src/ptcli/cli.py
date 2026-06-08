@@ -2343,7 +2343,8 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     }
     blockers: list[str] = []
     for key, section in sections.items():
-        for blocker in _string_list(section.get("blockers")):
+        section_blockers = _string_list(section.get("all_blockers")) or _string_list(section.get("blockers"))
+        for blocker in section_blockers:
             _append_unique_string(blockers, f"{key}: {blocker}")
     _extend_unique_string(blockers, _string_list(artifacts.get("target_materials_warnings")))
     image_host_evidence = _summary_image_host_evidence(sections, target_assets)
@@ -2405,6 +2406,9 @@ def _summary_material_section(section: Any) -> dict[str, Any]:
         "readiness",
         "sources",
         "applied",
+        "blockers",
+        "readiness_blockers",
+        "all_blockers",
         "imdb_id",
         "tmdb_id",
         "douban_id",
@@ -5696,7 +5700,9 @@ def _material_generation_artifacts(stages: list[dict[str, Any]]) -> dict[str, An
             "applied": enrichment.get("applied") if isinstance(enrichment.get("applied"), dict) else {},
             "readiness": enrichment.get("readiness") if isinstance(enrichment.get("readiness"), dict) else {},
             "missing": _string_list(enrichment.get("missing")),
-            "blockers": [*_string_list(enrichment.get("blockers")), *_string_list(enrichment.get("readiness_blockers"))],
+            "blockers": _string_list(enrichment.get("blockers")),
+            "readiness_blockers": _string_list(enrichment.get("readiness_blockers")),
+            "all_blockers": [*_string_list(enrichment.get("blockers")), *_string_list(enrichment.get("readiness_blockers"))],
             "imdb_id": result.get("imdb_id"),
             "tmdb_id": result.get("tmdb_id"),
             "douban_id": result.get("douban_id"),
@@ -8249,6 +8255,10 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_METADATA_READINESS": json.dumps(metadata_readiness, ensure_ascii=False) if metadata_readiness else None,
         "PTCLI_MATERIAL_METADATA_SOURCES": ",".join(_string_list(metadata.get("sources"))),
         "PTCLI_MATERIAL_METADATA_APPLIED_KEYS": ",".join(sorted(str(key) for key in metadata.get("applied", {}) if isinstance(metadata.get("applied"), dict))),
+        "PTCLI_MATERIAL_METADATA_BLOCKERS": "|".join(_string_list(metadata.get("blockers"))),
+        "PTCLI_MATERIAL_METADATA_READINESS_BLOCKERS": "|".join(_string_list(metadata.get("readiness_blockers"))),
+        "PTCLI_MATERIAL_METADATA_BLOCKER_COUNT": len(_string_list(metadata.get("blockers"))),
+        "PTCLI_MATERIAL_METADATA_READINESS_BLOCKER_COUNT": len(_string_list(metadata.get("readiness_blockers"))),
         "PTCLI_MATERIAL_METADATA_IMDB_ID": metadata.get("imdb_id"),
         "PTCLI_MATERIAL_METADATA_TMDB_ID": metadata.get("tmdb_id"),
         "PTCLI_MATERIAL_METADATA_DOUBAN_ID": metadata.get("douban_id"),

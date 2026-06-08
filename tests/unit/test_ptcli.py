@@ -4518,6 +4518,10 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_METADATA_OK=1\n" in out
     assert "export PTCLI_MATERIAL_METADATA_SOURCES=source,tmdb_api,ptgen\n" in out
     assert "export PTCLI_MATERIAL_METADATA_APPLIED_KEYS=douban_url,tmdb_id\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_BLOCKERS=''\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_READINESS_BLOCKERS=''\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_BLOCKER_COUNT=0\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_READINESS_BLOCKER_COUNT=0\n" in out
     assert "export PTCLI_MATERIAL_METADATA_IMDB_ID=1234567\n" in out
     assert "export PTCLI_MATERIAL_METADATA_TMDB_ID=999\n" in out
     assert "export PTCLI_MATERIAL_METADATA_DOUBAN_ID=1291546\n" in out
@@ -13222,6 +13226,40 @@ def test_pipeline_stage_blockers_include_metadata_enrichment_readiness() -> None
     assert "metadata-enrich: Missing metadata after enrichment: tmdb_id, douban_id, douban_url" in blockers
     assert "metadata-enrich: PTGen/Douban description is missing after enrichment." in blockers
     assert actions.count("Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description, then rerun target preparation.") == len(actions)
+
+
+def test_material_generation_artifacts_keep_metadata_blockers_separate() -> None:
+    artifacts = ptcli_cli._material_generation_artifacts(
+        [
+            {
+                "stage": "metadata-enrich",
+                "ok": False,
+                "message": "Metadata enrichment completed with blockers.",
+                "result": {
+                    "imdb_id": 1234567,
+                    "tmdb_id": None,
+                    "douban_id": None,
+                    "douban_url": None,
+                    "metadata_enrichment": {
+                        "status": "unchanged",
+                        "ready": False,
+                        "applied": {},
+                        "missing": ["tmdb_id", "douban_id", "douban_url"],
+                        "readiness": {"tmdb_id": {"ready": False, "required": True, "source": None}},
+                        "sources": [],
+                        "blockers": ["TMDb enrichment requires DEFAULT.tmdb_api."],
+                        "readiness_blockers": ["Missing metadata after enrichment: tmdb_id, douban_id, douban_url"],
+                    },
+                },
+            }
+        ]
+    )
+
+    metadata = artifacts["metadata"]
+    assert metadata["ok"] is False
+    assert metadata["blockers"] == ["TMDb enrichment requires DEFAULT.tmdb_api."]
+    assert metadata["readiness_blockers"] == ["Missing metadata after enrichment: tmdb_id, douban_id, douban_url"]
+    assert metadata["all_blockers"] == ["TMDb enrichment requires DEFAULT.tmdb_api.", "Missing metadata after enrichment: tmdb_id, douban_id, douban_url"]
 
 
 def test_pipeline_stage_blocker_next_action_explains_bdmv_bdinfo_requirement() -> None:
