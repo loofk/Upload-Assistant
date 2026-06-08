@@ -1930,6 +1930,10 @@ def _uploaded_wait_retry_hint(qbit_wait_fields: dict[str, Any] | None) -> dict[s
 
 
 def _uploaded_wait_retry_save_path(hint: dict[str, Any]) -> str | None:
+    return _qbit_wait_retry_save_path(hint)
+
+
+def _qbit_wait_retry_save_path(hint: dict[str, Any]) -> str | None:
     for key in ("suggested_content_path", "suggested_save_path"):
         value = hint.get(key)
         if isinstance(value, str) and value:
@@ -6036,7 +6040,10 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     uploaded_wait_options = wait_options.get("uploaded") if isinstance(wait_options.get("uploaded"), dict) else {}
     content_path = payload.get("path")
     path_args = ["--path", str(content_path)] if content_path else []
+    qbit_retry_hints = artifacts.get("qbit_wait_retry_hints") if isinstance(artifacts.get("qbit_wait_retry_hints"), dict) else {}
+    source_retry_hint = qbit_retry_hints.get("source") if isinstance(qbit_retry_hints.get("source"), dict) and qbit_retry_hints.get("source", {}).get("retry_recommended") is True else {}
     source_save_path = artifacts.get("source_save_path") or payload.get("source_save_path") or content_path or "/downloads"
+    source_save_path = _qbit_wait_retry_save_path(source_retry_hint) or source_save_path
     uploaded_save_path = artifacts.get("uploaded_save_path") or content_path
     uploaded_save_path_args = ["--uploaded-save-path", str(uploaded_save_path)] if uploaded_save_path else []
     source_wait_args: list[str] = []
