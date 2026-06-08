@@ -15229,6 +15229,12 @@ def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path, capsys) 
     assert followup["wait_retry"]["suggested_torrent_hash"] == "b" * 40
     assert followup["wait_retry"]["suggested_content_path"] == "/downloads/Other"
     assert followup["wait_retry"]["suggested_save_path"] == "/downloads"
+    commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
+    assert "--uploaded-save-path /downloads/Other" in commands["resume-uploaded-torrent"]
+    assert "/downloads/Other" in command_argv["resume-uploaded-torrent"]
+    assert "--uploaded-save-path /downloads/Other" in commands["retorrent-resume-uploaded-torrent"]
+    assert "/downloads/Other" in command_argv["retorrent-resume-uploaded-torrent"]
     diagnostics = summary_payload["qbit_wait_diagnostics"]["uploaded"]
     assert diagnostics["complete"] is True
     assert diagnostics["request_mismatch"] is True

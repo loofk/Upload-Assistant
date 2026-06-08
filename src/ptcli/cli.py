@@ -1702,7 +1702,8 @@ def _maybe_write_target_upload_summary(args: argparse.Namespace, result: dict[st
 
 def _target_upload_handoff_fields(summary: dict[str, Any], result: dict[str, Any], preflight: dict[str, Any], args: argparse.Namespace, *, summary_file: str | None) -> dict[str, Any]:
     artifacts = _target_upload_summary_artifacts(result, preflight, args, summary_file or "")
-    recommended_commands = _target_upload_recommended_commands(summary, args, artifacts)
+    qbit_wait_fields = _qbit_wait_summary_fields({"summary": summary, "result": result})
+    recommended_commands = _target_upload_recommended_commands(summary, args, artifacts, qbit_wait_fields=qbit_wait_fields)
     resume_state = _target_upload_resume_state(summary, artifacts, recommended_commands)
     command_audit = _resume_command_audit_fields(recommended_commands, resume_state.get("next_command"), resume_state.get("next_command_argv"))
     automation_fields = _target_upload_automation_fields(summary, resume_state, command_audit)
@@ -1769,7 +1770,8 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
     destination = destination_dir / "ptcli-target-upload-summary.json"
     summary = _target_upload_summary(result, preflight, args)
     artifacts = _target_upload_summary_artifacts(result, preflight, args, str(destination))
-    recommended_commands = _target_upload_recommended_commands(summary, args, artifacts)
+    qbit_wait_fields = _qbit_wait_summary_fields({"summary": summary, "result": result})
+    recommended_commands = _target_upload_recommended_commands(summary, args, artifacts, qbit_wait_fields=qbit_wait_fields)
     payload = {
         "schema_version": 1,
         "kind": "ptcli.target_upload.summary",
@@ -1786,7 +1788,7 @@ def _write_target_upload_summary(result: dict[str, Any], preflight: dict[str, An
         "preflight": preflight,
         "result": result,
     }
-    payload.update(_qbit_wait_summary_fields(payload))
+    payload.update(qbit_wait_fields)
     destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return str(destination)
 
@@ -1833,15 +1835,18 @@ def _uploaded_torrent_file_artifact(downloaded_torrent: Any, uploaded_torrent_pa
     return artifact or None
 
 
-def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.Namespace, artifacts: dict[str, Any]) -> list[dict[str, Any]]:
+def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.Namespace, artifacts: dict[str, Any], *, qbit_wait_fields: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     commands: list[dict[str, Any]] = []
     package_artifact = artifacts.get("package_dir")
     uploaded_torrent_artifact = artifacts.get("uploaded_torrent_file")
     uploaded_torrent_id = artifacts.get("uploaded_torrent_id")
     uploaded_save_path_artifact = artifacts.get("uploaded_save_path")
+    uploaded_wait_retry = _uploaded_wait_retry_hint(qbit_wait_fields)
+    retry_save_path = _uploaded_wait_retry_save_path(uploaded_wait_retry) or _artifact_path(uploaded_save_path_artifact)
+    retry_save_path_artifact = {"path": retry_save_path} if retry_save_path else uploaded_save_path_artifact
     retry_args = _target_upload_retry_args(args)
-    if not args.uploaded_save_path and (uploaded_save_path := _artifact_path(uploaded_save_path_artifact)):
-        retry_args.extend(["--uploaded-save-path", uploaded_save_path])
+    if not args.uploaded_save_path and retry_save_path:
+        retry_args.extend(["--uploaded-save-path", retry_save_path])
     commands.append(_ptcli_command_entry("target-upload-retry", retry_args))
     if isinstance(package_artifact, dict) and uploaded_torrent_id and not (isinstance(uploaded_torrent_artifact, dict) and uploaded_torrent_artifact.get("path")):
         download_args = [
@@ -1864,8 +1869,8 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             download_args.extend(["--uploaded-output-dir", args.uploaded_output_dir])
         if args.summary_output_dir:
             download_args.extend(["--summary-output-dir", args.summary_output_dir])
-        if isinstance(uploaded_save_path_artifact, dict) and uploaded_save_path_artifact.get("path"):
-            download_args.extend(["--uploaded-save-path", str(uploaded_save_path_artifact["path"])])
+        if retry_save_path:
+            download_args.extend(["--uploaded-save-path", retry_save_path])
         if args.uploaded_qbit_category:
             download_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
         if args.uploaded_qbit_tags:
@@ -1874,7 +1879,7 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             download_args.append("--uploaded-paused")
         _append_uploaded_wait_options(download_args, args)
         commands.append(_ptcli_command_entry("resume-uploaded-torrent-download", download_args))
-        retorrent_args = _target_upload_retorrent_resume_args(args, str(package_artifact.get("path") or args.package_dir), uploaded_torrent_id=str(uploaded_torrent_id), uploaded_save_path_artifact=uploaded_save_path_artifact)
+        retorrent_args = _target_upload_retorrent_resume_args(args, str(package_artifact.get("path") or args.package_dir), uploaded_torrent_id=str(uploaded_torrent_id), uploaded_save_path_artifact=retry_save_path_artifact)
         if retorrent_args:
             commands.append(_ptcli_command_entry("retorrent-resume-uploaded-torrent-download", retorrent_args))
     if isinstance(package_artifact, dict) and isinstance(uploaded_torrent_artifact, dict) and uploaded_torrent_artifact.get("path"):
@@ -1893,8 +1898,8 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
         ]
         if args.config:
             resume_args.extend(["--config", args.config])
-        if isinstance(uploaded_save_path_artifact, dict) and uploaded_save_path_artifact.get("path"):
-            resume_args.extend(["--uploaded-save-path", str(uploaded_save_path_artifact["path"])])
+        if retry_save_path:
+            resume_args.extend(["--uploaded-save-path", retry_save_path])
         if args.summary_output_dir:
             resume_args.extend(["--summary-output-dir", args.summary_output_dir])
         if args.uploaded_qbit_category:
@@ -1909,13 +1914,27 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             args,
             str(package_artifact.get("path") or args.package_dir),
             uploaded_torrent_file=str(uploaded_torrent_artifact["path"]),
-            uploaded_save_path_artifact=uploaded_save_path_artifact,
+            uploaded_save_path_artifact=retry_save_path_artifact,
         )
         if retorrent_args:
             commands.append(_ptcli_command_entry("retorrent-resume-uploaded-torrent", retorrent_args))
     if summary.get("ready"):
         commands.append(_ptcli_command_entry("verify-seeding", ["inspect", "--client", args.client, "--json"]))
     return commands
+
+
+def _uploaded_wait_retry_hint(qbit_wait_fields: dict[str, Any] | None) -> dict[str, Any]:
+    retry_hints = qbit_wait_fields.get("qbit_wait_retry_hints") if isinstance(qbit_wait_fields, dict) and isinstance(qbit_wait_fields.get("qbit_wait_retry_hints"), dict) else {}
+    hint = retry_hints.get("uploaded") if isinstance(retry_hints.get("uploaded"), dict) else {}
+    return hint if hint.get("retry_recommended") is True else {}
+
+
+def _uploaded_wait_retry_save_path(hint: dict[str, Any]) -> str | None:
+    for key in ("suggested_content_path", "suggested_save_path"):
+        value = hint.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def _target_upload_retorrent_resume_args(
