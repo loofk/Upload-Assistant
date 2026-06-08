@@ -2547,6 +2547,9 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
     completion_review = summary.get("completion_review") if isinstance(summary.get("completion_review"), dict) else {}
     checks = completion_review.get("checks") if isinstance(completion_review.get("checks"), dict) else {}
     uploaded_wait_query = completion_review.get("uploaded_wait_query") if isinstance(completion_review.get("uploaded_wait_query"), dict) else {}
+    preparation_audit = summary.get("target_preparation_audit") if isinstance(summary.get("target_preparation_audit"), dict) else {}
+    preparation_payload = preparation_audit.get("payload") if isinstance(preparation_audit.get("payload"), dict) else {}
+    preflight_torrent = preparation_payload.get("torrent_file") if isinstance(preparation_payload.get("torrent_file"), dict) else {}
     resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
     uploaded_followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
     return {
@@ -2567,6 +2570,21 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
             "uploaded_save_path": completion_review.get("uploaded_save_path"),
             "uploaded_wait_query": uploaded_wait_query,
             "preflight_status": completion_review.get("preflight_status"),
+        },
+        "preflight": {
+            "status": summary.get("preflight_status"),
+            "ready": summary.get("preflight_status") == "ready" and bool(preparation_audit.get("ready")),
+            "blockers": _string_list(summary.get("preflight_blockers")),
+            "target_preparation_ready": summary.get("target_preparation_ready"),
+            "materials_ready": preparation_audit.get("materials_ready"),
+            "metadata_ready": preparation_audit.get("metadata_ready"),
+            "assets_ready": preparation_audit.get("assets_ready"),
+            "description_ready": preparation_audit.get("description_ready"),
+            "payload_ready": preparation_audit.get("payload_ready"),
+            "payload_checks_ready": preparation_payload.get("payload_checks_ready"),
+            "description_checks_ready": preparation_payload.get("description_checks_ready"),
+            "materials_ready_required": preparation_payload.get("materials_ready_required"),
+            "torrent_file": preflight_torrent,
         },
     }
 
@@ -8599,6 +8617,8 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
     completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
     checks = completion.get("checks") if isinstance(completion.get("checks"), dict) else {}
     wait_query = completion.get("uploaded_wait_query") if isinstance(completion.get("uploaded_wait_query"), dict) else {}
+    preflight = target_upload_diagnostics.get("preflight") if isinstance(target_upload_diagnostics.get("preflight"), dict) else {}
+    preflight_torrent = preflight.get("torrent_file") if isinstance(preflight.get("torrent_file"), dict) else {}
     return {
         "PTCLI_TARGET_UPLOAD_PRESENT": _shell_bool(target_upload_diagnostics.get("present")) if "present" in target_upload_diagnostics else None,
         "PTCLI_TARGET_UPLOAD_MODE": target_upload_diagnostics.get("mode"),
@@ -8616,6 +8636,21 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
         "PTCLI_TARGET_UPLOAD_WAIT_QUERY_TIMEOUT": wait_query.get("timeout"),
         "PTCLI_TARGET_UPLOAD_WAIT_QUERY_INTERVAL": wait_query.get("interval"),
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_STATUS": completion.get("preflight_status"),
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_READY": _shell_bool(preflight.get("ready")) if preflight.get("ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_BLOCKERS": "|".join(_string_list(preflight.get("blockers"))),
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_PREPARATION_READY": _shell_bool(preflight.get("target_preparation_ready")) if preflight.get("target_preparation_ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_MATERIALS_READY": _shell_bool(preflight.get("materials_ready")) if preflight.get("materials_ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_METADATA_READY": _shell_bool(preflight.get("metadata_ready")) if preflight.get("metadata_ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_ASSETS_READY": _shell_bool(preflight.get("assets_ready")) if preflight.get("assets_ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_READY": _shell_bool(preflight.get("description_ready")) if preflight.get("description_ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_PAYLOAD_READY": _shell_bool(preflight.get("payload_ready")) if preflight.get("payload_ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_PAYLOAD_CHECKS_READY": _shell_bool(preflight.get("payload_checks_ready")) if preflight.get("payload_checks_ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_CHECKS_READY": _shell_bool(preflight.get("description_checks_ready")) if preflight.get("description_checks_ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_MATERIALS_READY_REQUIRED": _shell_bool(preflight.get("materials_ready_required")) if preflight.get("materials_ready_required") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_PATH": preflight_torrent.get("path"),
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_MTEAM_SAFE": _shell_bool(preflight_torrent.get("mteam_safe")) if preflight_torrent.get("mteam_safe") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_METADATA_READABLE": _shell_bool(preflight_torrent.get("metadata_readable")) if preflight_torrent.get("metadata_readable") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_SOURCE_FLAG": preflight_torrent.get("source_flag"),
         "PTCLI_TARGET_UPLOAD_CHECK_PREPARATION_READY": _summary_check_bool_field(checks, "target_preparation_ready"),
         "PTCLI_TARGET_UPLOAD_CHECK_UPLOADED": _summary_check_bool_field(checks, "uploaded"),
         "PTCLI_TARGET_UPLOAD_CHECK_TORRENT_FILE": _summary_check_bool_field(checks, "uploaded_torrent_file"),

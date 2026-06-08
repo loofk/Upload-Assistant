@@ -14707,6 +14707,56 @@ def test_mteam_upload_preflight_execute_requires_ready_materials(tmp_path) -> No
     assert any("materials.assets.mediainfo_or_bdinfo" in blocker for blocker in preflight["upload_payload"]["blockers"])
 
 
+def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+    args = build_parser().parse_args(["target-upload", "--package-dir", package["package_dir"], "--torrent-file", str(torrent_file), "--execute", "--confirm-upload"])
+    summary_file = ptcli_cli._write_target_upload_summary(preflight, preflight, args, package["package_dir"])
+    summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+
+    diagnostics = ptcli_cli._summary_check_diagnostics(summary_payload)
+
+    preflight_diagnostics = diagnostics["target_upload_diagnostics"]["preflight"]
+    assert preflight_diagnostics["status"] == "blocked"
+    assert preflight_diagnostics["ready"] is False
+    assert preflight_diagnostics["target_preparation_ready"] is False
+    assert preflight_diagnostics["materials_ready"] is False
+    assert preflight_diagnostics["metadata_ready"] is False
+    assert preflight_diagnostics["assets_ready"] is False
+    assert preflight_diagnostics["description_ready"] is False
+    assert preflight_diagnostics["payload_ready"] is False
+    assert preflight_diagnostics["payload_checks_ready"] is True
+    assert preflight_diagnostics["description_checks_ready"] is False
+    assert preflight_diagnostics["materials_ready_required"] is True
+    assert preflight_diagnostics["torrent_file"]["mteam_safe"] is True
+    assert preflight_diagnostics["torrent_file"]["metadata_readable"] is True
+    assert preflight_diagnostics["blockers"]
+    shell_fields = ptcli_cli._summary_check_target_upload_shell_fields(diagnostics["target_upload_diagnostics"])
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_READY"] == "0"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MATERIALS_READY"] == "0"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_METADATA_READY"] == "0"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_ASSETS_READY"] == "0"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_READY"] == "0"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_PAYLOAD_READY"] == "0"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_PAYLOAD_CHECKS_READY"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_CHECKS_READY"] == "0"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MATERIALS_READY_REQUIRED"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_MTEAM_SAFE"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_METADATA_READABLE"] == "1"
+
+
 def test_mteam_upload_preflight_execute_requires_materials_even_when_none_supplied(tmp_path) -> None:
     source_info = {
         "tracker": "U2",
@@ -15343,6 +15393,22 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert uploaded_followup["uploaded_wait_query"] == {"torrent_hash": uploaded_hash, "content_path": "/downloads/Example", "timeout": 42.0, "interval": 3.0}
     diagnostics = ptcli_cli._summary_check_diagnostics(summary_payload)
     assert diagnostics["target_upload_diagnostics"]["ready_for_uploaded_seeding"] is True
+    preflight_diagnostics = diagnostics["target_upload_diagnostics"]["preflight"]
+    assert preflight_diagnostics["status"] == "ready"
+    assert preflight_diagnostics["ready"] is True
+    assert preflight_diagnostics["blockers"] == []
+    assert preflight_diagnostics["target_preparation_ready"] is True
+    assert preflight_diagnostics["materials_ready"] is True
+    assert preflight_diagnostics["metadata_ready"] is True
+    assert preflight_diagnostics["assets_ready"] is True
+    assert preflight_diagnostics["description_ready"] is True
+    assert preflight_diagnostics["payload_ready"] is True
+    assert preflight_diagnostics["payload_checks_ready"] is True
+    assert preflight_diagnostics["description_checks_ready"] is True
+    assert preflight_diagnostics["materials_ready_required"] is True
+    assert preflight_diagnostics["torrent_file"]["mteam_safe"] is True
+    assert preflight_diagnostics["torrent_file"]["metadata_readable"] is True
+    assert preflight_diagnostics["torrent_file"]["source_flag"] == "MTEAM"
     assert diagnostics["completion_matrix"]["domains"]["target_upload"]["evidence"]["ready_for_uploaded_seeding"] is True
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
@@ -15416,6 +15482,21 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_QUERY_TIMEOUT=42.0\n" in out
     assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_QUERY_INTERVAL=3.0\n" in out
     assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_STATUS=ready\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_BLOCKERS=''\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_PREPARATION_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_MATERIALS_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_METADATA_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_ASSETS_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_PAYLOAD_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_PAYLOAD_CHECKS_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_DESCRIPTION_CHECKS_READY=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_MATERIALS_READY_REQUIRED=1\n" in out
+    assert f"export PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_PATH={torrent_file}\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_MTEAM_SAFE=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_METADATA_READABLE=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_SOURCE_FLAG=MTEAM\n" in out
     assert "export PTCLI_TARGET_UPLOAD_CHECK_PREPARATION_READY=1\n" in out
     assert "export PTCLI_TARGET_UPLOAD_CHECK_TORRENT_FILE=1\n" in out
     assert "export PTCLI_TARGET_UPLOAD_CHECK_INJECTION_VERIFIED=1\n" in out
