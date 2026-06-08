@@ -1417,7 +1417,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         uploaded_torrent_id=args.uploaded_torrent_id,
         uploaded_torrent_file=args.uploaded_torrent_file,
         inject_uploaded_torrent=True,
-        uploaded_save_path=args.uploaded_save_path,
+        uploaded_save_path=args.uploaded_save_path or args.content_path or args.save_path,
         uploaded_qbit_category=args.uploaded_qbit_category,
         uploaded_qbit_tags=args.uploaded_qbit_tags,
         uploaded_paused=args.uploaded_paused,

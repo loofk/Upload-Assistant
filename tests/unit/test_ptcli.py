@@ -1033,6 +1033,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.client == "default"
     assert pipeline_args.summary_output_dir == str(tmp_path / "summary")
     assert pipeline_args.save_path == "/downloads"
+    assert pipeline_args.uploaded_save_path == "/downloads"
     assert pipeline_args.wait_timeout == 7200.0
     assert pipeline_args.wait_interval == 45.0
     assert pipeline_args.enrich_metadata is True
@@ -1096,7 +1097,7 @@ async def test_retorrent_execute_enables_uploaded_torrent_followup_by_default(mo
     assert pipeline_args.download_uploaded_torrent is True
     assert pipeline_args.inject_uploaded_torrent is True
     assert pipeline_args.wait_uploaded_complete is True
-    assert pipeline_args.uploaded_save_path is None
+    assert pipeline_args.uploaded_save_path == "/downloads/Name"
     assert pipeline_args.content_path == "/downloads/Name"
     assert pipeline_args.write_summary is True
 
@@ -1305,6 +1306,7 @@ async def test_retorrent_execute_defaults_to_export_target_torrent(monkeypatch) 
     assert payload["ready"] is True
     assert captured_args["args"].export_target_torrent is True
     assert captured_args["args"].target_torrent_file is None
+    assert captured_args["args"].uploaded_save_path == "/downloads/Name"
     assert captured_args["args"].uploaded_output_dir == "./tmp/uploaded"
     assert captured_args["args"].enrich_metadata is True
     assert captured_args["args"].fetch_ptgen is True
