@@ -735,6 +735,24 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                 },
             },
             "summary": {"ready": True, "complete": True, "status": "complete"},
+            "material_diagnostics": {
+                "present": True,
+                "ready_for_mteam_upload": True,
+                "critical_ready": True,
+                "critical_missing": [],
+                "critical_path": {"ready": True, "next_step": None, "missing": []},
+                "image_host_urls": {"img_urls": ["https://img.example/thumb.png"]},
+            },
+            "target_preflight_diagnostics": {
+                "present": True,
+                "status": "ready",
+                "ready": True,
+                "target_preparation_ready": True,
+                "materials_ready": True,
+                "description_ready": True,
+                "payload_ready": True,
+                "materials_ready_required": True,
+            },
             "closure_audit": {"ready": True, "missing": [], "items": [{"name": "source.ready", "ok": True}]},
             "summary_file": str(tmp_path / "summary" / "ptcli-run-summary.json"),
             "output_options": {
@@ -877,6 +895,13 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["evidence"]["source"]["mode"] == "downloaded"
     assert payload["evidence"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert payload["summary"]["status"] == "complete"
+    assert payload["material_diagnostics"]["ready_for_mteam_upload"] is True
+    assert payload["material_diagnostics"]["critical_path"]["ready"] is True
+    assert payload["material_diagnostics"]["image_host_urls"]["img_urls"] == ["https://img.example/thumb.png"]
+    assert payload["target_preflight_diagnostics"]["ready"] is True
+    assert payload["target_preflight_diagnostics"]["materials_ready"] is True
+    assert payload["target_preflight_diagnostics"]["description_ready"] is True
+    assert payload["target_preflight_diagnostics"]["payload_ready"] is True
     assert payload["summary_file"].endswith("ptcli-run-summary.json")
     assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--json"]
     assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--run-next-command"])
@@ -1838,6 +1863,36 @@ def test_retorrent_execute_artifacts_preserve_target_payload_review() -> None:
     artifacts = ptcli_cli._retorrent_execute_artifacts({"artifacts": {}}, {"target": {"payload_review": payload_review}}, {"target": {}})
 
     assert artifacts["target_payload_review"] == payload_review
+
+
+def test_retorrent_execute_artifacts_derive_target_preflight_gates() -> None:
+    preparation_audit = {
+        "ready": True,
+        "materials_ready": True,
+        "metadata_ready": True,
+        "assets_ready": True,
+        "description_ready": True,
+        "payload_ready": True,
+        "missing": [],
+        "payload": {
+            "materials_ready_required": True,
+            "payload_checks_ready": True,
+            "description_checks_ready": True,
+            "torrent_file": {"path": "/tmp/mteam.torrent", "mteam_safe": True, "metadata_readable": True, "source_flag": "MTEAM"},
+        },
+    }
+
+    artifacts = ptcli_cli._retorrent_execute_artifacts({"artifacts": {"target_preparation_audit": preparation_audit}}, {}, {})
+    diagnostics = ptcli_cli._summary_target_preflight_diagnostics({"artifacts": artifacts})
+
+    assert artifacts["target_preflight_gates"]["ready"] is True
+    assert diagnostics["ready"] is True
+    assert diagnostics["target_preparation_ready"] is True
+    assert diagnostics["materials_ready"] is True
+    assert diagnostics["description_ready"] is True
+    assert diagnostics["payload_ready"] is True
+    assert diagnostics["materials_ready_required"] is True
+    assert diagnostics["torrent_file"]["mteam_safe"] is True
 
 
 @pytest.mark.asyncio

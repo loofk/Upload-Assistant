@@ -705,6 +705,10 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     closure_audit = pipeline_result.get("closure_audit") if isinstance(pipeline_result.get("closure_audit"), dict) else _pipeline_closure_audit(closure, evidence)
     ready = bool(pipeline_result.get("ready"))
     artifacts = _retorrent_execute_artifacts(pipeline_result, evidence, closure)
+    material_diagnostics = pipeline_result.get("material_diagnostics") if isinstance(pipeline_result.get("material_diagnostics"), dict) else _summary_material_diagnostics({"artifacts": artifacts})
+    target_preflight_diagnostics = (
+        pipeline_result.get("target_preflight_diagnostics") if isinstance(pipeline_result.get("target_preflight_diagnostics"), dict) else _summary_target_preflight_diagnostics({"artifacts": artifacts})
+    )
     blockers = _retorrent_execute_blockers(pipeline_result, closure, ready, artifacts)
     next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
     qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(pipeline_result)
@@ -741,6 +745,8 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "closure_review": closure_review,
         "evidence": evidence,
         "summary": summary,
+        "material_diagnostics": material_diagnostics,
+        "target_preflight_diagnostics": target_preflight_diagnostics,
         "summary_file": summary_file,
         "automation_handoff": pipeline_result.get("automation_handoff") if isinstance(pipeline_result.get("automation_handoff"), dict) else _summary_automation_handoff(str(summary_file)) if summary_file else None,
         "qbit_wait_diagnostics": qbit_wait_diagnostics,
