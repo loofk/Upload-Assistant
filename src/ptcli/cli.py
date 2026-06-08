@@ -2792,6 +2792,14 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "target_materials_ready": target_materials_ready,
         "target_preparation_ready": target_preparation_ready,
     }
+    critical_domains = _material_critical_domains(critical_missing)
+    critical_path = _material_critical_path_summary(
+        critical_domains=critical_domains,
+        target_materials_ready=target_materials_ready,
+        target_preparation_ready=target_preparation_ready,
+        description_ready=target_preparation_audit.get("description_ready"),
+        material_missing=material_missing,
+    )
     return {
         "present": bool(material_generation or target_materials),
         "generation_present": bool(material_generation),
@@ -2806,7 +2814,8 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "upload_material_blockers": _material_upload_blockers(upload_material_gates, material_missing, critical_missing),
         "critical_ready": not critical_missing,
         "critical_missing": critical_missing,
-        "critical_domains": _material_critical_domains(critical_missing),
+        "critical_domains": critical_domains,
+        "critical_path": critical_path,
         "disc_structure": disc_structure,
         "bdinfo_required": bdinfo_required,
         "media_info_requirement": "bdinfo" if bdinfo_required else "mediainfo_or_bdinfo",
@@ -6771,12 +6780,20 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
     description_ready = bool(preparation.get("description_ready"))
     bdinfo_required = bool(disc_structure.get("bdmv"))
     critical_missing = _critical_material_missing(material_missing)
+    critical_domains = _material_critical_domains(critical_missing)
     target_screenshot_paths = _string_list(screenshot_asset.get("paths"))
     return {
         "ready": bool(target_materials.get("ready") and preparation.get("ready")),
         "critical_ready": not critical_missing,
         "critical_missing": critical_missing,
-        "critical_domains": _material_critical_domains(critical_missing),
+        "critical_domains": critical_domains,
+        "critical_path": _material_critical_path_summary(
+            critical_domains=critical_domains,
+            target_materials_ready=target_materials.get("ready"),
+            target_preparation_ready=preparation.get("ready"),
+            description_ready=description_ready,
+            material_missing=material_missing,
+        ),
         "metadata_ready": metadata_ready,
         "assets_ready": assets_ready,
         "description_ready": description_ready,
@@ -6875,6 +6892,66 @@ def _material_critical_domains(critical_missing: list[str]) -> dict[str, Any]:
             "missing": [item for item in critical_missing if item.startswith(tuple(prefixes))],
         }
         for name, prefixes in domains.items()
+    }
+
+
+def _material_critical_path_summary(
+    *,
+    critical_domains: dict[str, Any],
+    target_materials_ready: Any,
+    target_preparation_ready: Any,
+    description_ready: Any = None,
+    material_missing: list[str] | None = None,
+) -> dict[str, Any]:
+    material_missing = material_missing or []
+
+    def domain_step(name: str, label: str) -> dict[str, Any]:
+        domain = critical_domains.get(name) if isinstance(critical_domains.get(name), dict) else {}
+        return {
+            "name": name,
+            "label": label,
+            "ready": bool(domain.get("ready")),
+            "missing": _string_list(domain.get("missing")),
+        }
+
+    description_domain = critical_domains.get("description") if isinstance(critical_domains.get("description"), dict) else {}
+    description_missing = _string_list(description_domain.get("missing"))
+    if description_ready is False:
+        _append_unique_string(description_missing, "description.content")
+
+    steps = [
+        domain_step("metadata", "IMDb/TMDb/Douban/PTGen metadata"),
+        domain_step("media_info", "MediaInfo/BDInfo"),
+        domain_step("screenshots", "video screenshots"),
+        domain_step("image_host", "image-host uploads"),
+        {
+            "name": "description",
+            "label": "MTEAM description draft",
+            "ready": bool(description_domain.get("ready")) and description_ready is not False,
+            "missing": description_missing,
+        },
+        {
+            "name": "target_materials",
+            "label": "MTEAM material manifest",
+            "ready": target_materials_ready is True,
+            "missing": [] if target_materials_ready is True else _string_list(material_missing),
+        },
+        {
+            "name": "target_preparation",
+            "label": "MTEAM upload preflight",
+            "ready": target_preparation_ready is True,
+            "missing": [] if target_preparation_ready is True else _string_list(material_missing),
+        },
+    ]
+    missing: list[str] = []
+    for step in steps:
+        _extend_unique_string(missing, _string_list(step.get("missing")))
+    next_step = next((step["name"] for step in steps if not step.get("ready")), None)
+    return {
+        "ready": next_step is None,
+        "next_step": next_step,
+        "missing": missing,
+        "steps": steps,
     }
 
 
@@ -8805,6 +8882,7 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
     screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
     external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
     external_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
+    critical_path = closure.get("critical_path") if isinstance(closure.get("critical_path"), dict) else {}
     recovery_hints = materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else []
     first_recovery_command = _first_material_recovery_command(recovery_hints)
     return {
@@ -8827,6 +8905,10 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_CRITICAL_IMAGE_HOST_MISSING": ",".join(_material_critical_domain_missing(critical_domains, "image_host")),
         "PTCLI_RESUME_MATERIAL_CRITICAL_DESCRIPTION_READY": _shell_bool(_material_critical_domain_ready(critical_domains, "description")),
         "PTCLI_RESUME_MATERIAL_CRITICAL_DESCRIPTION_MISSING": ",".join(_material_critical_domain_missing(critical_domains, "description")),
+        "PTCLI_RESUME_MATERIAL_CRITICAL_PATH_READY": _shell_bool(critical_path.get("ready")) if critical_path.get("ready") is not None else None,
+        "PTCLI_RESUME_MATERIAL_CRITICAL_PATH_NEXT_STEP": critical_path.get("next_step"),
+        "PTCLI_RESUME_MATERIAL_CRITICAL_PATH_MISSING": ",".join(_string_list(critical_path.get("missing"))),
+        "PTCLI_RESUME_MATERIAL_CRITICAL_PATH": json.dumps(critical_path, ensure_ascii=False) if critical_path else None,
         "PTCLI_RESUME_MATERIAL_METADATA_READY": _shell_bool(metadata.get("ready")) if metadata.get("ready") is not None else None,
         "PTCLI_RESUME_MATERIAL_METADATA_GENERATED": _shell_bool(metadata.get("generated")) if metadata.get("generated") is not None else None,
         "PTCLI_RESUME_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
@@ -9085,6 +9167,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
     screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
     critical_domains = material_diagnostics.get("critical_domains") if isinstance(material_diagnostics.get("critical_domains"), dict) else {}
+    critical_path = material_diagnostics.get("critical_path") if isinstance(material_diagnostics.get("critical_path"), dict) else {}
     return {
         "PTCLI_MATERIAL_PRESENT": _shell_bool(material_diagnostics.get("present")) if "present" in material_diagnostics else None,
         "PTCLI_MATERIAL_GENERATION_PRESENT": _shell_bool(material_diagnostics.get("generation_present")) if "generation_present" in material_diagnostics else None,
@@ -9109,6 +9192,10 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_CRITICAL_IMAGE_HOST_MISSING": ",".join(_material_critical_domain_missing(critical_domains, "image_host")),
         "PTCLI_MATERIAL_CRITICAL_DESCRIPTION_READY": _shell_bool(_material_critical_domain_ready(critical_domains, "description")),
         "PTCLI_MATERIAL_CRITICAL_DESCRIPTION_MISSING": ",".join(_material_critical_domain_missing(critical_domains, "description")),
+        "PTCLI_MATERIAL_CRITICAL_PATH_READY": _shell_bool(critical_path.get("ready")) if critical_path.get("ready") is not None else None,
+        "PTCLI_MATERIAL_CRITICAL_PATH_NEXT_STEP": critical_path.get("next_step"),
+        "PTCLI_MATERIAL_CRITICAL_PATH_MISSING": ",".join(_string_list(critical_path.get("missing"))),
+        "PTCLI_MATERIAL_CRITICAL_PATH": json.dumps(critical_path, ensure_ascii=False) if critical_path else None,
         "PTCLI_MATERIAL_BLOCKERS": ",".join(_string_list(material_diagnostics.get("blockers"))),
         "PTCLI_MATERIAL_DISC_TYPE": disc_structure.get("type"),
         "PTCLI_MATERIAL_DISC_BDMV": _shell_bool(disc_structure.get("bdmv")) if "bdmv" in disc_structure else None,

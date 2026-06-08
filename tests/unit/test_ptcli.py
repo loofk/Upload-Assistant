@@ -3669,6 +3669,21 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["critical_domains"]["metadata"]["ready"] is True
     assert diagnostics["critical_domains"]["screenshots"]["ready"] is True
     assert diagnostics["critical_domains"]["description"]["ready"] is True
+    assert diagnostics["critical_path"]["ready"] is False
+    assert diagnostics["critical_path"]["next_step"] == "media_info"
+    assert diagnostics["critical_path"]["missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
+    assert [step["name"] for step in diagnostics["critical_path"]["steps"]] == [
+        "metadata",
+        "media_info",
+        "screenshots",
+        "image_host",
+        "description",
+        "target_materials",
+        "target_preparation",
+    ]
+    assert diagnostics["critical_path"]["steps"][1]["label"] == "MediaInfo/BDInfo"
+    assert diagnostics["critical_path"]["steps"][1]["ready"] is False
+    assert diagnostics["critical_path"]["steps"][3]["ready"] is False
     assert diagnostics["disc_structure"]["type"] == "BDMV"
     assert diagnostics["disc_structure"]["bdmv"] is True
     assert diagnostics["bdinfo_required"] is True
@@ -3696,6 +3711,9 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert "export PTCLI_MATERIAL_CRITICAL_MEDIA_INFO_MISSING=assets.bdinfo_for_disc\n" in out
     assert "export PTCLI_MATERIAL_CRITICAL_IMAGE_HOST_READY=0\n" in out
     assert "export PTCLI_MATERIAL_CRITICAL_IMAGE_HOST_MISSING=assets.image_host_uploads\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_PATH_READY=0\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_PATH_NEXT_STEP=media_info\n" in out
+    assert "export PTCLI_MATERIAL_CRITICAL_PATH_MISSING=assets.bdinfo_for_disc,assets.image_host_uploads\n" in out
     assert "export PTCLI_MATERIAL_BDINFO_REQUIRED=1\n" in out
     assert "export PTCLI_MATERIAL_MEDIA_INFO_REQUIREMENT=bdinfo\n" in out
     assert "export PTCLI_MATERIAL_IMAGE_HOST_ITEM_COUNT=1\n" in out
@@ -3841,9 +3859,14 @@ def test_summary_material_diagnostics_exposes_ready_for_mteam_upload() -> None:
     assert diagnostics["ready_for_mteam_upload"] is True
     assert diagnostics["upload_material_gates"] == {"critical_ready": True, "target_materials_ready": True, "target_preparation_ready": True}
     assert diagnostics["upload_material_blockers"] == []
+    assert diagnostics["critical_path"]["ready"] is True
+    assert diagnostics["critical_path"]["next_step"] is None
+    assert diagnostics["critical_path"]["missing"] == []
     shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
     assert shell_fields["PTCLI_READY_FOR_MTEAM_UPLOAD"] == "1"
     assert shell_fields["PTCLI_MATERIAL_UPLOAD_BLOCKERS"] == ""
+    assert shell_fields["PTCLI_MATERIAL_CRITICAL_PATH_READY"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_CRITICAL_PATH_NEXT_STEP"] is None
     assert json.loads(shell_fields["PTCLI_MATERIAL_UPLOAD_GATES"]) == {
         "critical_ready": True,
         "target_materials_ready": True,
@@ -11396,6 +11419,18 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert material_closure["critical_domains"]["media_info"]["ready"] is True
     assert material_closure["critical_domains"]["screenshots"]["ready"] is True
     assert material_closure["critical_domains"]["image_host"]["ready"] is True
+    assert material_closure["critical_path"]["ready"] is False
+    assert material_closure["critical_path"]["next_step"] == "metadata"
+    assert material_closure["critical_path"]["missing"] == ["metadata.ptgen_description", "description.content", "payload.preflight"]
+    assert [step["name"] for step in material_closure["critical_path"]["steps"]] == [
+        "metadata",
+        "media_info",
+        "screenshots",
+        "image_host",
+        "description",
+        "target_materials",
+        "target_preparation",
+    ]
     assert material_closure["metadata"]["ready"] is False
     assert material_closure["metadata"]["imdb_id"] == 1234567
     assert material_closure["metadata"]["tmdb_id"] == 2
