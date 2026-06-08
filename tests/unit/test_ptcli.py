@@ -4526,6 +4526,12 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                             "has_screenshot_bbcode": True,
                             "bbcode_image_count": 3,
                             "bbcode_image_urls": ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png"],
+                            "screenshot_coverage": {
+                                "ready": False,
+                                "expected_urls": ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png", "https://img.example/thumb-3.png"],
+                                "description_urls": ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png"],
+                                "missing_urls": ["https://img.example/thumb-3.png"],
+                            },
                         },
                     },
                     "target_materials_missing": [],
@@ -4614,6 +4620,10 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT=3\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_IMAGE_URLS=https://img.example/thumb-1.png,https://img.example/thumb-2.png\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_READY=0\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_EXPECTED_URLS=https://img.example/thumb-1.png,https://img.example/thumb-2.png,https://img.example/thumb-3.png\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_DESCRIPTION_URLS=https://img.example/thumb-1.png,https://img.example/thumb-2.png\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_URLS=https://img.example/thumb-3.png\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_MISSING=''\n" in out
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
     assert "export PTCLI_QBIT_WAIT_MISMATCH=0\n" in out
@@ -14317,6 +14327,12 @@ def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_descri
     audit = ptcli_cli._target_preparation_audit(package_from_disk, str(torrent_file))
     assert audit["description_ready"] is False
     assert "materials.description.screenshot_coverage" in audit["description"]["missing"]
+    assert audit["description"]["screenshot_coverage"] == {
+        "ready": False,
+        "expected_urls": ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png"],
+        "description_urls": ["https://img.example/thumb-1.png"],
+        "missing_urls": ["https://img.example/thumb-2.png"],
+    }
 
 
 def test_mteam_upload_preflight_execute_blocks_stale_description_materials(tmp_path) -> None:
