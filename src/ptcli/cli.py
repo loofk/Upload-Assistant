@@ -2197,17 +2197,39 @@ def _target_upload_followup_next_actions(missing: list[str]) -> list[str]:
 
 
 def _target_upload_next_command(summary: dict[str, Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
+    completion_review = summary.get("completion_review") if isinstance(summary.get("completion_review"), dict) else {}
+    if summary.get("ready") and completion_review.get("complete") is not False:
+        return {"stage": None, "command": None}
     uploaded_wait = summary.get("uploaded_wait")
     uploaded_wait_complete = _wait_result_completed(uploaded_wait)
-    if summary.get("injected") and (summary.get("seeding_verified") or uploaded_wait_complete):
-        return {"stage": None, "command": None}
     blockers = _string_list(summary.get("blockers"))
     blocker_text = "\n".join(blockers)
     preferred_stages: list[str] = []
+    completion_missing = _string_list(completion_review.get("missing"))
+    needs_retry = (
+        "uploaded_torrent_hash" in blocker_text
+        or "duplicate" in blocker_text
+        or "rule obligation" in blocker_text
+        or "preflight" in blocker_text
+        or summary.get("hash_consistent") is False
+        or summary.get("duplicate_clean") is False
+        or not _rule_obligations_artifact_ready(summary.get("rule_obligations"))
+        or any(item in completion_missing for item in ("hash_consistent", "duplicate_clean", "rule_obligations_ready"))
+    )
+    if needs_retry:
+        preferred_stages.append("target-upload-retry")
     if "downloaded_torrent" in blocker_text or not summary.get("downloaded"):
         preferred_stages.append("resume-uploaded-torrent-download")
-    if "injected_torrent" in blocker_text or "uploaded_wait" in blocker_text or not summary.get("injected") or not summary.get("seeding_verified"):
+    if (
+        "injected_torrent" in blocker_text
+        or "uploaded_wait" in blocker_text
+        or any(item in completion_missing for item in ("injection_visible_in_client", "injection_verified", "uploaded_wait_complete"))
+        or not summary.get("injected")
+        or not summary.get("seeding_verified")
+    ):
         preferred_stages.append("resume-uploaded-torrent")
+    if not needs_retry and summary.get("injected") and (summary.get("seeding_verified") or uploaded_wait_complete):
+        preferred_stages.append("target-upload-retry")
     preferred_stages.extend(["resume-uploaded-torrent-download", "resume-uploaded-torrent", "target-upload-retry"])
     for stage in preferred_stages:
         command = commands_by_stage.get(stage)

@@ -6298,6 +6298,28 @@ def test_target_upload_next_command_requires_uploaded_wait_match_evidence() -> N
     assert next_command["stage"] == "resume-uploaded-torrent"
 
 
+def test_target_upload_next_command_retries_after_completed_wait_when_hash_inconsistent() -> None:
+    next_command = ptcli_cli._target_upload_next_command(
+        {
+            "ready": False,
+            "downloaded": True,
+            "injected": True,
+            "seeding_verified": True,
+            "hash_consistent": False,
+            "duplicate_clean": True,
+            "rule_obligations": {"ready": True},
+            "uploaded_wait": {"complete": True, "matches": [{"hash": "a" * 40, "content_path": "/downloads/Example"}]},
+            "blockers": ["uploaded_torrent_hash: inconsistent target torrent hashes"],
+        },
+        {
+            "resume-uploaded-torrent": "python3 ptcli.py target-upload --uploaded-torrent-file /tmp/MTEAM-999.torrent",
+            "target-upload-retry": "python3 ptcli.py target-upload --execute",
+        },
+    )
+
+    assert next_command["stage"] == "target-upload-retry"
+
+
 def test_pipeline_evidence_summarizes_closure_for_automation() -> None:
     closure = {
         "complete": True,
@@ -16340,6 +16362,69 @@ def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path, capsys) 
     assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH=/downloads\n" in out
     assert "export PTCLI_QBIT_WAIT_UPLOADED_RETRY_ACTION='Resolve the uploaded qBittorrent wait mismatch before rerunning:" in out
     assert f"Suggested retry values from qBittorrent: hash={'b' * 40}, path=/downloads/Other, save_path=/downloads." in out
+
+
+def test_target_upload_summary_retries_when_uploaded_hash_is_inconsistent_after_wait(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
+    uploaded_hash = str(Torrent.read(uploaded_torrent, validate=False).infohash)
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(uploaded_torrent))
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            package["package_dir"],
+            "--uploaded-torrent-file",
+            str(uploaded_torrent),
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+    )
+    result = {
+        "status": "uploaded",
+        "uploaded_torrent_id": "999",
+        "downloaded_torrent": {"path": str(uploaded_torrent), "torrent_hash": uploaded_hash, "metadata_readable": True},
+        "uploaded_torrent_hash": "b" * 40,
+        "injected_torrent": {"hash": uploaded_hash, "visible_in_client": True, "verified_in_client": True},
+        "uploaded_wait": {
+            "complete": True,
+            "query": {"torrent_hash": uploaded_hash, "content_path": "/downloads/Example"},
+            "matches": [{"hash": uploaded_hash, "content_path": "/downloads/Example"}],
+            "completion_verification": {
+                "matched_count": 1,
+                "complete_count": 1,
+                "any_complete": True,
+                "requested_hash_matched": True,
+                "requested_content_path_matched": True,
+            },
+        },
+    }
+
+    summary_file = ptcli_cli._write_target_upload_summary(result, preflight, args, package["package_dir"])
+
+    summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+    assert summary_payload["summary"]["ready"] is False
+    assert summary_payload["summary"]["hash_consistent"] is False
+    assert summary_payload["resume_state"]["uploaded_followup"]["uploaded_wait_evidence"] is True
+    assert summary_payload["resume_state"]["uploaded_followup"]["hash_consistent"] is False
+    assert summary_payload["resume_state"]["next_stage"] == "target-upload-retry"
+    assert summary_payload["resume_state"]["next_command"] == summary_payload["recommended_commands"][0]["command"]
 
 
 @pytest.mark.asyncio
