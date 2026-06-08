@@ -8787,6 +8787,7 @@ def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) 
     wait_query = followup.get("uploaded_wait_query") if isinstance(followup.get("uploaded_wait_query"), dict) else {}
     torrent_evidence = followup.get("uploaded_torrent_file_evidence") if isinstance(followup.get("uploaded_torrent_file_evidence"), dict) else {}
     gates = followup.get("gates") if isinstance(followup.get("gates"), dict) else {}
+    next_actions = _string_list(followup.get("next_actions"))
     return {
         "PTCLI_UPLOADED_FOLLOWUP_PRESENT": _shell_bool(bool(followup)) if resume_state else None,
         "PTCLI_UPLOADED_FOLLOWUP_READY": _shell_bool(followup.get("ready")) if followup.get("ready") is not None else None,
@@ -8825,7 +8826,9 @@ def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) 
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH": wait_retry.get("suggested_content_path"),
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH": wait_retry.get("suggested_save_path"),
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_RETRY_REASON": wait_retry.get("reason"),
-        "PTCLI_UPLOADED_FOLLOWUP_NEXT_ACTIONS": " | ".join(_string_list(followup.get("next_actions"))),
+        "PTCLI_UPLOADED_FOLLOWUP_NEXT_ACTION_COUNT": len(next_actions),
+        "PTCLI_UPLOADED_FOLLOWUP_FIRST_NEXT_ACTION": next_actions[0] if next_actions else None,
+        "PTCLI_UPLOADED_FOLLOWUP_NEXT_ACTIONS": " | ".join(next_actions),
     }
 
 

@@ -16253,7 +16253,7 @@ async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_target_upload_download_only_records_uploaded_torrent_file_evidence(monkeypatch, tmp_path) -> None:
+async def test_target_upload_download_only_records_uploaded_torrent_file_evidence(monkeypatch, tmp_path, capsys) -> None:
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -16327,6 +16327,19 @@ async def test_target_upload_download_only_records_uploaded_torrent_file_evidenc
     assert result["should_execute_next_command"] is True
     assert result["candidate_command_count"] == 4
     assert result["runnable_command_count"] == 2
+    summary_path = Path(result["summary_file"])
+
+    code = main(["summary-check", "--summary-file", str(summary_path), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_DOWNLOADED=1\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_INJECTION_VERIFIED=0\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_EVIDENCE=0\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_NEXT_ACTION_COUNT=2\n" in out
+    assert "export PTCLI_UPLOADED_FOLLOWUP_FIRST_NEXT_ACTION='Inject the uploaded MTEAM torrent into qBittorrent with the correct save path.'\n" in out
+    assert "Inject the uploaded MTEAM torrent into qBittorrent with the correct save path." in out
+    assert "Wait for qBittorrent to report the uploaded MTEAM torrent as matched and complete." in out
 
 
 @pytest.mark.asyncio
