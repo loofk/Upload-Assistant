@@ -4007,14 +4007,18 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
     preparation_audit = _target_preparation_audit_from_preflight(package_preflight)
     target_preflight = _target_preflight_gates(package_preflight, preparation_audit)
+    target_materials = _doctor_target_materials(args.package_dir)
     content_path = args.content_path or package_preflight.get("content_path")
     return {
         "content_path": _path_artifact(str(content_path)) if content_path else None,
         "source_torrent_file": _path_artifact(args.source_torrent_file),
         "package_dir": _path_artifact(args.package_dir),
         "target_torrent_file": _path_artifact(args.target_torrent_file),
+        "target_materials": target_materials,
         "target_preparation_audit": preparation_audit,
         "target_preparation_ready": bool(preparation_audit.get("ready")),
+        "target_materials_missing": _string_list(target_materials.get("missing")),
+        "target_materials_warnings": _string_list(target_materials.get("warnings")),
         "target_preparation_missing": _string_list(preparation_audit.get("missing")),
         "target_materials_ready": preparation_audit.get("materials_ready"),
         "target_preflight_gates": target_preflight,
@@ -4048,6 +4052,16 @@ def _path_artifact(path: str | None) -> dict[str, Any] | None:
         "is_file": resolved.is_file(),
         "is_dir": resolved.is_dir(),
     }
+
+
+def _doctor_target_materials(package_dir: Any) -> dict[str, Any]:
+    if not package_dir:
+        return {}
+    try:
+        package = load_mteam_prepare_package(str(package_dir))
+    except Exception:
+        return {}
+    return _target_materials_summary(package)
 
 
 def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespace, artifacts: dict[str, Any]) -> list[dict[str, Any]]:

@@ -8154,7 +8154,26 @@ def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
         "torrenthash": "a" * 40,
         "description_length": 100,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), str(content_path), str(tmp_path / "target"), accept_rules=True)
+    material_dir = tmp_path / "materials"
+    material_dir.mkdir()
+    mediainfo = material_dir / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Name.mkv\n", encoding="utf-8")
+    screenshot = material_dir / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host_file = material_dir / "image-host-uploads.json"
+    image_host_file.write_text(
+        json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}),
+        encoding="utf-8",
+    )
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        str(content_path),
+        str(tmp_path / "target"),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
 
     payload = build_doctor_check(
         config,
@@ -8213,7 +8232,7 @@ def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
     assert gates["target_preparation_ready"] is False
     assert gates["materials_ready"] is False
     assert gates["metadata_ready"] is False
-    assert gates["assets_ready"] is False
+    assert gates["assets_ready"] is True
     assert gates["description_ready"] is False
     assert gates["payload_ready"] is False
     assert gates["payload_checks_ready"] is True
@@ -8235,6 +8254,12 @@ def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
     assert "--prepare-target" in commands["resume-target-package"]["argv"]
     assert "--fetch-ptgen" in commands["resume-target-package"]["argv"]
     assert "--target-output-dir" in commands["resume-target-package"]["argv"]
+    assert "--mediainfo-file" in commands["resume-target-package"]["argv"]
+    assert str(mediainfo) in commands["resume-target-package"]["argv"]
+    assert "--screenshot-file" in commands["resume-target-package"]["argv"]
+    assert str(screenshot) in commands["resume-target-package"]["argv"]
+    assert "--image-host-file" in commands["resume-target-package"]["argv"]
+    assert str(image_host_file) in commands["resume-target-package"]["argv"]
     assert str(content_path) in commands["resume-target-package"]["argv"]
     assert summary["resume_state"]["artifacts"]["target_preflight_gates_ready"] is False
     assert summary["resume_state"]["artifacts"]["target_preflight_materials_ready"] is False
