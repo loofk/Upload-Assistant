@@ -1171,6 +1171,12 @@ def _target_preparation_missing_next_action(missing: str) -> str | None:
     normalized = _target_preparation_missing_key(missing)
     if normalized in {"description.ptgen_description", "metadata.ptgen_description"}:
         return "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package."
+    if normalized in {"metadata.imdb", "metadata.imdb_id", "description.external_ids.imdb"}:
+        return "Fetch IMDb metadata with --enrich-metadata or supply it with --metadata-file/--imdb-id, then rerun resume-target-package."
+    if normalized in {"metadata.tmdb", "metadata.tmdb_id", "description.external_ids.tmdb"}:
+        return "Fetch TMDb metadata with --enrich-metadata or supply it with --metadata-file/--tmdb-id, then rerun resume-target-package."
+    if normalized in {"metadata.douban", "metadata.douban_id", "metadata.douban_url", "description.external_ids.douban"}:
+        return "Fetch Douban metadata with --fetch-ptgen or supply it with --metadata-file/--douban-id/--douban-url, then rerun resume-target-package."
     if normalized.startswith("metadata.") or normalized.startswith("description.external_ids"):
         return "Fetch or supply IMDb/TMDb/Douban metadata with --enrich-metadata, --metadata-file, --imdb-id, --tmdb-id, or --douban-id, then rerun resume-target-package."
     if normalized in {"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo"}:
@@ -1240,6 +1246,27 @@ def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
             "Fetch PTGen/Douban description before regenerating the MTEAM package.",
             ["--enrich-metadata", "--fetch-ptgen"],
             ["--metadata-file"],
+        )
+    if normalized in {"metadata.imdb", "metadata.imdb_id", "description.external_ids.imdb"}:
+        return _material_recovery_hint(
+            "metadata.imdb_id",
+            "Fetch or supply IMDb metadata before regenerating the MTEAM package.",
+            ["--enrich-metadata"],
+            ["--metadata-file", "--imdb-id"],
+        )
+    if normalized in {"metadata.tmdb", "metadata.tmdb_id", "description.external_ids.tmdb"}:
+        return _material_recovery_hint(
+            "metadata.tmdb_id",
+            "Fetch or supply TMDb metadata before regenerating the MTEAM package.",
+            ["--enrich-metadata"],
+            ["--metadata-file", "--tmdb-id"],
+        )
+    if normalized in {"metadata.douban", "metadata.douban_id", "metadata.douban_url", "description.external_ids.douban"}:
+        return _material_recovery_hint(
+            "metadata.douban",
+            "Fetch or supply Douban metadata before regenerating the MTEAM package.",
+            ["--enrich-metadata", "--fetch-ptgen"],
+            ["--metadata-file", "--douban-id", "--douban-url"],
         )
     if normalized.startswith("metadata.") or normalized.startswith("description.external_ids"):
         return _material_recovery_hint(
@@ -6655,8 +6682,10 @@ def _target_package_material_auto_flags(artifacts: dict[str, Any] | None) -> set
         normalized = _target_preparation_missing_key(item)
         if normalized in {"metadata.ptgen_description", "description.ptgen_description"}:
             flags.update({"--enrich-metadata", "--fetch-ptgen"})
-        elif normalized.startswith("metadata.") or normalized == "description.external_ids":
+        elif normalized.startswith("metadata.") or normalized.startswith("description.external_ids"):
             flags.add("--enrich-metadata")
+            if normalized in {"metadata.douban", "metadata.douban_id", "metadata.douban_url", "description.external_ids.douban"}:
+                flags.add("--fetch-ptgen")
         elif normalized in {"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo"}:
             flags.add("--generate-mediainfo")
         elif normalized == "assets.bdinfo_for_disc":

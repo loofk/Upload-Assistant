@@ -1633,6 +1633,39 @@ def test_retorrent_next_actions_expand_closure_review_materials_ready() -> None:
     assert any("MediaInfo/BDInfo" in action for action in actions)
 
 
+def test_target_preparation_missing_next_actions_explain_specific_external_ids() -> None:
+    actions = ptcli_cli._target_preparation_missing_next_actions(
+        ["description.external_ids.tmdb", "description.external_ids.douban", "metadata.imdb"]
+    )
+
+    assert any("--tmdb-id" in action for action in actions)
+    assert any("--douban-id/--douban-url" in action for action in actions)
+    assert any("--imdb-id" in action for action in actions)
+
+
+def test_target_preparation_recovery_hints_explain_specific_external_ids() -> None:
+    hints = ptcli_cli._target_preparation_recovery_hints(
+        ["description.external_ids.tmdb", "description.external_ids.douban", "metadata.imdb"]
+    )
+    by_key = {hint["key"]: hint for hint in hints}
+
+    assert by_key["metadata.tmdb_id"]["command_flags"] == ["--enrich-metadata"]
+    assert by_key["metadata.tmdb_id"]["existing_file_options"] == ["--metadata-file", "--tmdb-id"]
+    assert by_key["metadata.douban"]["command_flags"] == ["--enrich-metadata", "--fetch-ptgen"]
+    assert by_key["metadata.douban"]["existing_file_options"] == ["--metadata-file", "--douban-id", "--douban-url"]
+    assert by_key["metadata.imdb_id"]["command_flags"] == ["--enrich-metadata"]
+    assert by_key["metadata.imdb_id"]["existing_file_options"] == ["--metadata-file", "--imdb-id"]
+
+
+def test_target_package_material_auto_flags_include_specific_external_ids() -> None:
+    flags = ptcli_cli._target_package_material_auto_flags(
+        {"target_preparation_missing": ["description.external_ids.tmdb", "description.external_ids.douban"]}
+    )
+
+    assert "--enrich-metadata" in flags
+    assert "--fetch-ptgen" in flags
+
+
 def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:
     pipeline_result = {
         "status": "ok",
