@@ -5206,6 +5206,34 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
                             "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
                             "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
                         ],
+                        "recovery_hints": [
+                            {
+                                "key": "metadata.ptgen_description",
+                                "resume_stage": "resume-target-package",
+                                "reason": "Fetch PTGen/Douban description before regenerating the MTEAM package.",
+                                "command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                                "existing_file_options": ["--metadata-file"],
+                                "required_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                                "missing_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                                "resume_command_available": False,
+                                "resume_command_stage": None,
+                                "resume_command": None,
+                                "resume_command_argv": [],
+                            },
+                            {
+                                "key": "assets.image_host_uploads",
+                                "resume_stage": "resume-target-package",
+                                "reason": "Upload screenshots to an image host or provide existing image-host upload evidence before regenerating the MTEAM package.",
+                                "command_flags": ["--upload-screenshots", "--image-host"],
+                                "existing_file_options": ["--image-host-file"],
+                                "required_command_flags": ["--upload-screenshots"],
+                                "missing_command_flags": ["--upload-screenshots"],
+                                "resume_command_available": False,
+                                "resume_command_stage": None,
+                                "resume_command": None,
+                                "resume_command_argv": [],
+                            },
+                        ],
                     },
                     "blockers": ["target.materials_ready"],
                 },
@@ -5223,6 +5251,9 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_RESUME_TARGET_PREPARATION_READY=0\n" in out
     assert "export PTCLI_RESUME_TARGET_MATERIALS_MISSING=metadata.ptgen_description,assets.image_host_uploads\n" in out
     assert "export PTCLI_RESUME_TARGET_PREPARATION_MISSING=description.content\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "PTCLI_RESUME_MATERIAL_NEXT_ACTIONS='Fetch PTGen/Douban description" in out
     assert "Upload screenshots to an image host" in out
 

@@ -8839,6 +8839,8 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_AVAILABLE": _shell_bool(any(bool(hint.get("resume_command_available")) for hint in recovery_hints if isinstance(hint, dict))),
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_STAGES": ",".join(str(hint.get("resume_command_stage")) for hint in recovery_hints if isinstance(hint, dict) and hint.get("resume_command_available") and hint.get("resume_command_stage")),
         "PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_FLAGS": ",".join(_material_recovery_missing_flags(recovery_hints)),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_REQUIRED_FLAGS": ",".join(_material_recovery_required_flags(recovery_hints)),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS": ",".join(_material_recovery_existing_file_options(recovery_hints)),
         "PTCLI_RESUME_MATERIAL_FIRST_RECOVERY_COMMAND": first_recovery_command.get("command"),
         "PTCLI_RESUME_MATERIAL_FIRST_RECOVERY_COMMAND_ARGV": json.dumps(first_recovery_command.get("argv"), ensure_ascii=False) if first_recovery_command.get("argv") else None,
         "PTCLI_RESUME_MATERIAL_RECOVERY_HINTS": json.dumps(recovery_hints, ensure_ascii=False) if recovery_hints else None,
@@ -8852,6 +8854,22 @@ def _material_recovery_missing_flags(recovery_hints: list[Any]) -> list[str]:
         if isinstance(hint, dict):
             _extend_unique_string(missing, _string_list(hint.get("missing_command_flags")))
     return missing
+
+
+def _material_recovery_required_flags(recovery_hints: list[Any]) -> list[str]:
+    flags: list[str] = []
+    for hint in recovery_hints:
+        if isinstance(hint, dict):
+            _extend_unique_string(flags, _string_list(hint.get("required_command_flags") or hint.get("command_flags")))
+    return flags
+
+
+def _material_recovery_existing_file_options(recovery_hints: list[Any]) -> list[str]:
+    options: list[str] = []
+    for hint in recovery_hints:
+        if isinstance(hint, dict):
+            _extend_unique_string(options, _string_list(hint.get("existing_file_options")))
+    return options
 
 
 def _first_material_recovery_command(recovery_hints: list[Any]) -> dict[str, Any]:
