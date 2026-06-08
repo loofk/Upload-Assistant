@@ -4523,6 +4523,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                                 "douban": "https://movie.douban.com/subject/1291546/",
                             },
                             "has_mediainfo_or_bdinfo": True,
+                            "media_info": {"has_excerpt": True, "source": "/tmp/MI_FULL_00.txt", "length": 34},
                             "has_screenshot_bbcode": True,
                             "bbcode_image_count": 3,
                             "bbcode_image_urls": ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png"],
@@ -4617,6 +4618,9 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_DESCRIPTION_TMDB_LINK=https://www.themoviedb.org/movie/999\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_DOUBAN_LINK=https://movie.douban.com/subject/1291546/\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO=1\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_MEDIAINFO_SOURCE=/tmp/MI_FULL_00.txt\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_MEDIAINFO_LENGTH=34\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_MEDIAINFO_HAS_EXCERPT=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT=3\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_IMAGE_URLS=https://img.example/thumb-1.png,https://img.example/thumb-2.png\n" in out
@@ -14262,6 +14266,12 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
     assert coverage_check["description_urls"] == ["https://img.example/thumb.png"]
     assert coverage_check["missing_urls"] == []
     assert all(check["ok"] for check in preflight["upload_payload"]["material_checks"])
+    audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
+    assert audit["description"]["media_info"] == {
+        "has_excerpt": True,
+        "source": str(mediainfo),
+        "length": len(mediainfo.read_text(encoding="utf-8")),
+    }
 
 
 def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_description(tmp_path) -> None:

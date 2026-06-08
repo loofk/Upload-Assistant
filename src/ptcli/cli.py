@@ -2533,6 +2533,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "has_external_ids": description.get("has_external_ids"),
             "external_links": description.get("external_links") if isinstance(description.get("external_links"), dict) else {},
             "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
+            "media_info": description.get("media_info") if isinstance(description.get("media_info"), dict) else {},
             "has_screenshot_bbcode": description.get("has_screenshot_bbcode"),
             "bbcode_image_count": description.get("bbcode_image_count"),
             "bbcode_image_urls": _string_list(description.get("bbcode_image_urls")),
@@ -3956,6 +3957,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
     content = description_file.get("content") if isinstance(description_file.get("content"), dict) else {}
     review = upload_payload.get("review") if isinstance(upload_payload.get("review"), dict) else {}
     review_description = review.get("description") if isinstance(review.get("description"), dict) else {}
+    review_materials = review.get("materials") if isinstance(review.get("materials"), dict) else {}
     material_checks = upload_payload.get("material_checks") if isinstance(upload_payload.get("material_checks"), list) else []
     payload_checks = _target_preparation_checks(material_checks, "payload.")
     description_checks = _target_preparation_checks(material_checks, "materials.description.")
@@ -4002,6 +4004,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
             "has_external_ids": bool(content.get("has_imdb") and content.get("has_tmdb") and content.get("has_douban")),
             "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
+            "media_info": _target_preparation_media_info(content, review_materials),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
             "bbcode_image_urls": _string_list(content.get("bbcode_image_urls")),
@@ -4039,6 +4042,15 @@ def _target_preparation_screenshot_coverage(material_checks: list[Any]) -> dict[
             "missing_urls": _string_list(check.get("missing_urls")),
         }
     return {"ready": None, "expected_urls": [], "description_urls": [], "missing_urls": []}
+
+
+def _target_preparation_media_info(content: dict[str, Any], review_materials: dict[str, Any]) -> dict[str, Any]:
+    length = review_materials.get("mediainfo_or_bdinfo_length")
+    return {
+        "has_excerpt": bool(content.get("has_mediainfo_or_bdinfo")),
+        "source": review_materials.get("mediainfo_or_bdinfo_source"),
+        "length": length if isinstance(length, int) else None,
+    }
 
 
 def _target_upload_summary_mode(result: dict[str, Any], preflight: dict[str, Any], args: argparse.Namespace | None = None) -> str:
@@ -6360,6 +6372,7 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
     generation = artifacts.get("material_generation") if isinstance(artifacts.get("material_generation"), dict) else {}
     preparation = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
     description = preparation.get("description") if isinstance(preparation.get("description"), dict) else {}
+    media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
     screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
     disc_structure = target_assets.get("disc_structure") if isinstance(target_assets.get("disc_structure"), dict) else {}
     metadata_section = generation.get("metadata") if isinstance(generation.get("metadata"), dict) else {}
@@ -6435,6 +6448,11 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
             "ptgen_description_length": description.get("ptgen_description_length"),
             "has_external_ids": bool(description.get("has_external_ids")),
             "has_mediainfo_or_bdinfo": bool(description.get("has_mediainfo_or_bdinfo")),
+            "media_info": {
+                "has_excerpt": bool(media_info.get("has_excerpt")) if "has_excerpt" in media_info else bool(description.get("has_mediainfo_or_bdinfo")),
+                "source": media_info.get("source"),
+                "length": media_info.get("length"),
+            },
             "has_screenshot_bbcode": bool(description.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(description.get("bbcode_image_count", 0) or 0),
             "bbcode_image_urls": _string_list(description.get("bbcode_image_urls")),
@@ -6953,6 +6971,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
     content = description_file.get("content") if isinstance(description_file.get("content"), dict) else {}
     review = upload_payload.get("review") if isinstance(upload_payload.get("review"), dict) else {}
     review_description = review.get("description") if isinstance(review.get("description"), dict) else {}
+    review_materials = review.get("materials") if isinstance(review.get("materials"), dict) else {}
     material_checks = upload_payload.get("material_checks") if isinstance(upload_payload.get("material_checks"), list) else []
     payload_checks = [check for check in material_checks if isinstance(check, dict) and str(check.get("name") or "").startswith("payload.")]
     description_checks = [check for check in material_checks if isinstance(check, dict) and str(check.get("name") or "").startswith("materials.description.")]
@@ -6991,6 +7010,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
             "has_external_ids": bool(content.get("has_imdb") and content.get("has_tmdb") and content.get("has_douban")),
             "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
+            "media_info": _target_preparation_media_info(content, review_materials),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
             "bbcode_image_urls": _string_list(content.get("bbcode_image_urls")),
@@ -8324,6 +8344,7 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
     screenshots = closure.get("screenshots") if isinstance(closure.get("screenshots"), dict) else {}
     image_host = closure.get("image_host") if isinstance(closure.get("image_host"), dict) else {}
     description = closure.get("description") if isinstance(closure.get("description"), dict) else {}
+    media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
     screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
     recovery_hints = materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else []
     first_recovery_command = _first_material_recovery_command(recovery_hints)
@@ -8377,6 +8398,9 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_PTGEN_LENGTH": description.get("ptgen_description_length"),
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_EXTERNAL_IDS": _shell_bool(description.get("has_external_ids")) if description.get("has_external_ids") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_MEDIAINFO_SOURCE": media_info.get("source"),
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_MEDIAINFO_LENGTH": media_info.get("length"),
+        "PTCLI_RESUME_MATERIAL_DESCRIPTION_MEDIAINFO_HAS_EXCERPT": _shell_bool(media_info.get("has_excerpt")) if media_info.get("has_excerpt") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
         "PTCLI_RESUME_MATERIAL_DESCRIPTION_IMAGE_URLS": ",".join(_string_list(description.get("bbcode_image_urls"))),
@@ -8508,6 +8532,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     disc_structure = material_diagnostics.get("disc_structure") if isinstance(material_diagnostics.get("disc_structure"), dict) else {}
     description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
     description_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
+    media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
     screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
     critical_domains = material_diagnostics.get("critical_domains") if isinstance(material_diagnostics.get("critical_domains"), dict) else {}
     return {
@@ -8572,6 +8597,9 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_DESCRIPTION_TMDB_LINK": description_links.get("tmdb"),
         "PTCLI_MATERIAL_DESCRIPTION_DOUBAN_LINK": description_links.get("douban"),
         "PTCLI_MATERIAL_DESCRIPTION_HAS_MEDIAINFO_OR_BDINFO": _shell_bool(description.get("has_mediainfo_or_bdinfo")) if description.get("has_mediainfo_or_bdinfo") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_MEDIAINFO_SOURCE": media_info.get("source"),
+        "PTCLI_MATERIAL_DESCRIPTION_MEDIAINFO_LENGTH": media_info.get("length"),
+        "PTCLI_MATERIAL_DESCRIPTION_MEDIAINFO_HAS_EXCERPT": _shell_bool(media_info.get("has_excerpt")) if media_info.get("has_excerpt") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS": _shell_bool(description.get("has_screenshot_bbcode")) if description.get("has_screenshot_bbcode") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_IMAGE_COUNT": description.get("bbcode_image_count"),
         "PTCLI_MATERIAL_DESCRIPTION_IMAGE_URLS": ",".join(_string_list(description.get("bbcode_image_urls"))),
