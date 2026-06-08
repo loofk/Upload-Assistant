@@ -774,6 +774,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
         _material_check("image_host_uploads", bool(image_hosts.get("ready")), "Image host uploads are present.", "Screenshot image-host upload results are missing usable image URLs."),
         _material_check("description_draft", True, "MTEAM description draft has been generated.", "MTEAM description draft is missing."),
     ]
+    all_checks = [*metadata_checks, *asset_checks]
     warnings = [check["message"] for check in [*metadata_checks, *asset_checks] if not check["ok"]]
     return {
         "schema_version": 1,
@@ -814,9 +815,10 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "metadata": metadata_checks,
             "assets": asset_checks,
         },
-        "ready": all(check["ok"] for check in [*metadata_checks, *asset_checks]),
+        "ready": all(check["ok"] for check in all_checks),
+        "missing": _mteam_material_missing(all_checks),
         "warnings": warnings,
-        "next_actions": _mteam_material_next_actions([*metadata_checks, *asset_checks]),
+        "next_actions": _mteam_material_next_actions(all_checks),
     }
 
 
@@ -826,6 +828,21 @@ def _material_check(name: str, ok: bool, ok_message: str, missing_message: str) 
         "ok": ok,
         "message": ok_message if ok else missing_message,
     }
+
+
+def _mteam_material_missing(checks: list[dict[str, Any]]) -> list[str]:
+    missing: list[str] = []
+    for check in checks:
+        if check.get("ok"):
+            continue
+        name = str(check.get("name") or "")
+        if name in {"imdb", "tmdb", "douban", "ptgen_description"}:
+            missing.append(f"metadata.{name}")
+        elif name == "description_draft":
+            missing.append("description.content")
+        elif name:
+            missing.append(f"assets.{name}")
+    return missing
 
 
 def _material_file_asset(path_value: Any) -> dict[str, Any]:

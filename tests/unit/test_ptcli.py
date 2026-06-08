@@ -13768,6 +13768,7 @@ def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
     assert materials["metadata"]["readiness"]["ptgen_description"] == {"ready": False, "required": True, "source": None}
     assert materials["metadata"]["readiness_blockers"] == ["PTGen/Douban description is missing after enrichment."]
     assert materials["ready"] is False
+    assert materials["missing"] == ["metadata.ptgen_description", "assets.mediainfo_or_bdinfo", "assets.screenshots", "assets.image_host_uploads"]
     assert "Fetch or supply IMDb/TMDb/Douban metadata" in materials["next_actions"][0]
     assert "Generate MediaInfo or BDInfo" in materials["next_actions"][1]
 
@@ -13834,6 +13835,7 @@ def test_mteam_materials_manifest_records_existing_material_files(tmp_path) -> N
     assert materials["assets"]["screenshots"]["count"] == 1
     assert materials["assets"]["image_hosts"]["count"] == 1
     assert materials["ready"] is True
+    assert materials["missing"] == []
 
 
 def test_mteam_materials_manifest_requires_usable_image_host_urls(tmp_path) -> None:
@@ -13982,6 +13984,7 @@ def test_mteam_materials_manifest_requires_bdinfo_for_bdmv_content(tmp_path) -> 
     assert missing_checks["bdinfo_for_disc"]["ok"] is False
     assert missing_bdinfo["assets"]["disc_structure"]["type"] == "BDMV"
     assert missing_bdinfo["ready"] is False
+    assert missing_bdinfo["missing"] == ["assets.bdinfo_for_disc"]
     assert any("Provide a BDInfo text file with --bdinfo-file" in action for action in missing_bdinfo["next_actions"])
 
     ready = build_mteam_materials_manifest(
@@ -13999,6 +14002,7 @@ def test_mteam_materials_manifest_requires_bdinfo_for_bdmv_content(tmp_path) -> 
     assert ready_checks["bdinfo_for_disc"]["ok"] is True
     assert ready["assets"]["bdinfo"]["ready"] is True
     assert ready["ready"] is True
+    assert ready["missing"] == []
 
 
 def test_find_primary_media_file_prefers_largest_supported_video(tmp_path) -> None:
