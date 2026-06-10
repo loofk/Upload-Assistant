@@ -3524,7 +3524,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         automation_action = "resolve_blockers"
     automation_reason = _summary_automation_reason(payload, automation_action, blockers, next_command_run_blocker=next_command_metadata["run_blocker"])
-    return {
+    result = {
         **payload,
         "automation_handoff": automation_handoff,
         "automation_action": automation_action,
@@ -3547,6 +3547,39 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         "should_execute_next_command": automation_action == "run_next_command",
         "automation_exit_code": 0 if status == "ok" else 1,
     }
+    result["readiness_summary"] = _summary_check_readiness_summary(result)
+    return result
+
+
+def _summary_check_readiness_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    completion_matrix = payload.get("completion_matrix") if isinstance(payload.get("completion_matrix"), dict) else {}
+    material_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
+    target_upload_diagnostics = payload.get("target_upload_diagnostics") if isinstance(payload.get("target_upload_diagnostics"), dict) else {}
+    target_preflight_diagnostics = payload.get("target_preflight_diagnostics") if isinstance(payload.get("target_preflight_diagnostics"), dict) else {}
+    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    return _retorrent_readiness_summary(
+        status=str(payload.get("status") or "blocked"),
+        ready=payload.get("ready") is True,
+        complete=payload.get("complete") is True,
+        blockers=_string_list(payload.get("blockers")),
+        completion_matrix=completion_matrix,
+        material_diagnostics=material_diagnostics,
+        target_upload_diagnostics=target_upload_diagnostics,
+        target_preflight_diagnostics=target_preflight_diagnostics,
+        qbit_wait_mismatches=_string_list(payload.get("qbit_wait_mismatches")),
+        resume_state={
+            **resume_state,
+            "next_stage": payload.get("next_stage"),
+            "next_command": payload.get("next_command"),
+            "next_command_argv": payload.get("next_command_argv"),
+        },
+        automation_fields={
+            "automation_action": payload.get("automation_action"),
+            "should_execute_next_command": payload.get("should_execute_next_command"),
+            "automation_exit_code": payload.get("automation_exit_code"),
+        },
+        summary_file=payload.get("summary_file"),
+    )
 
 
 def _summary_automation_reason(payload: dict[str, Any], automation_action: str, blockers: list[str], *, next_command_run_blocker: str | None = None) -> str:
@@ -8913,6 +8946,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     qbit_wait_diagnostics = payload.get("qbit_wait_diagnostics") if isinstance(payload.get("qbit_wait_diagnostics"), dict) else {}
     qbit_wait_retry_hints = payload.get("qbit_wait_retry_hints") if isinstance(payload.get("qbit_wait_retry_hints"), dict) else {}
     resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    readiness_summary = payload.get("readiness_summary") if isinstance(payload.get("readiness_summary"), dict) else {}
     fields = {
         "PTCLI_SUMMARY_STATUS": payload.get("status"),
         "PTCLI_AUTOMATION_ACTION": payload.get("automation_action"),
@@ -8985,6 +9019,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     fields.update(_summary_check_material_shell_fields(material_diagnostics))
     fields.update(_summary_check_target_preflight_shell_fields(target_preflight_diagnostics))
     fields.update(_summary_check_target_upload_shell_fields(target_upload_diagnostics))
+    fields.update(_summary_check_readiness_shell_fields(readiness_summary))
     fields.update(_summary_check_resume_material_shell_fields(resume_state))
     fields.update(_summary_check_uploaded_followup_shell_fields(resume_state))
     fields.update(_summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics))
@@ -8992,6 +9027,39 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     for key, value in fields.items():
         print(f"export {key}={shlex.quote('' if value is None else str(value))}")
     return 0
+
+
+def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "PTCLI_READINESS_STATUS": readiness_summary.get("status"),
+        "PTCLI_READINESS_READY": _shell_bool(readiness_summary.get("ready")) if readiness_summary.get("ready") is not None else None,
+        "PTCLI_READINESS_COMPLETE": _shell_bool(readiness_summary.get("complete")) if readiness_summary.get("complete") is not None else None,
+        "PTCLI_READINESS_COMPLETION_READY": _shell_bool(readiness_summary.get("completion_ready")) if readiness_summary.get("completion_ready") is not None else None,
+        "PTCLI_READINESS_MISSING_DOMAINS": ",".join(_string_list(readiness_summary.get("missing_domains"))),
+        "PTCLI_READINESS_BLOCKERS": ",".join(_string_list(readiness_summary.get("blockers"))),
+        "PTCLI_READINESS_NEXT_STAGE": readiness_summary.get("next_stage"),
+        "PTCLI_READINESS_NEXT_COMMAND": readiness_summary.get("next_command"),
+        "PTCLI_READINESS_NEXT_COMMAND_ARGV": json.dumps(readiness_summary.get("next_command_argv"), ensure_ascii=False) if readiness_summary.get("next_command_argv") else None,
+        "PTCLI_READINESS_AUTOMATION_ACTION": readiness_summary.get("automation_action"),
+        "PTCLI_READINESS_SHOULD_EXECUTE_NEXT_COMMAND": _shell_bool(readiness_summary.get("should_execute_next_command"))
+        if readiness_summary.get("should_execute_next_command") is not None
+        else None,
+        "PTCLI_READINESS_AUTOMATION_EXIT_CODE": readiness_summary.get("automation_exit_code"),
+        "PTCLI_READINESS_FLOW_READY": _shell_bool(readiness_summary.get("flow_ready")) if readiness_summary.get("flow_ready") is not None else None,
+        "PTCLI_READINESS_SOURCE_READY": _shell_bool(readiness_summary.get("source_ready")) if readiness_summary.get("source_ready") is not None else None,
+        "PTCLI_READINESS_MATERIALS_READY": _shell_bool(readiness_summary.get("materials_ready")) if readiness_summary.get("materials_ready") is not None else None,
+        "PTCLI_READINESS_RULES_READY": _shell_bool(readiness_summary.get("rules_ready")) if readiness_summary.get("rules_ready") is not None else None,
+        "PTCLI_READINESS_TARGET_UPLOAD_READY": _shell_bool(readiness_summary.get("target_upload_ready")) if readiness_summary.get("target_upload_ready") is not None else None,
+        "PTCLI_READINESS_QBIT_WAIT_READY": _shell_bool(readiness_summary.get("qbit_wait_ready")) if readiness_summary.get("qbit_wait_ready") is not None else None,
+        "PTCLI_READINESS_READY_FOR_MTEAM_UPLOAD": _shell_bool(readiness_summary.get("ready_for_mteam_upload"))
+        if readiness_summary.get("ready_for_mteam_upload") is not None
+        else None,
+        "PTCLI_READINESS_READY_FOR_UPLOADED_SEEDING": _shell_bool(readiness_summary.get("ready_for_uploaded_seeding"))
+        if readiness_summary.get("ready_for_uploaded_seeding") is not None
+        else None,
+        "PTCLI_READINESS_QBIT_WAIT_MISMATCH": _shell_bool(readiness_summary.get("qbit_wait_mismatch")) if readiness_summary.get("qbit_wait_mismatch") is not None else None,
+        "PTCLI_READINESS_QBIT_WAIT_MISMATCHES": ",".join(_string_list(readiness_summary.get("qbit_wait_mismatches"))),
+    }
 
 
 def _summary_check_target_preflight_shell_fields(target_preflight_diagnostics: dict[str, Any]) -> dict[str, Any]:

@@ -5139,6 +5139,20 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_AUTOMATION_REASON='Next generated ptcli command is ready to run for stage resume-target-upload.'\n" in out
     assert "export PTCLI_AUTOMATION_EXIT_CODE=1\n" in out
     assert "export PTCLI_BLOCKERS=target.uploaded\n" in out
+    assert "export PTCLI_READINESS_STATUS=blocked\n" in out
+    assert "export PTCLI_READINESS_READY=0\n" in out
+    assert "export PTCLI_READINESS_COMPLETE=0\n" in out
+    assert "export PTCLI_READINESS_BLOCKERS=target.uploaded\n" in out
+    assert "export PTCLI_READINESS_NEXT_STAGE=resume-target-upload\n" in out
+    assert "export PTCLI_READINESS_NEXT_COMMAND='python3 ptcli.py pipeline --upload-target'\n" in out
+    assert 'export PTCLI_READINESS_NEXT_COMMAND_ARGV=\'["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]\'\n' in out
+    assert "export PTCLI_READINESS_AUTOMATION_ACTION=run_next_command\n" in out
+    assert "export PTCLI_READINESS_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
+    assert "export PTCLI_READINESS_AUTOMATION_EXIT_CODE=1\n" in out
+    assert "export PTCLI_READINESS_FLOW_READY=1\n" in out
+    assert "export PTCLI_READINESS_MATERIALS_READY=1\n" in out
+    assert "export PTCLI_READINESS_READY_FOR_MTEAM_UPLOAD=1\n" in out
+    assert "export PTCLI_READINESS_QBIT_WAIT_MISMATCH=0\n" in out
     assert "export PTCLI_MISSING_ARTIFACTS=''\n" in out
     assert "export PTCLI_MISSING_CLOSURE_AUDIT=''\n" in out
     assert "export PTCLI_FLOW_READY=1\n" in out
@@ -5590,6 +5604,18 @@ def test_summary_check_exposes_structured_next_command_argv(tmp_path, capsys) ->
     assert payload["first_runnable_stage"] == "resume-target-upload"
     assert payload["first_runnable_command"] == "python3 ptcli.py pipeline --upload-target"
     assert payload["first_runnable_command_argv"] == ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]
+    assert payload["readiness_summary"]["status"] == "blocked"
+    assert payload["readiness_summary"]["ready"] is False
+    assert payload["readiness_summary"]["complete"] is False
+    assert payload["readiness_summary"]["blockers"] == ["target.uploaded"]
+    assert payload["readiness_summary"]["next_stage"] == "resume-target-upload"
+    assert payload["readiness_summary"]["next_command"] == "python3 ptcli.py pipeline --upload-target"
+    assert payload["readiness_summary"]["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--upload-target", "--package-dir", "/tmp/with space"]
+    assert payload["readiness_summary"]["automation_action"] == "run_next_command"
+    assert payload["readiness_summary"]["should_execute_next_command"] is True
+    assert payload["readiness_summary"]["automation_exit_code"] == 1
+    assert payload["readiness_summary"]["flow_ready"] is True
+    assert payload["readiness_summary"]["qbit_wait_mismatch"] is False
     assert payload["first_runnable_command_source"] == "resume_commands"
     assert payload["first_runnable_command_subcommand"] == "pipeline"
     assert payload["rejected_command_count"] == 0
