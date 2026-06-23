@@ -2986,6 +2986,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         target_metadata_section = _summary_target_material_metadata_section(target_materials)
         if target_metadata_section:
             sections["metadata"] = target_metadata_section
+    metadata_fields = _summary_metadata_field_status(sections.get("metadata") if isinstance(sections.get("metadata"), dict) else {})
     blockers: list[str] = []
     for key, section in sections.items():
         section_blockers = _string_list(section.get("all_blockers")) or _string_list(section.get("blockers"))
@@ -3035,6 +3036,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "disc_structure": disc_structure,
         "bdinfo_required": bdinfo_required,
         "media_info_requirement": "bdinfo" if bdinfo_required else "mediainfo_or_bdinfo",
+        "metadata_fields": metadata_fields,
         "description": {
             "ready": target_preparation_audit.get("description_ready"),
             "path": description.get("path"),
@@ -3102,6 +3104,45 @@ def _summary_target_material_metadata_section(target_materials: dict[str, Any]) 
         "douban_url": metadata.get("douban_url"),
         "ptgen_description_length": metadata.get("ptgen_description_length"),
     }
+
+
+def _summary_metadata_field_status(metadata: dict[str, Any]) -> dict[str, Any]:
+    readiness = metadata.get("readiness") if isinstance(metadata.get("readiness"), dict) else {}
+    field_values = {
+        "imdb_id": metadata.get("imdb_id"),
+        "tmdb_id": metadata.get("tmdb_id"),
+        "douban_id": metadata.get("douban_id"),
+        "douban_url": metadata.get("douban_url"),
+        "ptgen_description": {
+            "length": metadata.get("ptgen_description_length"),
+        },
+    }
+    fields: dict[str, Any] = {}
+    for key, value in field_values.items():
+        field_readiness = readiness.get(key) if isinstance(readiness.get(key), dict) else {}
+        ready = field_readiness.get("ready")
+        required = field_readiness.get("required")
+        source = field_readiness.get("source")
+        if key == "ptgen_description":
+            length = value.get("length") if isinstance(value, dict) else None
+            if ready is None:
+                ready = bool(length)
+            fields[key] = {
+                "ready": ready if isinstance(ready, bool) else None,
+                "required": required if isinstance(required, bool) else None,
+                "source": source,
+                "length": length,
+            }
+            continue
+        if ready is None:
+            ready = bool(value)
+        fields[key] = {
+            "ready": ready if isinstance(ready, bool) else None,
+            "required": required if isinstance(required, bool) else None,
+            "source": source,
+            "value": value,
+        }
+    return fields
 
 
 def _summary_material_section(section: Any) -> dict[str, Any]:
@@ -9606,6 +9647,12 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     prerequisites = sections.get("prerequisites") if isinstance(sections.get("prerequisites"), dict) else {}
     metadata = sections.get("metadata") if isinstance(sections.get("metadata"), dict) else {}
     metadata_readiness = metadata.get("readiness") if isinstance(metadata.get("readiness"), dict) else {}
+    metadata_fields = material_diagnostics.get("metadata_fields") if isinstance(material_diagnostics.get("metadata_fields"), dict) else {}
+    imdb_field = metadata_fields.get("imdb_id") if isinstance(metadata_fields.get("imdb_id"), dict) else {}
+    tmdb_field = metadata_fields.get("tmdb_id") if isinstance(metadata_fields.get("tmdb_id"), dict) else {}
+    douban_id_field = metadata_fields.get("douban_id") if isinstance(metadata_fields.get("douban_id"), dict) else {}
+    douban_url_field = metadata_fields.get("douban_url") if isinstance(metadata_fields.get("douban_url"), dict) else {}
+    ptgen_field = metadata_fields.get("ptgen_description") if isinstance(metadata_fields.get("ptgen_description"), dict) else {}
     bdinfo = sections.get("bdinfo") if isinstance(sections.get("bdinfo"), dict) else {}
     mediainfo = sections.get("mediainfo") if isinstance(sections.get("mediainfo"), dict) else {}
     screenshots = sections.get("screenshots") if isinstance(sections.get("screenshots"), dict) else {}
@@ -9668,6 +9715,17 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_METADATA_DOUBAN_ID": metadata.get("douban_id"),
         "PTCLI_MATERIAL_METADATA_DOUBAN_URL": metadata.get("douban_url"),
         "PTCLI_MATERIAL_PTGEN_DESCRIPTION_LENGTH": metadata.get("ptgen_description_length"),
+        "PTCLI_MATERIAL_METADATA_IMDB_READY": _shell_bool(imdb_field.get("ready")) if imdb_field.get("ready") is not None else None,
+        "PTCLI_MATERIAL_METADATA_IMDB_SOURCE": imdb_field.get("source"),
+        "PTCLI_MATERIAL_METADATA_TMDB_READY": _shell_bool(tmdb_field.get("ready")) if tmdb_field.get("ready") is not None else None,
+        "PTCLI_MATERIAL_METADATA_TMDB_SOURCE": tmdb_field.get("source"),
+        "PTCLI_MATERIAL_METADATA_DOUBAN_ID_READY": _shell_bool(douban_id_field.get("ready")) if douban_id_field.get("ready") is not None else None,
+        "PTCLI_MATERIAL_METADATA_DOUBAN_ID_SOURCE": douban_id_field.get("source"),
+        "PTCLI_MATERIAL_METADATA_DOUBAN_URL_READY": _shell_bool(douban_url_field.get("ready")) if douban_url_field.get("ready") is not None else None,
+        "PTCLI_MATERIAL_METADATA_DOUBAN_URL_SOURCE": douban_url_field.get("source"),
+        "PTCLI_MATERIAL_METADATA_PTGEN_READY": _shell_bool(ptgen_field.get("ready")) if ptgen_field.get("ready") is not None else None,
+        "PTCLI_MATERIAL_METADATA_PTGEN_REQUIRED": _shell_bool(ptgen_field.get("required")) if ptgen_field.get("required") is not None else None,
+        "PTCLI_MATERIAL_METADATA_PTGEN_SOURCE": ptgen_field.get("source"),
         "PTCLI_MATERIAL_BDINFO_OK": _summary_material_section_shell_bool(bdinfo),
         "PTCLI_MATERIAL_BDINFO_FILE": bdinfo.get("bdinfo_file"),
         "PTCLI_MATERIAL_MEDIAINFO_OK": _summary_material_section_shell_bool(mediainfo),

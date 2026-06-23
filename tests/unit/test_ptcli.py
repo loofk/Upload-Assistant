@@ -4029,6 +4029,13 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
     assert metadata["readiness"] == readiness
     assert metadata["missing"] == ["tmdb_id"]
     assert metadata["readiness_blockers"] == ["Missing metadata after enrichment: tmdb_id"]
+    assert diagnostics["metadata_fields"] == {
+        "imdb_id": {"ready": True, "required": True, "source": "source", "value": 1234567},
+        "tmdb_id": {"ready": False, "required": True, "source": None, "value": None},
+        "douban_id": {"ready": True, "required": True, "source": "ptgen", "value": "1291546"},
+        "douban_url": {"ready": True, "required": True, "source": "ptgen", "value": "https://movie.douban.com/subject/1291546/"},
+        "ptgen_description": {"ready": True, "required": True, "source": "ptgen", "length": 42},
+    }
     assert diagnostics["blockers"] == ["metadata: TMDb enrichment returned no TMDb id.", "metadata: Missing metadata after enrichment: tmdb_id"]
 
     shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
@@ -4036,6 +4043,17 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
     assert shell_fields["PTCLI_MATERIAL_METADATA_SOURCES"] == "source,ptgen"
     assert shell_fields["PTCLI_MATERIAL_METADATA_APPLIED_KEYS"] == "douban_url"
     assert shell_fields["PTCLI_MATERIAL_METADATA_READINESS_BLOCKERS"] == "Missing metadata after enrichment: tmdb_id"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_IMDB_READY"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_IMDB_SOURCE"] == "source"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_TMDB_READY"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_TMDB_SOURCE"] is None
+    assert shell_fields["PTCLI_MATERIAL_METADATA_DOUBAN_ID_READY"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_DOUBAN_ID_SOURCE"] == "ptgen"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_DOUBAN_URL_READY"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_DOUBAN_URL_SOURCE"] == "ptgen"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_READY"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_REQUIRED"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_SOURCE"] == "ptgen"
 
 
 def test_summary_material_diagnostics_exposes_invalid_image_host_url_counts() -> None:
@@ -5212,6 +5230,13 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                             "missing": [],
                             "sources": ["source", "tmdb_api", "ptgen"],
                             "applied": {"tmdb_id": 999, "douban_url": "https://movie.douban.com/subject/1291546/"},
+                            "readiness": {
+                                "imdb_id": {"ready": True, "required": True, "source": "source"},
+                                "tmdb_id": {"ready": True, "required": True, "source": "tmdb_api"},
+                                "douban_id": {"ready": True, "required": True, "source": "ptgen"},
+                                "douban_url": {"ready": True, "required": True, "source": "ptgen"},
+                                "ptgen_description": {"ready": True, "required": True, "source": "ptgen"},
+                            },
                             "imdb_id": 1234567,
                             "tmdb_id": 999,
                             "douban_id": "1291546",
@@ -5339,6 +5364,17 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_METADATA_DOUBAN_ID=1291546\n" in out
     assert "export PTCLI_MATERIAL_METADATA_DOUBAN_URL=https://movie.douban.com/subject/1291546/\n" in out
     assert "export PTCLI_MATERIAL_PTGEN_DESCRIPTION_LENGTH=42\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_IMDB_READY=1\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_IMDB_SOURCE=source\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_TMDB_READY=1\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_TMDB_SOURCE=tmdb_api\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_DOUBAN_ID_READY=1\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_DOUBAN_ID_SOURCE=ptgen\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_DOUBAN_URL_READY=1\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_DOUBAN_URL_SOURCE=ptgen\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_PTGEN_READY=1\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_PTGEN_REQUIRED=1\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_PTGEN_SOURCE=ptgen\n" in out
     assert "export PTCLI_MATERIAL_MEDIAINFO_OK=1\n" in out
     assert "export PTCLI_MATERIAL_SCREENSHOTS_OK=1\n" in out
     assert "export PTCLI_MATERIAL_SCREENSHOTS_COUNT=3\n" in out
