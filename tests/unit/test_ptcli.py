@@ -2094,6 +2094,35 @@ def test_target_upload_payload_recovery_summary_derives_from_description_evidenc
     assert any("Upload screenshots to an image host" in action for action in recovery["next_actions"])
 
 
+def test_target_upload_payload_recovery_summary_uses_screenshot_chain_evidence() -> None:
+    recovery = ptcli_cli._target_upload_payload_recovery_summary(
+        {
+            "target_payload_review": {
+                "description": {
+                    "evidence": {
+                        "screenshot_chain": {
+                            "ready": False,
+                            "local_screenshot_count": 0,
+                            "image_host_count": 0,
+                            "description_image_count": 0,
+                            "missing_urls": ["https://img.example/thumb.png"],
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+    assert recovery["recovery_missing"] == [
+        "assets.screenshots",
+        "assets.image_host_uploads",
+        "description.screenshot_bbcode",
+        "description.screenshot_coverage",
+    ]
+    assert any("Generate or provide screenshots" in action for action in recovery["next_actions"])
+    assert any("Upload screenshots to an image host" in action for action in recovery["next_actions"])
+
+
 def test_target_package_material_auto_flags_include_preparation_payload_review_completeness() -> None:
     flags = ptcli_cli._target_package_material_auto_flags(
         {
@@ -17769,6 +17798,15 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
             "description_urls": ["https://img.example/thumb.png"],
             "missing_urls": [],
         },
+        "screenshot_chain": {
+            "ready": True,
+            "local_screenshot_count": 1,
+            "image_host_count": 1,
+            "description_image_count": 1,
+            "image_host_urls": ["https://img.example/thumb.png"],
+            "description_urls": ["https://img.example/thumb.png"],
+            "missing_urls": [],
+        },
     }
     assert review["materials"]["mediainfo_or_bdinfo_source"] == str(mediainfo)
     assert review["materials"]["mediainfo_or_bdinfo_length"] == len(mediainfo.read_text(encoding="utf-8"))
@@ -18347,6 +18385,15 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
         "description_count": 1,
         "missing_count": 0,
         "expected_urls": ["https://img.example/thumb.png"],
+        "description_urls": ["https://img.example/thumb.png"],
+        "missing_urls": [],
+    }
+    assert payload_review["description"]["evidence"]["screenshot_chain"] == {
+        "ready": True,
+        "local_screenshot_count": 1,
+        "image_host_count": 1,
+        "description_image_count": 1,
+        "image_host_urls": ["https://img.example/thumb.png"],
         "description_urls": ["https://img.example/thumb.png"],
         "missing_urls": [],
     }

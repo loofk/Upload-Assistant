@@ -8034,6 +8034,16 @@ def _description_evidence_recovery_missing(evidence: Any) -> list[str]:
     screenshot_coverage = evidence.get("screenshot_coverage") if isinstance(evidence.get("screenshot_coverage"), dict) else {}
     if screenshot_coverage.get("ready") is False:
         _append_unique_string(missing, "description.screenshot_coverage")
+    screenshot_chain = evidence.get("screenshot_chain") if isinstance(evidence.get("screenshot_chain"), dict) else {}
+    if screenshot_chain.get("ready") is False:
+        if int(screenshot_chain.get("local_screenshot_count", 0) or 0) <= 0:
+            _append_unique_string(missing, "assets.screenshots")
+        if int(screenshot_chain.get("image_host_count", 0) or 0) <= 0:
+            _append_unique_string(missing, "assets.image_host_uploads")
+        if int(screenshot_chain.get("description_image_count", 0) or 0) <= 0:
+            _append_unique_string(missing, "description.screenshot_bbcode")
+        if _string_list(screenshot_chain.get("missing_urls")):
+            _append_unique_string(missing, "description.screenshot_coverage")
     return missing
 
 

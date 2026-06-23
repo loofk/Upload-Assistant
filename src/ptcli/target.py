@@ -1621,6 +1621,7 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
                 media_info_source=media_info_source,
                 media_info_length=media_info_length,
                 screenshot_coverage=screenshot_coverage,
+                local_screenshot_count=int(screenshots.get("count", 0) or 0),
                 image_host_count=int(image_hosts.get("count", 0) or 0),
                 image_host_urls=expected_image_urls,
             ),
@@ -1650,10 +1651,17 @@ def _mteam_description_evidence_summary(
     media_info_source: str | None,
     media_info_length: int,
     screenshot_coverage: dict[str, Any],
+    local_screenshot_count: int,
     image_host_count: int,
     image_host_urls: list[str],
 ) -> dict[str, Any]:
     external_id_readiness = content.get("external_id_readiness") if isinstance(content.get("external_id_readiness"), dict) else {}
+    description_urls = screenshot_coverage.get("description_urls") if isinstance(screenshot_coverage.get("description_urls"), list) else []
+    expected_urls = screenshot_coverage.get("expected_urls") if isinstance(screenshot_coverage.get("expected_urls"), list) else []
+    missing_urls = screenshot_coverage.get("missing_urls") if isinstance(screenshot_coverage.get("missing_urls"), list) else []
+    description_count = len(description_urls)
+    expected_count = len(expected_urls)
+    missing_count = len(missing_urls)
     return {
         "ptgen_description": {
             "ready": bool(content.get("has_ptgen_description")),
@@ -1682,12 +1690,21 @@ def _mteam_description_evidence_summary(
         },
         "screenshot_coverage": {
             "ready": screenshot_coverage.get("ready"),
-            "expected_count": len(screenshot_coverage.get("expected_urls") if isinstance(screenshot_coverage.get("expected_urls"), list) else []),
-            "description_count": len(screenshot_coverage.get("description_urls") if isinstance(screenshot_coverage.get("description_urls"), list) else []),
-            "missing_count": len(screenshot_coverage.get("missing_urls") if isinstance(screenshot_coverage.get("missing_urls"), list) else []),
-            "expected_urls": screenshot_coverage.get("expected_urls") if isinstance(screenshot_coverage.get("expected_urls"), list) else [],
-            "description_urls": screenshot_coverage.get("description_urls") if isinstance(screenshot_coverage.get("description_urls"), list) else [],
-            "missing_urls": screenshot_coverage.get("missing_urls") if isinstance(screenshot_coverage.get("missing_urls"), list) else [],
+            "expected_count": expected_count,
+            "description_count": description_count,
+            "missing_count": missing_count,
+            "expected_urls": expected_urls,
+            "description_urls": description_urls,
+            "missing_urls": missing_urls,
+        },
+        "screenshot_chain": {
+            "ready": bool(local_screenshot_count > 0 and image_host_count > 0 and description_count > 0 and missing_count == 0),
+            "local_screenshot_count": local_screenshot_count,
+            "image_host_count": image_host_count,
+            "description_image_count": description_count,
+            "image_host_urls": image_host_urls,
+            "description_urls": description_urls,
+            "missing_urls": missing_urls,
         },
     }
 
