@@ -1501,6 +1501,14 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
     expected_image_urls = _mteam_expected_image_urls(materials)
     description_image_urls = _mteam_description_image_urls_from_content(content)
     missing_image_urls = [url for url in expected_image_urls if url not in description_image_urls]
+    screenshot_coverage = {
+        "ready": not missing_image_urls,
+        "expected_urls": expected_image_urls,
+        "description_urls": description_image_urls,
+        "missing_urls": missing_image_urls,
+    }
+    media_info_source = _mteam_material_mediainfo_source(materials)
+    media_info_length = _mteam_material_mediainfo_length(materials)
     return {
         "description": {
             "path": description_summary.get("path"),
@@ -1514,16 +1522,20 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
             "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
             "bbcode_image_urls": description_image_urls,
-            "screenshot_coverage": {
-                "ready": not missing_image_urls,
-                "expected_urls": expected_image_urls,
-                "description_urls": description_image_urls,
-                "missing_urls": missing_image_urls,
-            },
+            "screenshot_coverage": screenshot_coverage,
+            "evidence": _mteam_description_evidence_summary(
+                content,
+                metadata,
+                media_info_source=media_info_source,
+                media_info_length=media_info_length,
+                screenshot_coverage=screenshot_coverage,
+                image_host_count=int(image_hosts.get("count", 0) or 0),
+                image_host_urls=expected_image_urls,
+            ),
         },
         "materials": {
-            "mediainfo_or_bdinfo_source": _mteam_material_mediainfo_source(materials),
-            "mediainfo_or_bdinfo_length": _mteam_material_mediainfo_length(materials),
+            "mediainfo_or_bdinfo_source": media_info_source,
+            "mediainfo_or_bdinfo_length": media_info_length,
             "screenshot_file_count": int(screenshots.get("count", 0) or 0),
             "image_host_count": int(image_hosts.get("count", 0) or 0),
             "image_host_urls": expected_image_urls,
@@ -1535,6 +1547,55 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
             "standard": form_fields.get("standard"),
             "imdb": form_fields.get("imdb"),
             "douban": form_fields.get("douban"),
+        },
+    }
+
+
+def _mteam_description_evidence_summary(
+    content: dict[str, Any],
+    metadata: dict[str, Any],
+    *,
+    media_info_source: str | None,
+    media_info_length: int,
+    screenshot_coverage: dict[str, Any],
+    image_host_count: int,
+    image_host_urls: list[str],
+) -> dict[str, Any]:
+    external_id_readiness = content.get("external_id_readiness") if isinstance(content.get("external_id_readiness"), dict) else {}
+    return {
+        "ptgen_description": {
+            "ready": bool(content.get("has_ptgen_description")),
+            "length": metadata.get("ptgen_description_length"),
+            "source": "metadata.ptgen_description" if content.get("has_ptgen_description") else None,
+        },
+        "external_ids": {
+            "ready": all(external_id_readiness.get(name) is True for name in ("imdb", "tmdb", "douban")),
+            "readiness": external_id_readiness,
+            "missing": [name for name in ("imdb", "tmdb", "douban") if external_id_readiness.get(name) is not True],
+            "links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
+        },
+        "mediainfo_or_bdinfo": {
+            "ready": bool(content.get("has_mediainfo_or_bdinfo")),
+            "source": media_info_source,
+            "length": media_info_length,
+        },
+        "screenshots": {
+            "ready": bool(content.get("has_screenshot_bbcode")),
+            "bbcode_image_count": int(content.get("bbcode_image_count", 0) or 0),
+            "bbcode_image_urls": _mteam_description_image_urls_from_content(content),
+        },
+        "image_host": {
+            "count": image_host_count,
+            "urls": image_host_urls,
+        },
+        "screenshot_coverage": {
+            "ready": screenshot_coverage.get("ready"),
+            "expected_count": len(screenshot_coverage.get("expected_urls") if isinstance(screenshot_coverage.get("expected_urls"), list) else []),
+            "description_count": len(screenshot_coverage.get("description_urls") if isinstance(screenshot_coverage.get("description_urls"), list) else []),
+            "missing_count": len(screenshot_coverage.get("missing_urls") if isinstance(screenshot_coverage.get("missing_urls"), list) else []),
+            "expected_urls": screenshot_coverage.get("expected_urls") if isinstance(screenshot_coverage.get("expected_urls"), list) else [],
+            "description_urls": screenshot_coverage.get("description_urls") if isinstance(screenshot_coverage.get("description_urls"), list) else [],
+            "missing_urls": screenshot_coverage.get("missing_urls") if isinstance(screenshot_coverage.get("missing_urls"), list) else [],
         },
     }
 

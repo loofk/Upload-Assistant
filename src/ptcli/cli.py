@@ -2960,12 +2960,14 @@ def _payload_review_summary_from_upload_payload(upload_payload: dict[str, Any]) 
     materials = review.get("materials") if isinstance(review.get("materials"), dict) else {}
     external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
     screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
+    description_evidence = description.get("evidence") if isinstance(description.get("evidence"), dict) else {}
     return {
         "present": bool(review),
         "description": {
             "external_links": description.get("external_links") if isinstance(description.get("external_links"), dict) else {},
             "external_id_readiness": external_id_readiness,
             "external_id_missing": _string_list(description.get("external_id_missing")),
+            "evidence": description_evidence,
             "completeness": _description_completeness_summary(description),
             "has_ptgen_description": description.get("has_ptgen_description"),
             "ptgen_description_length": description.get("ptgen_description_length"),
@@ -3138,6 +3140,11 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "external_id_readiness": description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {},
             "external_id_missing": _string_list(description.get("external_id_missing")),
             "external_links": description.get("external_links") if isinstance(description.get("external_links"), dict) else {},
+            "evidence": (
+                description.get("evidence")
+                if isinstance(description.get("evidence"), dict)
+                else target_payload_description.get("evidence") if isinstance(target_payload_description.get("evidence"), dict) else {}
+            ),
             "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
             "media_info": description.get("media_info") if isinstance(description.get("media_info"), dict) else {},
             "has_screenshot_bbcode": description.get("has_screenshot_bbcode"),
@@ -5018,6 +5025,7 @@ def _target_preparation_audit_from_preflight(preflight: dict[str, Any] | None) -
             },
             "external_id_missing": _string_list(content.get("external_id_missing")),
             "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
+            "evidence": review_description.get("evidence") if isinstance(review_description.get("evidence"), dict) else {},
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
             "media_info": _target_preparation_media_info(content, review_materials),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
@@ -8232,6 +8240,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
             },
             "external_id_missing": _string_list(content.get("external_id_missing")),
             "external_links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
+            "evidence": review_description.get("evidence") if isinstance(review_description.get("evidence"), dict) else {},
             "has_mediainfo_or_bdinfo": bool(content.get("has_mediainfo_or_bdinfo")),
             "media_info": _target_preparation_media_info(content, review_materials),
             "has_screenshot_bbcode": bool(content.get("has_screenshot_bbcode")),
@@ -9884,6 +9893,7 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
     payload_review = target_upload_diagnostics.get("payload_review") if isinstance(target_upload_diagnostics.get("payload_review"), dict) else {}
     payload_description = payload_review.get("description") if isinstance(payload_review.get("description"), dict) else {}
     payload_materials = payload_review.get("materials") if isinstance(payload_review.get("materials"), dict) else {}
+    payload_description_evidence = payload_description.get("evidence") if isinstance(payload_description.get("evidence"), dict) else {}
     external_id_readiness = payload_description.get("external_id_readiness") if isinstance(payload_description.get("external_id_readiness"), dict) else {}
     external_links = payload_description.get("external_links") if isinstance(payload_description.get("external_links"), dict) else {}
     payload_description_completeness = payload_description.get("completeness") if isinstance(payload_description.get("completeness"), dict) else {}
@@ -9928,6 +9938,7 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
         "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING": ",".join(_string_list(payload_description_completeness.get("recovery_missing"))),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS": " | ".join(_string_list(payload_description_completeness.get("next_actions"))),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_CHECKS": json.dumps(payload_description_completeness.get("checks"), ensure_ascii=False) if isinstance(payload_description_completeness.get("checks"), list) else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_EVIDENCE": json.dumps(payload_description_evidence, ensure_ascii=False) if payload_description_evidence else None,
         "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_PTGEN": _shell_bool(payload_description.get("has_ptgen_description")) if payload_description.get("has_ptgen_description") is not None else None,
         "PTCLI_TARGET_UPLOAD_PAYLOAD_PTGEN_LENGTH": payload_description.get("ptgen_description_length"),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_EXTERNAL_IDS": _shell_bool(all(external_id_readiness.get(name) is True for name in ("imdb", "tmdb", "douban"))) if external_id_readiness else None,
@@ -10042,6 +10053,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     disc_structure = material_diagnostics.get("disc_structure") if isinstance(material_diagnostics.get("disc_structure"), dict) else {}
     description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
     description_completeness = description.get("completeness") if isinstance(description.get("completeness"), dict) else {}
+    description_evidence = description.get("evidence") if isinstance(description.get("evidence"), dict) else {}
     description_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
     description_external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
     media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
@@ -10139,6 +10151,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING": ",".join(_string_list(description_completeness.get("recovery_missing"))),
         "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS": " | ".join(_string_list(description_completeness.get("next_actions"))),
         "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_CHECKS": json.dumps(description_completeness.get("checks"), ensure_ascii=False) if isinstance(description_completeness.get("checks"), list) else None,
+        "PTCLI_MATERIAL_DESCRIPTION_EVIDENCE": json.dumps(description_evidence, ensure_ascii=False) if description_evidence else None,
         "PTCLI_MATERIAL_DESCRIPTION_PATH": description.get("path"),
         "PTCLI_MATERIAL_DESCRIPTION_LENGTH": description.get("char_length"),
         "PTCLI_MATERIAL_DESCRIPTION_EXPECTED_LENGTH": description.get("expected_length"),

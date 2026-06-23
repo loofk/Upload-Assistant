@@ -4623,6 +4623,17 @@ def test_summary_material_diagnostics_blocks_upload_when_material_evidence_is_in
 
 
 def test_summary_material_diagnostics_blocks_upload_when_description_completeness_is_missing() -> None:
+    description_evidence = {
+        "screenshot_coverage": {
+            "ready": False,
+            "expected_count": 1,
+            "description_count": 0,
+            "missing_count": 1,
+            "expected_urls": ["https://img.example/screen-1.png"],
+            "description_urls": [],
+            "missing_urls": ["https://img.example/screen-1.png"],
+        }
+    }
     diagnostics = ptcli_cli._summary_material_diagnostics(
         {
             "artifacts": {
@@ -4640,6 +4651,7 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
                         "has_mediainfo_or_bdinfo": True,
                         "has_screenshot_bbcode": True,
                         "screenshot_coverage": {"ready": False, "missing_urls": ["https://img.example/screen-1.png"]},
+                        "evidence": description_evidence,
                     },
                 },
                 "target_materials": {
@@ -4678,6 +4690,7 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert shell_fields["PTCLI_READY_FOR_MTEAM_UPLOAD"] == "0"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETE"] == "0"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING"] == "description.screenshot_coverage"
+    assert json.loads(shell_fields["PTCLI_MATERIAL_DESCRIPTION_EVIDENCE"]) == description_evidence
 
     matrix = ptcli_cli._summary_completion_matrix(
         flow_diagnostics={},
@@ -17317,6 +17330,31 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
         "description_urls": ["https://img.example/thumb.png"],
         "missing_urls": [],
     }
+    assert review["description"]["evidence"] == {
+        "ptgen_description": {"ready": True, "length": len(source_info["ptgen_description"]), "source": "metadata.ptgen_description"},
+        "external_ids": {
+            "ready": True,
+            "readiness": {"imdb": True, "tmdb": True, "douban": True},
+            "missing": [],
+            "links": {
+                "imdb": "https://www.imdb.com/title/tt1234567",
+                "tmdb": "https://www.themoviedb.org/movie/999",
+                "douban": "https://movie.douban.com/subject/1291546/",
+            },
+        },
+        "mediainfo_or_bdinfo": {"ready": True, "source": str(mediainfo), "length": len(mediainfo.read_text(encoding="utf-8"))},
+        "screenshots": {"ready": True, "bbcode_image_count": 1, "bbcode_image_urls": ["https://img.example/thumb.png"]},
+        "image_host": {"count": 1, "urls": ["https://img.example/thumb.png"]},
+        "screenshot_coverage": {
+            "ready": True,
+            "expected_count": 1,
+            "description_count": 1,
+            "missing_count": 0,
+            "expected_urls": ["https://img.example/thumb.png"],
+            "description_urls": ["https://img.example/thumb.png"],
+            "missing_urls": [],
+        },
+    }
     assert review["materials"]["mediainfo_or_bdinfo_source"] == str(mediainfo)
     assert review["materials"]["mediainfo_or_bdinfo_length"] == len(mediainfo.read_text(encoding="utf-8"))
     assert review["materials"]["screenshot_file_count"] == 1
@@ -17337,6 +17375,8 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
         "source": str(mediainfo),
         "length": len(mediainfo.read_text(encoding="utf-8")),
     }
+    assert audit["description"]["evidence"]["screenshot_coverage"]["ready"] is True
+    assert audit["payload_review"]["description"]["evidence"]["mediainfo_or_bdinfo"]["source"] == str(mediainfo)
 
 
 def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_description(tmp_path) -> None:
@@ -17406,6 +17446,15 @@ def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_descri
         "description_urls": ["https://img.example/thumb-1.png"],
         "missing_urls": ["https://img.example/thumb-2.png"],
     }
+    assert review["description"]["evidence"]["screenshot_coverage"] == {
+        "ready": False,
+        "expected_count": 2,
+        "description_count": 1,
+        "missing_count": 1,
+        "expected_urls": ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png"],
+        "description_urls": ["https://img.example/thumb-1.png"],
+        "missing_urls": ["https://img.example/thumb-2.png"],
+    }
     assert review["materials"]["image_host_urls"] == ["https://img.example/thumb-1.png", "https://img.example/thumb-2.png"]
     audit = ptcli_cli._target_preparation_audit(package_from_disk, str(torrent_file))
     assert audit["description_ready"] is False
@@ -17416,6 +17465,7 @@ def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_descri
         "description_urls": ["https://img.example/thumb-1.png"],
         "missing_urls": ["https://img.example/thumb-2.png"],
     }
+    assert audit["description"]["evidence"]["screenshot_coverage"]["missing_count"] == 1
 
 
 def test_mteam_upload_preflight_execute_blocks_stale_description_materials(tmp_path) -> None:
@@ -17876,6 +17926,15 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
         "description_urls": ["https://img.example/thumb.png"],
         "missing_urls": [],
     }
+    assert payload_review["description"]["evidence"]["screenshot_coverage"] == {
+        "ready": True,
+        "expected_count": 1,
+        "description_count": 1,
+        "missing_count": 0,
+        "expected_urls": ["https://img.example/thumb.png"],
+        "description_urls": ["https://img.example/thumb.png"],
+        "missing_urls": [],
+    }
     assert payload_review["description"]["completeness"] == {
         "ready": True,
         "missing": [],
@@ -17905,6 +17964,10 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_IMAGE_URLS"] == "https://img.example/thumb.png"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_IMAGE_HOST_URLS"] == "https://img.example/thumb.png"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_COVERAGE_READY"] == "1"
+    target_upload_description_evidence = json.loads(shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_EVIDENCE"])
+    assert target_upload_description_evidence["ptgen_description"]["ready"] is True
+    assert target_upload_description_evidence["mediainfo_or_bdinfo"]["source"].endswith("MI_FULL_00.txt")
+    assert target_upload_description_evidence["screenshot_coverage"]["missing_count"] == 0
     assert diagnostics["completion_matrix"]["domains"]["target_upload"]["evidence"]["ready_for_uploaded_seeding"] is True
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
