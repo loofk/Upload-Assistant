@@ -3644,18 +3644,21 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     next_command = payload.get("next_command")
     next_command_argv = _summary_next_command_raw_argv(payload.get("next_command_argv")) if payload.get("next_command_argv") else _summary_next_command_raw_argv(str(next_command)) if next_command else None
     next_command_metadata = _summary_next_command_metadata(next_command_argv)
+    material_recovery_run_blocker = _summary_material_recovery_command_run_blocker(payload, str(payload.get("next_stage") or ""))
     candidate_commands = payload.get("candidate_commands") if isinstance(payload.get("candidate_commands"), list) else _summary_candidate_commands(payload)
     first_runnable_command = _first_runnable_candidate_command(candidate_commands)
     rejected_command_summary = _rejected_candidate_command_summary(candidate_commands)
     next_command_placeholder = bool(next_command_metadata["placeholder"])
     next_command_ready = bool(next_command) and not next_command_placeholder
-    next_command_run_allowed = bool(next_command_ready and next_command_metadata["run_allowed"])
+    next_command_run_allowed = bool(next_command_ready and next_command_metadata["run_allowed"] and not material_recovery_run_blocker)
     if status == "ok":
         automation_action = "complete"
     elif payload.get("qbit_wait_mismatch"):
         automation_action = "resolve_qbit_wait_mismatch"
     elif next_command_placeholder:
         automation_action = "fill_command_placeholders"
+    elif material_recovery_run_blocker:
+        automation_action = "complete_material_recovery_command"
     elif next_command_run_allowed:
         automation_action = "run_next_command"
     elif next_command_ready:
@@ -3670,7 +3673,8 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         automation_action = "repair_closure"
     else:
         automation_action = "resolve_blockers"
-    automation_reason = _summary_automation_reason(payload, automation_action, blockers, next_command_run_blocker=next_command_metadata["run_blocker"])
+    next_command_run_blocker = material_recovery_run_blocker or next_command_metadata["run_blocker"]
+    automation_reason = _summary_automation_reason(payload, automation_action, blockers, next_command_run_blocker=next_command_run_blocker)
     result = {
         **payload,
         "automation_handoff": automation_handoff,
@@ -3680,7 +3684,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         "next_command_placeholder": next_command_placeholder,
         "next_command_run_allowed": next_command_run_allowed,
         "next_command_subcommand": next_command_metadata["subcommand"],
-        "next_command_run_blocker": next_command_metadata["run_blocker"],
+        "next_command_run_blocker": next_command_run_blocker,
         "next_command_source": payload.get("next_command_source"),
         "candidate_commands": candidate_commands,
         "candidate_command_count": len(candidate_commands),
@@ -3729,6 +3733,23 @@ def _summary_check_readiness_summary(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next_stage: str) -> str | None:
+    if next_stage != "resume-target-package":
+        return None
+    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    material_recovery = _readiness_material_recovery_summary(resume_state)
+    coverage = material_recovery.get("command_coverage") if isinstance(material_recovery.get("command_coverage"), dict) else {}
+    if not coverage.get("hint_count") or coverage.get("ready") is True:
+        return None
+    key = coverage.get("first_uncovered_key")
+    flags = ",".join(_string_list(coverage.get("first_uncovered_missing_flags")))
+    if key and flags:
+        return f"material recovery command does not cover {key}; missing flags: {flags}"
+    if key:
+        return f"material recovery command does not cover {key}"
+    return "material recovery command does not cover all missing materials"
+
+
 def _summary_automation_reason(payload: dict[str, Any], automation_action: str, blockers: list[str], *, next_command_run_blocker: str | None = None) -> str:
     if automation_action == "complete":
         return "Summary is complete and no follow-up command is required."
@@ -3744,6 +3765,8 @@ def _summary_automation_reason(payload: dict[str, Any], automation_action: str, 
         return f"Next generated ptcli command is ready to run for stage {stage}." if stage else "Next generated ptcli command is ready to run."
     if automation_action == "unsupported_next_command":
         return f"Next command is present but is not allowed for automatic execution: {next_command_run_blocker}." if next_command_run_blocker else "Next command is present but is not allowed for automatic execution."
+    if automation_action == "complete_material_recovery_command":
+        return f"Material recovery command needs additional flags before automatic execution: {next_command_run_blocker}." if next_command_run_blocker else "Material recovery command needs additional flags before automatic execution."
     if automation_action == "replace_summary":
         return "Summary schema or kind is unsupported; regenerate the summary with the current ptcli."
     if automation_action == "provide_summary":

@@ -5709,6 +5709,11 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
 
     assert code == 0
     out = capsys.readouterr().out
+    assert "export PTCLI_AUTOMATION_ACTION=complete_material_recovery_command\n" in out
+    assert "material recovery command does not cover metadata.ptgen_description" in out
+    assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=0\n" in out
+    assert "export PTCLI_NEXT_COMMAND_RUN_ALLOWED=0\n" in out
+    assert "export PTCLI_NEXT_COMMAND_RUN_BLOCKER='material recovery command does not cover metadata.ptgen_description; missing flags: --enrich-metadata,--fetch-ptgen'\n" in out
     assert "export PTCLI_RESUME_MATERIALS_PRESENT=1\n" in out
     assert "export PTCLI_RESUME_TARGET_MATERIALS_READY=0\n" in out
     assert "export PTCLI_RESUME_TARGET_PREPARATION_READY=0\n" in out
