@@ -6376,6 +6376,79 @@ def test_summary_check_promotes_material_recovery_command(tmp_path, capsys) -> N
     assert payload["readiness_summary"]["material_recovery"]["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg"
 
 
+def test_summary_check_derives_material_recovery_from_description_evidence(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    description_evidence = {
+        "ptgen_description": {"ready": False, "length": 0},
+        "external_ids": {"ready": False, "missing": ["tmdb", "douban"]},
+        "mediainfo_or_bdinfo": {"ready": False, "source": None},
+        "screenshots": {"ready": True, "count": 3},
+        "screenshot_coverage": {"ready": False, "missing_urls": ["https://img.example/1.png"]},
+    }
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "artifacts": {
+                    "target_payload_review": {
+                        "present": True,
+                        "description": {
+                            "evidence": description_evidence,
+                            "completeness": {"ready": False, "recovery_missing": []},
+                        },
+                    },
+                },
+                "resume_commands": [
+                    {
+                        "stage": "resume-target-package",
+                        "command": "python3 ptcli.py pipeline --prepare-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["automation_action"] == "complete_material_recovery_command"
+    assert payload["next_command_run_allowed"] is False
+    assert payload["first_runnable_command_source"] == "material_recovery_completion"
+    assert payload["first_runnable_command_argv"] == [
+        "python3",
+        "ptcli.py",
+        "pipeline",
+        "--prepare-target",
+        "--enrich-metadata",
+        "--fetch-ptgen",
+        "--generate-mediainfo",
+        "--upload-screenshots",
+    ]
+    recovery = payload["readiness_summary"]["material_recovery"]
+    assert recovery["present"] is True
+    assert recovery["keys"] == [
+        "metadata.ptgen_description",
+        "metadata.tmdb_id",
+        "metadata.douban",
+        "assets.mediainfo_or_bdinfo",
+        "assets.image_host_uploads",
+    ]
+    assert recovery["required_flags"] == ["--enrich-metadata", "--fetch-ptgen", "--generate-mediainfo", "--upload-screenshots"]
+    assert recovery["missing_flags"] == ["--enrich-metadata", "--fetch-ptgen", "--generate-mediainfo", "--upload-screenshots"]
+    assert recovery["completion_command_argv"] == payload["first_runnable_command_argv"]
+    assert recovery["command_coverage"]["ready"] is False
+    assert payload["readiness_summary"]["material_description_evidence"] == description_evidence
+
+
 def test_summary_check_print_next_argv_uses_material_recovery_command(tmp_path, capsys) -> None:
     summary_file = _write_material_recovery_summary(tmp_path)
 

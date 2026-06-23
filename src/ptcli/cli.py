@@ -3887,7 +3887,7 @@ def _summary_check_readiness_summary(payload: dict[str, Any]) -> dict[str, Any]:
     material_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
     target_upload_diagnostics = payload.get("target_upload_diagnostics") if isinstance(payload.get("target_upload_diagnostics"), dict) else {}
     target_preflight_diagnostics = payload.get("target_preflight_diagnostics") if isinstance(payload.get("target_preflight_diagnostics"), dict) else {}
-    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    resume_state = _summary_resume_state_with_material_recovery(payload)
     return _retorrent_readiness_summary(
         status=str(payload.get("status") or "blocked"),
         ready=payload.get("ready") is True,
@@ -3916,7 +3916,7 @@ def _summary_check_readiness_summary(payload: dict[str, Any]) -> dict[str, Any]:
 def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next_stage: str) -> str | None:
     if next_stage != "resume-target-package":
         return None
-    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    resume_state = _summary_resume_state_with_material_recovery(payload)
     material_recovery = _readiness_material_recovery_summary(resume_state)
     coverage = material_recovery.get("command_coverage") if isinstance(material_recovery.get("command_coverage"), dict) else {}
     if not coverage.get("hint_count") or coverage.get("ready") is True:
@@ -3928,6 +3928,36 @@ def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next
     if key:
         return f"material recovery command does not cover {key}"
     return "material recovery command does not cover all missing materials"
+
+
+def _summary_resume_state_with_material_recovery(payload: dict[str, Any]) -> dict[str, Any]:
+    resume_state = dict(payload.get("resume_state")) if isinstance(payload.get("resume_state"), dict) else {}
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    resume_commands = _summary_command_entries(payload)
+    materials = resume_state.get("materials") if isinstance(resume_state.get("materials"), dict) else {}
+    generated_materials = _run_summary_material_resume_state(payload, artifacts, resume_commands) if artifacts or resume_commands else {}
+    if generated_materials:
+        merged_materials = {**generated_materials, **materials}
+        if not materials.get("recovery_hints") and generated_materials.get("recovery_hints"):
+            merged_materials["recovery_hints"] = generated_materials["recovery_hints"]
+        if not materials.get("next_actions") and generated_materials.get("next_actions"):
+            merged_materials["next_actions"] = generated_materials["next_actions"]
+        if not materials.get("closure") and generated_materials.get("closure"):
+            merged_materials["closure"] = generated_materials["closure"]
+        resume_state["materials"] = merged_materials
+
+    if not resume_state.get("next_command") and payload.get("next_command"):
+        resume_state["next_stage"] = payload.get("next_stage")
+        resume_state["next_command"] = payload.get("next_command")
+        resume_state["next_command_argv"] = _argv_list(payload.get("next_command_argv"))
+    elif not resume_state.get("next_command_argv"):
+        resume_state["next_command_argv"] = _resume_state_next_command_argv({"stage": resume_state.get("next_stage"), "command": resume_state.get("next_command")}, resume_commands)
+
+    if not resume_state.get("available_stages") and resume_commands:
+        resume_state["available_stages"] = [str(command.get("stage")) for command in resume_commands if isinstance(command, dict) and command.get("stage")]
+    if "resume_available" not in resume_state and resume_commands:
+        resume_state["resume_available"] = True
+    return resume_state
 
 
 def _summary_automation_reason(payload: dict[str, Any], automation_action: str, blockers: list[str], *, next_command_run_blocker: str | None = None) -> str:
@@ -3982,7 +4012,7 @@ def _qbit_wait_retry_hint_reason(qbit_wait_retry_hints: Any) -> str:
 
 def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
     diagnostics = _summary_check_diagnostics(payload)
-    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    resume_state = _summary_resume_state_with_material_recovery(payload)
     blockers = _string_list(payload.get("blockers"))
     if not blockers:
         blockers = _string_list(resume_state.get("blockers"))
@@ -4031,7 +4061,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     )
     next_command = _prefer_material_recovery_next_command(next_command, readiness_summary)
     closure_status = _closure_status_summary({**payload, "status": check_status, "blockers": blockers})
-    return _summary_check_result({
+    check_payload = {
         "status": check_status,
         "kind": payload.get("kind"),
         "summary_file": summary_file,
@@ -4044,13 +4074,16 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
         "next_command_source": next_command.get("source"),
-        "candidate_commands": _summary_candidate_commands(payload),
+        "resume_commands": payload.get("resume_commands"),
+        "recommended_commands": payload.get("recommended_commands"),
         "resume_state": resume_state,
         **diagnostics,
         "closure_status": closure_status,
         **artifact_status,
         **closure_audit_status,
-    })
+    }
+    check_payload["candidate_commands"] = _summary_candidate_commands(check_payload)
+    return _summary_check_result(check_payload)
 
 
 def _prefer_material_recovery_next_command(next_command: dict[str, Any], readiness_summary: dict[str, Any]) -> dict[str, Any]:
@@ -4068,7 +4101,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     diagnostics = _summary_check_diagnostics(payload)
     target_upload_diagnostics = diagnostics.get("target_upload_diagnostics") if isinstance(diagnostics.get("target_upload_diagnostics"), dict) else {}
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    resume_state = _summary_resume_state_with_material_recovery(payload)
     blockers = _string_list(summary.get("blockers")) or _string_list(resume_state.get("blockers"))
     ready = bool(summary.get("ready"))
     complete = _target_upload_summary_complete(target_upload_diagnostics, ready)
@@ -4097,7 +4130,7 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
             *_completion_matrix_preferred_stages(diagnostics.get("completion_matrix"), kind=str(payload.get("kind") or "")),
         ),
     )
-    return _summary_check_result({
+    check_payload = {
         "status": check_status,
         "kind": payload.get("kind"),
         "summary_file": summary_file,
@@ -4110,11 +4143,14 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
         "next_command_source": next_command.get("source"),
-        "candidate_commands": _summary_candidate_commands(payload),
+        "resume_commands": payload.get("resume_commands"),
+        "recommended_commands": payload.get("recommended_commands"),
         "resume_state": resume_state,
         **diagnostics,
         **artifact_status,
-    })
+    }
+    check_payload["candidate_commands"] = _summary_candidate_commands(check_payload)
+    return _summary_check_result(check_payload)
 
 
 def _target_upload_summary_complete(target_upload_diagnostics: dict[str, Any], ready: bool) -> bool:
@@ -4141,7 +4177,7 @@ def _target_upload_summary_completion_blockers(target_upload_diagnostics: dict[s
 
 
 def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
-    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    resume_state = _summary_resume_state_with_material_recovery(payload)
     blockers = _string_list(payload.get("failed_check_names"))
     ready = bool(payload.get("ready"))
     live_safe = bool(payload.get("live_safe_to_attempt"))
@@ -4163,7 +4199,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     next_command = _summary_next_command(payload, resume_state, ("resume-uploaded-torrent", "resume-uploaded-torrent-download", "pipeline-live", "doctor-live-probes", "doctor-retry"))
-    return _summary_check_result({
+    check_payload = {
         "status": "ok" if ready and live_safe and not blockers else "blocked",
         "kind": payload.get("kind"),
         "summary_file": summary_file,
@@ -4176,10 +4212,13 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
         "next_command": next_command.get("command"),
         "next_command_argv": next_command.get("argv"),
         "next_command_source": next_command.get("source"),
-        "candidate_commands": _summary_candidate_commands(payload),
+        "resume_commands": payload.get("resume_commands"),
+        "recommended_commands": payload.get("recommended_commands"),
         **_summary_check_diagnostics(payload),
         **artifact_status,
-    })
+    }
+    check_payload["candidate_commands"] = _summary_candidate_commands(check_payload)
+    return _summary_check_result(check_payload)
 
 
 def _summary_next_command(payload: dict[str, Any], resume_state: dict[str, Any], preferred_stages: tuple[str, ...]) -> dict[str, Any]:
@@ -4240,7 +4279,7 @@ def _summary_candidate_commands(payload: dict[str, Any]) -> list[dict[str, Any]]
 
 
 def _summary_material_recovery_completion_command_entry(payload: dict[str, Any]) -> dict[str, Any] | None:
-    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    resume_state = _summary_resume_state_with_material_recovery(payload)
     material_recovery = _readiness_material_recovery_summary(resume_state)
     command = material_recovery.get("completion_command")
     argv = _argv_list(material_recovery.get("completion_command_argv"))
