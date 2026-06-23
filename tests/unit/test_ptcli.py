@@ -17380,6 +17380,29 @@ def test_mteam_upload_preflight_execute_requires_materials_even_when_none_suppli
     assert any("materials.metadata.ptgen_description" in blocker for blocker in blockers)
     assert any("materials.assets.screenshots" in blocker for blocker in blockers)
     assert any("materials.assets.image_host_uploads" in blocker for blocker in blockers)
+    assert preflight["upload_payload"]["recovery_missing"] == [
+        "description.ptgen_description",
+        "description.external_ids",
+        "description.external_ids.imdb",
+        "description.external_ids.tmdb",
+        "description.external_ids.douban",
+        "description.mediainfo_or_bdinfo",
+        "description.screenshot_bbcode",
+        "metadata.imdb_id",
+        "metadata.tmdb_id",
+        "metadata.douban",
+        "metadata.ptgen_description",
+        "assets.mediainfo_or_bdinfo",
+        "assets.screenshots",
+        "assets.image_host_uploads",
+    ]
+    assert any("Fetch IMDb metadata" in action for action in preflight["upload_payload"]["next_actions"])
+    assert any("Fetch TMDb metadata" in action for action in preflight["upload_payload"]["next_actions"])
+    assert any("Fetch Douban metadata" in action for action in preflight["upload_payload"]["next_actions"])
+    assert any("Fetch PTGen/Douban description" in action for action in preflight["upload_payload"]["next_actions"])
+    assert any("Generate or provide MediaInfo/BDInfo" in action for action in preflight["upload_payload"]["next_actions"])
+    assert any("Generate or provide screenshots" in action for action in preflight["upload_payload"]["next_actions"])
+    assert any("Upload screenshots to an image host" in action for action in preflight["upload_payload"]["next_actions"])
 
 
 def test_mteam_upload_preflight_exposes_missing_description_external_id(tmp_path) -> None:
@@ -17422,6 +17445,11 @@ def test_mteam_upload_preflight_exposes_missing_description_external_id(tmp_path
     assert any("materials.description.external_ids.tmdb" in blocker for blocker in blockers)
     assert not any("materials.description.external_ids.imdb" in blocker for blocker in blockers)
     assert not any("materials.description.external_ids.douban" in blocker for blocker in blockers)
+    assert "metadata.tmdb_id" in preflight["upload_payload"]["recovery_missing"]
+    assert "description.external_ids.tmdb" in preflight["upload_payload"]["recovery_missing"]
+    assert "description.external_ids.imdb" not in preflight["upload_payload"]["recovery_missing"]
+    assert "description.external_ids.douban" not in preflight["upload_payload"]["recovery_missing"]
+    assert any("Fetch TMDb metadata" in action for action in preflight["upload_payload"]["next_actions"])
     audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
     assert audit["description"]["external_id_readiness"] == {"imdb": True, "tmdb": False, "douban": True}
     assert audit["description"]["external_id_missing"] == ["tmdb"]

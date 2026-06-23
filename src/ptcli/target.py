@@ -298,6 +298,7 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
     torrent_summary, torrent_blockers = _torrent_file_summary(torrent_file)
     field_checks = _mteam_upload_field_checks(form_fields)
     material_checks = _mteam_upload_material_checks(description_summary, description_length, materials=materials)
+    recovery_missing = _mteam_upload_recovery_missing(material_checks)
     blockers = [f"{check['name']}: {check['message']}" for check in field_checks if not check["ok"]]
     enforce_materials = require_materials
     blockers.extend(f"{check['name']}: {check['message']}" for check in material_checks if not check["ok"] and (enforce_materials or check["name"].startswith("payload.description_")))
@@ -311,6 +312,8 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
         "field_checks": field_checks,
         "material_checks": material_checks,
         "materials_ready_required": enforce_materials,
+        "recovery_missing": recovery_missing,
+        "next_actions": _mteam_upload_recovery_next_actions(recovery_missing),
         "file_field": "file",
         "description_file": description_summary,
         "review": _mteam_upload_review_summary(form_fields, description_summary, materials),
@@ -1697,6 +1700,69 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
                     )
                 )
     return material_checks
+
+
+def _mteam_upload_recovery_missing(checks: list[dict[str, Any]]) -> list[str]:
+    missing: list[str] = []
+    for check in checks:
+        if not isinstance(check, dict) or check.get("ok") is True:
+            continue
+        for item in _mteam_upload_recovery_keys(str(check.get("name") or "")):
+            _append_unique(missing, item)
+    return missing
+
+
+def _mteam_upload_recovery_keys(name: str) -> list[str]:
+    mapping = {
+        "payload.description_file": ["description.content"],
+        "payload.description_length": ["description.content"],
+        "materials.metadata.imdb": ["metadata.imdb_id"],
+        "materials.metadata.tmdb": ["metadata.tmdb_id"],
+        "materials.metadata.douban": ["metadata.douban"],
+        "materials.metadata.ptgen_description": ["metadata.ptgen_description"],
+        "materials.assets.mediainfo_or_bdinfo": ["assets.mediainfo_or_bdinfo"],
+        "materials.assets.bdinfo_for_disc": ["assets.bdinfo_for_disc"],
+        "materials.assets.screenshots": ["assets.screenshots"],
+        "materials.assets.image_host_uploads": ["assets.image_host_uploads"],
+        "materials.assets.description_draft": ["description.content"],
+        "materials.description.ptgen_description": ["description.ptgen_description"],
+        "materials.description.external_ids": ["description.external_ids"],
+        "materials.description.external_ids.imdb": ["description.external_ids.imdb"],
+        "materials.description.external_ids.tmdb": ["description.external_ids.tmdb"],
+        "materials.description.external_ids.douban": ["description.external_ids.douban"],
+        "materials.description.mediainfo_or_bdinfo": ["description.mediainfo_or_bdinfo"],
+        "materials.description.screenshot_bbcode": ["description.screenshot_bbcode"],
+        "materials.description.screenshot_coverage": ["description.screenshot_coverage"],
+    }
+    return mapping.get(name, [name] if name else [])
+
+
+def _mteam_upload_recovery_next_actions(missing: list[str]) -> list[str]:
+    actions: list[str] = []
+    normalized = set(missing)
+    if normalized.intersection({"metadata.imdb_id", "description.external_ids.imdb"}):
+        actions.append("Fetch IMDb metadata with --enrich-metadata or supply --metadata-file/--imdb-id before live upload.")
+    if normalized.intersection({"metadata.tmdb_id", "description.external_ids.tmdb"}):
+        actions.append("Fetch TMDb metadata with --enrich-metadata or supply --metadata-file/--tmdb-id before live upload.")
+    if normalized.intersection({"metadata.douban", "description.external_ids.douban"}):
+        actions.append("Fetch Douban metadata with --fetch-ptgen or supply --metadata-file/--douban-id/--douban-url before live upload.")
+    if normalized.intersection({"metadata.ptgen_description", "description.ptgen_description"}):
+        actions.append("Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description before live upload.")
+    if normalized.intersection({"description.external_ids"}):
+        actions.append("Fetch or supply IMDb/TMDb/Douban metadata before live upload.")
+    if normalized.intersection({"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo"}):
+        actions.append("Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file before live upload.")
+    if "assets.bdinfo_for_disc" in normalized:
+        actions.append("Provide a BDInfo text file with --bdinfo-file for BDMV disc content before live upload.")
+    if "assets.screenshots" in normalized:
+        actions.append("Generate or provide screenshots with --generate-screenshots or --screenshot-file before live upload.")
+    if normalized.intersection({"assets.image_host_uploads", "description.screenshot_coverage"}):
+        actions.append("Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file before live upload.")
+    if "description.screenshot_bbcode" in normalized:
+        actions.append("Regenerate the MTEAM description after image-host screenshots are ready.")
+    if "description.content" in normalized:
+        actions.append("Regenerate the MTEAM package description before live upload.")
+    return actions or ["Review generated MTEAM materials before target-upload."]
 
 
 def _mteam_expected_image_urls(materials: dict[str, Any] | None) -> list[str]:
