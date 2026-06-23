@@ -838,6 +838,7 @@ def _retorrent_readiness_summary(
     materials_evidence = domain_evidence("materials")
     target_upload_evidence = domain_evidence("target_upload")
     next_command_argv = _argv_list(resume_state.get("next_command_argv"))
+    material_recovery = _readiness_material_recovery_summary(resume_state)
     return {
         "status": status,
         "ready": ready,
@@ -867,6 +868,28 @@ def _retorrent_readiness_summary(
         "ready_for_uploaded_seeding": first_bool(target_upload_diagnostics.get("ready_for_uploaded_seeding"), target_upload_evidence.get("ready_for_uploaded_seeding")),
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": list(qbit_wait_mismatches),
+        "material_recovery": material_recovery,
+    }
+
+
+def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
+    materials = resume_state.get("materials") if isinstance(resume_state.get("materials"), dict) else {}
+    recovery_hints = materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else []
+    first_recovery_command = _first_material_recovery_command(recovery_hints)
+    first_argv = _argv_list(first_recovery_command.get("argv")) or []
+    return {
+        "present": bool(materials),
+        "target_materials_missing": _string_list(materials.get("target_materials_missing")),
+        "target_preparation_missing": _string_list(materials.get("target_preparation_missing")),
+        "next_actions": _string_list(materials.get("next_actions")),
+        "hint_count": len(recovery_hints),
+        "keys": [str(hint.get("key")) for hint in recovery_hints if isinstance(hint, dict) and hint.get("key")],
+        "required_flags": _material_recovery_required_flags(recovery_hints),
+        "missing_flags": _material_recovery_missing_flags(recovery_hints),
+        "existing_file_options": _material_recovery_existing_file_options(recovery_hints),
+        "first_command": first_recovery_command.get("command"),
+        "first_command_argv": first_argv,
+        "hints": recovery_hints,
     }
 
 
@@ -9060,6 +9083,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
 
 
 def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> dict[str, Any]:
+    material_recovery = readiness_summary.get("material_recovery") if isinstance(readiness_summary.get("material_recovery"), dict) else {}
     return {
         "PTCLI_READINESS_STATUS": readiness_summary.get("status"),
         "PTCLI_READINESS_READY": _shell_bool(readiness_summary.get("ready")) if readiness_summary.get("ready") is not None else None,
@@ -9089,6 +9113,17 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         else None,
         "PTCLI_READINESS_QBIT_WAIT_MISMATCH": _shell_bool(readiness_summary.get("qbit_wait_mismatch")) if readiness_summary.get("qbit_wait_mismatch") is not None else None,
         "PTCLI_READINESS_QBIT_WAIT_MISMATCHES": ",".join(_string_list(readiness_summary.get("qbit_wait_mismatches"))),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_PRESENT": _shell_bool(material_recovery.get("present")) if "present" in material_recovery else None,
+        "PTCLI_READINESS_MATERIAL_RECOVERY_TARGET_MATERIALS_MISSING": ",".join(_string_list(material_recovery.get("target_materials_missing"))),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_TARGET_PREPARATION_MISSING": ",".join(_string_list(material_recovery.get("target_preparation_missing"))),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_HINT_COUNT": material_recovery.get("hint_count"),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_KEYS": ",".join(_string_list(material_recovery.get("keys"))),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_REQUIRED_FLAGS": ",".join(_string_list(material_recovery.get("required_flags"))),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_FLAGS": ",".join(_string_list(material_recovery.get("missing_flags"))),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS": ",".join(_string_list(material_recovery.get("existing_file_options"))),
+        "PTCLI_READINESS_MATERIAL_FIRST_RECOVERY_COMMAND": material_recovery.get("first_command"),
+        "PTCLI_READINESS_MATERIAL_FIRST_RECOVERY_COMMAND_ARGV": json.dumps(material_recovery.get("first_command_argv"), ensure_ascii=False) if material_recovery.get("first_command_argv") else None,
+        "PTCLI_READINESS_MATERIAL_RECOVERY_NEXT_ACTIONS": " | ".join(_string_list(material_recovery.get("next_actions"))),
     }
 
 

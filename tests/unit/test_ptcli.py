@@ -1859,6 +1859,45 @@ def test_material_recovery_resume_command_reports_missing_flags() -> None:
     assert enriched[0]["resume_command_argv"] == []
 
 
+def test_readiness_material_recovery_summary_exposes_actionable_commands() -> None:
+    resume_state = {
+        "materials": {
+            "target_materials_missing": ["assets.image_host_uploads"],
+            "target_preparation_missing": ["description.screenshot_coverage"],
+            "next_actions": ["Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package."],
+            "recovery_hints": [
+                {
+                    "key": "assets.image_host_uploads",
+                    "resume_stage": "resume-target-package",
+                    "reason": "Upload screenshots to an image host or provide existing image-host upload evidence before regenerating the MTEAM package.",
+                    "command_flags": ["--upload-screenshots", "--image-host"],
+                    "existing_file_options": ["--image-host-file"],
+                    "required_command_flags": ["--upload-screenshots"],
+                    "missing_command_flags": [],
+                    "resume_command_available": True,
+                    "resume_command_stage": "resume-target-package",
+                    "resume_command": "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg",
+                    "resume_command_argv": ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots", "--image-host", "ptpimg"],
+                }
+            ],
+        }
+    }
+
+    recovery = ptcli_cli._readiness_material_recovery_summary(resume_state)
+
+    assert recovery["present"] is True
+    assert recovery["target_materials_missing"] == ["assets.image_host_uploads"]
+    assert recovery["target_preparation_missing"] == ["description.screenshot_coverage"]
+    assert recovery["next_actions"] == ["Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package."]
+    assert recovery["hint_count"] == 1
+    assert recovery["keys"] == ["assets.image_host_uploads"]
+    assert recovery["required_flags"] == ["--upload-screenshots"]
+    assert recovery["missing_flags"] == []
+    assert recovery["existing_file_options"] == ["--image-host-file"]
+    assert recovery["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg"
+    assert recovery["first_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots", "--image-host", "ptpimg"]
+
+
 def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:
     pipeline_result = {
         "status": "ok",
@@ -5414,6 +5453,15 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_PRESENT=1\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_TARGET_MATERIALS_MISSING=metadata.ptgen_description,assets.image_host_uploads\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_TARGET_PREPARATION_MISSING=description.content\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_HINT_COUNT=2\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_KEYS=metadata.ptgen_description,assets.image_host_uploads\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
+    assert "PTCLI_READINESS_MATERIAL_RECOVERY_NEXT_ACTIONS='Fetch PTGen/Douban description" in out
     assert "PTCLI_RESUME_MATERIAL_NEXT_ACTIONS='Fetch PTGen/Douban description" in out
     assert "Upload screenshots to an image host" in out
 
