@@ -839,6 +839,7 @@ def _retorrent_readiness_summary(
     target_upload_evidence = domain_evidence("target_upload")
     next_command_argv = _argv_list(resume_state.get("next_command_argv"))
     material_recovery = _readiness_material_recovery_summary(resume_state)
+    uploaded_followup = _readiness_uploaded_followup_summary(resume_state)
     return {
         "status": status,
         "ready": ready,
@@ -869,6 +870,7 @@ def _retorrent_readiness_summary(
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": list(qbit_wait_mismatches),
         "material_recovery": material_recovery,
+        "uploaded_followup": uploaded_followup,
     }
 
 
@@ -890,6 +892,32 @@ def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[s
         "first_command": first_recovery_command.get("command"),
         "first_command_argv": first_argv,
         "hints": recovery_hints,
+    }
+
+
+def _readiness_uploaded_followup_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
+    followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
+    torrent_evidence = followup.get("uploaded_torrent_file_evidence") if isinstance(followup.get("uploaded_torrent_file_evidence"), dict) else {}
+    wait_query = followup.get("uploaded_wait_query") if isinstance(followup.get("uploaded_wait_query"), dict) else {}
+    wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
+    return {
+        "present": bool(followup),
+        "ready": followup.get("ready") if isinstance(followup.get("ready"), bool) else None,
+        "ready_for_uploaded_seeding": followup.get("ready_for_uploaded_seeding") if isinstance(followup.get("ready_for_uploaded_seeding"), bool) else None,
+        "missing": _string_list(followup.get("missing")),
+        "blockers": _string_list(followup.get("blockers")),
+        "next_actions": _string_list(followup.get("next_actions")),
+        "uploaded_torrent_id": followup.get("uploaded_torrent_id"),
+        "uploaded_torrent_hash": followup.get("uploaded_torrent_hash"),
+        "injected_torrent_hash": followup.get("injected_torrent_hash"),
+        "uploaded_torrent_file": followup.get("uploaded_torrent_file"),
+        "uploaded_torrent_file_evidence": torrent_evidence,
+        "uploaded_save_path": followup.get("uploaded_save_path"),
+        "uploaded_wait_query": wait_query,
+        "qbit_wait_mismatch": followup.get("qbit_wait_mismatch") if isinstance(followup.get("qbit_wait_mismatch"), bool) else None,
+        "qbit_wait_mismatches": _string_list(followup.get("qbit_wait_mismatches")),
+        "wait_retry": wait_retry,
+        "gates": followup.get("gates") if isinstance(followup.get("gates"), dict) else {},
     }
 
 
@@ -3765,8 +3793,8 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         payload,
         resume_state,
         (
-            *_readiness_summary_preferred_stages(readiness_summary, kind=str(payload.get("kind") or "")),
             *_target_upload_summary_preferred_stages(missing_audit),
+            *_readiness_summary_preferred_stages(readiness_summary, kind=str(payload.get("kind") or "")),
             *_completion_matrix_preferred_stages(diagnostics.get("completion_matrix"), kind=str(payload.get("kind") or "")),
         ),
     )
@@ -9096,6 +9124,9 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
 
 def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> dict[str, Any]:
     material_recovery = readiness_summary.get("material_recovery") if isinstance(readiness_summary.get("material_recovery"), dict) else {}
+    uploaded_followup = readiness_summary.get("uploaded_followup") if isinstance(readiness_summary.get("uploaded_followup"), dict) else {}
+    uploaded_wait_query = uploaded_followup.get("uploaded_wait_query") if isinstance(uploaded_followup.get("uploaded_wait_query"), dict) else {}
+    uploaded_wait_retry = uploaded_followup.get("wait_retry") if isinstance(uploaded_followup.get("wait_retry"), dict) else {}
     return {
         "PTCLI_READINESS_STATUS": readiness_summary.get("status"),
         "PTCLI_READINESS_READY": _shell_bool(readiness_summary.get("ready")) if readiness_summary.get("ready") is not None else None,
@@ -9136,6 +9167,31 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_MATERIAL_FIRST_RECOVERY_COMMAND": material_recovery.get("first_command"),
         "PTCLI_READINESS_MATERIAL_FIRST_RECOVERY_COMMAND_ARGV": json.dumps(material_recovery.get("first_command_argv"), ensure_ascii=False) if material_recovery.get("first_command_argv") else None,
         "PTCLI_READINESS_MATERIAL_RECOVERY_NEXT_ACTIONS": " | ".join(_string_list(material_recovery.get("next_actions"))),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_PRESENT": _shell_bool(uploaded_followup.get("present")) if "present" in uploaded_followup else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_READY": _shell_bool(uploaded_followup.get("ready")) if uploaded_followup.get("ready") is not None else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_READY_FOR_SEEDING": _shell_bool(uploaded_followup.get("ready_for_uploaded_seeding"))
+        if uploaded_followup.get("ready_for_uploaded_seeding") is not None
+        else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_MISSING": ",".join(_string_list(uploaded_followup.get("missing"))),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_BLOCKERS": "|".join(_string_list(uploaded_followup.get("blockers"))),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_NEXT_ACTIONS": " | ".join(_string_list(uploaded_followup.get("next_actions"))),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_ID": uploaded_followup.get("uploaded_torrent_id"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_HASH": uploaded_followup.get("uploaded_torrent_hash"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTED_HASH": uploaded_followup.get("injected_torrent_hash"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_FILE": uploaded_followup.get("uploaded_torrent_file"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_SAVE_PATH": uploaded_followup.get("uploaded_save_path"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_HASH": uploaded_wait_query.get("torrent_hash"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_CONTENT_PATH": uploaded_wait_query.get("content_path"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_TIMEOUT": uploaded_wait_query.get("timeout"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_INTERVAL": uploaded_wait_query.get("interval"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_MISMATCH": _shell_bool(uploaded_followup.get("qbit_wait_mismatch")) if uploaded_followup.get("qbit_wait_mismatch") is not None else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_MISMATCHES": ",".join(_string_list(uploaded_followup.get("qbit_wait_mismatches"))),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_RETRY_RECOMMENDED": _shell_bool(uploaded_wait_retry.get("retry_recommended"))
+        if uploaded_wait_retry.get("retry_recommended") is not None
+        else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH": uploaded_wait_retry.get("suggested_torrent_hash"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH": uploaded_wait_retry.get("suggested_content_path"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH": uploaded_wait_retry.get("suggested_save_path"),
     }
 
 

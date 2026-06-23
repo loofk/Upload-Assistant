@@ -1898,6 +1898,117 @@ def test_readiness_material_recovery_summary_exposes_actionable_commands() -> No
     assert recovery["first_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots", "--image-host", "ptpimg"]
 
 
+def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> None:
+    uploaded_hash = "a" * 40
+    retry_hash = "b" * 40
+    resume_state = {
+        "uploaded_followup": {
+            "ready": False,
+            "ready_for_uploaded_seeding": False,
+            "missing": ["injected_torrent_hash", "uploaded_wait_evidence"],
+            "blockers": ["uploaded MTEAM torrent injection is not verified in qBittorrent", "qBittorrent has not reported the uploaded MTEAM torrent as complete"],
+            "next_actions": ["Inject the uploaded MTEAM torrent into qBittorrent.", "Wait for qBittorrent to report the uploaded MTEAM torrent as complete."],
+            "uploaded_torrent_id": "999",
+            "uploaded_torrent_hash": uploaded_hash,
+            "injected_torrent_hash": None,
+            "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
+            "uploaded_torrent_file_evidence": {
+                "path": "/tmp/MTEAM-999.torrent",
+                "exists": True,
+                "is_file": True,
+                "size_bytes": 1234,
+                "sha1": "c" * 40,
+                "torrent_hash": uploaded_hash,
+                "metadata_readable": True,
+            },
+            "uploaded_save_path": "/downloads/Example",
+            "uploaded_wait_query": {"torrent_hash": uploaded_hash, "content_path": "/downloads/Example", "timeout": 42.0, "interval": 3.0},
+            "qbit_wait_mismatch": True,
+            "qbit_wait_mismatches": ["uploaded.requested_hash"],
+            "wait_retry": {
+                "retry_recommended": True,
+                "suggested_torrent_hash": retry_hash,
+                "suggested_content_path": "/downloads/Other",
+                "suggested_save_path": "/downloads",
+            },
+            "gates": {"downloaded": True, "injection_verified": False, "uploaded_wait_evidence": False},
+        }
+    }
+
+    followup = ptcli_cli._readiness_uploaded_followup_summary(resume_state)
+
+    assert followup["present"] is True
+    assert followup["ready"] is False
+    assert followup["ready_for_uploaded_seeding"] is False
+    assert followup["missing"] == ["injected_torrent_hash", "uploaded_wait_evidence"]
+    assert followup["blockers"] == ["uploaded MTEAM torrent injection is not verified in qBittorrent", "qBittorrent has not reported the uploaded MTEAM torrent as complete"]
+    assert followup["next_actions"] == ["Inject the uploaded MTEAM torrent into qBittorrent.", "Wait for qBittorrent to report the uploaded MTEAM torrent as complete."]
+    assert followup["uploaded_torrent_id"] == "999"
+    assert followup["uploaded_torrent_hash"] == uploaded_hash
+    assert followup["injected_torrent_hash"] is None
+    assert followup["uploaded_torrent_file"] == "/tmp/MTEAM-999.torrent"
+    assert followup["uploaded_torrent_file_evidence"]["torrent_hash"] == uploaded_hash
+    assert followup["uploaded_save_path"] == "/downloads/Example"
+    assert followup["uploaded_wait_query"] == {"torrent_hash": uploaded_hash, "content_path": "/downloads/Example", "timeout": 42.0, "interval": 3.0}
+    assert followup["qbit_wait_mismatch"] is True
+    assert followup["qbit_wait_mismatches"] == ["uploaded.requested_hash"]
+    assert followup["wait_retry"]["suggested_torrent_hash"] == retry_hash
+    assert followup["gates"] == {"downloaded": True, "injection_verified": False, "uploaded_wait_evidence": False}
+
+
+def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
+    uploaded_hash = "a" * 40
+    retry_hash = "b" * 40
+    fields = ptcli_cli._summary_check_readiness_shell_fields(
+        {
+            "uploaded_followup": {
+                "present": True,
+                "ready": False,
+                "ready_for_uploaded_seeding": False,
+                "missing": ["injected_torrent_hash", "uploaded_wait_evidence"],
+                "blockers": ["uploaded MTEAM torrent injection is not verified in qBittorrent", "qBittorrent has not reported the uploaded MTEAM torrent as complete"],
+                "next_actions": ["Inject the uploaded MTEAM torrent into qBittorrent.", "Wait for qBittorrent to report the uploaded MTEAM torrent as complete."],
+                "uploaded_torrent_id": "999",
+                "uploaded_torrent_hash": uploaded_hash,
+                "injected_torrent_hash": None,
+                "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
+                "uploaded_save_path": "/downloads/Example",
+                "uploaded_wait_query": {"torrent_hash": uploaded_hash, "content_path": "/downloads/Example", "timeout": 42.0, "interval": 3.0},
+                "qbit_wait_mismatch": True,
+                "qbit_wait_mismatches": ["uploaded.requested_hash"],
+                "wait_retry": {
+                    "retry_recommended": True,
+                    "suggested_torrent_hash": retry_hash,
+                    "suggested_content_path": "/downloads/Other",
+                    "suggested_save_path": "/downloads",
+                },
+            }
+        }
+    )
+
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_PRESENT"] == "1"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_READY"] == "0"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_READY_FOR_SEEDING"] == "0"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_MISSING"] == "injected_torrent_hash,uploaded_wait_evidence"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_BLOCKERS"] == "uploaded MTEAM torrent injection is not verified in qBittorrent|qBittorrent has not reported the uploaded MTEAM torrent as complete"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_NEXT_ACTIONS"] == "Inject the uploaded MTEAM torrent into qBittorrent. | Wait for qBittorrent to report the uploaded MTEAM torrent as complete."
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_ID"] == "999"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_HASH"] == uploaded_hash
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTED_HASH"] is None
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_FILE"] == "/tmp/MTEAM-999.torrent"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_SAVE_PATH"] == "/downloads/Example"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_HASH"] == uploaded_hash
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_CONTENT_PATH"] == "/downloads/Example"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_TIMEOUT"] == 42.0
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_INTERVAL"] == 3.0
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_MISMATCH"] == "1"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_MISMATCHES"] == "uploaded.requested_hash"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_RETRY_RECOMMENDED"] == "1"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH"] == retry_hash
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH"] == "/downloads/Other"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH"] == "/downloads"
+
+
 def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:
     pipeline_result = {
         "status": "ok",
@@ -17668,7 +17779,8 @@ def test_target_upload_summary_retries_when_uploaded_hash_is_inconsistent_after_
     assert summary_payload["resume_state"]["uploaded_followup"]["uploaded_wait_evidence"] is True
     assert summary_payload["resume_state"]["uploaded_followup"]["hash_consistent"] is False
     assert summary_payload["resume_state"]["next_stage"] == "target-upload-retry"
-    assert summary_payload["resume_state"]["next_command"] == summary_payload["recommended_commands"][0]["command"]
+    commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    assert summary_payload["resume_state"]["next_command"] == commands["target-upload-retry"]
 
 
 @pytest.mark.asyncio
@@ -17833,8 +17945,8 @@ async def test_target_upload_download_only_records_uploaded_torrent_file_evidenc
     assert result["automation_reason"] == "Next generated ptcli command is ready to run for stage resume-uploaded-torrent."
     assert result["automation_exit_code"] == 1
     assert result["should_execute_next_command"] is True
-    assert result["candidate_command_count"] == 4
-    assert result["runnable_command_count"] == 2
+    assert result["candidate_command_count"] == 5
+    assert result["runnable_command_count"] == 3
     summary_path = Path(result["summary_file"])
 
     code = main(["summary-check", "--summary-file", str(summary_path), "--print-shell"])
