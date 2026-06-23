@@ -710,7 +710,8 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         pipeline_result.get("target_preflight_diagnostics") if isinstance(pipeline_result.get("target_preflight_diagnostics"), dict) else _summary_target_preflight_diagnostics({"artifacts": artifacts})
     )
     blockers = _retorrent_execute_blockers(pipeline_result, closure, ready, artifacts, material_diagnostics, target_preflight_diagnostics)
-    next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
+    target_upload_payload_recovery = _target_upload_payload_recovery_summary(artifacts)
+    next_actions = _retorrent_execute_next_actions({**pipeline_result, "target_upload_payload_recovery": target_upload_payload_recovery}, blockers)
     qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(pipeline_result)
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
     qbit_wait_retry_hints = _summary_qbit_wait_retry_hints(qbit_wait_diagnostics)
@@ -719,7 +720,6 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     closure_review = pipeline_result.get("closure_review") if isinstance(pipeline_result.get("closure_review"), dict) else _pipeline_closure_review(pipeline_result, artifacts)
     flow_diagnostics = _summary_flow_diagnostics(pipeline_result)
     target_upload_diagnostics = _summary_target_upload_diagnostics(pipeline_result)
-    target_upload_payload_recovery = _target_upload_payload_recovery_summary(artifacts)
     target_payload_review = _summary_target_payload_review(artifacts, artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {})
     if target_payload_review and not target_upload_diagnostics.get("payload_review"):
         target_upload_diagnostics = {
@@ -1322,6 +1322,8 @@ def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: l
     actions: list[str] = []
     for action in _retorrent_execute_qbit_mismatch_actions(pipeline_result):
         _append_unique_string(actions, action)
+    for action in _target_upload_payload_recovery_next_actions(pipeline_result.get("target_upload_payload_recovery")):
+        _append_unique_string(actions, action)
     for blocker in blockers:
         _append_unique_string(actions, _retorrent_execute_blocker_next_action(str(blocker)))
         if str(blocker) in {"target_preparation_ready", "target.preparation_ready", "target.materials_ready"}:
@@ -1335,6 +1337,19 @@ def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: l
                 continue
             _append_unique_string(actions, action_text)
     return actions or [f"Fix {blocker}" for blocker in blockers]
+
+
+def _target_upload_payload_recovery_next_actions(recovery: Any) -> list[str]:
+    if not isinstance(recovery, dict):
+        return []
+    return _string_list(recovery.get("next_actions"))
+
+
+def _merge_target_upload_payload_recovery_next_actions(next_actions: Any, recovery: Any) -> list[str]:
+    actions = _string_list(next_actions)
+    for action in _target_upload_payload_recovery_next_actions(recovery):
+        _append_unique_string(actions, action)
+    return actions
 
 
 def _retorrent_execute_qbit_mismatch_actions(pipeline_result: dict[str, Any]) -> list[str]:
@@ -5699,10 +5714,12 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     payload["material_diagnostics"] = _summary_material_diagnostics({"artifacts": artifacts})
     payload["target_preflight_diagnostics"] = _summary_target_preflight_diagnostics({"artifacts": artifacts})
     payload["target_upload_payload_recovery"] = _target_upload_payload_recovery_summary(artifacts)
+    payload["next_actions"] = _merge_target_upload_payload_recovery_next_actions(payload.get("next_actions"), payload["target_upload_payload_recovery"])
     summary["closure_review"] = payload["closure_review"]
     summary["material_diagnostics"] = payload["material_diagnostics"]
     summary["target_preflight_diagnostics"] = payload["target_preflight_diagnostics"]
     summary["target_upload_payload_recovery"] = payload["target_upload_payload_recovery"]
+    summary["next_actions"] = payload["next_actions"]
     resume_commands = _run_summary_resume_commands(payload, artifacts)
     payload["resume_commands"] = resume_commands
     payload["resume_state"] = _run_summary_resume_state(payload, artifacts, resume_commands)
@@ -6950,7 +6967,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "flow_check": payload.get("flow_check"),
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),
-        "next_actions": payload.get("next_actions", []),
+        "next_actions": _merge_target_upload_payload_recovery_next_actions(payload.get("next_actions", []), target_upload_payload_recovery),
         **_qbit_wait_summary_fields(payload),
         "artifacts": artifacts,
         "resume_commands": resume_commands,

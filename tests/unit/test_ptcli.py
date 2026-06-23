@@ -1925,6 +1925,25 @@ def test_retorrent_next_actions_expand_closure_review_materials_ready() -> None:
     assert any("MediaInfo/BDInfo" in action for action in actions)
 
 
+def test_retorrent_next_actions_include_target_upload_payload_recovery() -> None:
+    actions = ptcli_cli._retorrent_execute_next_actions(
+        {
+            "target_upload_payload_recovery": {
+                "present": True,
+                "recovery_missing": ["metadata.tmdb_id", "description.screenshot_coverage"],
+                "next_actions": [
+                    "Fetch TMDb metadata with --enrich-metadata or supply --metadata-file/--tmdb-id before live upload.",
+                    "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file before live upload.",
+                ],
+            }
+        },
+        ["target.materials_ready"],
+    )
+
+    assert any("Fetch TMDb metadata" in action for action in actions)
+    assert any("Upload screenshots to an image host" in action for action in actions)
+
+
 def test_target_preparation_missing_next_actions_explain_specific_external_ids() -> None:
     actions = ptcli_cli._target_preparation_missing_next_actions(
         ["description.external_ids.tmdb", "description.external_ids.douban", "metadata.imdb"]
