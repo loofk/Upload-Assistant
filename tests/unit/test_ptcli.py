@@ -2117,6 +2117,89 @@ def test_target_package_material_auto_flags_include_preparation_payload_review_c
     assert "--prepare-target" in flags
 
 
+def test_target_package_material_recovery_missing_includes_recovery_plan_domains() -> None:
+    artifacts = {
+        "target_materials": {
+            "recovery_plan": {
+                "domains": [
+                    {
+                        "domain": "metadata",
+                        "ready": False,
+                        "missing": ["metadata.tmdb", "metadata.ptgen_description"],
+                        "flags": ["--enrich-metadata", "--fetch-ptgen", "--metadata-file"],
+                    },
+                    {
+                        "domain": "media_info",
+                        "ready": False,
+                        "missing": ["assets.mediainfo_or_bdinfo"],
+                        "flags": ["--generate-mediainfo", "--mediainfo-file"],
+                    },
+                    {
+                        "domain": "description",
+                        "ready": False,
+                        "missing": ["description.regenerate"],
+                        "flags": ["--prepare-target"],
+                    },
+                ]
+            }
+        }
+    }
+
+    missing = ptcli_cli._target_package_material_recovery_missing(artifacts)
+    flags = ptcli_cli._target_package_material_auto_flags(artifacts)
+
+    assert missing == ["metadata.tmdb", "metadata.ptgen_description", "assets.mediainfo_or_bdinfo", "description.content"]
+    assert "--enrich-metadata" in flags
+    assert "--fetch-ptgen" in flags
+    assert "--generate-mediainfo" in flags
+    assert "--prepare-target" in flags
+    assert "--metadata-file" not in flags
+    assert "--mediainfo-file" not in flags
+
+
+def test_target_package_resume_args_use_material_recovery_plan_flags() -> None:
+    args = ptcli_cli._target_package_material_resume_args(
+        {},
+        {},
+        {"metadata_file": "/tmp/metadata.json"},
+        {
+            "target_materials": {
+                "recovery_plan": {
+                    "domains": [
+                        {
+                            "domain": "metadata",
+                            "ready": False,
+                            "missing": ["metadata.imdb", "metadata.tmdb", "metadata.douban", "metadata.ptgen_description"],
+                            "flags": ["--enrich-metadata", "--fetch-ptgen", "--metadata-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"],
+                        },
+                        {
+                            "domain": "screenshots",
+                            "ready": False,
+                            "missing": ["assets.screenshots"],
+                            "flags": ["--generate-screenshots", "--screenshot-file"],
+                        },
+                        {
+                            "domain": "image_host",
+                            "ready": False,
+                            "missing": ["assets.image_host_uploads"],
+                            "flags": ["--upload-screenshots", "--image-host", "--image-host-file"],
+                        },
+                    ]
+                }
+            }
+        },
+    )
+
+    assert "--enrich-metadata" in args
+    assert "--fetch-ptgen" in args
+    assert "--metadata-file" in args
+    assert "/tmp/metadata.json" in args
+    assert "--generate-screenshots" in args
+    assert "--upload-screenshots" in args
+    assert "--screenshot-file" not in args
+    assert "--image-host-file" not in args
+
+
 def test_material_recovery_resume_command_covers_screenshot_coverage() -> None:
     hints = ptcli_cli._target_preparation_recovery_hints(["description.screenshot_coverage"])
     commands = [

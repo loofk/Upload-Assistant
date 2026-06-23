@@ -1462,7 +1462,7 @@ def _target_preparation_missing_next_action(missing: str) -> str | None:
         return "Regenerate the MTEAM description after screenshot and image-host materials are ready."
     if normalized in {"assets.image_host_uploads", "description.screenshot_coverage"}:
         return "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package."
-    if normalized == "description.content":
+    if normalized in {"description.content", "description.regenerate"}:
         return "Regenerate the MTEAM description after metadata, MediaInfo/BDInfo, screenshot, and image-host materials are ready."
     return None
 
@@ -1595,7 +1595,7 @@ def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
             ["--upload-screenshots", "--image-host"],
             ["--image-host-file"],
         )
-    if normalized == "description.content":
+    if normalized in {"description.content", "description.regenerate"}:
         return _material_recovery_hint(
             "description.content",
             "Regenerate the MTEAM description after metadata and media materials are ready.",
@@ -7913,6 +7913,7 @@ def _target_package_material_resume_args(requested_actions: dict[str, Any], effe
 def _target_package_material_auto_flags(artifacts: dict[str, Any] | None) -> set[str]:
     missing = _target_package_material_recovery_missing(artifacts)
     flags: set[str] = set()
+    flags.update(_target_material_recovery_plan_flags(artifacts))
     for item in missing:
         normalized = _target_preparation_missing_key(item)
         if normalized in {"metadata.ptgen_description", "description.ptgen_description"}:
@@ -7938,11 +7939,55 @@ def _target_package_material_recovery_missing(artifacts: dict[str, Any] | None) 
     artifacts = artifacts if isinstance(artifacts, dict) else {}
     missing = _string_list(artifacts.get("target_materials_missing"))
     _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
+    _extend_unique_string(missing, _target_material_recovery_plan_missing(artifacts))
     _extend_unique_string(missing, _target_payload_review_description_recovery_missing(artifacts.get("target_payload_review")))
     preparation_audit = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
+    _extend_unique_string(missing, _target_material_recovery_plan_missing(preparation_audit))
     _extend_unique_string(missing, _target_payload_review_description_recovery_missing(preparation_audit.get("payload_review")))
     _extend_unique_string(missing, _target_preflight_recovery_missing(artifacts.get("target_preflight_gates")))
     return missing
+
+
+def _target_material_recovery_plan(artifacts: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(artifacts, dict):
+        return {}
+    target_materials = artifacts.get("target_materials") if isinstance(artifacts.get("target_materials"), dict) else {}
+    plan = target_materials.get("recovery_plan") if isinstance(target_materials.get("recovery_plan"), dict) else {}
+    if plan:
+        return plan
+    materials = artifacts.get("materials") if isinstance(artifacts.get("materials"), dict) else {}
+    return materials.get("recovery_plan") if isinstance(materials.get("recovery_plan"), dict) else {}
+
+
+def _target_material_recovery_plan_missing(artifacts: dict[str, Any] | None) -> list[str]:
+    missing: list[str] = []
+    plan = _target_material_recovery_plan(artifacts)
+    domains = plan.get("domains") if isinstance(plan.get("domains"), list) else []
+    for domain in domains:
+        if isinstance(domain, dict) and domain.get("ready") is not True:
+            for item in _string_list(domain.get("missing")):
+                _append_unique_string(missing, "description.content" if item == "description.regenerate" else item)
+    return missing
+
+
+def _target_material_recovery_plan_flags(artifacts: dict[str, Any] | None) -> set[str]:
+    flags: set[str] = set()
+    plan = _target_material_recovery_plan(artifacts)
+    domains = plan.get("domains") if isinstance(plan.get("domains"), list) else []
+    for domain in domains:
+        if isinstance(domain, dict) and domain.get("ready") is not True:
+            flags.update(_string_list(domain.get("flags")))
+    flags.discard("--metadata-file")
+    flags.discard("--imdb-id")
+    flags.discard("--tmdb-id")
+    flags.discard("--douban-id")
+    flags.discard("--douban-url")
+    flags.discard("--mediainfo-file")
+    flags.discard("--bdinfo-file")
+    flags.discard("--screenshot-file")
+    flags.discard("--image-host-file")
+    flags.discard("--image-host")
+    return flags
 
 
 def _target_preflight_recovery_missing(target_preflight: Any) -> list[str]:
