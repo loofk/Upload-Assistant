@@ -709,7 +709,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     target_preflight_diagnostics = (
         pipeline_result.get("target_preflight_diagnostics") if isinstance(pipeline_result.get("target_preflight_diagnostics"), dict) else _summary_target_preflight_diagnostics({"artifacts": artifacts})
     )
-    blockers = _retorrent_execute_blockers(pipeline_result, closure, ready, artifacts)
+    blockers = _retorrent_execute_blockers(pipeline_result, closure, ready, artifacts, material_diagnostics, target_preflight_diagnostics)
     next_actions = _retorrent_execute_next_actions(pipeline_result, blockers)
     qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(pipeline_result)
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
@@ -1151,7 +1151,14 @@ def _retorrent_pipeline_complete(pipeline_result: dict[str, Any], pipeline_resum
     return bool(isinstance(closure, dict) and closure.get("complete") is True)
 
 
-def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[str, Any] | None, ready: bool, artifacts: dict[str, Any] | None = None) -> list[str]:
+def _retorrent_execute_blockers(
+    pipeline_result: dict[str, Any],
+    closure: dict[str, Any] | None,
+    ready: bool,
+    artifacts: dict[str, Any] | None = None,
+    material_diagnostics: dict[str, Any] | None = None,
+    target_preflight_diagnostics: dict[str, Any] | None = None,
+) -> list[str]:
     blockers: list[str] = []
     if closure is None:
         blockers.append("pipeline did not return a closure summary.")
@@ -1166,6 +1173,7 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
     _extend_unique_string(blockers, _string_list(summary.get("blockers")))
     _extend_unique_string(blockers, _summary_closure_audit_status(pipeline_result)["missing_closure_audit"])
     _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(_summary_check_diagnostics(pipeline_result)))
+    _extend_unique_string(blockers, _retorrent_execute_preflight_material_blockers(material_diagnostics, target_preflight_diagnostics))
     if not ready:
         blockers.append("pipeline did not report ready.")
     if ready and closure is not None and closure.get("complete") is True:
@@ -1197,6 +1205,22 @@ def _retorrent_execute_blockers(pipeline_result: dict[str, Any], closure: dict[s
             blockers.append("target.injection_verified")
     if pipeline_result.get("status") not in {None, "ok", "complete"}:
         blockers.append(f"pipeline status is {pipeline_result.get('status')}.")
+    return blockers
+
+
+def _retorrent_execute_preflight_material_blockers(material_diagnostics: dict[str, Any] | None, target_preflight_diagnostics: dict[str, Any] | None) -> list[str]:
+    blockers: list[str] = []
+    material = material_diagnostics if isinstance(material_diagnostics, dict) else {}
+    if material.get("present") is True and material.get("ready_for_mteam_upload") is False:
+        material_blockers = _string_list(material.get("upload_material_blockers"))
+        if material_blockers:
+            _extend_unique_string(blockers, material_blockers)
+        else:
+            _append_unique_string(blockers, "materials are not ready for MTEAM upload")
+    preflight = target_preflight_diagnostics if isinstance(target_preflight_diagnostics, dict) else {}
+    if preflight.get("present") and preflight.get("ready") is False:
+        for blocker in _string_list(preflight.get("blockers")):
+            _append_unique_string(blockers, f"target preflight: {blocker}")
     return blockers
 
 

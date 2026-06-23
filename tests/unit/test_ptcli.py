@@ -1662,6 +1662,95 @@ def test_retorrent_resume_state_prefers_material_recovery_over_pipeline_followup
     assert resume_state["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--fetch-ptgen"]
 
 
+@pytest.mark.asyncio
+async def test_retorrent_execute_surfaces_material_preflight_blockers(monkeypatch) -> None:
+    async def fake_pipeline_payload(_args):
+        return {
+            "status": "blocked",
+            "ready": False,
+            "closure": {"complete": False, "blockers": [], "source": {"ready": True}, "target": {"ready": False}},
+            "material_diagnostics": {
+                "present": True,
+                "ready_for_mteam_upload": False,
+                "target_materials_ready": True,
+                "target_preparation_ready": True,
+                "critical_ready": True,
+                "critical_missing": [],
+                "upload_material_gates": {
+                    "critical_ready": True,
+                    "target_materials_ready": True,
+                    "target_preparation_ready": True,
+                    "material_evidence_ready": True,
+                    "description_completeness_ready": False,
+                },
+                "upload_material_blockers": ["description completeness missing: description.screenshot_coverage"],
+                "description": {
+                    "completeness": {
+                        "ready": False,
+                        "missing": ["screenshot_coverage"],
+                        "recovery_missing": ["description.screenshot_coverage"],
+                    }
+                },
+            },
+            "target_preflight_diagnostics": {
+                "present": True,
+                "status": "blocked",
+                "ready": False,
+                "blockers": ["materials.description.screenshot_coverage: Description has fewer hosted screenshots than local screenshots."],
+                "target_preparation_ready": False,
+                "materials_ready": True,
+                "description_ready": False,
+                "payload_ready": False,
+            },
+            "resume_commands": [
+                {
+                    "stage": "resume-target-package",
+                    "command": "python3 ptcli.py pipeline --prepare-target --upload-screenshots",
+                    "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots"],
+                },
+                {
+                    "stage": "resume-uploaded-torrent",
+                    "command": "python3 ptcli.py pipeline --uploaded-torrent-file /tmp/MTEAM-999.torrent",
+                    "argv": ["python3", "ptcli.py", "pipeline", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"],
+                },
+            ],
+            "resume_state": {
+                "next_stage": "resume-uploaded-torrent",
+                "next_command": "python3 ptcli.py pipeline --uploaded-torrent-file /tmp/MTEAM-999.torrent",
+                "next_command_argv": ["python3", "ptcli.py", "pipeline", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"],
+            },
+        }
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    args = build_parser().parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--path",
+            "/downloads/Name",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.retorrent_payload(args)
+
+    assert payload["status"] == "blocked"
+    assert "description completeness missing: description.screenshot_coverage" in payload["blockers"]
+    assert "target preflight: materials.description.screenshot_coverage: Description has fewer hosted screenshots than local screenshots." in payload["blockers"]
+    assert payload["next_stage"] == "resume-target-package"
+    assert payload["next_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots"
+    assert payload["readiness_summary"]["material_upload_blockers"] == ["description completeness missing: description.screenshot_coverage"]
+    assert payload["readiness_summary"]["target_preflight_description_ready"] is False
+
+
 def test_retorrent_execute_blockers_require_uploaded_wait_evidence() -> None:
     pipeline_result = {"status": "ok", "ready": True, "summary": {"blockers": []}}
     closure = {"complete": True, "blockers": []}
