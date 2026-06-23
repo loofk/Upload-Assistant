@@ -1355,8 +1355,10 @@ def _target_preparation_missing_next_action(missing: str) -> str | None:
         return "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun resume-target-package."
     if normalized == "assets.bdinfo_for_disc":
         return "Provide BDInfo for BDMV disc content with --bdinfo-file or --generate-bdinfo, then rerun resume-target-package."
-    if normalized in {"assets.screenshots", "description.screenshot_bbcode"}:
+    if normalized == "assets.screenshots":
         return "Generate or provide screenshots with --generate-screenshots or --screenshot-file, then rerun resume-target-package."
+    if normalized == "description.screenshot_bbcode":
+        return "Regenerate the MTEAM description after screenshot and image-host materials are ready."
     if normalized in {"assets.image_host_uploads", "description.screenshot_coverage"}:
         return "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package."
     if normalized == "description.content":
@@ -1471,12 +1473,19 @@ def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
             ["--generate-bdinfo"],
             ["--bdinfo-file"],
         )
-    if normalized in {"assets.screenshots", "description.screenshot_bbcode"}:
+    if normalized == "assets.screenshots":
         return _material_recovery_hint(
             "assets.screenshots",
             "Generate or provide screenshots before regenerating the MTEAM package.",
             ["--generate-screenshots", "--screenshot-count"],
             ["--screenshot-file"],
+        )
+    if normalized == "description.screenshot_bbcode":
+        return _material_recovery_hint(
+            "description.screenshot_bbcode",
+            "Regenerate the MTEAM description after screenshot and image-host materials are ready.",
+            ["--prepare-target"],
+            [],
         )
     if normalized in {"assets.image_host_uploads", "description.screenshot_coverage"}:
         return _material_recovery_hint(
@@ -7336,9 +7345,9 @@ def _material_critical_domains(critical_missing: list[str]) -> dict[str, Any]:
     domains = {
         "metadata": ["metadata.imdb", "metadata.tmdb", "metadata.douban", "metadata.ptgen_description", "description.external_ids", "description.ptgen_description"],
         "media_info": ["assets.mediainfo_or_bdinfo", "assets.bdinfo_for_disc", "description.mediainfo_or_bdinfo"],
-        "screenshots": ["assets.screenshots", "description.screenshot_bbcode"],
+        "screenshots": ["assets.screenshots"],
         "image_host": ["assets.image_host_uploads", "description.screenshot_coverage"],
-        "description": ["description.content"],
+        "description": ["description.content", "description.screenshot_bbcode"],
     }
     return {
         name: {
@@ -7554,8 +7563,10 @@ def _target_package_material_auto_flags(artifacts: dict[str, Any] | None) -> set
             flags.add("--generate-mediainfo")
         elif normalized == "assets.bdinfo_for_disc":
             flags.add("--generate-bdinfo")
-        elif normalized in {"assets.screenshots", "description.screenshot_bbcode"}:
+        elif normalized == "assets.screenshots":
             flags.add("--generate-screenshots")
+        elif normalized == "description.screenshot_bbcode":
+            flags.add("--prepare-target")
         elif normalized in {"assets.image_host_uploads", "description.screenshot_coverage"}:
             flags.add("--upload-screenshots")
     return flags
@@ -7982,7 +7993,7 @@ def _target_preparation_audit(package: Any, target_torrent_file: str | None = No
         },
         "payload_review": payload_review,
         "materials": materials,
-        "missing": _target_preparation_missing(materials, payload_ready, description_checks_ready),
+        "missing": _target_preparation_missing(materials, payload_ready, description_checks_ready, description_missing),
         "blockers": blockers,
     }
 
@@ -7996,8 +8007,9 @@ def _target_preparation_preflight(package_dir: Any, target_torrent_file: str | N
         return {"status": "blocked", "blockers": [f"target upload preflight failed: {exc}"]}
 
 
-def _target_preparation_missing(materials: dict[str, Any], payload_ready: bool, description_ready: bool) -> list[str]:
+def _target_preparation_missing(materials: dict[str, Any], payload_ready: bool, description_ready: bool, description_missing: list[str] | None = None) -> list[str]:
     missing = _string_list(materials.get("missing"))
+    _extend_unique_string(missing, _string_list(description_missing))
     if not description_ready:
         _append_unique_string(missing, "description.content")
     if not payload_ready:

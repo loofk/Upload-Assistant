@@ -1734,7 +1734,7 @@ def test_retorrent_next_actions_expand_missing_target_materials() -> None:
     assert any("IMDb/TMDb/Douban metadata" in action for action in actions)
     assert any("PTGen/Douban description" in action for action in actions)
     assert any("MediaInfo/BDInfo" in action for action in actions)
-    assert any("screenshots" in action for action in actions)
+    assert any("screenshot" in action for action in actions)
     assert any("image host" in action for action in actions)
     assert any("Regenerate the MTEAM description" in action for action in actions)
 
@@ -1753,7 +1753,7 @@ def test_retorrent_next_actions_expand_closure_review_materials_ready() -> None:
     )
 
     assert any("IMDb/TMDb/Douban metadata" in action for action in actions)
-    assert any("screenshots" in action for action in actions)
+    assert any("screenshot" in action for action in actions)
     assert any("MediaInfo/BDInfo" in action for action in actions)
 
 
@@ -4200,7 +4200,7 @@ def test_summary_material_diagnostics_exposes_description_external_id_readiness(
             "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
             "Fetch or supply IMDb/TMDb/Douban metadata with --enrich-metadata, --fetch-ptgen, --metadata-file, --imdb-id, --tmdb-id, or --douban-id, then rerun resume-target-package.",
             "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun resume-target-package.",
-            "Generate or provide screenshots with --generate-screenshots or --screenshot-file, then rerun resume-target-package.",
+            "Regenerate the MTEAM description after screenshot and image-host materials are ready.",
             "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
         ],
         "checks": [
@@ -11944,15 +11944,21 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     material_closure = summary_payload["resume_state"]["materials"]["closure"]
     assert material_closure["ready"] is False
     assert material_closure["critical_ready"] is False
-    assert material_closure["critical_missing"] == ["metadata.ptgen_description", "description.content"]
-    assert material_closure["critical_domains"]["metadata"] == {"ready": False, "missing": ["metadata.ptgen_description"]}
+    assert material_closure["critical_missing"] == ["metadata.ptgen_description", "description.ptgen_description", "description.content"]
+    assert material_closure["critical_domains"]["metadata"] == {"ready": False, "missing": ["metadata.ptgen_description", "description.ptgen_description"]}
     assert material_closure["critical_domains"]["description"] == {"ready": False, "missing": ["description.content"]}
     assert material_closure["critical_domains"]["media_info"]["ready"] is True
     assert material_closure["critical_domains"]["screenshots"]["ready"] is True
     assert material_closure["critical_domains"]["image_host"]["ready"] is True
     assert material_closure["critical_path"]["ready"] is False
     assert material_closure["critical_path"]["next_step"] == "metadata"
-    assert material_closure["critical_path"]["missing"] == ["metadata.ptgen_description", "description.content", "payload.preflight"]
+    assert material_closure["critical_path"]["missing"] == [
+        "metadata.ptgen_description",
+        "description.ptgen_description",
+        "description.content",
+        "materials.description.ptgen_description",
+        "payload.preflight",
+    ]
     assert [step["name"] for step in material_closure["critical_path"]["steps"]] == [
         "metadata",
         "media_info",
@@ -12003,9 +12009,9 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     out = capsys.readouterr().out
     assert "export PTCLI_RESUME_MATERIAL_CLOSURE_READY=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_CRITICAL_READY=0\n" in out
-    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_MISSING=metadata.ptgen_description,description.content\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_MISSING=metadata.ptgen_description,description.ptgen_description,description.content\n" in out
     assert "export PTCLI_RESUME_MATERIAL_CRITICAL_METADATA_READY=0\n" in out
-    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_METADATA_MISSING=metadata.ptgen_description\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_METADATA_MISSING=metadata.ptgen_description,description.ptgen_description\n" in out
     assert "export PTCLI_RESUME_MATERIAL_CRITICAL_MEDIA_INFO_READY=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_CRITICAL_SCREENSHOTS_READY=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_CRITICAL_IMAGE_HOST_READY=1\n" in out
@@ -12150,7 +12156,7 @@ async def test_pipeline_summary_recovers_missing_image_host_uploads(monkeypatch,
     assert material_closure["critical_domains"]["media_info"]["ready"] is True
     assert material_closure["critical_domains"]["screenshots"]["ready"] is True
     assert material_closure["critical_domains"]["image_host"] == {"ready": False, "missing": ["assets.image_host_uploads"]}
-    assert material_closure["critical_domains"]["description"] == {"ready": False, "missing": ["description.content"]}
+    assert material_closure["critical_domains"]["description"] == {"ready": False, "missing": ["description.screenshot_bbcode", "description.content"]}
     assert material_closure["screenshots"]["ready"] is True
     assert material_closure["screenshots"]["count"] == 1
     assert material_closure["screenshots"]["files"] == [str(screenshot)]
@@ -12185,7 +12191,7 @@ async def test_pipeline_summary_recovers_missing_image_host_uploads(monkeypatch,
     assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_INVALID_COUNT=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_READY=1\n" in out
-    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=assets.image_host_uploads,description.content\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=assets.image_host_uploads,description.screenshot_bbcode,description.content\n" in out
     assert "--upload-screenshots" in out
 
 
