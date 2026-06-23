@@ -4722,6 +4722,15 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert readiness["material_missing"] == ["description completeness missing: description.screenshot_coverage"]
     assert readiness["material_upload_blockers"] == ["description completeness missing: description.screenshot_coverage"]
     assert readiness["material_upload_gates"]["description_completeness_ready"] is False
+    assert readiness["material_description_evidence"] == description_evidence
+    assert readiness["material_description_screenshot_coverage_ready"] is False
+    assert readiness["material_description_screenshot_coverage_missing_count"] == 1
+    assert readiness["material_description_screenshot_coverage_missing_urls"] == ["https://img.example/screen-1.png"]
+    readiness_shell_fields = ptcli_cli._summary_check_readiness_shell_fields(readiness)
+    assert json.loads(readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_EVIDENCE"]) == description_evidence
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_READY"] == "0"
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_COUNT"] == 1
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_URLS"] == "https://img.example/screen-1.png"
 
 
 def test_summary_material_diagnostics_exposes_description_external_id_readiness() -> None:

@@ -838,6 +838,12 @@ def _retorrent_readiness_summary(
     materials_evidence = domain_evidence("materials")
     materials_domain = domain("materials")
     target_upload_evidence = domain_evidence("target_upload")
+    material_description_evidence = _readiness_material_description_evidence(material_diagnostics, target_upload_diagnostics)
+    screenshot_coverage_evidence = material_description_evidence.get("screenshot_coverage") if isinstance(material_description_evidence.get("screenshot_coverage"), dict) else {}
+    external_id_evidence = material_description_evidence.get("external_ids") if isinstance(material_description_evidence.get("external_ids"), dict) else {}
+    ptgen_evidence = material_description_evidence.get("ptgen_description") if isinstance(material_description_evidence.get("ptgen_description"), dict) else {}
+    mediainfo_evidence = material_description_evidence.get("mediainfo_or_bdinfo") if isinstance(material_description_evidence.get("mediainfo_or_bdinfo"), dict) else {}
+    screenshots_evidence = material_description_evidence.get("screenshots") if isinstance(material_description_evidence.get("screenshots"), dict) else {}
     next_command_argv = _argv_list(resume_state.get("next_command_argv"))
     material_recovery = _readiness_material_recovery_summary(resume_state)
     uploaded_followup = _readiness_uploaded_followup_summary(resume_state)
@@ -866,6 +872,15 @@ def _retorrent_readiness_summary(
         "material_missing": _string_list(materials_domain.get("missing")),
         "material_upload_gates": material_diagnostics.get("upload_material_gates") if isinstance(material_diagnostics.get("upload_material_gates"), dict) else {},
         "material_upload_blockers": _string_list(material_diagnostics.get("upload_material_blockers")),
+        "material_description_evidence": material_description_evidence,
+        "material_description_ptgen_ready": ptgen_evidence.get("ready") if isinstance(ptgen_evidence.get("ready"), bool) else None,
+        "material_description_external_ids_ready": external_id_evidence.get("ready") if isinstance(external_id_evidence.get("ready"), bool) else None,
+        "material_description_external_id_missing": _string_list(external_id_evidence.get("missing")),
+        "material_description_mediainfo_ready": mediainfo_evidence.get("ready") if isinstance(mediainfo_evidence.get("ready"), bool) else None,
+        "material_description_screenshots_ready": screenshots_evidence.get("ready") if isinstance(screenshots_evidence.get("ready"), bool) else None,
+        "material_description_screenshot_coverage_ready": screenshot_coverage_evidence.get("ready") if isinstance(screenshot_coverage_evidence.get("ready"), bool) else None,
+        "material_description_screenshot_coverage_missing_count": screenshot_coverage_evidence.get("missing_count"),
+        "material_description_screenshot_coverage_missing_urls": _string_list(screenshot_coverage_evidence.get("missing_urls")),
         "target_preflight_ready": target_preflight_diagnostics.get("ready") if isinstance(target_preflight_diagnostics.get("ready"), bool) else None,
         "target_preflight_materials_ready": target_preflight_diagnostics.get("materials_ready") if isinstance(target_preflight_diagnostics.get("materials_ready"), bool) else None,
         "target_preflight_description_ready": target_preflight_diagnostics.get("description_ready") if isinstance(target_preflight_diagnostics.get("description_ready"), bool) else None,
@@ -879,6 +894,17 @@ def _retorrent_readiness_summary(
         "material_recovery": material_recovery,
         "uploaded_followup": uploaded_followup,
     }
+
+
+def _readiness_material_description_evidence(material_diagnostics: dict[str, Any], target_upload_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
+    evidence = description.get("evidence") if isinstance(description.get("evidence"), dict) else {}
+    if evidence:
+        return evidence
+    payload_review = target_upload_diagnostics.get("payload_review") if isinstance(target_upload_diagnostics.get("payload_review"), dict) else {}
+    payload_description = payload_review.get("description") if isinstance(payload_review.get("description"), dict) else {}
+    evidence = payload_description.get("evidence") if isinstance(payload_description.get("evidence"), dict) else {}
+    return evidence
 
 
 def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
@@ -9488,6 +9514,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
 def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> dict[str, Any]:
     material_recovery = readiness_summary.get("material_recovery") if isinstance(readiness_summary.get("material_recovery"), dict) else {}
     material_recovery_coverage = material_recovery.get("command_coverage") if isinstance(material_recovery.get("command_coverage"), dict) else {}
+    material_description_evidence = readiness_summary.get("material_description_evidence") if isinstance(readiness_summary.get("material_description_evidence"), dict) else {}
     uploaded_followup = readiness_summary.get("uploaded_followup") if isinstance(readiness_summary.get("uploaded_followup"), dict) else {}
     uploaded_wait_query = uploaded_followup.get("uploaded_wait_query") if isinstance(uploaded_followup.get("uploaded_wait_query"), dict) else {}
     uploaded_wait_retry = uploaded_followup.get("wait_retry") if isinstance(uploaded_followup.get("wait_retry"), dict) else {}
@@ -9518,6 +9545,15 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_MATERIAL_MISSING": ",".join(_string_list(readiness_summary.get("material_missing"))),
         "PTCLI_READINESS_MATERIAL_UPLOAD_GATES": json.dumps(readiness_summary.get("material_upload_gates"), ensure_ascii=False) if isinstance(readiness_summary.get("material_upload_gates"), dict) else None,
         "PTCLI_READINESS_MATERIAL_UPLOAD_BLOCKERS": "|".join(_string_list(readiness_summary.get("material_upload_blockers"))),
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_EVIDENCE": json.dumps(material_description_evidence, ensure_ascii=False) if material_description_evidence else None,
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_PTGEN_READY": _shell_bool(readiness_summary.get("material_description_ptgen_ready")) if readiness_summary.get("material_description_ptgen_ready") is not None else None,
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_EXTERNAL_IDS_READY": _shell_bool(readiness_summary.get("material_description_external_ids_ready")) if readiness_summary.get("material_description_external_ids_ready") is not None else None,
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_EXTERNAL_ID_MISSING": ",".join(_string_list(readiness_summary.get("material_description_external_id_missing"))),
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIAINFO_READY": _shell_bool(readiness_summary.get("material_description_mediainfo_ready")) if readiness_summary.get("material_description_mediainfo_ready") is not None else None,
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOTS_READY": _shell_bool(readiness_summary.get("material_description_screenshots_ready")) if readiness_summary.get("material_description_screenshots_ready") is not None else None,
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_READY": _shell_bool(readiness_summary.get("material_description_screenshot_coverage_ready")) if readiness_summary.get("material_description_screenshot_coverage_ready") is not None else None,
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_COUNT": readiness_summary.get("material_description_screenshot_coverage_missing_count"),
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_URLS": ",".join(_string_list(readiness_summary.get("material_description_screenshot_coverage_missing_urls"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_MISSING": ",".join(_string_list(readiness_summary.get("target_preflight_missing"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_DESCRIPTION_MISSING": ",".join(_string_list(readiness_summary.get("target_preflight_description_missing"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_BLOCKERS": "|".join(_string_list(readiness_summary.get("target_preflight_blockers"))),
