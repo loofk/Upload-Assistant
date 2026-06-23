@@ -3228,12 +3228,19 @@ def _summary_material_section(section: Any) -> dict[str, Any]:
         "douban_url",
         "ptgen_description_length",
         "bdinfo_file",
+        "bdinfo_file_evidence",
         "raw_bdinfo_file",
+        "raw_bdinfo_file_evidence",
         "mediainfo_file",
+        "mediainfo_file_evidence",
         "mediainfo_summary_file",
+        "mediainfo_summary_file_evidence",
         "mediainfo_json_file",
+        "mediainfo_json_file_evidence",
         "screenshot_files",
+        "screenshot_files_evidence",
         "image_host_file",
+        "image_host_file_evidence",
         "count",
         "requested_count",
         "host",
@@ -9865,6 +9872,10 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     mediainfo = sections.get("mediainfo") if isinstance(sections.get("mediainfo"), dict) else {}
     screenshots = sections.get("screenshots") if isinstance(sections.get("screenshots"), dict) else {}
     image_host = sections.get("image_host") if isinstance(sections.get("image_host"), dict) else {}
+    bdinfo_evidence = bdinfo.get("bdinfo_file_evidence") or bdinfo.get("raw_bdinfo_file_evidence")
+    mediainfo_evidence = mediainfo.get("mediainfo_file_evidence")
+    screenshot_evidence = screenshots.get("screenshot_files_evidence")
+    image_host_file_evidence = image_host.get("image_host_file_evidence")
     image_host_urls = material_diagnostics.get("image_host_urls") if isinstance(material_diagnostics.get("image_host_urls"), dict) else {}
     disc_structure = material_diagnostics.get("disc_structure") if isinstance(material_diagnostics.get("disc_structure"), dict) else {}
     description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
@@ -9937,12 +9948,22 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_METADATA_PTGEN_SOURCE": ptgen_field.get("source"),
         "PTCLI_MATERIAL_BDINFO_OK": _summary_material_section_shell_bool(bdinfo),
         "PTCLI_MATERIAL_BDINFO_FILE": bdinfo.get("bdinfo_file"),
+        "PTCLI_MATERIAL_BDINFO_FILE_EXISTS": _shell_bool(_material_evidence_all_files_exist(bdinfo_evidence)) if _material_evidence_all_files_exist(bdinfo_evidence) is not None else None,
+        "PTCLI_MATERIAL_BDINFO_FILE_SHA1": _material_evidence_first_sha1(bdinfo_evidence),
         "PTCLI_MATERIAL_MEDIAINFO_OK": _summary_material_section_shell_bool(mediainfo),
+        "PTCLI_MATERIAL_MEDIAINFO_FILE": mediainfo.get("mediainfo_file"),
+        "PTCLI_MATERIAL_MEDIAINFO_FILE_EXISTS": _shell_bool(_material_evidence_all_files_exist(mediainfo_evidence)) if _material_evidence_all_files_exist(mediainfo_evidence) is not None else None,
+        "PTCLI_MATERIAL_MEDIAINFO_FILE_SHA1": _material_evidence_first_sha1(mediainfo_evidence),
         "PTCLI_MATERIAL_SCREENSHOTS_OK": _summary_material_section_shell_bool(screenshots),
         "PTCLI_MATERIAL_SCREENSHOTS_COUNT": screenshots.get("count"),
+        "PTCLI_MATERIAL_SCREENSHOTS_FILES_EXIST": _shell_bool(_material_evidence_all_files_exist(screenshot_evidence)) if _material_evidence_all_files_exist(screenshot_evidence) is not None else None,
+        "PTCLI_MATERIAL_SCREENSHOTS_SHA1S": ",".join(_material_evidence_sha1s(screenshot_evidence)),
         "PTCLI_MATERIAL_IMAGE_HOST_OK": _summary_material_section_shell_bool(image_host),
         "PTCLI_MATERIAL_IMAGE_HOST_HOST": image_host.get("host"),
         "PTCLI_MATERIAL_IMAGE_HOST_COUNT": image_host.get("count"),
+        "PTCLI_MATERIAL_IMAGE_HOST_FILE": image_host.get("image_host_file"),
+        "PTCLI_MATERIAL_IMAGE_HOST_FILE_EXISTS": _shell_bool(_material_evidence_all_files_exist(image_host_file_evidence)) if _material_evidence_all_files_exist(image_host_file_evidence) is not None else None,
+        "PTCLI_MATERIAL_IMAGE_HOST_FILE_SHA1": _material_evidence_first_sha1(image_host_file_evidence),
         "PTCLI_MATERIAL_IMAGE_HOST_ITEM_COUNT": image_host_urls.get("item_count"),
         "PTCLI_MATERIAL_IMAGE_HOST_VALID_COUNT": image_host_urls.get("valid_count"),
         "PTCLI_MATERIAL_IMAGE_HOST_INVALID_COUNT": image_host_urls.get("invalid_count"),
@@ -9986,6 +10007,30 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
 
 def _summary_material_section_shell_bool(section: dict[str, Any]) -> str | None:
     return _shell_bool(section.get("ok")) if "ok" in section and section.get("ok") is not None else None
+
+
+def _material_evidence_items(evidence: Any) -> list[dict[str, Any]]:
+    if isinstance(evidence, dict):
+        return [evidence]
+    if isinstance(evidence, list):
+        return [item for item in evidence if isinstance(item, dict)]
+    return []
+
+
+def _material_evidence_all_files_exist(evidence: Any) -> bool | None:
+    items = _material_evidence_items(evidence)
+    if not items:
+        return None
+    return all(item.get("exists") is True and item.get("is_file") is True for item in items)
+
+
+def _material_evidence_sha1s(evidence: Any) -> list[str]:
+    return [str(item["sha1"]) for item in _material_evidence_items(evidence) if isinstance(item.get("sha1"), str) and item.get("sha1")]
+
+
+def _material_evidence_first_sha1(evidence: Any) -> str | None:
+    sha1s = _material_evidence_sha1s(evidence)
+    return sha1s[0] if sha1s else None
 
 
 def _summary_check_qbit_wait_shell_fields(qbit_wait_diagnostics: dict[str, Any]) -> dict[str, Any]:

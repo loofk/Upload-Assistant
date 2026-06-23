@@ -4218,6 +4218,66 @@ def test_summary_material_diagnostics_exposes_invalid_image_host_url_counts() ->
     assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_INVALID_COUNT"] == 1
 
 
+def test_summary_material_diagnostics_exposes_material_file_evidence(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host = tmp_path / "image-host-uploads.json"
+    image_host.write_text(json.dumps({"items": [{"img_url": "https://img.example/1.png"}]}), encoding="utf-8")
+
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "material_generation": {
+                    "mediainfo": {
+                        "ok": True,
+                        "status": "generated",
+                        "mediainfo_file": str(mediainfo),
+                        "mediainfo_file_evidence": ptcli_cli._material_file_evidence(str(mediainfo)),
+                    },
+                    "screenshots": {
+                        "ok": True,
+                        "status": "generated",
+                        "screenshot_files": [str(screenshot)],
+                        "screenshot_files_evidence": ptcli_cli._material_file_evidence([str(screenshot)]),
+                        "count": 1,
+                    },
+                    "image_host": {
+                        "ok": True,
+                        "status": "uploaded",
+                        "image_host_file": str(image_host),
+                        "image_host_file_evidence": ptcli_cli._material_file_evidence(str(image_host)),
+                    },
+                }
+            }
+        }
+    )
+
+    mediainfo_evidence = diagnostics["sections"]["mediainfo"]["mediainfo_file_evidence"]
+    assert mediainfo_evidence["exists"] is True
+    assert mediainfo_evidence["is_file"] is True
+    assert mediainfo_evidence["size_bytes"] == len(mediainfo.read_bytes())
+    assert len(mediainfo_evidence["sha1"]) == 40
+    screenshot_evidence = diagnostics["sections"]["screenshots"]["screenshot_files_evidence"]
+    assert screenshot_evidence[0]["exists"] is True
+    assert screenshot_evidence[0]["is_file"] is True
+    assert len(screenshot_evidence[0]["sha1"]) == 40
+    image_host_evidence = diagnostics["sections"]["image_host"]["image_host_file_evidence"]
+    assert image_host_evidence["exists"] is True
+    assert len(image_host_evidence["sha1"]) == 40
+
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+    assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_FILE"] == str(mediainfo)
+    assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_FILE_EXISTS"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_FILE_SHA1"] == mediainfo_evidence["sha1"]
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_FILES_EXIST"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_SHA1S"] == screenshot_evidence[0]["sha1"]
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_FILE"] == str(image_host)
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_FILE_EXISTS"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_FILE_SHA1"] == image_host_evidence["sha1"]
+
+
 def test_summary_material_diagnostics_marks_bdinfo_optional_for_file_content() -> None:
     diagnostics = ptcli_cli._summary_material_diagnostics(
         {
