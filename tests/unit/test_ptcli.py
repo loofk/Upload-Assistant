@@ -1985,6 +1985,8 @@ def test_readiness_material_recovery_summary_exposes_actionable_commands() -> No
         "first_uncovered_missing_flags": [],
         "uncovered_keys": [],
     }
+    assert recovery["completion_command"] is None
+    assert recovery["completion_command_argv"] == []
 
 
 def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> None:
@@ -5722,6 +5724,8 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMPLETION_COMMAND='python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen --upload-screenshots'\n" in out
+    assert 'export PTCLI_RESUME_MATERIAL_RECOVERY_COMPLETION_COMMAND_ARGV=\'["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen", "--upload-screenshots"]\'\n' in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_COVERAGE_AVAILABLE=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_COVERAGE_MISSING=2\n" in out
@@ -5735,6 +5739,8 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMPLETION_COMMAND='python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen --upload-screenshots'\n" in out
+    assert 'export PTCLI_READINESS_MATERIAL_RECOVERY_COMPLETION_COMMAND_ARGV=\'["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen", "--upload-screenshots"]\'\n' in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_AVAILABLE=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_MISSING=2\n" in out

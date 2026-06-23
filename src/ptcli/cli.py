@@ -880,6 +880,7 @@ def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[s
     first_recovery_command = _first_material_recovery_command(recovery_hints)
     first_argv = _argv_list(first_recovery_command.get("argv")) or []
     command_coverage = _material_recovery_command_coverage(recovery_hints)
+    completion_command = _material_recovery_completion_command(resume_state, recovery_hints, command_coverage)
     return {
         "present": bool(materials),
         "target_materials_missing": _string_list(materials.get("target_materials_missing")),
@@ -893,6 +894,8 @@ def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[s
         "first_command": first_recovery_command.get("command"),
         "first_command_argv": first_argv,
         "command_coverage": command_coverage,
+        "completion_command": completion_command.get("command"),
+        "completion_command_argv": completion_command.get("argv"),
         "hints": recovery_hints,
     }
 
@@ -9304,6 +9307,8 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS": ",".join(_string_list(material_recovery.get("existing_file_options"))),
         "PTCLI_READINESS_MATERIAL_FIRST_RECOVERY_COMMAND": material_recovery.get("first_command"),
         "PTCLI_READINESS_MATERIAL_FIRST_RECOVERY_COMMAND_ARGV": json.dumps(material_recovery.get("first_command_argv"), ensure_ascii=False) if material_recovery.get("first_command_argv") else None,
+        "PTCLI_READINESS_MATERIAL_RECOVERY_COMPLETION_COMMAND": material_recovery.get("completion_command"),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_COMPLETION_COMMAND_ARGV": json.dumps(material_recovery.get("completion_command_argv"), ensure_ascii=False) if material_recovery.get("completion_command_argv") else None,
         "PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY": _shell_bool(material_recovery_coverage.get("ready")) if material_recovery_coverage.get("ready") is not None else None,
         "PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_AVAILABLE": material_recovery_coverage.get("available_count"),
         "PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_MISSING": material_recovery_coverage.get("missing_count"),
@@ -9474,6 +9479,7 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
     recovery_hints = materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else []
     first_recovery_command = _first_material_recovery_command(recovery_hints)
     recovery_command_coverage = _material_recovery_command_coverage(recovery_hints)
+    recovery_completion_command = _material_recovery_completion_command(resume_state, recovery_hints, recovery_command_coverage)
     return {
         "PTCLI_RESUME_MATERIALS_PRESENT": _shell_bool(bool(materials)) if resume_state else None,
         "PTCLI_RESUME_TARGET_MATERIALS_READY": _shell_bool(materials.get("target_materials_ready")) if materials.get("target_materials_ready") is not None else None,
@@ -9559,6 +9565,8 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_FLAGS": ",".join(_material_recovery_missing_flags(recovery_hints)),
         "PTCLI_RESUME_MATERIAL_RECOVERY_REQUIRED_FLAGS": ",".join(_material_recovery_required_flags(recovery_hints)),
         "PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS": ",".join(_material_recovery_existing_file_options(recovery_hints)),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_COMPLETION_COMMAND": recovery_completion_command.get("command"),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_COMPLETION_COMMAND_ARGV": json.dumps(recovery_completion_command.get("argv"), ensure_ascii=False) if recovery_completion_command.get("argv") else None,
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY": _shell_bool(recovery_command_coverage.get("ready")) if recovery_command_coverage.get("ready") is not None else None,
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_COVERAGE_AVAILABLE": recovery_command_coverage.get("available_count"),
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_COVERAGE_MISSING": recovery_command_coverage.get("missing_count"),
@@ -9608,6 +9616,23 @@ def _material_recovery_command_coverage(recovery_hints: list[Any]) -> dict[str, 
         "first_uncovered_missing_flags": _string_list(first_uncovered.get("missing_command_flags")),
         "uncovered_keys": [str(hint.get("key")) for hint in uncovered if hint.get("key")],
     }
+
+
+def _material_recovery_completion_command(resume_state: dict[str, Any], recovery_hints: list[Any], command_coverage: dict[str, Any]) -> dict[str, Any]:
+    if command_coverage.get("ready") is True or not command_coverage.get("hint_count"):
+        return {"command": None, "argv": []}
+    if resume_state.get("next_stage") != "resume-target-package":
+        return {"command": None, "argv": []}
+    argv = _argv_list(resume_state.get("next_command_argv"))
+    if not argv:
+        return {"command": None, "argv": []}
+    completed_argv = list(argv)
+    for flag in _material_recovery_missing_flags(recovery_hints):
+        if flag not in completed_argv:
+            completed_argv.append(flag)
+    if completed_argv == argv:
+        return {"command": None, "argv": []}
+    return {"command": shlex.join(completed_argv), "argv": completed_argv}
 
 
 def _first_material_recovery_command(recovery_hints: list[Any]) -> dict[str, Any]:
