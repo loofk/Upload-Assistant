@@ -3157,11 +3157,24 @@ def _description_completeness_summary(description: dict[str, Any]) -> dict[str, 
         {"name": "screenshot_coverage", "ready": _description_bool(screenshot_coverage.get("ready"))},
     ]
     missing = [str(check["name"]) for check in checks if check.get("ready") is not True]
+    recovery_missing = [_description_completeness_recovery_key(item) for item in missing]
     return {
         "ready": not missing,
         "missing": missing,
+        "recovery_missing": recovery_missing,
+        "next_actions": _target_preparation_missing_next_actions(recovery_missing),
         "checks": checks,
     }
+
+
+def _description_completeness_recovery_key(key: str) -> str:
+    return {
+        "ptgen_description": "description.ptgen_description",
+        "external_ids": "description.external_ids",
+        "mediainfo_or_bdinfo": "description.mediainfo_or_bdinfo",
+        "screenshot_bbcode": "description.screenshot_bbcode",
+        "screenshot_coverage": "description.screenshot_coverage",
+    }.get(key, f"description.{key}")
 
 
 def _description_bool(value: Any) -> bool | None:
@@ -9775,6 +9788,8 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_DESCRIPTION_READY": _shell_bool(description.get("ready")) if description.get("ready") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_COMPLETE": _shell_bool(description_completeness.get("ready")) if description_completeness.get("ready") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_MISSING": ",".join(_string_list(description_completeness.get("missing"))),
+        "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING": ",".join(_string_list(description_completeness.get("recovery_missing"))),
+        "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS": " | ".join(_string_list(description_completeness.get("next_actions"))),
         "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_CHECKS": json.dumps(description_completeness.get("checks"), ensure_ascii=False) if isinstance(description_completeness.get("checks"), list) else None,
         "PTCLI_MATERIAL_DESCRIPTION_PATH": description.get("path"),
         "PTCLI_MATERIAL_DESCRIPTION_LENGTH": description.get("char_length"),

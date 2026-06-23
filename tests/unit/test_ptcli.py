@@ -4195,6 +4195,14 @@ def test_summary_material_diagnostics_exposes_description_external_id_readiness(
     assert description["completeness"] == {
         "ready": False,
         "missing": ["ptgen_description", "external_ids", "mediainfo_or_bdinfo", "screenshot_bbcode", "screenshot_coverage"],
+        "recovery_missing": ["description.ptgen_description", "description.external_ids", "description.mediainfo_or_bdinfo", "description.screenshot_bbcode", "description.screenshot_coverage"],
+        "next_actions": [
+            "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
+            "Fetch or supply IMDb/TMDb/Douban metadata with --enrich-metadata, --fetch-ptgen, --metadata-file, --imdb-id, --tmdb-id, or --douban-id, then rerun resume-target-package.",
+            "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun resume-target-package.",
+            "Generate or provide screenshots with --generate-screenshots or --screenshot-file, then rerun resume-target-package.",
+            "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
+        ],
         "checks": [
             {"name": "ptgen_description", "ready": None},
             {"name": "external_ids", "ready": False},
@@ -4206,6 +4214,9 @@ def test_summary_material_diagnostics_exposes_description_external_id_readiness(
     shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETE"] == "0"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_MISSING"] == "ptgen_description,external_ids,mediainfo_or_bdinfo,screenshot_bbcode,screenshot_coverage"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING"] == "description.ptgen_description,description.external_ids,description.mediainfo_or_bdinfo,description.screenshot_bbcode,description.screenshot_coverage"
+    assert "Fetch PTGen/Douban description" in shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS"]
+    assert "Upload screenshots to an image host" in shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS"]
     assert json.loads(shell_fields["PTCLI_MATERIAL_DESCRIPTION_EXTERNAL_ID_READINESS"]) == {"imdb": True, "tmdb": False, "douban": True}
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_EXTERNAL_ID_MISSING"] == "tmdb"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_HAS_IMDB"] == "1"
@@ -5400,6 +5411,8 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_DESCRIPTION_READY=1\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_COMPLETE=0\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_MISSING=screenshot_coverage\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING=description.screenshot_coverage\n" in out
+    assert "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS='Upload screenshots to an image host" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_PATH='/tmp/with space/mteam-description-draft.txt'\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_LENGTH=4096\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_EXPECTED_LENGTH=4096\n" in out
