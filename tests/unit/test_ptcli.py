@@ -4049,7 +4049,13 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["target_materials_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
     assert diagnostics["target_preparation_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
     assert diagnostics["ready_for_mteam_upload"] is False
-    assert diagnostics["upload_material_gates"] == {"critical_ready": False, "target_materials_ready": False, "target_preparation_ready": False, "material_evidence_ready": True}
+    assert diagnostics["upload_material_gates"] == {
+        "critical_ready": False,
+        "target_materials_ready": False,
+        "target_preparation_ready": False,
+        "material_evidence_ready": True,
+        "description_completeness_ready": True,
+    }
     assert "critical material missing: assets.bdinfo_for_disc" in diagnostics["upload_material_blockers"]
     assert "target materials are not ready" in diagnostics["upload_material_blockers"]
     assert "target preparation is not ready" in diagnostics["upload_material_blockers"]
@@ -4326,7 +4332,13 @@ def test_summary_material_diagnostics_exposes_ready_for_mteam_upload() -> None:
     )
 
     assert diagnostics["ready_for_mteam_upload"] is True
-    assert diagnostics["upload_material_gates"] == {"critical_ready": True, "target_materials_ready": True, "target_preparation_ready": True, "material_evidence_ready": True}
+    assert diagnostics["upload_material_gates"] == {
+        "critical_ready": True,
+        "target_materials_ready": True,
+        "target_preparation_ready": True,
+        "material_evidence_ready": True,
+        "description_completeness_ready": True,
+    }
     assert diagnostics["upload_material_blockers"] == []
     assert diagnostics["critical_path"]["ready"] is True
     assert diagnostics["critical_path"]["next_step"] is None
@@ -4341,6 +4353,7 @@ def test_summary_material_diagnostics_exposes_ready_for_mteam_upload() -> None:
         "target_materials_ready": True,
         "target_preparation_ready": True,
         "material_evidence_ready": True,
+        "description_completeness_ready": True,
     }
     matrix = ptcli_cli._summary_completion_matrix(
         flow_diagnostics={},
@@ -4388,7 +4401,13 @@ def test_summary_material_diagnostics_blocks_upload_when_material_evidence_is_in
     )
 
     assert diagnostics["ready_for_mteam_upload"] is False
-    assert diagnostics["upload_material_gates"] == {"critical_ready": True, "target_materials_ready": True, "target_preparation_ready": True, "material_evidence_ready": False}
+    assert diagnostics["upload_material_gates"] == {
+        "critical_ready": True,
+        "target_materials_ready": True,
+        "target_preparation_ready": True,
+        "material_evidence_ready": False,
+        "description_completeness_ready": True,
+    }
     assert diagnostics["upload_material_blockers"] == ["material evidence invalid: mediainfo.mediainfo_file"]
     shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
     assert shell_fields["PTCLI_READY_FOR_MTEAM_UPLOAD"] == "0"
@@ -4405,6 +4424,75 @@ def test_summary_material_diagnostics_blocks_upload_when_material_evidence_is_in
     assert matrix["domains"]["materials"]["ready"] is False
     assert matrix["domains"]["materials"]["missing"] == ["material evidence invalid: mediainfo.mediainfo_file"]
     assert matrix["domains"]["materials"]["evidence"]["ready_for_mteam_upload"] is False
+
+
+def test_summary_material_diagnostics_blocks_upload_when_description_completeness_is_missing() -> None:
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "target_payload_review": {
+                    "present": True,
+                    "description": {
+                        "completeness": {
+                            "ready": False,
+                            "missing": ["screenshot_coverage"],
+                            "recovery_missing": ["description.screenshot_coverage"],
+                            "next_actions": ["Upload screenshots to an image host."],
+                            "checks": [{"name": "screenshot_coverage", "ready": False}],
+                        },
+                        "has_ptgen_description": True,
+                        "has_mediainfo_or_bdinfo": True,
+                        "has_screenshot_bbcode": True,
+                        "screenshot_coverage": {"ready": False, "missing_urls": ["https://img.example/screen-1.png"]},
+                    },
+                },
+                "target_materials": {
+                    "ready": True,
+                    "assets": {"disc_structure": {"ready": False, "path": "/downloads/Movie.mkv", "bdmv": False, "type": None}},
+                    "missing": [],
+                },
+                "target_materials_ready": True,
+                "target_preparation_ready": True,
+                "target_preparation_audit": {
+                    "description_ready": True,
+                    "description": {
+                        "has_ptgen_description": True,
+                        "has_external_ids": True,
+                        "has_mediainfo_or_bdinfo": True,
+                        "has_screenshot_bbcode": True,
+                        "missing": [],
+                    },
+                },
+            }
+        }
+    )
+
+    assert diagnostics["ready_for_mteam_upload"] is False
+    assert diagnostics["description"]["completeness"]["ready"] is False
+    assert diagnostics["description"]["completeness"]["recovery_missing"] == ["description.screenshot_coverage"]
+    assert diagnostics["upload_material_gates"] == {
+        "critical_ready": True,
+        "target_materials_ready": True,
+        "target_preparation_ready": True,
+        "material_evidence_ready": True,
+        "description_completeness_ready": False,
+    }
+    assert diagnostics["upload_material_blockers"] == ["description completeness missing: description.screenshot_coverage"]
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+    assert shell_fields["PTCLI_READY_FOR_MTEAM_UPLOAD"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETE"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING"] == "description.screenshot_coverage"
+
+    matrix = ptcli_cli._summary_completion_matrix(
+        flow_diagnostics={},
+        material_diagnostics=diagnostics,
+        target_upload_diagnostics={},
+        closure_review={},
+        closure_status={},
+        qbit_wait_mismatches=[],
+    )
+    assert matrix["domains"]["materials"]["ready"] is False
+    assert matrix["domains"]["materials"]["missing"] == ["description completeness missing: description.screenshot_coverage"]
 
 
 def test_summary_material_diagnostics_exposes_description_external_id_readiness() -> None:

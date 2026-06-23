@@ -2992,6 +2992,14 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     target_preparation_audit = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
     disc_structure = target_assets.get("disc_structure") if isinstance(target_assets.get("disc_structure"), dict) else {}
     description = target_preparation_audit.get("description") if isinstance(target_preparation_audit.get("description"), dict) else {}
+    target_payload_review = _summary_target_payload_review(artifacts, target_preparation_audit)
+    target_payload_description = target_payload_review.get("description") if isinstance(target_payload_review.get("description"), dict) else {}
+    description_completeness = (
+        target_payload_description.get("completeness")
+        if isinstance(target_payload_description.get("completeness"), dict)
+        else _description_completeness_summary(description)
+    )
+    description_completeness_present = bool(target_payload_review.get("present")) or bool(target_payload_description.get("completeness"))
     sections = {
         key: _summary_material_section(material_generation.get(key))
         for key in ("prerequisites", "metadata", "bdinfo", "mediainfo", "screenshots", "image_host")
@@ -3013,6 +3021,8 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     critical_missing = _critical_material_missing(material_missing)
     material_evidence_blockers = _material_evidence_blockers(sections)
     material_evidence_ready = not material_evidence_blockers
+    description_completeness_blockers = _description_completeness_blockers(description_completeness, description_completeness_present)
+    description_completeness_ready = not description_completeness_blockers
     bdinfo_required = bool(disc_structure.get("bdmv"))
     target_materials_ready = artifacts.get("target_materials_ready") if "target_materials_ready" in artifacts else target_materials.get("ready")
     if target_materials_ready is None and "materials_ready" in target_preparation_audit:
@@ -3020,12 +3030,19 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     target_preparation_ready = artifacts.get("target_preparation_ready")
     if target_preparation_ready is None and artifacts.get("target_preparation_missing"):
         target_preparation_ready = False
-    ready_for_mteam_upload = bool(critical_missing == [] and target_materials_ready is True and target_preparation_ready is True and material_evidence_ready)
+    ready_for_mteam_upload = bool(
+        critical_missing == []
+        and target_materials_ready is True
+        and target_preparation_ready is True
+        and material_evidence_ready
+        and description_completeness_ready
+    )
     upload_material_gates = {
         "critical_ready": not critical_missing,
         "target_materials_ready": target_materials_ready,
         "target_preparation_ready": target_preparation_ready,
         "material_evidence_ready": material_evidence_ready,
+        "description_completeness_ready": description_completeness_ready,
     }
     critical_domains = _material_critical_domains(critical_missing)
     critical_path = _material_critical_path_summary(
@@ -3046,7 +3063,13 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "target_preparation_missing": _string_list(artifacts.get("target_preparation_missing")),
         "ready_for_mteam_upload": ready_for_mteam_upload,
         "upload_material_gates": upload_material_gates,
-        "upload_material_blockers": _material_upload_blockers(upload_material_gates, material_missing, critical_missing, material_evidence_blockers),
+        "upload_material_blockers": _material_upload_blockers(
+            upload_material_gates,
+            material_missing,
+            critical_missing,
+            material_evidence_blockers,
+            description_completeness_blockers,
+        ),
         "critical_ready": not critical_missing,
         "critical_missing": critical_missing,
         "critical_domains": critical_domains,
@@ -3074,7 +3097,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "bbcode_image_urls": _string_list(description.get("bbcode_image_urls")),
             "screenshot_coverage": description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {},
             "missing": _string_list(description.get("missing")),
-            "completeness": _description_completeness_summary(description),
+            "completeness": description_completeness,
         },
         "sections": sections,
         "image_host_urls": _image_host_url_summary(image_host_evidence.get("items") if isinstance(image_host_evidence, dict) else []),
@@ -3086,6 +3109,21 @@ def _summary_material_missing(artifacts: dict[str, Any], target_materials: dict[
     missing = _string_list(artifacts.get("target_materials_missing") or target_materials.get("missing"))
     _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
     return missing
+
+
+def _summary_target_payload_review(artifacts: dict[str, Any], target_preparation_audit: dict[str, Any]) -> dict[str, Any]:
+    payload_review = artifacts.get("target_payload_review") if isinstance(artifacts.get("target_payload_review"), dict) else {}
+    if payload_review:
+        return payload_review
+    payload_review = target_preparation_audit.get("payload_review") if isinstance(target_preparation_audit.get("payload_review"), dict) else {}
+    return payload_review
+
+
+def _description_completeness_blockers(completeness: dict[str, Any], present: bool) -> list[str]:
+    if not present or completeness.get("ready") is True:
+        return []
+    missing = _string_list(completeness.get("recovery_missing")) or _string_list(completeness.get("missing"))
+    return [f"description completeness missing: {item}" for item in missing]
 
 
 def _material_evidence_blockers(sections: dict[str, Any]) -> list[str]:
@@ -3107,7 +3145,13 @@ def _material_evidence_blockers(sections: dict[str, Any]) -> list[str]:
     return blockers
 
 
-def _material_upload_blockers(gates: dict[str, Any], material_missing: list[str], critical_missing: list[str], material_evidence_blockers: list[str] | None = None) -> list[str]:
+def _material_upload_blockers(
+    gates: dict[str, Any],
+    material_missing: list[str],
+    critical_missing: list[str],
+    material_evidence_blockers: list[str] | None = None,
+    description_completeness_blockers: list[str] | None = None,
+) -> list[str]:
     blockers: list[str] = []
     if gates.get("critical_ready") is not True:
         _extend_unique_string(blockers, [f"critical material missing: {item}" for item in critical_missing])
@@ -3117,6 +3161,8 @@ def _material_upload_blockers(gates: dict[str, Any], material_missing: list[str]
         _append_unique_string(blockers, "target preparation is not ready")
     if gates.get("material_evidence_ready") is not True:
         _extend_unique_string(blockers, _string_list(material_evidence_blockers))
+    if gates.get("description_completeness_ready") is not True:
+        _extend_unique_string(blockers, _string_list(description_completeness_blockers))
     if not blockers:
         return []
     _extend_unique_string(blockers, [f"material missing: {item}" for item in material_missing if item not in critical_missing])
