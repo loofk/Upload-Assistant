@@ -3202,6 +3202,8 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "critical_missing": critical_missing,
         "critical_domains": critical_domains,
         "critical_path": critical_path,
+        "target_material_critical_path": target_materials.get("critical_path") if isinstance(target_materials.get("critical_path"), dict) else {},
+        "target_material_recovery_plan": target_materials.get("recovery_plan") if isinstance(target_materials.get("recovery_plan"), dict) else {},
         "disc_structure": disc_structure,
         "bdinfo_required": bdinfo_required,
         "media_info_requirement": "bdinfo" if bdinfo_required else "mediainfo_or_bdinfo",
@@ -8334,6 +8336,8 @@ def _target_materials_summary(package: Any) -> dict[str, Any]:
         },
         "missing": missing,
         "warnings": materials.get("warnings") if isinstance(materials.get("warnings"), list) else [],
+        "critical_path": materials.get("critical_path") if isinstance(materials.get("critical_path"), dict) else {},
+        "recovery_plan": materials.get("recovery_plan") if isinstance(materials.get("recovery_plan"), dict) else {},
         "next_actions": materials.get("next_actions") if isinstance(materials.get("next_actions"), list) else [],
     }
 

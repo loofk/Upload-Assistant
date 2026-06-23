@@ -45,6 +45,29 @@ MTEAM_SOURCE_ID_TO_TYPE = {
     "6": "Other",
     "8": "WEBDL",
 }
+MTEAM_MATERIAL_RECOVERY_ORDER = ("metadata", "media_info", "screenshots", "image_host", "description")
+MTEAM_MATERIAL_RECOVERY_DOMAINS = {
+    "metadata": {
+        "checks": ("imdb", "tmdb", "douban", "ptgen_description"),
+        "flags": ("--enrich-metadata", "--fetch-ptgen", "--metadata-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"),
+        "action": "Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description before preparing the MTEAM package.",
+    },
+    "media_info": {
+        "checks": ("mediainfo_or_bdinfo", "bdinfo_for_disc"),
+        "flags": ("--generate-mediainfo", "--mediainfo-file", "--generate-bdinfo", "--bdinfo-file"),
+        "action": "Generate or provide MediaInfo/BDInfo before preparing the MTEAM package.",
+    },
+    "screenshots": {
+        "checks": ("screenshots",),
+        "flags": ("--generate-screenshots", "--screenshot-file"),
+        "action": "Generate or provide video screenshots before preparing the MTEAM package.",
+    },
+    "image_host": {
+        "checks": ("image_host_uploads",),
+        "flags": ("--upload-screenshots", "--image-host", "--image-host-file"),
+        "action": "Upload screenshots to an image host before preparing the MTEAM package.",
+    },
+}
 
 
 def create_mteam_upload_torrent_candidate(torrent_file: str, output_dir: str | None = None) -> dict[str, Any]:
@@ -838,6 +861,8 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
         "ready": all(check["ok"] for check in all_checks),
         "missing": _mteam_material_missing(all_checks),
         "warnings": warnings,
+        "critical_path": _mteam_material_critical_path(all_checks),
+        "recovery_plan": _mteam_material_recovery_plan(all_checks),
         "next_actions": _mteam_material_next_actions(all_checks),
     }
 
@@ -950,6 +975,70 @@ def _mteam_material_next_actions(checks: list[dict[str, Any]]) -> list[str]:
     if "image_host_uploads" in missing:
         actions.append("Upload screenshots to the configured image host and record the links.")
     return actions or ["Review generated MTEAM materials before target-upload."]
+
+
+def _mteam_material_critical_path(checks: list[dict[str, Any]]) -> dict[str, Any]:
+    plan = _mteam_material_recovery_plan(checks)
+    domains = plan.get("domains") if isinstance(plan.get("domains"), list) else []
+    next_domain = next((domain for domain in domains if isinstance(domain, dict) and not domain.get("ready")), None)
+    return {
+        "ready": bool(plan.get("ready")),
+        "next_step": next_domain.get("domain") if isinstance(next_domain, dict) else None,
+        "missing": next_domain.get("missing") if isinstance(next_domain, dict) else [],
+        "action": next_domain.get("action") if isinstance(next_domain, dict) else None,
+    }
+
+
+def _mteam_material_recovery_plan(checks: list[dict[str, Any]]) -> dict[str, Any]:
+    check_by_name = {str(check.get("name") or ""): check for check in checks if isinstance(check, dict)}
+    missing_names = {name for name, check in check_by_name.items() if not check.get("ok")}
+    domains: list[dict[str, Any]] = []
+    missing_domains: list[str] = []
+    next_actions: list[str] = []
+    for domain_name in MTEAM_MATERIAL_RECOVERY_ORDER:
+        if domain_name == "description":
+            domain = _mteam_material_description_recovery_domain(missing_domains)
+        else:
+            spec = MTEAM_MATERIAL_RECOVERY_DOMAINS[domain_name]
+            domain_missing = [f"{_mteam_material_recovery_scope(name)}.{name}" for name in spec["checks"] if name in missing_names]
+            domain = {
+                "domain": domain_name,
+                "ready": not domain_missing,
+                "missing": domain_missing,
+                "depends_on": [],
+                "blocked_by": [],
+                "flags": list(spec["flags"]),
+                "action": spec["action"] if domain_missing else None,
+            }
+        if not domain["ready"]:
+            missing_domains.append(domain_name)
+            if domain.get("action"):
+                _append_unique(next_actions, str(domain["action"]))
+        domains.append(domain)
+    return {
+        "ready": not missing_domains,
+        "order": list(MTEAM_MATERIAL_RECOVERY_ORDER),
+        "missing_domains": missing_domains,
+        "domains": domains,
+        "next_actions": next_actions,
+    }
+
+
+def _mteam_material_description_recovery_domain(missing_domains: list[str]) -> dict[str, Any]:
+    ready = not missing_domains
+    return {
+        "domain": "description",
+        "ready": ready,
+        "missing": [] if ready else ["description.regenerate"],
+        "depends_on": ["metadata", "media_info", "screenshots", "image_host"],
+        "blocked_by": list(missing_domains),
+        "flags": ["--prepare-target"],
+        "action": None if ready else "Regenerate the MTEAM target package/description after the missing upstream materials are ready.",
+    }
+
+
+def _mteam_material_recovery_scope(name: str) -> str:
+    return "metadata" if name in {"imdb", "tmdb", "douban", "ptgen_description"} else "assets"
 
 
 def build_mteam_rule_review(stages: list[dict[str, Any]], accept_rules: bool) -> dict[str, Any]:

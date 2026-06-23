@@ -15752,6 +15752,76 @@ def test_mteam_materials_manifest_requires_usable_image_host_urls(tmp_path) -> N
     assert materials["ready"] is False
 
 
+def test_mteam_materials_manifest_exposes_prioritized_recovery_plan() -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": None,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
+
+    materials = build_mteam_materials_manifest(preview, source_info, "/downloads/Example")
+
+    assert materials["critical_path"] == {
+        "ready": False,
+        "next_step": "metadata",
+        "missing": ["metadata.imdb", "metadata.tmdb", "metadata.douban", "metadata.ptgen_description"],
+        "action": "Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description before preparing the MTEAM package.",
+    }
+    recovery_plan = materials["recovery_plan"]
+    assert recovery_plan["ready"] is False
+    assert recovery_plan["order"] == ["metadata", "media_info", "screenshots", "image_host", "description"]
+    assert recovery_plan["missing_domains"] == ["metadata", "media_info", "screenshots", "image_host", "description"]
+    domains = {domain["domain"]: domain for domain in recovery_plan["domains"]}
+    assert domains["metadata"]["flags"] == ["--enrich-metadata", "--fetch-ptgen", "--metadata-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"]
+    assert domains["media_info"]["missing"] == ["assets.mediainfo_or_bdinfo"]
+    assert domains["screenshots"]["missing"] == ["assets.screenshots"]
+    assert domains["image_host"]["missing"] == ["assets.image_host_uploads"]
+    assert domains["description"]["missing"] == ["description.regenerate"]
+    assert domains["description"]["blocked_by"] == ["metadata", "media_info", "screenshots", "image_host"]
+    assert recovery_plan["next_actions"] == [
+        "Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description before preparing the MTEAM package.",
+        "Generate or provide MediaInfo/BDInfo before preparing the MTEAM package.",
+        "Generate or provide video screenshots before preparing the MTEAM package.",
+        "Upload screenshots to an image host before preparing the MTEAM package.",
+        "Regenerate the MTEAM target package/description after the missing upstream materials are ready.",
+    ]
+
+
+def test_mteam_materials_manifest_recovery_plan_ready_when_materials_ready(tmp_path) -> None:
+    package = write_material_ready_mteam_package(
+        {
+            "tracker": "U2",
+            "torrent_id": "60635",
+            "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+            "imdb_id": 1234567,
+            "tmdb_id": 999,
+            "douban_id": "1291546",
+            "douban_url": "https://movie.douban.com/subject/1291546/",
+            "torrenthash": "a" * 40,
+            "description_length": 100,
+            "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+        },
+        tmp_path,
+    )
+    materials = package["materials"]
+
+    assert materials["ready"] is True
+    assert materials["critical_path"] == {"ready": True, "next_step": None, "missing": [], "action": None}
+    assert materials["recovery_plan"]["ready"] is True
+    assert materials["recovery_plan"]["missing_domains"] == []
+    assert all(domain["ready"] is True for domain in materials["recovery_plan"]["domains"])
+    summary = ptcli_cli._target_materials_summary(package)
+    assert summary["critical_path"] == materials["critical_path"]
+    assert summary["recovery_plan"] == materials["recovery_plan"]
+
+
 def test_mteam_materials_manifest_rejects_non_web_image_host_urls(tmp_path) -> None:
     mediainfo = tmp_path / "MEDIAINFO.txt"
     mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
