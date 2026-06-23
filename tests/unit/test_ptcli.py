@@ -4192,7 +4192,20 @@ def test_summary_material_diagnostics_exposes_description_external_id_readiness(
     assert description["has_external_ids"] is False
     assert description["external_id_readiness"] == {"imdb": True, "tmdb": False, "douban": True}
     assert description["external_id_missing"] == ["tmdb"]
+    assert description["completeness"] == {
+        "ready": False,
+        "missing": ["ptgen_description", "external_ids", "mediainfo_or_bdinfo", "screenshot_bbcode", "screenshot_coverage"],
+        "checks": [
+            {"name": "ptgen_description", "ready": None},
+            {"name": "external_ids", "ready": False},
+            {"name": "mediainfo_or_bdinfo", "ready": None},
+            {"name": "screenshot_bbcode", "ready": None},
+            {"name": "screenshot_coverage", "ready": None},
+        ],
+    }
     shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETE"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_MISSING"] == "ptgen_description,external_ids,mediainfo_or_bdinfo,screenshot_bbcode,screenshot_coverage"
     assert json.loads(shell_fields["PTCLI_MATERIAL_DESCRIPTION_EXTERNAL_ID_READINESS"]) == {"imdb": True, "tmdb": False, "douban": True}
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_EXTERNAL_ID_MISSING"] == "tmdb"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_HAS_IMDB"] == "1"
@@ -5385,6 +5398,8 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_IMAGE_HOST_IMG_URLS=https://img.example/thumb-1.png,https://img.example/thumb-2.png\n" in out
     assert "export PTCLI_MATERIAL_IMAGE_HOST_WEB_URLS=https://img.example/page-1,https://img.example/page-2\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_READY=1\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_COMPLETE=0\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_MISSING=screenshot_coverage\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_PATH='/tmp/with space/mteam-description-draft.txt'\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_LENGTH=4096\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_EXPECTED_LENGTH=4096\n" in out

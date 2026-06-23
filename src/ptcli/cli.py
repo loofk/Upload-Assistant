@@ -3056,6 +3056,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "bbcode_image_urls": _string_list(description.get("bbcode_image_urls")),
             "screenshot_coverage": description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {},
             "missing": _string_list(description.get("missing")),
+            "completeness": _description_completeness_summary(description),
         },
         "sections": sections,
         "image_host_urls": _image_host_url_summary(image_host_evidence.get("items") if isinstance(image_host_evidence, dict) else []),
@@ -3143,6 +3144,36 @@ def _summary_metadata_field_status(metadata: dict[str, Any]) -> dict[str, Any]:
             "value": value,
         }
     return fields
+
+
+def _description_completeness_summary(description: dict[str, Any]) -> dict[str, Any]:
+    external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
+    screenshot_coverage = description.get("screenshot_coverage") if isinstance(description.get("screenshot_coverage"), dict) else {}
+    checks = [
+        {"name": "ptgen_description", "ready": _description_bool(description.get("has_ptgen_description"))},
+        {"name": "external_ids", "ready": _description_external_ids_ready(description, external_id_readiness)},
+        {"name": "mediainfo_or_bdinfo", "ready": _description_bool(description.get("has_mediainfo_or_bdinfo"))},
+        {"name": "screenshot_bbcode", "ready": _description_bool(description.get("has_screenshot_bbcode"))},
+        {"name": "screenshot_coverage", "ready": _description_bool(screenshot_coverage.get("ready"))},
+    ]
+    missing = [str(check["name"]) for check in checks if check.get("ready") is not True]
+    return {
+        "ready": not missing,
+        "missing": missing,
+        "checks": checks,
+    }
+
+
+def _description_bool(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def _description_external_ids_ready(description: dict[str, Any], external_id_readiness: dict[str, Any]) -> bool | None:
+    if isinstance(description.get("has_external_ids"), bool):
+        return bool(description.get("has_external_ids"))
+    if external_id_readiness:
+        return all(external_id_readiness.get(name) is True for name in ("imdb", "tmdb", "douban"))
+    return None
 
 
 def _summary_material_section(section: Any) -> dict[str, Any]:
@@ -9660,6 +9691,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     image_host_urls = material_diagnostics.get("image_host_urls") if isinstance(material_diagnostics.get("image_host_urls"), dict) else {}
     disc_structure = material_diagnostics.get("disc_structure") if isinstance(material_diagnostics.get("disc_structure"), dict) else {}
     description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
+    description_completeness = description.get("completeness") if isinstance(description.get("completeness"), dict) else {}
     description_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
     description_external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
     media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
@@ -9741,6 +9773,9 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_IMAGE_HOST_IMG_URLS": ",".join(_string_list(image_host_urls.get("img_urls"))),
         "PTCLI_MATERIAL_IMAGE_HOST_WEB_URLS": ",".join(_string_list(image_host_urls.get("web_urls"))),
         "PTCLI_MATERIAL_DESCRIPTION_READY": _shell_bool(description.get("ready")) if description.get("ready") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_COMPLETE": _shell_bool(description_completeness.get("ready")) if description_completeness.get("ready") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_MISSING": ",".join(_string_list(description_completeness.get("missing"))),
+        "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_CHECKS": json.dumps(description_completeness.get("checks"), ensure_ascii=False) if isinstance(description_completeness.get("checks"), list) else None,
         "PTCLI_MATERIAL_DESCRIPTION_PATH": description.get("path"),
         "PTCLI_MATERIAL_DESCRIPTION_LENGTH": description.get("char_length"),
         "PTCLI_MATERIAL_DESCRIPTION_EXPECTED_LENGTH": description.get("expected_length"),
