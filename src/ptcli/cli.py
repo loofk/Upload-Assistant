@@ -4032,23 +4032,49 @@ def _summary_command_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _summary_candidate_commands(payload: dict[str, Any]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
-    for command_entry in _summary_command_entries(payload):
+    entries = _summary_command_entries(payload)
+    completion_entry = _summary_material_recovery_completion_command_entry(payload)
+    if completion_entry:
+        entries.append(completion_entry)
+    for command_entry in entries:
         command = command_entry.get("command")
         if not command:
             continue
         argv = _argv_list(command_entry.get("argv")) or _summary_next_command_raw_argv(str(command))
         metadata = _summary_next_command_metadata(argv)
+        run_allowed = metadata["run_allowed"]
+        run_blocker = metadata["run_blocker"]
+        if command_entry.get("stage") == "resume-target-package" and command_entry.get("_summary_command_source") != "material_recovery_completion":
+            material_recovery_blocker = _summary_material_recovery_command_run_blocker(payload, "resume-target-package")
+            if material_recovery_blocker:
+                run_allowed = False
+                run_blocker = material_recovery_blocker
         candidates.append({
             "stage": command_entry.get("stage"),
             "command": str(command),
             "argv": argv,
             "source": command_entry.get("_summary_command_source"),
             "subcommand": metadata["subcommand"],
-            "run_allowed": metadata["run_allowed"],
-            "run_blocker": metadata["run_blocker"],
+            "run_allowed": run_allowed,
+            "run_blocker": run_blocker,
             "placeholder": metadata["placeholder"],
         })
     return candidates
+
+
+def _summary_material_recovery_completion_command_entry(payload: dict[str, Any]) -> dict[str, Any] | None:
+    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    material_recovery = _readiness_material_recovery_summary(resume_state)
+    command = material_recovery.get("completion_command")
+    argv = _argv_list(material_recovery.get("completion_command_argv"))
+    if not command or not argv:
+        return None
+    return {
+        "stage": "resume-target-package",
+        "command": str(command),
+        "argv": argv,
+        "_summary_command_source": "material_recovery_completion",
+    }
 
 
 def _first_runnable_candidate_command(candidate_commands: list[Any]) -> dict[str, Any]:

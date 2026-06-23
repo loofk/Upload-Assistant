@@ -1989,6 +1989,42 @@ def test_readiness_material_recovery_summary_exposes_actionable_commands() -> No
     assert recovery["completion_command_argv"] == []
 
 
+def test_summary_candidate_commands_include_material_recovery_completion() -> None:
+    payload = {
+        "resume_commands": [
+            {
+                "stage": "resume-target-package",
+                "command": "python3 ptcli.py pipeline --prepare-target",
+                "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+            }
+        ],
+        "resume_state": {
+            "next_stage": "resume-target-package",
+            "next_command": "python3 ptcli.py pipeline --prepare-target",
+            "next_command_argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+            "materials": {
+                "recovery_hints": [
+                    {
+                        "key": "metadata.ptgen_description",
+                        "required_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                        "missing_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                        "resume_command_available": False,
+                    }
+                ]
+            },
+        },
+    }
+
+    candidates = ptcli_cli._summary_candidate_commands(payload)
+
+    assert candidates[0]["source"] == "resume_commands"
+    assert candidates[0]["run_allowed"] is False
+    assert candidates[0]["run_blocker"] == "material recovery command does not cover metadata.ptgen_description; missing flags: --enrich-metadata,--fetch-ptgen"
+    assert candidates[1]["source"] == "material_recovery_completion"
+    assert candidates[1]["run_allowed"] is True
+    assert candidates[1]["argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen"]
+
+
 def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> None:
     uploaded_hash = "a" * 40
     retry_hash = "b" * 40
@@ -5716,6 +5752,12 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=0\n" in out
     assert "export PTCLI_NEXT_COMMAND_RUN_ALLOWED=0\n" in out
     assert "export PTCLI_NEXT_COMMAND_RUN_BLOCKER='material recovery command does not cover metadata.ptgen_description; missing flags: --enrich-metadata,--fetch-ptgen'\n" in out
+    assert "export PTCLI_CANDIDATE_COMMAND_COUNT=2\n" in out
+    assert "export PTCLI_RUNNABLE_COMMAND_COUNT=1\n" in out
+    assert "export PTCLI_FIRST_RUNNABLE_COMMAND='python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen --upload-screenshots'\n" in out
+    assert 'export PTCLI_FIRST_RUNNABLE_COMMAND_ARGV=\'["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen", "--upload-screenshots"]\'\n' in out
+    assert "export PTCLI_FIRST_RUNNABLE_COMMAND_SOURCE=material_recovery_completion\n" in out
+    assert "export PTCLI_FIRST_REJECTED_COMMAND='python3 ptcli.py pipeline --prepare-target'\n" in out
     assert "export PTCLI_RESUME_MATERIALS_PRESENT=1\n" in out
     assert "export PTCLI_RESUME_TARGET_MATERIALS_READY=0\n" in out
     assert "export PTCLI_RESUME_TARGET_PREPARATION_READY=0\n" in out
