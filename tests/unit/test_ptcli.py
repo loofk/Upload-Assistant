@@ -15747,6 +15747,38 @@ def test_material_generation_artifacts_keep_metadata_blockers_separate() -> None
     assert metadata["all_blockers"] == ["TMDb enrichment requires DEFAULT.tmdb_api.", "Missing metadata after enrichment: tmdb_id, douban_id, douban_url"]
 
 
+def test_material_generation_artifacts_include_file_evidence(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host = tmp_path / "image-host-uploads.json"
+    image_host.write_text(json.dumps({"items": [{"img_url": "https://img.example/1.png"}]}), encoding="utf-8")
+
+    artifacts = ptcli_cli._material_generation_artifacts(
+        [
+            {"stage": "materials-mediainfo", "ok": True, "result": {"status": "generated", "mediainfo_file": str(mediainfo)}},
+            {"stage": "materials-screenshots", "ok": True, "result": {"status": "generated", "screenshot_files": [str(screenshot)], "count": 1}},
+            {"stage": "materials-image-host", "ok": True, "result": {"status": "uploaded", "image_host_file": str(image_host)}},
+        ]
+    )
+
+    mediainfo_evidence = artifacts["mediainfo"]["mediainfo_file_evidence"]
+    assert mediainfo_evidence["path"] == str(mediainfo)
+    assert mediainfo_evidence["exists"] is True
+    assert mediainfo_evidence["is_file"] is True
+    assert mediainfo_evidence["size_bytes"] == len(mediainfo.read_bytes())
+    assert len(mediainfo_evidence["sha1"]) == 40
+    screenshot_evidence = artifacts["screenshots"]["screenshot_files_evidence"]
+    assert screenshot_evidence[0]["path"] == str(screenshot)
+    assert screenshot_evidence[0]["size_bytes"] == len(screenshot.read_bytes())
+    assert len(screenshot_evidence[0]["sha1"]) == 40
+    image_host_evidence = artifacts["image_host"]["image_host_file_evidence"]
+    assert image_host_evidence["path"] == str(image_host)
+    assert image_host_evidence["exists"] is True
+    assert len(image_host_evidence["sha1"]) == 40
+
+
 def test_pipeline_stage_blocker_next_action_explains_bdmv_bdinfo_requirement() -> None:
     action = ptcli_cli._pipeline_stage_blocker_next_action("target.materials.assets.bdinfo_for_disc: BDMV disc content requires --bdinfo-file for MTEAM target preparation.")
 

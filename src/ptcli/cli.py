@@ -6879,7 +6879,11 @@ def _append_material_file_stage_artifact(artifacts: dict[str, Any], stages: list
     }
     for file_key in file_keys:
         if file_key in result:
-            payload[file_key] = result.get(file_key)
+            value = result.get(file_key)
+            payload[file_key] = value
+            evidence = _material_file_evidence(value)
+            if evidence:
+                payload[f"{file_key}_evidence"] = evidence
     if "media_file" in result:
         payload["media_file"] = result.get("media_file")
     if "count" in result:
@@ -6891,6 +6895,30 @@ def _append_material_file_stage_artifact(artifacts: dict[str, Any], stages: list
     if "items" in result and isinstance(result.get("items"), list):
         payload["items"] = result.get("items")
     artifacts[key] = payload
+
+
+def _material_file_evidence(value: Any) -> dict[str, Any] | list[dict[str, Any]]:
+    if isinstance(value, list):
+        evidence_items = [_material_file_evidence(item) for item in value]
+        return [item for item in evidence_items if isinstance(item, dict)]
+    if not isinstance(value, (str, Path)) or not str(value):
+        return {}
+    path = Path(value).expanduser()
+    evidence: dict[str, Any] = {
+        "path": str(path),
+        "exists": path.exists(),
+        "is_file": path.is_file(),
+        "is_dir": path.is_dir(),
+    }
+    if path.is_file():
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            evidence["read_error"] = str(exc)
+        else:
+            evidence["size_bytes"] = len(data)
+            evidence["sha1"] = hashlib.sha1(data).hexdigest()
+    return evidence
 
 
 def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, Any]) -> list[dict[str, Any]]:
