@@ -1452,7 +1452,7 @@ def _target_preparation_missing_next_action(missing: str) -> str | None:
         return "Fetch Douban metadata with --fetch-ptgen or supply it with --metadata-file/--douban-id/--douban-url, then rerun resume-target-package."
     if normalized.startswith("metadata.") or normalized.startswith("description.external_ids"):
         return "Fetch or supply IMDb/TMDb/Douban metadata with --enrich-metadata, --fetch-ptgen, --metadata-file, --imdb-id, --tmdb-id, or --douban-id, then rerun resume-target-package."
-    if normalized in {"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo"}:
+    if normalized in {"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo", "payload.mediainfo"}:
         return "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun resume-target-package."
     if normalized == "assets.bdinfo_for_disc":
         return "Provide BDInfo for BDMV disc content with --bdinfo-file or --generate-bdinfo, then rerun resume-target-package."
@@ -1560,7 +1560,7 @@ def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
             ["--enrich-metadata"],
             ["--metadata-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"],
         )
-    if normalized in {"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo"}:
+    if normalized in {"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo", "payload.mediainfo"}:
         return _material_recovery_hint(
             "assets.mediainfo_or_bdinfo",
             "Generate or provide MediaInfo/BDInfo before regenerating the MTEAM package.",
@@ -8028,6 +8028,14 @@ def _description_evidence_recovery_missing(evidence: Any) -> list[str]:
     mediainfo = evidence.get("mediainfo_or_bdinfo") if isinstance(evidence.get("mediainfo_or_bdinfo"), dict) else {}
     if mediainfo.get("ready") is False:
         _append_unique_string(missing, "description.mediainfo_or_bdinfo")
+    media_info_chain = evidence.get("media_info_chain") if isinstance(evidence.get("media_info_chain"), dict) else {}
+    if media_info_chain.get("ready") is False:
+        if not media_info_chain.get("material_source") or int(media_info_chain.get("material_length", 0) or 0) <= 0:
+            _append_unique_string(missing, "assets.mediainfo_or_bdinfo")
+        if media_info_chain.get("description_has_excerpt") is False:
+            _append_unique_string(missing, "description.mediainfo_or_bdinfo")
+        if not media_info_chain.get("payload_source") or int(media_info_chain.get("payload_length", 0) or 0) <= 0:
+            _append_unique_string(missing, "payload.mediainfo")
     screenshots = evidence.get("screenshots") if isinstance(evidence.get("screenshots"), dict) else {}
     if screenshots.get("ready") is False:
         _append_unique_string(missing, "description.screenshot_bbcode")

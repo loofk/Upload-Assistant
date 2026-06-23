@@ -1601,6 +1601,7 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
     }
     media_info_source = _mteam_material_mediainfo_source(materials)
     media_info_length = _mteam_material_mediainfo_length(materials)
+    payload_media_info = form_fields.get("mediainfo") if isinstance(form_fields.get("mediainfo"), dict) else {}
     return {
         "description": {
             "path": description_summary.get("path"),
@@ -1620,6 +1621,8 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
                 metadata,
                 media_info_source=media_info_source,
                 media_info_length=media_info_length,
+                payload_media_info_source=payload_media_info.get("source"),
+                payload_media_info_length=payload_media_info.get("length"),
                 screenshot_coverage=screenshot_coverage,
                 local_screenshot_count=int(screenshots.get("count", 0) or 0),
                 image_host_count=int(image_hosts.get("count", 0) or 0),
@@ -1650,6 +1653,8 @@ def _mteam_description_evidence_summary(
     *,
     media_info_source: str | None,
     media_info_length: int,
+    payload_media_info_source: Any,
+    payload_media_info_length: Any,
     screenshot_coverage: dict[str, Any],
     local_screenshot_count: int,
     image_host_count: int,
@@ -1678,6 +1683,20 @@ def _mteam_description_evidence_summary(
             "ready": bool(content.get("has_mediainfo_or_bdinfo")),
             "source": media_info_source,
             "length": media_info_length,
+        },
+        "media_info_chain": {
+            "ready": bool(
+                content.get("has_mediainfo_or_bdinfo")
+                and media_info_source
+                and media_info_length > 0
+                and payload_media_info_source == media_info_source
+                and payload_media_info_length == media_info_length
+            ),
+            "material_source": media_info_source,
+            "material_length": media_info_length,
+            "description_has_excerpt": bool(content.get("has_mediainfo_or_bdinfo")),
+            "payload_source": payload_media_info_source,
+            "payload_length": payload_media_info_length,
         },
         "screenshots": {
             "ready": bool(content.get("has_screenshot_bbcode")),

@@ -2123,6 +2123,30 @@ def test_target_upload_payload_recovery_summary_uses_screenshot_chain_evidence()
     assert any("Upload screenshots to an image host" in action for action in recovery["next_actions"])
 
 
+def test_target_upload_payload_recovery_summary_uses_media_info_chain_evidence() -> None:
+    recovery = ptcli_cli._target_upload_payload_recovery_summary(
+        {
+            "target_payload_review": {
+                "description": {
+                    "evidence": {
+                        "media_info_chain": {
+                            "ready": False,
+                            "material_source": None,
+                            "material_length": 0,
+                            "description_has_excerpt": False,
+                            "payload_source": None,
+                            "payload_length": 0,
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+    assert recovery["recovery_missing"] == ["assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo", "payload.mediainfo"]
+    assert any("Generate or provide MediaInfo/BDInfo" in action for action in recovery["next_actions"])
+
+
 def test_target_package_material_auto_flags_include_preparation_payload_review_completeness() -> None:
     flags = ptcli_cli._target_package_material_auto_flags(
         {
@@ -17787,6 +17811,14 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
             },
         },
         "mediainfo_or_bdinfo": {"ready": True, "source": str(mediainfo), "length": len(mediainfo.read_text(encoding="utf-8"))},
+        "media_info_chain": {
+            "ready": True,
+            "material_source": str(mediainfo),
+            "material_length": len(mediainfo.read_text(encoding="utf-8")),
+            "description_has_excerpt": True,
+            "payload_source": str(mediainfo),
+            "payload_length": len(mediainfo.read_text(encoding="utf-8")),
+        },
         "screenshots": {"ready": True, "bbcode_image_count": 1, "bbcode_image_urls": ["https://img.example/thumb.png"]},
         "image_host": {"count": 1, "urls": ["https://img.example/thumb.png"]},
         "screenshot_coverage": {
@@ -18387,6 +18419,16 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
         "expected_urls": ["https://img.example/thumb.png"],
         "description_urls": ["https://img.example/thumb.png"],
         "missing_urls": [],
+    }
+    payload_media_source = payload_review["materials"]["mediainfo_or_bdinfo_source"]
+    payload_media_length = payload_review["materials"]["mediainfo_or_bdinfo_length"]
+    assert payload_review["description"]["evidence"]["media_info_chain"] == {
+        "ready": True,
+        "material_source": payload_media_source,
+        "material_length": payload_media_length,
+        "description_has_excerpt": True,
+        "payload_source": payload_media_source,
+        "payload_length": payload_media_length,
     }
     assert payload_review["description"]["evidence"]["screenshot_chain"] == {
         "ready": True,
