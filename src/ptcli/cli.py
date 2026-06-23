@@ -2154,8 +2154,7 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
 
 
 def _target_upload_target_package_resume_command(args: argparse.Namespace, artifacts: dict[str, Any]) -> dict[str, Any] | None:
-    material_missing = _string_list(artifacts.get("target_preparation_missing"))
-    _extend_unique_string(material_missing, _string_list(artifacts.get("target_materials_missing")))
+    material_missing = _target_package_material_recovery_missing(artifacts)
     if not material_missing:
         return None
     package_dir = _artifact_path(artifacts.get("package_dir")) or args.package_dir
@@ -4569,7 +4568,7 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
 
 
 def _doctor_target_package_resume_command(args: argparse.Namespace, artifacts: dict[str, Any]) -> dict[str, Any] | None:
-    material_missing = _string_list(artifacts.get("target_preparation_missing"))
+    material_missing = _target_package_material_recovery_missing(artifacts)
     if not material_missing:
         return None
     content_path = _artifact_path(artifacts.get("content_path"))
@@ -7160,8 +7159,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
     next_command_argv = _resume_state_next_command_argv(next_command, resume_commands)
     target_materials_missing = _string_list(artifacts.get("target_materials_missing"))
     target_preparation_missing = _string_list(artifacts.get("target_preparation_missing"))
-    material_missing = [*target_materials_missing]
-    _extend_unique_string(material_missing, target_preparation_missing)
+    material_missing = _target_package_material_recovery_missing(artifacts)
     material_recovery_hints = _target_preparation_recovery_hints(material_missing)
     material_recovery_hints = _attach_material_recovery_resume_commands(material_recovery_hints, resume_commands)
     return {
@@ -7547,9 +7545,7 @@ def _target_package_material_resume_args(requested_actions: dict[str, Any], effe
 
 
 def _target_package_material_auto_flags(artifacts: dict[str, Any] | None) -> set[str]:
-    artifacts = artifacts if isinstance(artifacts, dict) else {}
-    missing = _string_list(artifacts.get("target_materials_missing"))
-    _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
+    missing = _target_package_material_recovery_missing(artifacts)
     flags: set[str] = set()
     for item in missing:
         normalized = _target_preparation_missing_key(item)
@@ -7570,6 +7566,24 @@ def _target_package_material_auto_flags(artifacts: dict[str, Any] | None) -> set
         elif normalized in {"assets.image_host_uploads", "description.screenshot_coverage"}:
             flags.add("--upload-screenshots")
     return flags
+
+
+def _target_package_material_recovery_missing(artifacts: dict[str, Any] | None) -> list[str]:
+    artifacts = artifacts if isinstance(artifacts, dict) else {}
+    missing = _string_list(artifacts.get("target_materials_missing"))
+    _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
+    _extend_unique_string(missing, _target_payload_review_description_recovery_missing(artifacts.get("target_payload_review")))
+    preparation_audit = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
+    _extend_unique_string(missing, _target_payload_review_description_recovery_missing(preparation_audit.get("payload_review")))
+    return missing
+
+
+def _target_payload_review_description_recovery_missing(payload_review: Any) -> list[str]:
+    if not isinstance(payload_review, dict):
+        return []
+    description = payload_review.get("description") if isinstance(payload_review.get("description"), dict) else {}
+    completeness = description.get("completeness") if isinstance(description.get("completeness"), dict) else {}
+    return _string_list(completeness.get("recovery_missing"))
 
 
 def _target_package_material_artifact_options(artifacts: dict[str, Any] | None) -> dict[str, Any]:

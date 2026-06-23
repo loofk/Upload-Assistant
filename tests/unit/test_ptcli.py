@@ -1819,6 +1819,52 @@ def test_target_package_material_auto_flags_include_screenshot_coverage() -> Non
     assert "--upload-screenshots" in flags
 
 
+def test_target_package_material_auto_flags_include_payload_review_completeness() -> None:
+    flags = ptcli_cli._target_package_material_auto_flags(
+        {
+            "target_payload_review": {
+                "description": {
+                    "completeness": {
+                        "recovery_missing": [
+                            "description.ptgen_description",
+                            "description.mediainfo_or_bdinfo",
+                            "description.screenshot_coverage",
+                        ]
+                    }
+                }
+            }
+        }
+    )
+
+    assert "--enrich-metadata" in flags
+    assert "--fetch-ptgen" in flags
+    assert "--generate-mediainfo" in flags
+    assert "--upload-screenshots" in flags
+
+
+def test_target_package_material_auto_flags_include_preparation_payload_review_completeness() -> None:
+    flags = ptcli_cli._target_package_material_auto_flags(
+        {
+            "target_preparation_audit": {
+                "payload_review": {
+                    "description": {
+                        "completeness": {
+                            "recovery_missing": [
+                                "description.external_ids",
+                                "description.screenshot_bbcode",
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+    assert "--enrich-metadata" in flags
+    assert "--fetch-ptgen" in flags
+    assert "--prepare-target" in flags
+
+
 def test_material_recovery_resume_command_covers_screenshot_coverage() -> None:
     hints = ptcli_cli._target_preparation_recovery_hints(["description.screenshot_coverage"])
     commands = [
@@ -1857,6 +1903,40 @@ def test_material_recovery_resume_command_reports_missing_flags() -> None:
     assert enriched[0]["resume_command_available"] is False
     assert enriched[0]["resume_command"] is None
     assert enriched[0]["resume_command_argv"] == []
+
+
+def test_run_summary_resume_state_uses_payload_review_description_completeness() -> None:
+    resume_commands = [
+        {
+            "stage": "resume-target-package",
+            "command": "python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen --upload-screenshots",
+            "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen", "--upload-screenshots"],
+        }
+    ]
+    resume_state = ptcli_cli._run_summary_resume_state(
+        {"closure": {"complete": False, "blockers": ["target.materials_ready"]}},
+        {
+            "target_payload_review": {
+                "description": {
+                    "completeness": {
+                        "recovery_missing": [
+                            "description.ptgen_description",
+                            "description.screenshot_coverage",
+                        ]
+                    }
+                }
+            }
+        },
+        resume_commands,
+    )
+
+    recovery_by_key = {hint["key"]: hint for hint in resume_state["materials"]["recovery_hints"]}
+    assert recovery_by_key["metadata.ptgen_description"]["resume_command_available"] is True
+    assert recovery_by_key["assets.image_host_uploads"]["resume_command_available"] is True
+    assert resume_state["materials"]["next_actions"] == [
+        "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
+        "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
+    ]
 
 
 def test_readiness_material_recovery_summary_exposes_actionable_commands() -> None:
