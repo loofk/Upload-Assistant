@@ -5466,6 +5466,71 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "Upload screenshots to an image host" in out
 
 
+def test_summary_check_promotes_material_recovery_command(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "resume_commands": [
+                    {
+                        "stage": "resume-target-package",
+                        "command": "python3 ptcli.py pipeline --prepare-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+                    }
+                ],
+                "resume_state": {
+                    "complete": False,
+                    "resume_available": True,
+                    "next_stage": "resume-target-package",
+                    "next_command": "python3 ptcli.py pipeline --prepare-target",
+                    "next_command_argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+                    "available_stages": ["resume-target-package"],
+                    "materials": {
+                        "target_materials_missing": ["assets.image_host_uploads"],
+                        "target_preparation_missing": ["description.screenshot_coverage"],
+                        "recovery_hints": [
+                            {
+                                "key": "assets.image_host_uploads",
+                                "resume_stage": "resume-target-package",
+                                "reason": "Upload screenshots to an image host or provide existing image-host upload evidence before regenerating the MTEAM package.",
+                                "command_flags": ["--upload-screenshots", "--image-host"],
+                                "existing_file_options": ["--image-host-file"],
+                                "required_command_flags": ["--upload-screenshots"],
+                                "missing_command_flags": [],
+                                "resume_command_available": True,
+                                "resume_command_stage": "resume-target-package",
+                                "resume_command": "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg",
+                                "resume_command_argv": ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots", "--image-host", "ptpimg"],
+                            }
+                        ],
+                    },
+                    "blockers": ["target.materials_ready"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["next_stage"] == "resume-target-package"
+    assert payload["next_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg"
+    assert payload["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots", "--image-host", "ptpimg"]
+    assert payload["next_command_source"] == "material_recovery"
+    assert payload["next_command_run_allowed"] is True
+    assert payload["automation_action"] == "run_next_command"
+    assert payload["readiness_summary"]["material_recovery"]["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg"
+
+
 def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatch, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(

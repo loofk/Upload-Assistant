@@ -3702,6 +3702,7 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
             *_pipeline_summary_preferred_stages([*missing_audit, *missing_closure_audit]),
         ),
     )
+    next_command = _prefer_material_recovery_next_command(next_command, readiness_summary)
     closure_status = _closure_status_summary({**payload, "status": check_status, "blockers": blockers})
     return _summary_check_result({
         "status": check_status,
@@ -3723,6 +3724,17 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
         **artifact_status,
         **closure_audit_status,
     })
+
+
+def _prefer_material_recovery_next_command(next_command: dict[str, Any], readiness_summary: dict[str, Any]) -> dict[str, Any]:
+    if next_command.get("stage") != "resume-target-package":
+        return next_command
+    material_recovery = readiness_summary.get("material_recovery") if isinstance(readiness_summary.get("material_recovery"), dict) else {}
+    command = material_recovery.get("first_command")
+    argv = _argv_list(material_recovery.get("first_command_argv"))
+    if not command or not argv:
+        return next_command
+    return {"stage": "resume-target-package", "command": str(command), "argv": argv, "source": "material_recovery"}
 
 
 def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
