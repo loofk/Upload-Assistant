@@ -5466,7 +5466,7 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "Upload screenshots to an image host" in out
 
 
-def test_summary_check_promotes_material_recovery_command(tmp_path, capsys) -> None:
+def _write_material_recovery_summary(tmp_path: Path) -> Path:
     summary_file = tmp_path / "summary.json"
     summary_file.write_text(
         json.dumps(
@@ -5517,6 +5517,11 @@ def test_summary_check_promotes_material_recovery_command(tmp_path, capsys) -> N
         ),
         encoding="utf-8",
     )
+    return summary_file
+
+
+def test_summary_check_promotes_material_recovery_command(tmp_path, capsys) -> None:
+    summary_file = _write_material_recovery_summary(tmp_path)
 
     code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
 
@@ -5529,6 +5534,32 @@ def test_summary_check_promotes_material_recovery_command(tmp_path, capsys) -> N
     assert payload["next_command_run_allowed"] is True
     assert payload["automation_action"] == "run_next_command"
     assert payload["readiness_summary"]["material_recovery"]["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg"
+
+
+def test_summary_check_print_next_argv_uses_material_recovery_command(tmp_path, capsys) -> None:
+    summary_file = _write_material_recovery_summary(tmp_path)
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-next-argv"])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out) == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots", "--image-host", "ptpimg"]
+
+
+def test_summary_check_run_next_command_uses_material_recovery_command(tmp_path, monkeypatch, capsys) -> None:
+    summary_file = _write_material_recovery_summary(tmp_path)
+    calls = []
+
+    def fake_run(argv, check):
+        calls.append((argv, check))
+        return argparse.Namespace(returncode=11)
+
+    monkeypatch.setattr(ptcli_cli.subprocess, "run", fake_run)
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--run-next-command"])
+
+    assert code == 11
+    assert calls == [([ptcli_cli.sys.executable, str(ptcli_cli._ptcli_script_path()), "pipeline", "--prepare-target", "--upload-screenshots", "--image-host", "ptpimg"], False)]
+    assert capsys.readouterr().out == ""
 
 
 def test_summary_check_run_next_command_executes_ptcli_argv(tmp_path, monkeypatch, capsys) -> None:
