@@ -4312,6 +4312,13 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
         "douban_url": {"ready": True, "required": True, "source": "ptgen"},
         "ptgen_description": {"ready": True, "required": True, "source": "ptgen"},
     }
+    field_evidence = {
+        "imdb_id": {"ready": True, "required": True, "source": "source", "value": 1234567},
+        "tmdb_id": {"ready": False, "required": True, "source": None, "value": None},
+        "douban_id": {"ready": True, "required": True, "source": "ptgen", "value": "1291546"},
+        "douban_url": {"ready": True, "required": True, "source": "ptgen", "value": "https://movie.douban.com/subject/1291546/"},
+        "ptgen_description": {"ready": True, "required": True, "source": "ptgen", "length": 42},
+    }
     diagnostics = ptcli_cli._summary_material_diagnostics(
         {
             "artifacts": {
@@ -4329,6 +4336,7 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
                         "sources": ["source", "ptgen"],
                         "applied": {"douban_url": "https://movie.douban.com/subject/1291546/"},
                         "readiness": readiness,
+                        "field_evidence": field_evidence,
                         "missing": ["tmdb_id"],
                         "blockers": ["TMDb enrichment returned no TMDb id."],
                         "readiness_blockers": ["Missing metadata after enrichment: tmdb_id"],
@@ -4346,6 +4354,7 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
     assert metadata["sources"] == ["source", "ptgen"]
     assert metadata["applied"] == {"douban_url": "https://movie.douban.com/subject/1291546/"}
     assert metadata["readiness"] == readiness
+    assert metadata["field_evidence"] == field_evidence
     assert metadata["missing"] == ["tmdb_id"]
     assert metadata["readiness_blockers"] == ["Missing metadata after enrichment: tmdb_id"]
     assert diagnostics["metadata_fields"] == {
@@ -4359,6 +4368,7 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
 
     shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
     assert json.loads(shell_fields["PTCLI_MATERIAL_METADATA_READINESS"]) == readiness
+    assert json.loads(shell_fields["PTCLI_MATERIAL_METADATA_FIELD_EVIDENCE"]) == field_evidence
     assert shell_fields["PTCLI_MATERIAL_METADATA_SOURCES"] == "source,ptgen"
     assert shell_fields["PTCLI_MATERIAL_METADATA_APPLIED_KEYS"] == "douban_url"
     assert shell_fields["PTCLI_MATERIAL_METADATA_READINESS_BLOCKERS"] == "Missing metadata after enrichment: tmdb_id"
@@ -11819,8 +11829,16 @@ async def test_pipeline_enrich_metadata_before_prepare_target(monkeypatch, tmp_p
     assert enrichment_stage["ok"] is True
     assert enrichment_stage["result"]["tmdb_id"] == 999
     assert enrichment_stage["result"]["douban_id"] == "1291546"
+    assert enrichment_stage["result"]["metadata_enrichment"]["field_evidence"]["tmdb_id"] == {"ready": True, "required": True, "source": "overrides", "value": 999}
+    assert enrichment_stage["result"]["metadata_enrichment"]["field_evidence"]["douban_url"] == {
+        "ready": True,
+        "required": True,
+        "source": "overrides",
+        "value": "https://movie.douban.com/subject/1291546/",
+    }
     assert target_stage["result"]["metadata"]["tmdb_id"] == 999
     assert target_stage["result"]["materials"]["metadata"]["douban_url"] == "https://movie.douban.com/subject/1291546/"
+    assert target_stage["result"]["materials"]["metadata"]["field_evidence"]["tmdb_id"]["value"] == 999
 
 
 @pytest.mark.asyncio
@@ -15849,6 +15867,11 @@ async def test_enrich_source_metadata_applies_overrides_without_clobbering_exist
     assert result["readiness"]["douban_id"] == {"ready": True, "required": True, "source": "overrides"}
     assert result["readiness"]["douban_url"] == {"ready": True, "required": True, "source": "overrides"}
     assert result["readiness"]["ptgen_description"] == {"ready": False, "required": False, "source": None}
+    assert result["field_evidence"]["imdb_id"] == {"ready": True, "required": True, "source": "source", "value": 1234567}
+    assert result["field_evidence"]["tmdb_id"] == {"ready": True, "required": True, "source": "overrides", "value": 999}
+    assert result["field_evidence"]["douban_id"] == {"ready": True, "required": True, "source": "overrides", "value": "1291546"}
+    assert result["field_evidence"]["douban_url"] == {"ready": True, "required": True, "source": "overrides", "value": "https://movie.douban.com/subject/1291546/"}
+    assert result["field_evidence"]["ptgen_description"] == {"ready": False, "required": False, "source": None, "length": 0}
 
 
 @pytest.mark.asyncio
@@ -15872,6 +15895,7 @@ async def test_enrich_source_metadata_accepts_ptgen_description_override_when_re
     assert result["applied"]["ptgen_description"] == "◎译　　名　示例电影"
     assert result["sources"] == ["overrides"]
     assert result["readiness"]["ptgen_description"] == {"ready": True, "required": True, "source": "overrides"}
+    assert result["field_evidence"]["ptgen_description"] == {"ready": True, "required": True, "source": "overrides", "length": len("◎译　　名　示例电影")}
 
 
 @pytest.mark.asyncio
@@ -15941,6 +15965,7 @@ async def test_enrich_source_metadata_fetches_tmdb_without_legacy_tmdb_manager(m
     assert result["sources"] == ["tmdb_api"]
     assert result["applied"]["tmdb_id"] == 999
     assert result["readiness"]["tmdb_id"] == {"ready": True, "required": True, "source": "tmdb_api"}
+    assert result["field_evidence"]["tmdb_id"] == {"ready": True, "required": True, "source": "tmdb_api", "value": 999}
 
 
 @pytest.mark.asyncio

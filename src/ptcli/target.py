@@ -815,6 +815,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "sources": metadata_enrichment.get("sources") if isinstance(metadata_enrichment.get("sources"), list) else [],
             "applied": metadata_enrichment.get("applied") if isinstance(metadata_enrichment.get("applied"), dict) else {},
             "readiness": metadata_enrichment.get("readiness") if isinstance(metadata_enrichment.get("readiness"), dict) else {},
+            "field_evidence": metadata_enrichment.get("field_evidence") if isinstance(metadata_enrichment.get("field_evidence"), dict) else {},
             "missing": metadata_enrichment.get("missing") if isinstance(metadata_enrichment.get("missing"), list) else [],
             "blockers": metadata_enrichment.get("blockers") if isinstance(metadata_enrichment.get("blockers"), list) else [],
             "readiness_blockers": metadata_enrichment.get("readiness_blockers") if isinstance(metadata_enrichment.get("readiness_blockers"), list) else [],

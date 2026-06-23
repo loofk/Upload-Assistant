@@ -3228,6 +3228,7 @@ def _summary_target_material_metadata_section(target_materials: dict[str, Any]) 
         "sources": metadata.get("sources") if isinstance(metadata.get("sources"), list) else [],
         "applied": metadata.get("applied") if isinstance(metadata.get("applied"), dict) else {},
         "readiness": metadata.get("readiness") if isinstance(metadata.get("readiness"), dict) else {},
+        "field_evidence": metadata.get("field_evidence") if isinstance(metadata.get("field_evidence"), dict) else {},
         "missing": _string_list(metadata.get("missing")),
         "blockers": _string_list(metadata.get("blockers")),
         "readiness_blockers": _string_list(metadata.get("readiness_blockers")),
@@ -3242,6 +3243,7 @@ def _summary_target_material_metadata_section(target_materials: dict[str, Any]) 
 
 def _summary_metadata_field_status(metadata: dict[str, Any]) -> dict[str, Any]:
     readiness = metadata.get("readiness") if isinstance(metadata.get("readiness"), dict) else {}
+    field_evidence = metadata.get("field_evidence") if isinstance(metadata.get("field_evidence"), dict) else {}
     field_values = {
         "imdb_id": metadata.get("imdb_id"),
         "tmdb_id": metadata.get("tmdb_id"),
@@ -3254,11 +3256,18 @@ def _summary_metadata_field_status(metadata: dict[str, Any]) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     for key, value in field_values.items():
         field_readiness = readiness.get(key) if isinstance(readiness.get(key), dict) else {}
+        evidence = field_evidence.get(key) if isinstance(field_evidence.get(key), dict) else {}
         ready = field_readiness.get("ready")
         required = field_readiness.get("required")
         source = field_readiness.get("source")
         if key == "ptgen_description":
-            length = value.get("length") if isinstance(value, dict) else None
+            length = value.get("length") if isinstance(value, dict) else evidence.get("length")
+            if ready is None:
+                ready = evidence.get("ready")
+            if required is None:
+                required = evidence.get("required")
+            if source is None:
+                source = evidence.get("source")
             if ready is None:
                 ready = bool(length)
             fields[key] = {
@@ -3268,6 +3277,14 @@ def _summary_metadata_field_status(metadata: dict[str, Any]) -> dict[str, Any]:
                 "length": length,
             }
             continue
+        if value is None:
+            value = evidence.get("value")
+        if ready is None:
+            ready = evidence.get("ready")
+        if required is None:
+            required = evidence.get("required")
+        if source is None:
+            source = evidence.get("source")
         if ready is None:
             ready = bool(value)
         fields[key] = {
@@ -3336,6 +3353,7 @@ def _summary_material_section(section: Any) -> dict[str, Any]:
         "ready",
         "missing",
         "readiness",
+        "field_evidence",
         "sources",
         "applied",
         "blockers",
@@ -5796,7 +5814,7 @@ async def _pipeline_metadata_enrichment_stage(config: dict[str, Any], args: argp
     enriched_source = result.get("source_info") if isinstance(result.get("source_info"), dict) else source_info
     stage_result = {
         **enriched_source,
-        "metadata_enrichment": {key: result.get(key) for key in ("status", "ready", "applied", "missing", "readiness", "sources", "blockers")},
+        "metadata_enrichment": {key: result.get(key) for key in ("status", "ready", "applied", "missing", "readiness", "field_evidence", "sources", "blockers")},
     }
     readiness_blockers = _metadata_enrichment_readiness_blockers(result, fetch_ptgen=bool(getattr(args, "fetch_ptgen", False)))
     stage_result["metadata_enrichment"]["readiness_blockers"] = readiness_blockers
@@ -6974,6 +6992,7 @@ def _material_generation_artifacts(stages: list[dict[str, Any]]) -> dict[str, An
             "sources": enrichment.get("sources") if isinstance(enrichment.get("sources"), list) else [],
             "applied": enrichment.get("applied") if isinstance(enrichment.get("applied"), dict) else {},
             "readiness": enrichment.get("readiness") if isinstance(enrichment.get("readiness"), dict) else {},
+            "field_evidence": enrichment.get("field_evidence") if isinstance(enrichment.get("field_evidence"), dict) else {},
             "missing": _string_list(enrichment.get("missing")),
             "blockers": _string_list(enrichment.get("blockers")),
             "readiness_blockers": _string_list(enrichment.get("readiness_blockers")),
@@ -10004,6 +10023,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     prerequisites = sections.get("prerequisites") if isinstance(sections.get("prerequisites"), dict) else {}
     metadata = sections.get("metadata") if isinstance(sections.get("metadata"), dict) else {}
     metadata_readiness = metadata.get("readiness") if isinstance(metadata.get("readiness"), dict) else {}
+    metadata_field_evidence = metadata.get("field_evidence") if isinstance(metadata.get("field_evidence"), dict) else {}
     metadata_fields = material_diagnostics.get("metadata_fields") if isinstance(material_diagnostics.get("metadata_fields"), dict) else {}
     imdb_field = metadata_fields.get("imdb_id") if isinstance(metadata_fields.get("imdb_id"), dict) else {}
     tmdb_field = metadata_fields.get("tmdb_id") if isinstance(metadata_fields.get("tmdb_id"), dict) else {}
@@ -10066,6 +10086,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_METADATA_OK": _summary_material_section_shell_bool(metadata),
         "PTCLI_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
         "PTCLI_MATERIAL_METADATA_READINESS": json.dumps(metadata_readiness, ensure_ascii=False) if metadata_readiness else None,
+        "PTCLI_MATERIAL_METADATA_FIELD_EVIDENCE": json.dumps(metadata_field_evidence, ensure_ascii=False) if metadata_field_evidence else None,
         "PTCLI_MATERIAL_METADATA_SOURCES": ",".join(_string_list(metadata.get("sources"))),
         "PTCLI_MATERIAL_METADATA_APPLIED_KEYS": ",".join(sorted(str(key) for key in metadata.get("applied", {}) if isinstance(metadata.get("applied"), dict))),
         "PTCLI_MATERIAL_METADATA_BLOCKERS": "|".join(_string_list(metadata.get("blockers"))),

@@ -96,6 +96,7 @@ async def enrich_source_metadata(
         "applied": applied,
         "missing": missing,
         "readiness": _metadata_readiness(base, field_sources, fetch_ptgen=fetch_ptgen),
+        "field_evidence": _metadata_field_evidence(base, field_sources, fetch_ptgen=fetch_ptgen),
         "sources": sources,
         "blockers": blockers,
     }
@@ -118,6 +119,26 @@ def _metadata_readiness(source_info: dict[str, Any], field_sources: dict[str, st
         }
         for key in keys
     }
+
+
+def _metadata_field_evidence(source_info: dict[str, Any], field_sources: dict[str, str], *, fetch_ptgen: bool) -> dict[str, Any]:
+    evidence: dict[str, Any] = {}
+    for key in METADATA_KEYS:
+        value = source_info.get(key)
+        evidence[key] = {
+            "ready": bool(value),
+            "required": True,
+            "source": field_sources.get(key),
+            "value": value,
+        }
+    ptgen_description = str(source_info.get("ptgen_description") or "")
+    evidence["ptgen_description"] = {
+        "ready": bool(ptgen_description),
+        "required": bool(fetch_ptgen),
+        "source": field_sources.get("ptgen_description"),
+        "length": len(ptgen_description),
+    }
+    return evidence
 
 
 def load_metadata_overrides(path: str | None) -> dict[str, Any]:
