@@ -1005,6 +1005,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "status": "ready",
             "ready": True,
             "blockers": [],
+            "missing": [],
+            "description_missing": [],
             "target_preparation_ready": True,
             "materials_ready": True,
             "metadata_ready": True,
@@ -1697,6 +1699,8 @@ async def test_retorrent_execute_surfaces_material_preflight_blockers(monkeypatc
                 "status": "blocked",
                 "ready": False,
                 "blockers": ["materials.description.screenshot_coverage: Description has fewer hosted screenshots than local screenshots."],
+                "missing": ["description.content", "materials.description.screenshot_coverage"],
+                "description_missing": ["materials.description.screenshot_coverage"],
                 "target_preparation_ready": False,
                 "materials_ready": True,
                 "description_ready": False,
@@ -1749,6 +1753,16 @@ async def test_retorrent_execute_surfaces_material_preflight_blockers(monkeypatc
     assert payload["next_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots"
     assert payload["readiness_summary"]["material_upload_blockers"] == ["description completeness missing: description.screenshot_coverage"]
     assert payload["readiness_summary"]["target_preflight_description_ready"] is False
+    assert payload["readiness_summary"]["target_preflight_missing"] == ["description.content", "materials.description.screenshot_coverage"]
+    assert payload["readiness_summary"]["target_preflight_description_missing"] == ["materials.description.screenshot_coverage"]
+    assert payload["readiness_summary"]["target_preflight_blockers"] == ["materials.description.screenshot_coverage: Description has fewer hosted screenshots than local screenshots."]
+    readiness_shell_fields = ptcli_cli._summary_check_readiness_shell_fields(payload["readiness_summary"])
+    assert readiness_shell_fields["PTCLI_READINESS_TARGET_PREFLIGHT_MISSING"] == "description.content,materials.description.screenshot_coverage"
+    assert readiness_shell_fields["PTCLI_READINESS_TARGET_PREFLIGHT_DESCRIPTION_MISSING"] == "materials.description.screenshot_coverage"
+    assert readiness_shell_fields["PTCLI_READINESS_TARGET_PREFLIGHT_BLOCKERS"] == "materials.description.screenshot_coverage: Description has fewer hosted screenshots than local screenshots."
+    shell_fields = ptcli_cli._summary_check_target_preflight_shell_fields(payload["target_preflight_diagnostics"])
+    assert shell_fields["PTCLI_TARGET_PREFLIGHT_MISSING"] == "description.content,materials.description.screenshot_coverage"
+    assert shell_fields["PTCLI_TARGET_PREFLIGHT_DESCRIPTION_MISSING"] == "materials.description.screenshot_coverage"
 
 
 def test_retorrent_execute_blockers_require_uploaded_wait_evidence() -> None:
