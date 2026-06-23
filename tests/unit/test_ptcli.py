@@ -4095,6 +4095,16 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["image_host_urls"]["valid_count"] == 1
     assert diagnostics["image_host_urls"]["invalid_count"] == 0
     assert diagnostics["blockers"] == ["prerequisites: --upload-screenshots requires --image-host.", "BDMV disc content requires --bdinfo-file.", "Image-host uploads are missing."]
+    readiness = payload["readiness_summary"]
+    assert readiness["materials_ready"] is False
+    assert readiness["ready_for_mteam_upload"] is False
+    assert "assets.bdinfo_for_disc" in readiness["material_missing"]
+    assert "assets.image_host_uploads" in readiness["material_missing"]
+    assert "critical material missing: assets.bdinfo_for_disc" in readiness["material_missing"]
+    assert "target materials are not ready" in readiness["material_missing"]
+    assert "target preparation is not ready" in readiness["material_missing"]
+    assert readiness["material_upload_gates"] == diagnostics["upload_material_gates"]
+    assert readiness["material_upload_blockers"] == diagnostics["upload_material_blockers"]
     code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
     assert code == 0
     out = capsys.readouterr().out
@@ -4116,6 +4126,14 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert "export PTCLI_MATERIAL_IMAGE_HOST_ITEM_COUNT=1\n" in out
     assert "export PTCLI_MATERIAL_IMAGE_HOST_VALID_COUNT=1\n" in out
     assert "export PTCLI_MATERIAL_IMAGE_HOST_INVALID_COUNT=0\n" in out
+    assert "export PTCLI_READINESS_MATERIALS_READY=0\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_MISSING=" in out
+    assert "target materials are not ready" in out
+    assert "target preparation is not ready" in out
+    assert "PTCLI_READINESS_MATERIAL_UPLOAD_GATES=" in out
+    assert "description_completeness_ready" in out
+    assert "export PTCLI_READINESS_MATERIAL_UPLOAD_BLOCKERS=" in out
+    assert "critical material missing: assets.bdinfo_for_disc" in out
 
 
 def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_package() -> None:
@@ -4493,6 +4511,26 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     )
     assert matrix["domains"]["materials"]["ready"] is False
     assert matrix["domains"]["materials"]["missing"] == ["description completeness missing: description.screenshot_coverage"]
+
+    readiness = ptcli_cli._retorrent_readiness_summary(
+        status="blocked",
+        ready=False,
+        complete=False,
+        blockers=[],
+        completion_matrix=matrix,
+        material_diagnostics=diagnostics,
+        target_upload_diagnostics={},
+        target_preflight_diagnostics={},
+        qbit_wait_mismatches=[],
+        resume_state={},
+        automation_fields={"automation_action": "resolve_blockers", "should_execute_next_command": False, "automation_exit_code": 1},
+        summary_file=None,
+    )
+    assert readiness["materials_ready"] is False
+    assert readiness["ready_for_mteam_upload"] is False
+    assert readiness["material_missing"] == ["description completeness missing: description.screenshot_coverage"]
+    assert readiness["material_upload_blockers"] == ["description completeness missing: description.screenshot_coverage"]
+    assert readiness["material_upload_gates"]["description_completeness_ready"] is False
 
 
 def test_summary_material_diagnostics_exposes_description_external_id_readiness() -> None:

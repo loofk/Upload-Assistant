@@ -836,6 +836,7 @@ def _retorrent_readiness_summary(
         return None
 
     materials_evidence = domain_evidence("materials")
+    materials_domain = domain("materials")
     target_upload_evidence = domain_evidence("target_upload")
     next_command_argv = _argv_list(resume_state.get("next_command_argv"))
     material_recovery = _readiness_material_recovery_summary(resume_state)
@@ -862,6 +863,9 @@ def _retorrent_readiness_summary(
         "qbit_wait_ready": domain_ready("qbit_wait"),
         "ready_for_mteam_upload": first_bool(material_diagnostics.get("ready_for_mteam_upload"), materials_evidence.get("ready_for_mteam_upload")),
         "material_critical_ready": material_diagnostics.get("critical_ready") if isinstance(material_diagnostics.get("critical_ready"), bool) else None,
+        "material_missing": _string_list(materials_domain.get("missing")),
+        "material_upload_gates": material_diagnostics.get("upload_material_gates") if isinstance(material_diagnostics.get("upload_material_gates"), dict) else {},
+        "material_upload_blockers": _string_list(material_diagnostics.get("upload_material_blockers")),
         "target_preflight_ready": target_preflight_diagnostics.get("ready") if isinstance(target_preflight_diagnostics.get("ready"), bool) else None,
         "target_preflight_materials_ready": target_preflight_diagnostics.get("materials_ready") if isinstance(target_preflight_diagnostics.get("materials_ready"), bool) else None,
         "target_preflight_description_ready": target_preflight_diagnostics.get("description_ready") if isinstance(target_preflight_diagnostics.get("description_ready"), bool) else None,
@@ -9424,6 +9428,9 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_READY_FOR_MTEAM_UPLOAD": _shell_bool(readiness_summary.get("ready_for_mteam_upload"))
         if readiness_summary.get("ready_for_mteam_upload") is not None
         else None,
+        "PTCLI_READINESS_MATERIAL_MISSING": ",".join(_string_list(readiness_summary.get("material_missing"))),
+        "PTCLI_READINESS_MATERIAL_UPLOAD_GATES": json.dumps(readiness_summary.get("material_upload_gates"), ensure_ascii=False) if isinstance(readiness_summary.get("material_upload_gates"), dict) else None,
+        "PTCLI_READINESS_MATERIAL_UPLOAD_BLOCKERS": "|".join(_string_list(readiness_summary.get("material_upload_blockers"))),
         "PTCLI_READINESS_READY_FOR_UPLOADED_SEEDING": _shell_bool(readiness_summary.get("ready_for_uploaded_seeding"))
         if readiness_summary.get("ready_for_uploaded_seeding") is not None
         else None,
