@@ -3356,11 +3356,13 @@ def test_completion_matrix_preferred_stages_map_domains_to_resume_commands() -> 
 
     pipeline_stages = ptcli_cli._completion_matrix_preferred_stages(matrix, kind="ptcli.pipeline.run_summary")
     target_upload_stages = ptcli_cli._completion_matrix_preferred_stages(matrix, kind="ptcli.target_upload.summary")
+    readiness_stages = ptcli_cli._readiness_summary_preferred_stages({"missing_domains": matrix["missing_domains"]}, kind="ptcli.pipeline.run_summary")
 
     assert pipeline_stages[:4] == ("resume-target-package", "resume-uploaded-torrent", "resume-uploaded-torrent-download", "resume-target-upload")
     assert "resume-source-torrent" in pipeline_stages
     assert target_upload_stages[:4] == ("resume-target-package", "resume-uploaded-torrent", "resume-uploaded-torrent-download", "target-upload-retry")
     assert "resume-source-download" in target_upload_stages
+    assert readiness_stages == pipeline_stages
 
 
 def test_target_package_resume_args_reuse_generated_material_artifacts() -> None:
@@ -4216,6 +4218,10 @@ def test_summary_check_prefers_target_package_for_preparation_audit(tmp_path, ca
     assert payload["next_stage"] == "resume-target-package"
     assert payload["next_command"] == "python3 ptcli.py pipeline --prepare-target"
     assert payload["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target"]
+    assert "materials" in payload["readiness_summary"]["missing_domains"]
+    assert payload["readiness_summary"]["materials_ready"] is False
+    assert payload["readiness_summary"]["next_stage"] == "resume-target-package"
+    assert payload["readiness_summary"]["next_command"] == "python3 ptcli.py pipeline --prepare-target"
     assert payload["automation_action"] == "run_next_command"
 
 

@@ -3660,15 +3660,25 @@ def _pipeline_summary_check(payload: dict[str, Any], summary_file: str) -> dict[
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit], *[f"closure audit missing: {name}" for name in missing_closure_audit]]
     _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(diagnostics))
+    check_status = "ok" if complete and ready and not blockers else "blocked"
+    readiness_summary = _summary_check_readiness_summary({
+        "status": check_status,
+        "summary_file": summary_file,
+        "ready": ready,
+        "complete": complete,
+        "blockers": blockers,
+        "resume_state": resume_state,
+        **diagnostics,
+    })
     next_command = _summary_next_command(
         payload,
         resume_state,
         (
+            *_readiness_summary_preferred_stages(readiness_summary, kind=str(payload.get("kind") or "")),
             *_completion_matrix_preferred_stages(diagnostics.get("completion_matrix"), kind=str(payload.get("kind") or "")),
             *_pipeline_summary_preferred_stages([*missing_audit, *missing_closure_audit]),
         ),
     )
-    check_status = "ok" if complete and ready and not blockers else "blocked"
     closure_status = _closure_status_summary({**payload, "status": check_status, "blockers": blockers})
     return _summary_check_result({
         "status": check_status,
@@ -3706,16 +3716,27 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     _extend_unique_string(artifact_status["missing_artifacts"], missing_audit)
     blockers = [*blockers, *[f"missing audit artifact: {name}" for name in missing_audit]]
     _extend_unique_string(blockers, _qbit_wait_mismatch_blockers(diagnostics))
+    check_status = "ok" if ready and complete and not blockers else "blocked"
+    readiness_summary = _summary_check_readiness_summary({
+        "status": check_status,
+        "summary_file": summary_file,
+        "ready": ready,
+        "complete": complete,
+        "blockers": blockers,
+        "resume_state": resume_state,
+        **diagnostics,
+    })
     next_command = _summary_next_command(
         payload,
         resume_state,
         (
+            *_readiness_summary_preferred_stages(readiness_summary, kind=str(payload.get("kind") or "")),
             *_target_upload_summary_preferred_stages(missing_audit),
             *_completion_matrix_preferred_stages(diagnostics.get("completion_matrix"), kind=str(payload.get("kind") or "")),
         ),
     )
     return _summary_check_result({
-        "status": "ok" if ready and complete and not blockers else "blocked",
+        "status": check_status,
         "kind": payload.get("kind"),
         "summary_file": summary_file,
         "automation_handoff": _summary_automation_handoff(summary_file),
@@ -3960,8 +3981,17 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
 def _completion_matrix_preferred_stages(completion_matrix: Any, *, kind: str) -> tuple[str, ...]:
     if not isinstance(completion_matrix, dict):
         return ()
+    return _missing_domains_preferred_stages(_string_list(completion_matrix.get("missing_domains")), kind=kind)
+
+
+def _readiness_summary_preferred_stages(readiness_summary: Any, *, kind: str) -> tuple[str, ...]:
+    if not isinstance(readiness_summary, dict):
+        return ()
+    return _missing_domains_preferred_stages(_string_list(readiness_summary.get("missing_domains")), kind=kind)
+
+
+def _missing_domains_preferred_stages(missing_domains: list[str], *, kind: str) -> tuple[str, ...]:
     preferred: list[str] = []
-    missing_domains = _string_list(completion_matrix.get("missing_domains"))
     for domain in missing_domains:
         if domain == "source":
             preferred.extend(["resume-source-torrent", "resume-source-download"])
