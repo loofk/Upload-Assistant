@@ -847,6 +847,7 @@ def _retorrent_readiness_summary(
     next_command_argv = _argv_list(resume_state.get("next_command_argv"))
     material_recovery = _readiness_material_recovery_summary(resume_state)
     uploaded_followup = _readiness_uploaded_followup_summary(resume_state)
+    target_payload_review = target_upload_diagnostics.get("payload_review") if isinstance(target_upload_diagnostics.get("payload_review"), dict) else {}
     return {
         "status": status,
         "ready": ready,
@@ -888,6 +889,8 @@ def _retorrent_readiness_summary(
         "target_preflight_missing": _string_list(target_preflight_diagnostics.get("missing")),
         "target_preflight_description_missing": _string_list(target_preflight_diagnostics.get("description_missing")),
         "target_preflight_blockers": _string_list(target_preflight_diagnostics.get("blockers")),
+        "target_upload_payload_recovery_missing": _string_list(target_payload_review.get("recovery_missing")),
+        "target_upload_payload_next_actions": _string_list(target_payload_review.get("next_actions")),
         "ready_for_uploaded_seeding": first_bool(target_upload_diagnostics.get("ready_for_uploaded_seeding"), target_upload_evidence.get("ready_for_uploaded_seeding")),
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": list(qbit_wait_mismatches),
@@ -2989,6 +2992,8 @@ def _payload_review_summary_from_upload_payload(upload_payload: dict[str, Any]) 
     description_evidence = description.get("evidence") if isinstance(description.get("evidence"), dict) else {}
     return {
         "present": bool(review),
+        "recovery_missing": _string_list(upload_payload.get("recovery_missing")),
+        "next_actions": _string_list(upload_payload.get("next_actions")),
         "description": {
             "external_links": description.get("external_links") if isinstance(description.get("external_links"), dict) else {},
             "external_id_readiness": external_id_readiness,
@@ -9627,6 +9632,8 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_TARGET_PREFLIGHT_MISSING": ",".join(_string_list(readiness_summary.get("target_preflight_missing"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_DESCRIPTION_MISSING": ",".join(_string_list(readiness_summary.get("target_preflight_description_missing"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_BLOCKERS": "|".join(_string_list(readiness_summary.get("target_preflight_blockers"))),
+        "PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_RECOVERY_MISSING": ",".join(_string_list(readiness_summary.get("target_upload_payload_recovery_missing"))),
+        "PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_NEXT_ACTIONS": " | ".join(_string_list(readiness_summary.get("target_upload_payload_next_actions"))),
         "PTCLI_READINESS_READY_FOR_UPLOADED_SEEDING": _shell_bool(readiness_summary.get("ready_for_uploaded_seeding"))
         if readiness_summary.get("ready_for_uploaded_seeding") is not None
         else None,
@@ -10039,6 +10046,8 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_METADATA_READABLE": _shell_bool(preflight_torrent.get("metadata_readable")) if preflight_torrent.get("metadata_readable") is not None else None,
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_SOURCE_FLAG": preflight_torrent.get("source_flag"),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_REVIEW_PRESENT": _shell_bool(payload_review.get("present")) if "present" in payload_review else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_RECOVERY_MISSING": ",".join(_string_list(payload_review.get("recovery_missing"))),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_NEXT_ACTIONS": " | ".join(_string_list(payload_review.get("next_actions"))),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETE": _shell_bool(payload_description_completeness.get("ready")) if payload_description_completeness.get("ready") is not None else None,
         "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_MISSING": ",".join(_string_list(payload_description_completeness.get("missing"))),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING": ",".join(_string_list(payload_description_completeness.get("recovery_missing"))),

@@ -17313,6 +17313,9 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert "assets.mediainfo_or_bdinfo" not in material_diagnostics["critical_path"]["missing"]
     assert "description.content" in material_diagnostics["critical_path"]["missing"]
     payload_review = diagnostics["target_upload_diagnostics"]["payload_review"]
+    assert "metadata.tmdb_id" in payload_review["recovery_missing"]
+    assert "description.external_ids.tmdb" in payload_review["recovery_missing"]
+    assert any("Fetch TMDb metadata" in action for action in payload_review["next_actions"])
     payload_completeness = payload_review["description"]["completeness"]
     assert payload_completeness["ready"] is False
     assert payload_completeness["missing"] == ["ptgen_description", "external_ids"]
@@ -17347,11 +17350,31 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MATERIALS_READY_REQUIRED"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_MTEAM_SAFE"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_METADATA_READABLE"] == "1"
+    assert "metadata.tmdb_id" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_RECOVERY_MISSING"]
+    assert "description.external_ids.tmdb" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_RECOVERY_MISSING"]
+    assert "Fetch TMDb metadata" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_NEXT_ACTIONS"]
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETE"] == "0"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_MISSING"] == "ptgen_description,external_ids"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING"] == "description.ptgen_description,description.external_ids"
     assert "Fetch PTGen/Douban description" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS"]
     assert "IMDb/TMDb/Douban metadata" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS"]
+    readiness = ptcli_cli._summary_check_readiness_summary(
+        {
+            "status": "blocked",
+            "ready": False,
+            "complete": False,
+            "blockers": ["target.materials_ready"],
+            "resume_state": summary_payload["resume_state"],
+            **diagnostics,
+        }
+    )
+    assert "metadata.tmdb_id" in readiness["target_upload_payload_recovery_missing"]
+    assert "description.external_ids.tmdb" in readiness["target_upload_payload_recovery_missing"]
+    assert any("Fetch TMDb metadata" in action for action in readiness["target_upload_payload_next_actions"])
+    readiness_shell = ptcli_cli._summary_check_readiness_shell_fields(readiness)
+    assert "metadata.tmdb_id" in readiness_shell["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_RECOVERY_MISSING"]
+    assert "description.external_ids.tmdb" in readiness_shell["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_RECOVERY_MISSING"]
+    assert "Fetch TMDb metadata" in readiness_shell["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_NEXT_ACTIONS"]
 
 
 def test_mteam_upload_preflight_execute_requires_materials_even_when_none_supplied(tmp_path) -> None:
