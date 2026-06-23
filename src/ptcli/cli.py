@@ -2908,6 +2908,7 @@ def _payload_review_summary_from_upload_payload(upload_payload: dict[str, Any]) 
             "external_links": description.get("external_links") if isinstance(description.get("external_links"), dict) else {},
             "external_id_readiness": external_id_readiness,
             "external_id_missing": _string_list(description.get("external_id_missing")),
+            "completeness": _description_completeness_summary(description),
             "has_ptgen_description": description.get("has_ptgen_description"),
             "ptgen_description_length": description.get("ptgen_description_length"),
             "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
@@ -9560,6 +9561,7 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
     payload_materials = payload_review.get("materials") if isinstance(payload_review.get("materials"), dict) else {}
     external_id_readiness = payload_description.get("external_id_readiness") if isinstance(payload_description.get("external_id_readiness"), dict) else {}
     external_links = payload_description.get("external_links") if isinstance(payload_description.get("external_links"), dict) else {}
+    payload_description_completeness = payload_description.get("completeness") if isinstance(payload_description.get("completeness"), dict) else {}
     screenshot_coverage = payload_description.get("screenshot_coverage") if isinstance(payload_description.get("screenshot_coverage"), dict) else {}
     return {
         "PTCLI_TARGET_UPLOAD_PRESENT": _shell_bool(target_upload_diagnostics.get("present")) if "present" in target_upload_diagnostics else None,
@@ -9596,6 +9598,11 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_METADATA_READABLE": _shell_bool(preflight_torrent.get("metadata_readable")) if preflight_torrent.get("metadata_readable") is not None else None,
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_SOURCE_FLAG": preflight_torrent.get("source_flag"),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_REVIEW_PRESENT": _shell_bool(payload_review.get("present")) if "present" in payload_review else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETE": _shell_bool(payload_description_completeness.get("ready")) if payload_description_completeness.get("ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_MISSING": ",".join(_string_list(payload_description_completeness.get("missing"))),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING": ",".join(_string_list(payload_description_completeness.get("recovery_missing"))),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS": " | ".join(_string_list(payload_description_completeness.get("next_actions"))),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_CHECKS": json.dumps(payload_description_completeness.get("checks"), ensure_ascii=False) if isinstance(payload_description_completeness.get("checks"), list) else None,
         "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_PTGEN": _shell_bool(payload_description.get("has_ptgen_description")) if payload_description.get("has_ptgen_description") is not None else None,
         "PTCLI_TARGET_UPLOAD_PAYLOAD_PTGEN_LENGTH": payload_description.get("ptgen_description_length"),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_EXTERNAL_IDS": _shell_bool(all(external_id_readiness.get(name) is True for name in ("imdb", "tmdb", "douban"))) if external_id_readiness else None,

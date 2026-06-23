@@ -16521,6 +16521,13 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert "metadata.tmdb" in material_diagnostics["critical_path"]["missing"]
     assert "assets.mediainfo_or_bdinfo" not in material_diagnostics["critical_path"]["missing"]
     assert "description.content" in material_diagnostics["critical_path"]["missing"]
+    payload_review = diagnostics["target_upload_diagnostics"]["payload_review"]
+    payload_completeness = payload_review["description"]["completeness"]
+    assert payload_completeness["ready"] is False
+    assert payload_completeness["missing"] == ["ptgen_description", "external_ids"]
+    assert payload_completeness["recovery_missing"] == ["description.ptgen_description", "description.external_ids"]
+    assert any("Fetch PTGen/Douban description" in action for action in payload_completeness["next_actions"])
+    assert any("IMDb/TMDb/Douban metadata" in action for action in payload_completeness["next_actions"])
     commands = {command["stage"]: command for command in summary_payload["recommended_commands"]}
     assert "resume-target-package" in commands
     assert summary_payload["resume_state"]["next_stage"] == "resume-target-package"
@@ -16549,6 +16556,11 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_MATERIALS_READY_REQUIRED"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_MTEAM_SAFE"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PREFLIGHT_TORRENT_METADATA_READABLE"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETE"] == "0"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_MISSING"] == "ptgen_description,external_ids"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING"] == "description.ptgen_description,description.external_ids"
+    assert "Fetch PTGen/Douban description" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS"]
+    assert "IMDb/TMDb/Douban metadata" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS"]
 
 
 def test_mteam_upload_preflight_execute_requires_materials_even_when_none_supplied(tmp_path) -> None:
@@ -17240,9 +17252,26 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
         "description_urls": ["https://img.example/thumb.png"],
         "missing_urls": [],
     }
+    assert payload_review["description"]["completeness"] == {
+        "ready": True,
+        "missing": [],
+        "recovery_missing": [],
+        "next_actions": [],
+        "checks": [
+            {"name": "ptgen_description", "ready": True},
+            {"name": "external_ids", "ready": True},
+            {"name": "mediainfo_or_bdinfo", "ready": True},
+            {"name": "screenshot_bbcode", "ready": True},
+            {"name": "screenshot_coverage", "ready": True},
+        ],
+    }
     assert payload_review["materials"]["image_host_urls"] == ["https://img.example/thumb.png"]
     shell_fields = ptcli_cli._summary_check_target_upload_shell_fields(diagnostics["target_upload_diagnostics"])
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_REVIEW_PRESENT"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETE"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_MISSING"] == ""
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING"] == ""
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS"] == ""
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_PTGEN"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_EXTERNAL_IDS"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_EXTERNAL_ID_MISSING"] == ""
