@@ -7859,7 +7859,38 @@ def _target_payload_review_description_recovery_missing(payload_review: Any) -> 
         return []
     description = payload_review.get("description") if isinstance(payload_review.get("description"), dict) else {}
     completeness = description.get("completeness") if isinstance(description.get("completeness"), dict) else {}
-    return _string_list(completeness.get("recovery_missing"))
+    missing = _string_list(completeness.get("recovery_missing"))
+    _extend_unique_string(missing, _description_evidence_recovery_missing(description.get("evidence")))
+    return missing
+
+
+def _description_evidence_recovery_missing(evidence: Any) -> list[str]:
+    if not isinstance(evidence, dict):
+        return []
+    missing: list[str] = []
+    ptgen = evidence.get("ptgen_description") if isinstance(evidence.get("ptgen_description"), dict) else {}
+    if ptgen.get("ready") is False:
+        missing.append("description.ptgen_description")
+    external_ids = evidence.get("external_ids") if isinstance(evidence.get("external_ids"), dict) else {}
+    external_missing = _string_list(external_ids.get("missing"))
+    if external_ids.get("ready") is False:
+        if external_missing:
+            for name in external_missing:
+                normalized = str(name).strip().lower()
+                if normalized in {"imdb", "tmdb", "douban"}:
+                    _append_unique_string(missing, f"description.external_ids.{normalized}")
+        else:
+            _append_unique_string(missing, "description.external_ids")
+    mediainfo = evidence.get("mediainfo_or_bdinfo") if isinstance(evidence.get("mediainfo_or_bdinfo"), dict) else {}
+    if mediainfo.get("ready") is False:
+        _append_unique_string(missing, "description.mediainfo_or_bdinfo")
+    screenshots = evidence.get("screenshots") if isinstance(evidence.get("screenshots"), dict) else {}
+    if screenshots.get("ready") is False:
+        _append_unique_string(missing, "description.screenshot_bbcode")
+    screenshot_coverage = evidence.get("screenshot_coverage") if isinstance(evidence.get("screenshot_coverage"), dict) else {}
+    if screenshot_coverage.get("ready") is False:
+        _append_unique_string(missing, "description.screenshot_coverage")
+    return missing
 
 
 def _target_package_material_artifact_options(artifacts: dict[str, Any] | None) -> dict[str, Any]:

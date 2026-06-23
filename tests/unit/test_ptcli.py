@@ -2010,6 +2010,42 @@ def test_target_package_material_auto_flags_include_payload_review_completeness(
     assert "--upload-screenshots" in flags
 
 
+def test_target_package_material_auto_flags_include_payload_review_evidence() -> None:
+    artifacts = {
+        "target_payload_review": {
+            "description": {
+                "evidence": {
+                    "ptgen_description": {"ready": False},
+                    "external_ids": {"ready": False, "missing": ["tmdb", "douban"]},
+                    "mediainfo_or_bdinfo": {"ready": False},
+                    "screenshots": {"ready": False},
+                    "screenshot_coverage": {"ready": False, "missing_count": 1},
+                }
+            }
+        }
+    }
+
+    missing = ptcli_cli._target_package_material_recovery_missing(artifacts)
+    hints = ptcli_cli._target_preparation_recovery_hints(missing)
+    hint_keys = {hint["key"] for hint in hints}
+    flags = ptcli_cli._target_package_material_auto_flags(artifacts)
+
+    assert missing == [
+        "description.ptgen_description",
+        "description.external_ids.tmdb",
+        "description.external_ids.douban",
+        "description.mediainfo_or_bdinfo",
+        "description.screenshot_bbcode",
+        "description.screenshot_coverage",
+    ]
+    assert hint_keys == {"metadata.ptgen_description", "metadata.tmdb_id", "metadata.douban", "assets.mediainfo_or_bdinfo", "description.screenshot_bbcode", "assets.image_host_uploads"}
+    assert "--enrich-metadata" in flags
+    assert "--fetch-ptgen" in flags
+    assert "--generate-mediainfo" in flags
+    assert "--prepare-target" in flags
+    assert "--upload-screenshots" in flags
+
+
 def test_target_package_material_auto_flags_include_preparation_payload_review_completeness() -> None:
     flags = ptcli_cli._target_package_material_auto_flags(
         {
@@ -2103,6 +2139,42 @@ def test_run_summary_resume_state_uses_payload_review_description_completeness()
     assert recovery_by_key["assets.image_host_uploads"]["resume_command_available"] is True
     assert resume_state["materials"]["next_actions"] == [
         "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
+        "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
+    ]
+
+
+def test_run_summary_resume_state_uses_payload_review_description_evidence() -> None:
+    resume_commands = [
+        {
+            "stage": "resume-target-package",
+            "command": "python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen --generate-mediainfo --upload-screenshots",
+            "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen", "--generate-mediainfo", "--upload-screenshots"],
+        }
+    ]
+    resume_state = ptcli_cli._run_summary_resume_state(
+        {"closure": {"complete": False, "blockers": ["target.materials_ready"]}},
+        {
+            "target_payload_review": {
+                "description": {
+                    "evidence": {
+                        "external_ids": {"ready": False, "missing": ["tmdb"]},
+                        "mediainfo_or_bdinfo": {"ready": False},
+                        "screenshot_coverage": {"ready": False, "missing_count": 1},
+                    }
+                }
+            }
+        },
+        resume_commands,
+    )
+
+    recovery_by_key = {hint["key"]: hint for hint in resume_state["materials"]["recovery_hints"]}
+    assert sorted(recovery_by_key) == ["assets.image_host_uploads", "assets.mediainfo_or_bdinfo", "metadata.tmdb_id"]
+    assert recovery_by_key["metadata.tmdb_id"]["resume_command_available"] is True
+    assert recovery_by_key["assets.mediainfo_or_bdinfo"]["resume_command_available"] is True
+    assert recovery_by_key["assets.image_host_uploads"]["resume_command_available"] is True
+    assert resume_state["materials"]["next_actions"] == [
+        "Fetch TMDb metadata with --enrich-metadata or supply it with --metadata-file/--tmdb-id, then rerun resume-target-package.",
+        "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun resume-target-package.",
         "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
     ]
 
