@@ -1033,6 +1033,9 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
         next_command_argv = _resume_state_next_command_argv({"stage": next_stage, "command": next_command}, commands)
     target_preflight = artifacts.get("target_preflight_gates") if isinstance(artifacts.get("target_preflight_gates"), dict) else {}
     target_preflight_torrent = target_preflight.get("torrent_file") if isinstance(target_preflight.get("torrent_file"), dict) else {}
+    materials = pipeline_resume.get("materials") if isinstance(pipeline_resume.get("materials"), dict) else {}
+    if not materials:
+        materials = _run_summary_material_resume_state(pipeline_result, artifacts, commands)
     return {
         "complete": complete,
         "pipeline_complete": _retorrent_pipeline_complete(pipeline_result, pipeline_resume),
@@ -1078,6 +1081,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "target_preflight_payload_ready": bool(target_preflight.get("payload_ready")),
             "target_preflight_torrent_safe": bool(target_preflight_torrent.get("mteam_safe")),
         },
+        "materials": materials,
         "blockers": [str(blocker) for blocker in blockers],
     }
 
@@ -7361,11 +7365,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
     complete = bool(closure.get("complete"))
     next_command = {"stage": None, "command": None} if complete else _resume_next_command(blockers, commands_by_stage)
     next_command_argv = _resume_state_next_command_argv(next_command, resume_commands)
-    target_materials_missing = _string_list(artifacts.get("target_materials_missing"))
-    target_preparation_missing = _string_list(artifacts.get("target_preparation_missing"))
-    material_missing = _target_package_material_recovery_missing(artifacts)
-    material_recovery_hints = _target_preparation_recovery_hints(material_missing)
-    material_recovery_hints = _attach_material_recovery_resume_commands(material_recovery_hints, resume_commands)
+    materials = _run_summary_material_resume_state(payload, artifacts, resume_commands)
     return {
         "complete": complete,
         "resume_available": bool(resume_commands),
@@ -7404,16 +7404,26 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
             "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
         },
-        "materials": {
-            "target_materials_ready": bool(artifacts.get("target_materials_ready")),
-            "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
-            "target_materials_missing": target_materials_missing,
-            "target_preparation_missing": target_preparation_missing,
-            "closure": _run_summary_material_closure(artifacts, material_missing),
-            "recovery_hints": material_recovery_hints,
-            "next_actions": _target_preparation_missing_next_actions(material_missing),
-        },
+        "materials": materials,
         "blockers": blockers,
+    }
+
+
+def _run_summary_material_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], resume_commands: list[dict[str, Any]]) -> dict[str, Any]:
+    target_materials_missing = _string_list(artifacts.get("target_materials_missing"))
+    target_preparation_missing = _string_list(artifacts.get("target_preparation_missing"))
+    material_missing = _target_package_material_recovery_missing(artifacts)
+    _extend_unique_string(material_missing, _target_preflight_recovery_missing(payload.get("target_preflight_diagnostics")))
+    material_recovery_hints = _target_preparation_recovery_hints(material_missing)
+    material_recovery_hints = _attach_material_recovery_resume_commands(material_recovery_hints, resume_commands)
+    return {
+        "target_materials_ready": bool(artifacts.get("target_materials_ready")),
+        "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
+        "target_materials_missing": target_materials_missing,
+        "target_preparation_missing": target_preparation_missing,
+        "closure": _run_summary_material_closure(artifacts, material_missing),
+        "recovery_hints": material_recovery_hints,
+        "next_actions": _target_preparation_missing_next_actions(material_missing),
     }
 
 
@@ -7779,6 +7789,15 @@ def _target_package_material_recovery_missing(artifacts: dict[str, Any] | None) 
     _extend_unique_string(missing, _target_payload_review_description_recovery_missing(artifacts.get("target_payload_review")))
     preparation_audit = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
     _extend_unique_string(missing, _target_payload_review_description_recovery_missing(preparation_audit.get("payload_review")))
+    _extend_unique_string(missing, _target_preflight_recovery_missing(artifacts.get("target_preflight_gates")))
+    return missing
+
+
+def _target_preflight_recovery_missing(target_preflight: Any) -> list[str]:
+    if not isinstance(target_preflight, dict):
+        return []
+    missing = _string_list(target_preflight.get("missing"))
+    _extend_unique_string(missing, _string_list(target_preflight.get("description_missing")))
     return missing
 
 

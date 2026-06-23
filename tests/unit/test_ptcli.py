@@ -1756,13 +1756,44 @@ async def test_retorrent_execute_surfaces_material_preflight_blockers(monkeypatc
     assert payload["readiness_summary"]["target_preflight_missing"] == ["description.content", "materials.description.screenshot_coverage"]
     assert payload["readiness_summary"]["target_preflight_description_missing"] == ["materials.description.screenshot_coverage"]
     assert payload["readiness_summary"]["target_preflight_blockers"] == ["materials.description.screenshot_coverage: Description has fewer hosted screenshots than local screenshots."]
+    material_recovery = payload["readiness_summary"]["material_recovery"]
+    assert material_recovery["present"] is True
+    assert material_recovery["keys"] == ["description.content", "assets.image_host_uploads"]
+    assert material_recovery["required_flags"] == ["--prepare-target", "--upload-screenshots"]
+    assert material_recovery["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots"
+    assert material_recovery["first_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots"]
+    assert material_recovery["command_coverage"]["ready"] is True
+    assert payload["automation_action"] == "run_next_command"
+    assert payload["resume_state"]["materials"]["next_actions"] == [
+        "Regenerate the MTEAM description after metadata, MediaInfo/BDInfo, screenshot, and image-host materials are ready.",
+        "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
+    ]
     readiness_shell_fields = ptcli_cli._summary_check_readiness_shell_fields(payload["readiness_summary"])
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_PREFLIGHT_MISSING"] == "description.content,materials.description.screenshot_coverage"
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_PREFLIGHT_DESCRIPTION_MISSING"] == "materials.description.screenshot_coverage"
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_PREFLIGHT_BLOCKERS"] == "materials.description.screenshot_coverage: Description has fewer hosted screenshots than local screenshots."
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_RECOVERY_KEYS"] == "description.content,assets.image_host_uploads"
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY"] == "1"
     shell_fields = ptcli_cli._summary_check_target_preflight_shell_fields(payload["target_preflight_diagnostics"])
     assert shell_fields["PTCLI_TARGET_PREFLIGHT_MISSING"] == "description.content,materials.description.screenshot_coverage"
     assert shell_fields["PTCLI_TARGET_PREFLIGHT_DESCRIPTION_MISSING"] == "materials.description.screenshot_coverage"
+
+
+def test_target_package_material_recovery_missing_includes_preflight_gates() -> None:
+    artifacts = {
+        "target_preflight_gates": {
+            "missing": ["description.content", "materials.description.screenshot_coverage"],
+            "description_missing": ["materials.description.external_ids.tmdb"],
+        }
+    }
+
+    missing = ptcli_cli._target_package_material_recovery_missing(artifacts)
+
+    assert missing == [
+        "description.content",
+        "materials.description.screenshot_coverage",
+        "materials.description.external_ids.tmdb",
+    ]
 
 
 def test_retorrent_execute_blockers_require_uploaded_wait_evidence() -> None:
