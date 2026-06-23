@@ -1016,8 +1016,13 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
     next_stage = None if complete else pipeline_resume.get("next_stage")
     next_command = None if complete else pipeline_resume.get("next_command")
     next_command_argv = None if complete else _argv_list(pipeline_resume.get("next_command_argv"))
-    if not complete and not next_command:
-        fallback = _resume_next_command_from_stages(preferred_stages, commands_by_stage) or _resume_next_command(blockers, commands_by_stage)
+    preferred = None if complete else _resume_next_command_from_stages(preferred_stages, commands_by_stage)
+    if not complete and preferred and preferred.get("stage") and preferred.get("stage") != next_stage:
+        next_stage = preferred.get("stage")
+        next_command = preferred.get("command")
+        next_command_argv = _resume_state_next_command_argv(preferred, commands)
+    elif not complete and not next_command:
+        fallback = preferred or _resume_next_command(blockers, commands_by_stage)
         next_stage = fallback.get("stage")
         next_command = fallback.get("command")
         next_command_argv = _resume_state_next_command_argv(fallback, commands)

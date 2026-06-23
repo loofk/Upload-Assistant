@@ -1628,6 +1628,40 @@ def test_retorrent_resume_state_infers_pipeline_complete_from_closure() -> None:
     assert resume_state["pipeline_complete"] is True
 
 
+def test_retorrent_resume_state_prefers_material_recovery_over_pipeline_followup() -> None:
+    resume_commands = [
+        {
+            "stage": "resume-target-package",
+            "command": "python3 ptcli.py pipeline --prepare-target --fetch-ptgen",
+            "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target", "--fetch-ptgen"],
+        },
+        {
+            "stage": "resume-uploaded-torrent",
+            "command": "python3 ptcli.py pipeline --uploaded-torrent-file /tmp/MTEAM-999.torrent",
+            "argv": ["python3", "ptcli.py", "pipeline", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"],
+        },
+    ]
+    resume_state = ptcli_cli._retorrent_execute_resume_state(
+        {
+            "status": "blocked",
+            "ready": False,
+            "resume_state": {
+                "next_stage": "resume-uploaded-torrent",
+                "next_command": "python3 ptcli.py pipeline --uploaded-torrent-file /tmp/MTEAM-999.torrent",
+                "next_command_argv": ["python3", "ptcli.py", "pipeline", "--uploaded-torrent-file", "/tmp/MTEAM-999.torrent"],
+            },
+        },
+        {},
+        ["description completeness missing: description.screenshot_coverage"],
+        resume_commands,
+        preferred_stages=("resume-target-package", "resume-uploaded-torrent"),
+    )
+
+    assert resume_state["next_stage"] == "resume-target-package"
+    assert resume_state["next_command"] == "python3 ptcli.py pipeline --prepare-target --fetch-ptgen"
+    assert resume_state["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--fetch-ptgen"]
+
+
 def test_retorrent_execute_blockers_require_uploaded_wait_evidence() -> None:
     pipeline_result = {"status": "ok", "ready": True, "summary": {"blockers": []}}
     closure = {"complete": True, "blockers": []}
