@@ -1976,6 +1976,15 @@ def test_readiness_material_recovery_summary_exposes_actionable_commands() -> No
     assert recovery["existing_file_options"] == ["--image-host-file"]
     assert recovery["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg"
     assert recovery["first_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots", "--image-host", "ptpimg"]
+    assert recovery["command_coverage"] == {
+        "ready": True,
+        "hint_count": 1,
+        "available_count": 1,
+        "missing_count": 0,
+        "first_uncovered_key": None,
+        "first_uncovered_missing_flags": [],
+        "uncovered_keys": [],
+    }
 
 
 def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> None:
@@ -5708,6 +5717,11 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_COVERAGE_AVAILABLE=0\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_COVERAGE_MISSING=2\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_FIRST_UNCOVERED_KEY=metadata.ptgen_description\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_FIRST_UNCOVERED_FLAGS=--enrich-metadata,--fetch-ptgen\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_PRESENT=1\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_TARGET_MATERIALS_MISSING=metadata.ptgen_description,assets.image_host_uploads\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_TARGET_PREPARATION_MISSING=description.content\n" in out
@@ -5716,6 +5730,11 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY=0\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_AVAILABLE=0\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_MISSING=2\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_FIRST_UNCOVERED_KEY=metadata.ptgen_description\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_FIRST_UNCOVERED_FLAGS=--enrich-metadata,--fetch-ptgen\n" in out
     assert "PTCLI_READINESS_MATERIAL_RECOVERY_NEXT_ACTIONS='Fetch PTGen/Douban description" in out
     assert "PTCLI_RESUME_MATERIAL_NEXT_ACTIONS='Fetch PTGen/Douban description" in out
     assert "Upload screenshots to an image host" in out
