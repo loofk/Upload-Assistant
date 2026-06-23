@@ -2046,6 +2046,35 @@ def test_target_package_material_auto_flags_include_payload_review_evidence() ->
     assert "--upload-screenshots" in flags
 
 
+def test_target_upload_payload_recovery_summary_derives_from_description_evidence() -> None:
+    recovery = ptcli_cli._target_upload_payload_recovery_summary(
+        {
+            "target_payload_review": {
+                "description": {
+                    "evidence": {
+                        "ptgen_description": {"ready": False},
+                        "external_ids": {"ready": False, "missing": ["tmdb"]},
+                        "mediainfo_or_bdinfo": {"ready": False},
+                        "screenshot_coverage": {"ready": False, "missing_count": 1},
+                    }
+                }
+            }
+        }
+    )
+
+    assert recovery["present"] is True
+    assert recovery["recovery_missing"] == [
+        "description.ptgen_description",
+        "description.external_ids.tmdb",
+        "description.mediainfo_or_bdinfo",
+        "description.screenshot_coverage",
+    ]
+    assert any("Fetch PTGen/Douban description" in action for action in recovery["next_actions"])
+    assert any("Fetch TMDb metadata" in action for action in recovery["next_actions"])
+    assert any("Generate or provide MediaInfo/BDInfo" in action for action in recovery["next_actions"])
+    assert any("Upload screenshots to an image host" in action for action in recovery["next_actions"])
+
+
 def test_target_package_material_auto_flags_include_preparation_payload_review_completeness() -> None:
     flags = ptcli_cli._target_package_material_auto_flags(
         {
@@ -4782,7 +4811,12 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
         blockers=[],
         completion_matrix=matrix,
         material_diagnostics=diagnostics,
-        target_upload_diagnostics={},
+        target_upload_diagnostics={
+            "payload_review": {
+                "recovery_missing": ["description.screenshot_coverage"],
+                "next_actions": ["Upload screenshots to an image host before live upload."],
+            }
+        },
         target_preflight_diagnostics={},
         qbit_wait_mismatches=[],
         resume_state={},
@@ -4798,11 +4832,15 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert readiness["material_description_screenshot_coverage_ready"] is False
     assert readiness["material_description_screenshot_coverage_missing_count"] == 1
     assert readiness["material_description_screenshot_coverage_missing_urls"] == ["https://img.example/screen-1.png"]
+    assert readiness["target_upload_payload_recovery_missing"] == ["description.screenshot_coverage"]
+    assert readiness["target_upload_payload_next_actions"] == ["Upload screenshots to an image host before live upload."]
     readiness_shell_fields = ptcli_cli._summary_check_readiness_shell_fields(readiness)
     assert json.loads(readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_EVIDENCE"]) == description_evidence
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_READY"] == "0"
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_COUNT"] == 1
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_URLS"] == "https://img.example/screen-1.png"
+    assert readiness_shell_fields["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_RECOVERY_MISSING"] == "description.screenshot_coverage"
+    assert readiness_shell_fields["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_NEXT_ACTIONS"] == "Upload screenshots to an image host before live upload."
 
 
 def test_summary_material_diagnostics_exposes_description_external_id_readiness() -> None:

@@ -719,6 +719,17 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     closure_review = pipeline_result.get("closure_review") if isinstance(pipeline_result.get("closure_review"), dict) else _pipeline_closure_review(pipeline_result, artifacts)
     flow_diagnostics = _summary_flow_diagnostics(pipeline_result)
     target_upload_diagnostics = _summary_target_upload_diagnostics(pipeline_result)
+    target_upload_payload_recovery = _target_upload_payload_recovery_summary(artifacts)
+    target_payload_review = _summary_target_payload_review(artifacts, artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {})
+    if target_payload_review and not target_upload_diagnostics.get("payload_review"):
+        target_upload_diagnostics = {
+            **target_upload_diagnostics,
+            "payload_review": {
+                **target_payload_review,
+                "recovery_missing": target_upload_payload_recovery.get("recovery_missing", []),
+                "next_actions": target_upload_payload_recovery.get("next_actions", []),
+            },
+        }
     completion_matrix = _summary_completion_matrix(
         flow_diagnostics=flow_diagnostics,
         material_diagnostics=material_diagnostics,
@@ -776,6 +787,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
         "material_diagnostics": material_diagnostics,
         "target_upload_diagnostics": target_upload_diagnostics,
         "target_preflight_diagnostics": target_preflight_diagnostics,
+        "target_upload_payload_recovery": target_upload_payload_recovery,
         "completion_matrix": completion_matrix,
         "completion_next_stages": list(completion_next_stages),
         "readiness_summary": readiness_summary,
@@ -3020,6 +3032,26 @@ def _payload_review_summary_from_upload_payload(upload_payload: dict[str, Any]) 
             "image_host_count": materials.get("image_host_count"),
             "image_host_urls": _string_list(materials.get("image_host_urls")),
         },
+    }
+
+
+def _target_upload_payload_recovery_summary(artifacts: dict[str, Any] | None) -> dict[str, Any]:
+    artifacts = artifacts if isinstance(artifacts, dict) else {}
+    preparation_audit = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
+    payload_review = _summary_target_payload_review(artifacts, preparation_audit)
+    description = payload_review.get("description") if isinstance(payload_review.get("description"), dict) else {}
+    completeness = description.get("completeness") if isinstance(description.get("completeness"), dict) else {}
+    recovery_missing = _string_list(payload_review.get("recovery_missing"))
+    _extend_unique_string(recovery_missing, _string_list(completeness.get("recovery_missing")))
+    _extend_unique_string(recovery_missing, _description_evidence_recovery_missing(description.get("evidence")))
+    next_actions = _string_list(payload_review.get("next_actions"))
+    _extend_unique_string(next_actions, _string_list(completeness.get("next_actions")))
+    if not next_actions:
+        next_actions = _target_preparation_missing_next_actions(recovery_missing)
+    return {
+        "present": bool(payload_review),
+        "recovery_missing": recovery_missing,
+        "next_actions": next_actions,
     }
 
 
@@ -5666,9 +5698,11 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     payload["closure_review"] = _pipeline_closure_review(payload, artifacts)
     payload["material_diagnostics"] = _summary_material_diagnostics({"artifacts": artifacts})
     payload["target_preflight_diagnostics"] = _summary_target_preflight_diagnostics({"artifacts": artifacts})
+    payload["target_upload_payload_recovery"] = _target_upload_payload_recovery_summary(artifacts)
     summary["closure_review"] = payload["closure_review"]
     summary["material_diagnostics"] = payload["material_diagnostics"]
     summary["target_preflight_diagnostics"] = payload["target_preflight_diagnostics"]
+    summary["target_upload_payload_recovery"] = payload["target_upload_payload_recovery"]
     resume_commands = _run_summary_resume_commands(payload, artifacts)
     payload["resume_commands"] = resume_commands
     payload["resume_state"] = _run_summary_resume_state(payload, artifacts, resume_commands)
@@ -6879,6 +6913,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
     closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else _pipeline_closure_review(payload, artifacts)
     material_diagnostics = _summary_material_diagnostics({"artifacts": artifacts})
     target_preflight_diagnostics = _summary_target_preflight_diagnostics({"artifacts": artifacts})
+    target_upload_payload_recovery = _target_upload_payload_recovery_summary(artifacts)
     summary_payload = {
         "schema_version": 1,
         "kind": "ptcli.pipeline.run_summary",
@@ -6911,6 +6946,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "closure_review": closure_review,
         "material_diagnostics": material_diagnostics,
         "target_preflight_diagnostics": target_preflight_diagnostics,
+        "target_upload_payload_recovery": target_upload_payload_recovery,
         "flow_check": payload.get("flow_check"),
         "summary": payload.get("summary"),
         "evidence": payload.get("evidence"),
