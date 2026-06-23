@@ -2791,7 +2791,7 @@ def _false_keys(payload: dict[str, Any], keys: tuple[str, ...]) -> list[str]:
 
 def _material_matrix_ready(material_diagnostics: dict[str, Any], review_target: dict[str, Any]) -> bool | None:
     if material_diagnostics.get("present"):
-        return bool(material_diagnostics.get("critical_ready") and material_diagnostics.get("target_materials_ready") and material_diagnostics.get("target_preparation_ready"))
+        return bool(material_diagnostics.get("ready_for_mteam_upload"))
     if review_target:
         return bool(review_target.get("materials_ready") and review_target.get("preparation_ready") and review_target.get("description_ready"))
     return None
@@ -2808,6 +2808,7 @@ def _material_matrix_missing(material_diagnostics: dict[str, Any], review_target
     missing = _string_list(material_diagnostics.get("critical_missing"))
     _extend_unique_string(missing, _string_list(material_diagnostics.get("target_materials_missing")))
     _extend_unique_string(missing, _string_list(material_diagnostics.get("target_preparation_missing") or review_target.get("preparation_missing")))
+    _extend_unique_string(missing, _string_list(material_diagnostics.get("upload_material_blockers")))
     return missing
 
 
@@ -3010,6 +3011,8 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     image_host_evidence = _summary_image_host_evidence(sections, target_assets)
     material_missing = _summary_material_missing(artifacts, target_materials)
     critical_missing = _critical_material_missing(material_missing)
+    material_evidence_blockers = _material_evidence_blockers(sections)
+    material_evidence_ready = not material_evidence_blockers
     bdinfo_required = bool(disc_structure.get("bdmv"))
     target_materials_ready = artifacts.get("target_materials_ready") if "target_materials_ready" in artifacts else target_materials.get("ready")
     if target_materials_ready is None and "materials_ready" in target_preparation_audit:
@@ -3017,11 +3020,12 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     target_preparation_ready = artifacts.get("target_preparation_ready")
     if target_preparation_ready is None and artifacts.get("target_preparation_missing"):
         target_preparation_ready = False
-    ready_for_mteam_upload = bool(critical_missing == [] and target_materials_ready is True and target_preparation_ready is True)
+    ready_for_mteam_upload = bool(critical_missing == [] and target_materials_ready is True and target_preparation_ready is True and material_evidence_ready)
     upload_material_gates = {
         "critical_ready": not critical_missing,
         "target_materials_ready": target_materials_ready,
         "target_preparation_ready": target_preparation_ready,
+        "material_evidence_ready": material_evidence_ready,
     }
     critical_domains = _material_critical_domains(critical_missing)
     critical_path = _material_critical_path_summary(
@@ -3042,7 +3046,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "target_preparation_missing": _string_list(artifacts.get("target_preparation_missing")),
         "ready_for_mteam_upload": ready_for_mteam_upload,
         "upload_material_gates": upload_material_gates,
-        "upload_material_blockers": _material_upload_blockers(upload_material_gates, material_missing, critical_missing),
+        "upload_material_blockers": _material_upload_blockers(upload_material_gates, material_missing, critical_missing, material_evidence_blockers),
         "critical_ready": not critical_missing,
         "critical_missing": critical_missing,
         "critical_domains": critical_domains,
@@ -3084,7 +3088,26 @@ def _summary_material_missing(artifacts: dict[str, Any], target_materials: dict[
     return missing
 
 
-def _material_upload_blockers(gates: dict[str, Any], material_missing: list[str], critical_missing: list[str]) -> list[str]:
+def _material_evidence_blockers(sections: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    evidence_fields = {
+        "bdinfo": ("bdinfo_file_evidence", "raw_bdinfo_file_evidence"),
+        "mediainfo": ("mediainfo_file_evidence", "mediainfo_summary_file_evidence", "mediainfo_json_file_evidence"),
+        "screenshots": ("screenshot_files_evidence",),
+        "image_host": ("image_host_file_evidence",),
+    }
+    for section_name, keys in evidence_fields.items():
+        section = sections.get(section_name) if isinstance(sections.get(section_name), dict) else {}
+        for key in keys:
+            if key not in section:
+                continue
+            ready = _material_evidence_all_files_exist(section.get(key))
+            if ready is not True:
+                _append_unique_string(blockers, f"material evidence invalid: {section_name}.{key.removesuffix('_evidence')}")
+    return blockers
+
+
+def _material_upload_blockers(gates: dict[str, Any], material_missing: list[str], critical_missing: list[str], material_evidence_blockers: list[str] | None = None) -> list[str]:
     blockers: list[str] = []
     if gates.get("critical_ready") is not True:
         _extend_unique_string(blockers, [f"critical material missing: {item}" for item in critical_missing])
@@ -3092,6 +3115,8 @@ def _material_upload_blockers(gates: dict[str, Any], material_missing: list[str]
         _append_unique_string(blockers, "target materials are not ready")
     if gates.get("target_preparation_ready") is not True:
         _append_unique_string(blockers, "target preparation is not ready")
+    if gates.get("material_evidence_ready") is not True:
+        _extend_unique_string(blockers, _string_list(material_evidence_blockers))
     if not blockers:
         return []
     _extend_unique_string(blockers, [f"material missing: {item}" for item in material_missing if item not in critical_missing])

@@ -4049,7 +4049,7 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["target_materials_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
     assert diagnostics["target_preparation_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
     assert diagnostics["ready_for_mteam_upload"] is False
-    assert diagnostics["upload_material_gates"] == {"critical_ready": False, "target_materials_ready": False, "target_preparation_ready": False}
+    assert diagnostics["upload_material_gates"] == {"critical_ready": False, "target_materials_ready": False, "target_preparation_ready": False, "material_evidence_ready": True}
     assert "critical material missing: assets.bdinfo_for_disc" in diagnostics["upload_material_blockers"]
     assert "target materials are not ready" in diagnostics["upload_material_blockers"]
     assert "target preparation is not ready" in diagnostics["upload_material_blockers"]
@@ -4326,7 +4326,7 @@ def test_summary_material_diagnostics_exposes_ready_for_mteam_upload() -> None:
     )
 
     assert diagnostics["ready_for_mteam_upload"] is True
-    assert diagnostics["upload_material_gates"] == {"critical_ready": True, "target_materials_ready": True, "target_preparation_ready": True}
+    assert diagnostics["upload_material_gates"] == {"critical_ready": True, "target_materials_ready": True, "target_preparation_ready": True, "material_evidence_ready": True}
     assert diagnostics["upload_material_blockers"] == []
     assert diagnostics["critical_path"]["ready"] is True
     assert diagnostics["critical_path"]["next_step"] is None
@@ -4340,6 +4340,7 @@ def test_summary_material_diagnostics_exposes_ready_for_mteam_upload() -> None:
         "critical_ready": True,
         "target_materials_ready": True,
         "target_preparation_ready": True,
+        "material_evidence_ready": True,
     }
     matrix = ptcli_cli._summary_completion_matrix(
         flow_diagnostics={},
@@ -4350,6 +4351,60 @@ def test_summary_material_diagnostics_exposes_ready_for_mteam_upload() -> None:
         qbit_wait_mismatches=[],
     )
     assert matrix["domains"]["materials"]["evidence"]["ready_for_mteam_upload"] is True
+
+
+def test_summary_material_diagnostics_blocks_upload_when_material_evidence_is_invalid(tmp_path) -> None:
+    missing_mediainfo = tmp_path / "missing-mediainfo.txt"
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "material_generation": {
+                    "mediainfo": {
+                        "ok": True,
+                        "status": "generated",
+                        "mediainfo_file": str(missing_mediainfo),
+                        "mediainfo_file_evidence": ptcli_cli._material_file_evidence(str(missing_mediainfo)),
+                    },
+                },
+                "target_materials": {
+                    "ready": True,
+                    "assets": {"disc_structure": {"ready": False, "path": "/downloads/Movie.mkv", "bdmv": False, "type": None}},
+                    "missing": [],
+                },
+                "target_materials_ready": True,
+                "target_preparation_ready": True,
+                "target_preparation_audit": {
+                    "description_ready": True,
+                    "description": {
+                        "has_ptgen_description": True,
+                        "has_external_ids": True,
+                        "has_mediainfo_or_bdinfo": True,
+                        "has_screenshot_bbcode": True,
+                        "missing": [],
+                    },
+                },
+            }
+        }
+    )
+
+    assert diagnostics["ready_for_mteam_upload"] is False
+    assert diagnostics["upload_material_gates"] == {"critical_ready": True, "target_materials_ready": True, "target_preparation_ready": True, "material_evidence_ready": False}
+    assert diagnostics["upload_material_blockers"] == ["material evidence invalid: mediainfo.mediainfo_file"]
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+    assert shell_fields["PTCLI_READY_FOR_MTEAM_UPLOAD"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_FILE_EXISTS"] == "0"
+
+    matrix = ptcli_cli._summary_completion_matrix(
+        flow_diagnostics={},
+        material_diagnostics=diagnostics,
+        target_upload_diagnostics={},
+        closure_review={},
+        closure_status={},
+        qbit_wait_mismatches=[],
+    )
+    assert matrix["domains"]["materials"]["ready"] is False
+    assert matrix["domains"]["materials"]["missing"] == ["material evidence invalid: mediainfo.mediainfo_file"]
+    assert matrix["domains"]["materials"]["evidence"]["ready_for_mteam_upload"] is False
 
 
 def test_summary_material_diagnostics_exposes_description_external_id_readiness() -> None:
