@@ -2860,6 +2860,59 @@ def test_retorrent_execute_artifacts_preserve_target_payload_review() -> None:
     assert artifacts["target_payload_review"] == payload_review
 
 
+def test_retorrent_execute_artifacts_derive_target_material_chain() -> None:
+    payload_review = {
+        "present": True,
+        "description": {
+            "evidence": {
+                "metadata_chain": {
+                    "ready": False,
+                    "items": {
+                        "imdb": {"ready": True},
+                        "tmdb": {"ready": False, "expected_link": None, "description_link": None, "payload_required": False},
+                        "douban": {"ready": True},
+                    },
+                },
+                "media_info_chain": {
+                    "ready": True,
+                    "material_source": "/tmp/MI.txt",
+                    "material_length": 10,
+                    "description_has_excerpt": True,
+                    "payload_source": "/tmp/MI.txt",
+                    "payload_length": 10,
+                },
+                "screenshot_chain": {
+                    "ready": False,
+                    "local_screenshot_count": 1,
+                    "image_host_count": 1,
+                    "description_image_count": 1,
+                    "missing_urls": ["https://img.example/missing.png"],
+                },
+            }
+        },
+    }
+
+    artifacts = ptcli_cli._retorrent_execute_artifacts({"artifacts": {}}, {"target": {"payload_review": payload_review}}, {"target": {}})
+
+    material_chain = artifacts["target_material_chain"]
+    assert material_chain["ready"] is False
+    assert material_chain["chains"]["metadata_chain"]["ready"] is False
+    assert material_chain["chains"]["metadata_chain"]["missing"] == ["metadata.tmdb"]
+    assert any("Fetch TMDb metadata" in action for action in material_chain["chains"]["metadata_chain"]["next_actions"])
+    assert material_chain["chains"]["media_info_chain"] == {"ready": True, "missing": [], "next_actions": []}
+    assert material_chain["chains"]["screenshot_chain"]["ready"] is False
+    assert material_chain["chains"]["screenshot_chain"]["missing"] == ["description.screenshot_coverage"]
+    assert any("Upload screenshots to an image host" in action for action in material_chain["chains"]["screenshot_chain"]["next_actions"])
+
+
+def test_retorrent_execute_artifacts_preserve_target_material_chain() -> None:
+    material_chain = {"ready": True, "chains": {"metadata_chain": {"ready": True, "missing": [], "next_actions": []}}}
+
+    artifacts = ptcli_cli._retorrent_execute_artifacts({"artifacts": {}}, {"target": {"target_material_chain": material_chain}}, {"target": {}})
+
+    assert artifacts["target_material_chain"] == material_chain
+
+
 def test_retorrent_execute_artifacts_derive_target_preflight_gates() -> None:
     preparation_audit = {
         "ready": True,

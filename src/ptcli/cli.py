@@ -1010,6 +1010,30 @@ def _description_chain_next_actions(chain_name: str, chain: Any) -> list[str]:
     return _target_preparation_missing_next_actions(_description_chain_recovery_missing(chain_name, chain))
 
 
+def _target_material_chain_summary(payload_review: Any) -> dict[str, Any]:
+    if not isinstance(payload_review, dict):
+        return {}
+    description = payload_review.get("description") if isinstance(payload_review.get("description"), dict) else {}
+    evidence = description.get("evidence") if isinstance(description.get("evidence"), dict) else {}
+    chains: dict[str, Any] = {}
+    for chain_name in ("metadata_chain", "media_info_chain", "screenshot_chain"):
+        chain = evidence.get(chain_name) if isinstance(evidence.get(chain_name), dict) else {}
+        if not chain:
+            continue
+        chains[chain_name] = {
+            "ready": chain.get("ready") if isinstance(chain.get("ready"), bool) else None,
+            "missing": _description_chain_recovery_missing(chain_name, chain),
+            "next_actions": _description_chain_next_actions(chain_name, chain),
+        }
+    if not chains:
+        return {}
+    ready_values = [chain["ready"] for chain in chains.values() if isinstance(chain.get("ready"), bool)]
+    return {
+        "ready": all(ready_values) if ready_values else None,
+        "chains": chains,
+    }
+
+
 def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
     materials = resume_state.get("materials") if isinstance(resume_state.get("materials"), dict) else {}
     recovery_hints = materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else []
@@ -1148,6 +1172,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         "target_rule_obligations",
         "target_preparation_audit",
         "target_payload_review",
+        "target_material_chain",
         "target_preparation_ready",
         "target_preparation_missing",
     ):
@@ -1164,6 +1189,10 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         merged["target_preparation_missing"] = _string_list(preparation_audit.get("missing"))
     if "target_preflight_gates" not in merged and isinstance(preparation_audit, dict):
         merged["target_preflight_gates"] = _target_preflight_gates({"status": "ready" if preparation_audit.get("ready") else "blocked"}, preparation_audit)
+    if "target_material_chain" not in merged:
+        material_chain = _target_material_chain_summary(merged.get("target_payload_review"))
+        if material_chain:
+            merged["target_material_chain"] = material_chain
     if "injection_visible_in_client" not in merged:
         target_injection = evidence_target.get("qbit_closure", {}).get("injection") if isinstance(evidence_target.get("qbit_closure"), dict) else None
         if isinstance(target_injection, dict):
