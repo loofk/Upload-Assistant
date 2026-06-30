@@ -5087,6 +5087,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
         "next_command_source": next_command.get("source"),
         "resume_commands": payload.get("resume_commands"),
         "recommended_commands": payload.get("recommended_commands"),
+        "resume_state": resume_state,
         "material_artifacts": payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {},
         **diagnostics,
         **artifact_status,
