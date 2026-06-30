@@ -5697,6 +5697,9 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         target_torrent_sanitize=sanitize_target_torrent,
     )
 
+    if args.target_execute and args.upload_target:
+        stages.append(_pipeline_live_material_gate_stage(stages, effective_target_torrent_file))
+
     if args.upload_target:
         target_prepare_stage = _find_stage(stages, "target-prepare")
         if not target_prepare_stage or not target_prepare_stage.get("ok") or target_prepare_stage.get("skipped"):
@@ -5723,6 +5726,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because focused ptcli runtime dependencies are not ready for live target upload."})
         elif args.target_execute and not _material_prerequisite_check_ready(stages):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because metadata/material prerequisites are not ready for live target upload."})
+        elif args.target_execute and not _live_material_gate_ready(stages):
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because MTEAM material and description gates are not ready for live target upload."})
         else:
             package_dir = str(target_prepare_stage.get("result", {}).get("package_dir", ""))
             upload_stage = await _pipeline_stage(
@@ -5849,6 +5854,92 @@ def _runtime_check_ready(stages: list[dict[str, Any]]) -> bool:
 def _material_prerequisite_check_ready(stages: list[dict[str, Any]]) -> bool:
     stage = _find_stage(stages, "material-prerequisite-check")
     return True if stage is None or stage.get("skipped") else bool(stage.get("ok"))
+
+
+def _live_material_gate_ready(stages: list[dict[str, Any]]) -> bool:
+    stage = _find_stage(stages, "live-material-gate")
+    return True if stage is None or stage.get("skipped") else bool(stage.get("ok"))
+
+
+def _pipeline_live_material_gate_stage(stages: list[dict[str, Any]], target_torrent_file: str | None) -> dict[str, Any]:
+    target_prepare = _find_stage(stages, "target-prepare")
+    package = target_prepare.get("result") if isinstance(target_prepare, dict) else None
+    if not isinstance(package, dict):
+        result = {
+            "ready_for_mteam_upload": False,
+            "missing": ["target.package"],
+            "blockers": ["target preparation package is missing."],
+            "next_actions": ["Prepare the MTEAM target package before live target upload."],
+        }
+        return {"stage": "live-material-gate", "ok": False, "message": "MTEAM material live upload gate has blockers.", "result": result}
+
+    target_materials = _target_materials_summary(package)
+    preparation_audit = _target_preparation_audit(package, target_torrent_file)
+    material_preparation_ready = bool(preparation_audit.get("materials_ready") and preparation_audit.get("description_ready"))
+    artifacts = {
+        "material_generation": _material_generation_artifacts(stages),
+        "target_materials": target_materials,
+        "target_materials_ready": target_materials.get("ready"),
+        "target_materials_missing": _string_list(target_materials.get("missing")),
+        "target_materials_warnings": _string_list(target_materials.get("warnings")),
+        "target_preparation_audit": preparation_audit,
+        "target_preparation_ready": material_preparation_ready,
+        "target_preparation_missing": _live_material_gate_preparation_missing(preparation_audit),
+        "target_payload_review": preparation_audit.get("payload_review") if isinstance(preparation_audit.get("payload_review"), dict) else {},
+    }
+    diagnostics = _summary_material_diagnostics({"artifacts": artifacts})
+    missing = _live_material_gate_missing(diagnostics)
+    next_actions = _live_material_gate_next_actions(diagnostics)
+    result = {
+        "ready_for_mteam_upload": diagnostics.get("ready_for_mteam_upload"),
+        "gates": diagnostics.get("upload_material_gates") if isinstance(diagnostics.get("upload_material_gates"), dict) else {},
+        "missing": missing,
+        "blockers": _string_list(diagnostics.get("upload_material_blockers")),
+        "next_actions": next_actions,
+        "critical_path": diagnostics.get("critical_path") if isinstance(diagnostics.get("critical_path"), dict) else {},
+        "readiness": diagnostics.get("readiness") if isinstance(diagnostics.get("readiness"), dict) else {},
+    }
+    return {
+        "stage": "live-material-gate",
+        "ok": bool(diagnostics.get("ready_for_mteam_upload")),
+        "message": "MTEAM material live upload gate is ready." if diagnostics.get("ready_for_mteam_upload") else "MTEAM material live upload gate has blockers.",
+        "result": result,
+    }
+
+
+def _live_material_gate_missing(diagnostics: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    _extend_unique_string(missing, _string_list(diagnostics.get("critical_missing")))
+    _extend_unique_string(missing, _string_list(diagnostics.get("target_materials_missing")))
+    _extend_unique_string(missing, _string_list(diagnostics.get("target_preparation_missing")))
+    readiness = diagnostics.get("readiness") if isinstance(diagnostics.get("readiness"), dict) else {}
+    for key in (
+        "material_description_metadata_chain_missing",
+        "material_description_media_info_chain_missing",
+        "material_description_screenshot_chain_missing",
+    ):
+        _extend_unique_string(missing, _string_list(readiness.get(key)))
+    return missing
+
+
+def _live_material_gate_preparation_missing(preparation_audit: dict[str, Any]) -> list[str]:
+    missing = _string_list(preparation_audit.get("missing"))
+    return [item for item in missing if not (item.startswith("payload.") or item.startswith("torrent_file."))]
+
+
+def _live_material_gate_next_actions(diagnostics: dict[str, Any]) -> list[str]:
+    actions: list[str] = []
+    readiness = diagnostics.get("readiness") if isinstance(diagnostics.get("readiness"), dict) else {}
+    for key in (
+        "material_description_metadata_chain_missing",
+        "material_description_media_info_chain_missing",
+        "material_description_screenshot_chain_missing",
+    ):
+        for action in _target_preparation_missing_next_actions(_string_list(readiness.get(key))):
+            _append_unique_string(actions, action)
+    for action in _target_preparation_missing_next_actions(_live_material_gate_missing(diagnostics)):
+        _append_unique_string(actions, action)
+    return actions or _string_list(diagnostics.get("description", {}).get("completeness", {}).get("next_actions") if isinstance(diagnostics.get("description"), dict) else [])
 
 
 def _pipeline_material_prerequisite_check(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
@@ -6519,6 +6610,11 @@ def _pipeline_target_material_blockers(stages: list[dict[str, Any]]) -> list[str
 def _stage_result_blockers(stage_name: str, result: Any) -> list[str]:
     if not isinstance(result, dict):
         return []
+    if stage_name == "live-material-gate":
+        blockers = _string_list(result.get("blockers"))
+        for item in _string_list(result.get("missing")):
+            _append_unique_string(blockers, item)
+        return blockers
     if stage_name == "target-upload":
         return _target_upload_result_blockers(result)
     if stage_name == "metadata-enrich":
@@ -8245,6 +8341,9 @@ def _pipeline_stage_blocker_next_action(blocker: str) -> str:
         return "Install the focused ptcli runtime dependencies with requirements-ptcli.txt, then rerun the pipeline."
     if blocker.startswith("material-prerequisite-check:"):
         return "Fix the metadata/material prerequisites such as ffmpeg and image-host configuration, then rerun target preparation."
+    if blocker.startswith("live-material-gate:"):
+        detail = blocker.removeprefix("live-material-gate:").strip()
+        return _target_preparation_missing_next_action(detail) or "Complete MTEAM material and description gates, then rerun live target upload."
     if blocker.startswith("metadata-enrich:"):
         return "Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description, then rerun target preparation."
     if blocker.startswith("source-download:"):

@@ -14973,7 +14973,7 @@ async def test_pipeline_target_execute_blocks_missing_runtime_dependency(monkeyp
         "torrenthash": source_hash,
         "description_length": 4,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Name", str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path="/downloads/Name", output_dir=str(tmp_path / "target"))
     target_torrent = tmp_path / "target.mteam-upload.torrent"
     target_torrent.write_bytes(b"d4:infod")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
@@ -15048,6 +15048,120 @@ async def test_pipeline_target_execute_blocks_missing_runtime_dependency(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_pipeline_target_execute_blocks_incomplete_material_gate(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    source_hash = "a" * 40
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": source_hash,
+        "description_length": 4,
+    }
+    material_dir = tmp_path / "materials"
+    material_dir.mkdir()
+    mediainfo = material_dir / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Name.mkv\n", encoding="utf-8")
+    screenshot = material_dir / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host_file = material_dir / "image-host-uploads.json"
+    image_host_file.write_text(json.dumps({"items": [{"img_url": "https://img.example/screen-1.png", "web_url": "https://img.example/view"}]}), encoding="utf-8")
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        "/downloads/Name",
+        str(tmp_path / "target"),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
+    target_torrent = make_mteam_safe_torrent(tmp_path, "target")
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = (base_dir, source_id)
+        return source_info_from_tuple(tracker, source_id, (1234567, 2, "Name.2024.1080p.WEB-DL-GROUP", source_hash, "desc"), {})
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": source_hash}]}
+
+    async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
+        return {
+            "client": client_name,
+            "complete": True,
+            "query": {"content_path": content_path, "torrent_hash": torrent_hash, "timeout": timeout, "interval": interval},
+            "matches": [{"content_path": content_path, "hash": source_hash, "progress": 1.0}],
+        }
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "query": {"imdb": f"tt{source_info['imdb_id']}"}, "count": 0, "dupes": []}
+
+    async def fake_target_upload_with_config(*_args, **_kwargs):
+        raise AssertionError("live target upload must not run when material gate is incomplete")
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
+    monkeypatch.setattr(ptcli_cli, "_target_upload_with_config", fake_target_upload_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            "/downloads/Name",
+            "--wait-complete",
+            "--package-dir",
+            package["package_dir"],
+            "--check-dupes",
+            "--accept-rules",
+            "--upload-target",
+            "--target-torrent-file",
+            str(target_torrent),
+            "--target-execute",
+            "--confirm-upload",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    material_gate = next(stage for stage in payload["stages"] if stage["stage"] == "live-material-gate")
+    upload_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-upload")
+    assert material_gate["ok"] is False
+    assert material_gate["result"]["ready_for_mteam_upload"] is False
+    assert "metadata.tmdb" in material_gate["result"]["missing"]
+    assert "description.external_ids.tmdb" in material_gate["result"]["missing"]
+    assert any("Fetch TMDb metadata" in action for action in material_gate["result"]["next_actions"])
+    assert any("Fetch PTGen/Douban description" in action for action in material_gate["result"]["next_actions"])
+    assert upload_stage["ok"] is False
+    assert upload_stage["skipped"] is True
+    assert "MTEAM material and description gates are not ready" in upload_stage["message"]
+    assert "live-material-gate: MTEAM material live upload gate has blockers." in payload["blockers"]
+    assert any(blocker.startswith("live-material-gate: metadata.tmdb") for blocker in payload["blockers"])
+    assert any("Fetch TMDb metadata" in action for action in payload["next_actions"])
+
+
+@pytest.mark.asyncio
 async def test_pipeline_target_execute_requires_current_source_ready_evidence(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -15069,7 +15183,7 @@ async def test_pipeline_target_execute_requires_current_source_ready_evidence(mo
         "torrenthash": source_hash,
         "description_length": 4,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Name", str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path="/downloads/Name", output_dir=str(tmp_path / "target"))
     target_torrent = tmp_path / "target.mteam-upload.torrent"
     target_torrent.write_bytes(b"d4:infod")
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
@@ -15316,7 +15430,7 @@ async def test_pipeline_target_execute_rechecks_fresh_duplicates_before_upload(m
         "torrenthash": source_hash,
         "description_length": 4,
     }
-    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Name", str(tmp_path / "target"), accept_rules=True)
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path="/downloads/Name", output_dir=str(tmp_path / "target"))
     target_torrent = make_mteam_safe_torrent(tmp_path, "target")
     dupe_calls = []
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
