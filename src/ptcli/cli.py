@@ -1852,7 +1852,8 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
 
 def _material_recovery_action_flags(hint: dict[str, Any]) -> list[str]:
     value_options = {"--screenshot-count", "--image-host"}
-    return [flag for flag in _string_list(hint.get("command_flags")) if flag not in value_options]
+    flags = _string_list(hint.get("required_command_flags") or hint.get("command_flags"))
+    return [flag for flag in flags if flag not in value_options]
 
 
 def _resume_command_entry_by_stage(resume_commands: list[dict[str, Any]], stage: str) -> dict[str, Any] | None:
@@ -4295,10 +4296,21 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
     next_command = payload.get("next_command")
     next_command_argv = _summary_next_command_raw_argv(payload.get("next_command_argv")) if payload.get("next_command_argv") else _summary_next_command_raw_argv(str(next_command)) if next_command else None
     next_command_metadata = _summary_next_command_metadata(next_command_argv)
-    material_recovery_run_blocker = _summary_material_recovery_command_run_blocker(payload, str(payload.get("next_stage") or ""))
     candidate_commands = payload.get("candidate_commands") if isinstance(payload.get("candidate_commands"), list) else _summary_candidate_commands(payload)
     first_runnable_command = _first_runnable_candidate_command(candidate_commands)
     rejected_command_summary = _rejected_candidate_command_summary(candidate_commands)
+    if first_runnable_command.get("source") == "material_recovery_completion" and first_runnable_command.get("command"):
+        next_command = first_runnable_command.get("command")
+        next_command_argv = _argv_list(first_runnable_command.get("argv"))
+        payload = {
+            **payload,
+            "next_stage": first_runnable_command.get("stage"),
+            "next_command": next_command,
+            "next_command_argv": next_command_argv,
+            "next_command_source": first_runnable_command.get("source"),
+        }
+        next_command_metadata = _summary_next_command_metadata(next_command_argv)
+    material_recovery_run_blocker = _summary_material_recovery_command_run_blocker(payload, str(payload.get("next_stage") or ""))
     next_command_placeholder = bool(next_command_metadata["placeholder"])
     next_command_ready = bool(next_command) and not next_command_placeholder
     next_command_run_allowed = bool(next_command_ready and next_command_metadata["run_allowed"] and not material_recovery_run_blocker)
@@ -4389,16 +4401,26 @@ def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next
         return None
     resume_state = _summary_resume_state_with_material_recovery(payload)
     material_recovery = _readiness_material_recovery_summary(resume_state)
-    coverage = material_recovery.get("command_coverage") if isinstance(material_recovery.get("command_coverage"), dict) else {}
-    if not coverage.get("hint_count") or coverage.get("ready") is True:
+    hints = material_recovery.get("hints") if isinstance(material_recovery.get("hints"), list) else []
+    if not hints:
         return None
-    key = coverage.get("first_uncovered_key")
-    flags = ",".join(_string_list(coverage.get("first_uncovered_missing_flags")))
-    if key and flags:
-        return f"material recovery command does not cover {key}; missing flags: {flags}"
-    if key:
-        return f"material recovery command does not cover {key}"
-    return "material recovery command does not cover all missing materials"
+    argv = _argv_list(payload.get("next_command_argv")) or _argv_list(resume_state.get("next_command_argv"))
+    if not argv:
+        return "material recovery command does not expose argv for validation"
+    for hint in hints:
+        if not isinstance(hint, dict):
+            continue
+        missing_flags = [flag for flag in _material_recovery_action_flags(hint) if flag not in argv]
+        if not missing_flags:
+            continue
+        key = hint.get("key")
+        flags = ",".join(missing_flags)
+        if key and flags:
+            return f"material recovery command does not cover {key}; missing flags: {flags}"
+        if key:
+            return f"material recovery command does not cover {key}"
+        return "material recovery command does not cover all missing materials"
+    return None
 
 
 def _summary_resume_state_with_material_recovery(payload: dict[str, Any]) -> dict[str, Any]:
@@ -4581,6 +4603,11 @@ def _prefer_material_recovery_next_command(next_command: dict[str, Any], readine
     if next_command.get("stage") != "resume-target-package":
         return next_command
     material_recovery = readiness_summary.get("material_recovery") if isinstance(readiness_summary.get("material_recovery"), dict) else {}
+    coverage = material_recovery.get("command_coverage") if isinstance(material_recovery.get("command_coverage"), dict) else {}
+    completion_command = material_recovery.get("completion_command")
+    completion_argv = _argv_list(material_recovery.get("completion_command_argv"))
+    if coverage.get("ready") is False and completion_command and completion_argv:
+        return {"stage": "resume-target-package", "command": str(completion_command), "argv": completion_argv, "source": "material_recovery_completion"}
     command = material_recovery.get("first_command")
     argv = _argv_list(material_recovery.get("first_command_argv"))
     if not command or not argv:
@@ -4752,7 +4779,10 @@ def _summary_candidate_commands(payload: dict[str, Any]) -> list[dict[str, Any]]
         run_allowed = metadata["run_allowed"]
         run_blocker = metadata["run_blocker"]
         if command_entry.get("stage") == "resume-target-package" and command_entry.get("_summary_command_source") != "material_recovery_completion":
-            material_recovery_blocker = _summary_material_recovery_command_run_blocker(payload, "resume-target-package")
+            material_recovery_blocker = _summary_material_recovery_command_run_blocker(
+                {**payload, "next_stage": command_entry.get("stage"), "next_command_argv": argv},
+                "resume-target-package",
+            )
             if material_recovery_blocker:
                 run_allowed = False
                 run_blocker = material_recovery_blocker

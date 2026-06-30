@@ -7194,11 +7194,13 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
 
     assert code == 0
     out = capsys.readouterr().out
-    assert "export PTCLI_AUTOMATION_ACTION=complete_material_recovery_command\n" in out
-    assert "material recovery command does not cover metadata.ptgen_description" in out
-    assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=0\n" in out
-    assert "export PTCLI_NEXT_COMMAND_RUN_ALLOWED=0\n" in out
-    assert "export PTCLI_NEXT_COMMAND_RUN_BLOCKER='material recovery command does not cover metadata.ptgen_description; missing flags: --enrich-metadata,--fetch-ptgen'\n" in out
+    assert "export PTCLI_AUTOMATION_ACTION=run_next_command\n" in out
+    assert "Highest-priority material blocker is metadata:metadata.ptgen_description." in out
+    assert "export PTCLI_SHOULD_EXECUTE_NEXT_COMMAND=1\n" in out
+    assert "export PTCLI_NEXT_COMMAND='python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen --upload-screenshots'\n" in out
+    assert 'export PTCLI_NEXT_COMMAND_ARGV=\'["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen", "--upload-screenshots"]\'\n' in out
+    assert "export PTCLI_NEXT_COMMAND_SOURCE=material_recovery_completion\n" in out
+    assert "export PTCLI_NEXT_COMMAND_RUN_ALLOWED=1\n" in out
     assert "export PTCLI_CANDIDATE_COMMAND_COUNT=2\n" in out
     assert "export PTCLI_RUNNABLE_COMMAND_COUNT=1\n" in out
     assert "export PTCLI_FIRST_RUNNABLE_COMMAND='python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen --upload-screenshots'\n" in out
@@ -7231,8 +7233,6 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
-    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMPLETION_COMMAND='python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen --upload-screenshots'\n" in out
-    assert 'export PTCLI_READINESS_MATERIAL_RECOVERY_COMPLETION_COMMAND_ARGV=\'["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen", "--upload-screenshots"]\'\n' in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_AVAILABLE=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_MISSING=2\n" in out
@@ -7359,10 +7359,21 @@ def test_summary_check_derives_material_recovery_from_description_evidence(tmp_p
 
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
-    assert payload["automation_action"] == "complete_material_recovery_command"
+    assert payload["automation_action"] == "run_next_command"
     assert "Highest-priority material blocker is metadata:metadata.ptgen_description." in payload["automation_reason"]
     assert "Required flags: --enrich-metadata,--fetch-ptgen." in payload["automation_reason"]
-    assert payload["next_command_run_allowed"] is False
+    assert payload["next_command_run_allowed"] is True
+    assert payload["next_command_source"] == "material_recovery_completion"
+    assert payload["next_command_argv"] == [
+        "python3",
+        "ptcli.py",
+        "pipeline",
+        "--prepare-target",
+        "--enrich-metadata",
+        "--fetch-ptgen",
+        "--generate-mediainfo",
+        "--upload-screenshots",
+    ]
     assert payload["first_runnable_command_source"] == "material_recovery_completion"
     assert payload["first_runnable_command_argv"] == [
         "python3",
@@ -7385,7 +7396,7 @@ def test_summary_check_derives_material_recovery_from_description_evidence(tmp_p
     ]
     assert recovery["required_flags"] == ["--enrich-metadata", "--fetch-ptgen", "--generate-mediainfo", "--upload-screenshots"]
     assert recovery["missing_flags"] == ["--enrich-metadata", "--fetch-ptgen", "--generate-mediainfo", "--upload-screenshots"]
-    assert recovery["completion_command_argv"] == payload["first_runnable_command_argv"]
+    assert recovery["completion_command_argv"] == []
     assert recovery["command_coverage"]["ready"] is False
     assert payload["readiness_summary"]["material_description_evidence"] == description_evidence
 
