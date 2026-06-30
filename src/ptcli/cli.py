@@ -1907,7 +1907,7 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
     for hint in hints:
         command_flags = _material_recovery_action_flags(hint)
         existing_file_options = _string_list(hint.get("existing_file_options"))
-        existing_file_option_present = _argv_contains_any_option(argv, existing_file_options)
+        existing_file_option_present = _argv_contains_any_option_value(argv, existing_file_options)
         missing_command_flags = [flag for flag in command_flags if flag not in argv]
         command_covers_hint = bool(command_entry) and (existing_file_option_present or not missing_command_flags)
         enriched.append(
@@ -1931,9 +1931,22 @@ def _material_recovery_action_flags(hint: dict[str, Any]) -> list[str]:
     return [flag for flag in flags if flag not in value_options]
 
 
-def _argv_contains_any_option(argv: list[Any], options: list[str]) -> bool:
-    argv_set = {str(item) for item in argv}
-    return any(option in argv_set for option in options)
+def _argv_contains_any_option_value(argv: list[Any], options: list[str]) -> bool:
+    argv_values = [str(item) for item in argv]
+    option_set = set(options)
+    return any(value in option_set and argv_values[index + 1] and not argv_values[index + 1].startswith("--") for index, value in enumerate(argv_values[:-1]))
+
+
+def _argv_options_missing_values(argv: list[Any], options: list[str]) -> list[str]:
+    argv_values = [str(item) for item in argv]
+    option_set = set(options)
+    missing: list[str] = []
+    for index, value in enumerate(argv_values):
+        if value not in option_set:
+            continue
+        if index + 1 >= len(argv_values) or not argv_values[index + 1] or argv_values[index + 1].startswith("--"):
+            _append_unique_string(missing, value)
+    return missing
 
 
 def _resume_command_entry_by_stage(resume_commands: list[dict[str, Any]], stage: str) -> dict[str, Any] | None:
@@ -4510,7 +4523,15 @@ def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next
     for hint in hints:
         if not isinstance(hint, dict):
             continue
-        if _argv_contains_any_option(argv, _string_list(hint.get("existing_file_options"))):
+        existing_file_options = _string_list(hint.get("existing_file_options"))
+        missing_option_values = _argv_options_missing_values(argv, existing_file_options)
+        if missing_option_values:
+            key = hint.get("key")
+            flags = ",".join(missing_option_values)
+            if key and flags:
+                return f"material recovery command has {key} file option without a value: {flags}"
+            return f"material recovery command has file option without a value: {flags}"
+        if _argv_contains_any_option_value(argv, existing_file_options):
             continue
         missing_flags = [flag for flag in _material_recovery_action_flags(hint) if flag not in argv]
         if not missing_flags:
