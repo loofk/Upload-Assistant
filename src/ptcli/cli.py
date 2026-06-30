@@ -1136,11 +1136,19 @@ def _readiness_source_followup_summary(resume_state: dict[str, Any]) -> dict[str
     }
 
 
+def _first_bool_value(*values: Any) -> bool | None:
+    for value in values:
+        if isinstance(value, bool):
+            return value
+    return None
+
+
 def _readiness_uploaded_followup_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
     followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
     torrent_evidence = followup.get("uploaded_torrent_file_evidence") if isinstance(followup.get("uploaded_torrent_file_evidence"), dict) else {}
     wait_query = followup.get("uploaded_wait_query") if isinstance(followup.get("uploaded_wait_query"), dict) else {}
     wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
+    gates = followup.get("gates") if isinstance(followup.get("gates"), dict) else {}
     return {
         "present": bool(followup),
         "ready": followup.get("ready") if isinstance(followup.get("ready"), bool) else None,
@@ -1148,10 +1156,18 @@ def _readiness_uploaded_followup_summary(resume_state: dict[str, Any]) -> dict[s
         "missing": _string_list(followup.get("missing")),
         "blockers": _string_list(followup.get("blockers")),
         "next_actions": _string_list(followup.get("next_actions")),
+        "uploaded": _first_bool_value(followup.get("uploaded"), gates.get("uploaded")),
+        "downloaded": _first_bool_value(followup.get("downloaded"), gates.get("downloaded")),
+        "injected": _first_bool_value(followup.get("injected"), gates.get("injected")),
         "uploaded_torrent_id": followup.get("uploaded_torrent_id"),
         "uploaded_torrent_hash": followup.get("uploaded_torrent_hash"),
         "injected_torrent_hash": followup.get("injected_torrent_hash"),
         "injection_visible_in_client": followup.get("injection_visible_in_client") if isinstance(followup.get("injection_visible_in_client"), bool) else None,
+        "injection_verified": _first_bool_value(followup.get("injection_verified"), gates.get("injection_verified")),
+        "uploaded_wait_evidence": _first_bool_value(followup.get("uploaded_wait_evidence"), gates.get("uploaded_wait_evidence")),
+        "hash_consistent": followup.get("hash_consistent") if isinstance(followup.get("hash_consistent"), bool) else None,
+        "duplicate_clean": followup.get("duplicate_clean") if isinstance(followup.get("duplicate_clean"), bool) else None,
+        "rule_obligations_ready": followup.get("rule_obligations_ready") if isinstance(followup.get("rule_obligations_ready"), bool) else None,
         "uploaded_torrent_file": followup.get("uploaded_torrent_file"),
         "uploaded_torrent_file_evidence": torrent_evidence,
         "uploaded_save_path": followup.get("uploaded_save_path"),
@@ -1159,7 +1175,7 @@ def _readiness_uploaded_followup_summary(resume_state: dict[str, Any]) -> dict[s
         "qbit_wait_mismatch": followup.get("qbit_wait_mismatch") if isinstance(followup.get("qbit_wait_mismatch"), bool) else None,
         "qbit_wait_mismatches": _string_list(followup.get("qbit_wait_mismatches")),
         "wait_retry": wait_retry,
-        "gates": followup.get("gates") if isinstance(followup.get("gates"), dict) else {},
+        "gates": gates,
     }
 
 
@@ -10389,11 +10405,25 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_MISSING": ",".join(_string_list(uploaded_followup.get("missing"))),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_BLOCKERS": "|".join(_string_list(uploaded_followup.get("blockers"))),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_NEXT_ACTIONS": " | ".join(_string_list(uploaded_followup.get("next_actions"))),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_UPLOADED": _shell_bool(uploaded_followup.get("uploaded")) if uploaded_followup.get("uploaded") is not None else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_DOWNLOADED": _shell_bool(uploaded_followup.get("downloaded")) if uploaded_followup.get("downloaded") is not None else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTED": _shell_bool(uploaded_followup.get("injected")) if uploaded_followup.get("injected") is not None else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_ID": uploaded_followup.get("uploaded_torrent_id"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_HASH": uploaded_followup.get("uploaded_torrent_hash"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTED_HASH": uploaded_followup.get("injected_torrent_hash"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTION_VISIBLE": _shell_bool(uploaded_followup.get("injection_visible_in_client"))
         if uploaded_followup.get("injection_visible_in_client") is not None
+        else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTION_VERIFIED": _shell_bool(uploaded_followup.get("injection_verified"))
+        if uploaded_followup.get("injection_verified") is not None
+        else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_EVIDENCE": _shell_bool(uploaded_followup.get("uploaded_wait_evidence"))
+        if uploaded_followup.get("uploaded_wait_evidence") is not None
+        else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_HASH_CONSISTENT": _shell_bool(uploaded_followup.get("hash_consistent")) if uploaded_followup.get("hash_consistent") is not None else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_DUPLICATE_CLEAN": _shell_bool(uploaded_followup.get("duplicate_clean")) if uploaded_followup.get("duplicate_clean") is not None else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_RULES_READY": _shell_bool(uploaded_followup.get("rule_obligations_ready"))
+        if uploaded_followup.get("rule_obligations_ready") is not None
         else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_FILE": uploaded_followup.get("uploaded_torrent_file"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_SAVE_PATH": uploaded_followup.get("uploaded_save_path"),
