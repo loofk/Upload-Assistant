@@ -8568,6 +8568,62 @@ def test_summary_check_exposes_unsupported_next_command_metadata(tmp_path, capsy
     assert payload["automation_reason"] == "Next command is present but is not allowed for automatic execution: ptcli subcommand inspect is not in the summary-check auto-run allowlist."
 
 
+def test_summary_check_blocks_pipeline_live_source_injection_without_save_path(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    pipeline_argv = [
+        "python3",
+        "ptcli.py",
+        "pipeline",
+        "--from",
+        "U2",
+        "--source-id",
+        "60635",
+        "--to",
+        "MTEAM",
+        "--upload-target",
+        "--target-execute",
+        "--confirm-upload",
+        "--json",
+    ]
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["source.ready"],
+                "resume_commands": [{"stage": "pipeline-live", "command": shlex.join(pipeline_argv), "argv": pipeline_argv}],
+                "resume_state": {
+                    "next_stage": "pipeline-live",
+                    "next_command": shlex.join(pipeline_argv),
+                    "next_command_argv": pipeline_argv,
+                    "artifacts": {
+                        "target_hash_consistent": True,
+                        "target_duplicate_clean": True,
+                        "target_rule_obligations": True,
+                        "target_preparation_ready": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["automation_action"] == "complete_source_command"
+    assert payload["next_stage"] == "pipeline-live"
+    assert payload["next_command_run_allowed"] is False
+    assert payload["next_command_run_blocker"] == "pipeline source injection requires --save-path before automatic execution"
+    assert payload["candidate_commands"][0]["run_allowed"] is False
+    assert payload["candidate_commands"][0]["run_blocker"] == "pipeline source injection requires --save-path before automatic execution"
+    assert payload["rejected_command_blockers"] == ["pipeline source injection requires --save-path before automatic execution"]
+    assert payload["automation_reason"] == "Source follow-up command needs additional flags before automatic execution: pipeline source injection requires --save-path before automatic execution."
+
+
 def test_summary_check_run_next_command_rejects_non_ptcli_command(tmp_path, monkeypatch, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(

@@ -1520,6 +1520,7 @@ def _resume_command_audit_fields(resume_commands: Any, next_command: Any, next_c
     next_argv = _summary_next_command_raw_argv(next_command_argv) if next_command_argv else _summary_next_command_raw_argv(str(next_command)) if next_command else None
     if next_command and not any(_argv_list(command.get("argv")) == next_argv for command in candidate_commands if isinstance(command, dict)):
         next_metadata_for_candidate = _summary_next_command_metadata(next_argv)
+        next_source_run_blocker = _summary_source_command_run_blocker(next_argv)
         candidate_commands.append(
             {
                 "stage": resume_state.get("next_stage") if isinstance(resume_state, dict) else None,
@@ -1527,20 +1528,22 @@ def _resume_command_audit_fields(resume_commands: Any, next_command: Any, next_c
                 "argv": next_argv,
                 "source": resume_state.get("next_command_source") if isinstance(resume_state, dict) else "resume_state",
                 "subcommand": next_metadata_for_candidate["subcommand"],
-                "run_allowed": next_metadata_for_candidate["run_allowed"],
-                "run_blocker": next_metadata_for_candidate["run_blocker"],
+                "run_allowed": bool(next_metadata_for_candidate["run_allowed"] and not next_source_run_blocker),
+                "run_blocker": next_source_run_blocker or next_metadata_for_candidate["run_blocker"],
                 "placeholder": next_metadata_for_candidate["placeholder"],
             }
         )
     first_runnable_command = _first_runnable_candidate_command(candidate_commands)
     next_metadata = _summary_next_command_metadata(next_argv)
     material_recovery_run_blocker = _summary_material_recovery_command_run_blocker(candidate_payload, str(candidate_payload.get("next_stage") or ""))
+    source_command_run_blocker = _summary_source_command_run_blocker(next_argv)
+    command_run_blocker = material_recovery_run_blocker or source_command_run_blocker
     return {
         "next_command_subcommand": next_metadata["subcommand"],
         "next_command_ready": bool(next_command) and not bool(next_metadata["placeholder"]),
         "next_command_placeholder": bool(next_metadata["placeholder"]),
-        "next_command_run_allowed": bool(next_command and next_metadata["run_allowed"] and not material_recovery_run_blocker),
-        "next_command_run_blocker": material_recovery_run_blocker or next_metadata["run_blocker"],
+        "next_command_run_allowed": bool(next_command and next_metadata["run_allowed"] and not command_run_blocker),
+        "next_command_run_blocker": command_run_blocker or next_metadata["run_blocker"],
         "candidate_commands": candidate_commands,
         "candidate_command_count": len(candidate_commands),
         "runnable_command_count": sum(1 for command in candidate_commands if isinstance(command, dict) and command.get("run_allowed") is True),
@@ -4628,9 +4631,11 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         }
         next_command_metadata = _summary_next_command_metadata(next_command_argv)
     material_recovery_run_blocker = _summary_material_recovery_command_run_blocker(payload, str(payload.get("next_stage") or ""))
+    source_command_run_blocker = _summary_source_command_run_blocker(next_command_argv)
+    command_run_blocker = material_recovery_run_blocker or source_command_run_blocker
     next_command_placeholder = bool(next_command_metadata["placeholder"])
     next_command_ready = bool(next_command) and not next_command_placeholder
-    next_command_run_allowed = bool(next_command_ready and next_command_metadata["run_allowed"] and not material_recovery_run_blocker)
+    next_command_run_allowed = bool(next_command_ready and next_command_metadata["run_allowed"] and not command_run_blocker)
     if status == "ok":
         automation_action = "complete"
     elif payload.get("qbit_wait_mismatch"):
@@ -4639,6 +4644,8 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         automation_action = "fill_command_placeholders"
     elif material_recovery_run_blocker:
         automation_action = "complete_material_recovery_command"
+    elif source_command_run_blocker:
+        automation_action = "complete_source_command"
     elif next_command_run_allowed:
         automation_action = "run_next_command"
     elif next_command_ready:
@@ -4653,7 +4660,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         automation_action = "repair_closure"
     else:
         automation_action = "resolve_blockers"
-    next_command_run_blocker = material_recovery_run_blocker or next_command_metadata["run_blocker"]
+    next_command_run_blocker = command_run_blocker or next_command_metadata["run_blocker"]
     automation_reason = _summary_automation_reason(payload, automation_action, blockers, next_command_run_blocker=next_command_run_blocker)
     result = {
         **payload,
@@ -4765,6 +4772,19 @@ def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next
     return None
 
 
+def _summary_source_command_run_blocker(argv: list[str] | None) -> str | None:
+    if not argv or len(argv) < 3 or argv[2] != "pipeline":
+        return None
+    source_injection_planned = "--inject-source" in argv or ("--target-execute" in argv and "--path" not in argv)
+    if not source_injection_planned:
+        return None
+    if "--save-path" in _argv_options_missing_values(argv, ["--save-path"]):
+        return "pipeline source injection has --save-path without a value"
+    if not _argv_option_values(argv, ["--save-path"]):
+        return "pipeline source injection requires --save-path before automatic execution"
+    return None
+
+
 def _summary_resume_state_with_material_recovery(payload: dict[str, Any]) -> dict[str, Any]:
     resume_state = dict(payload.get("resume_state")) if isinstance(payload.get("resume_state"), dict) else {}
     artifacts = payload.get("material_artifacts") if isinstance(payload.get("material_artifacts"), dict) else payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
@@ -4816,6 +4836,8 @@ def _summary_automation_reason(payload: dict[str, Any], automation_action: str, 
         reason = f"Material recovery command needs additional flags before automatic execution: {next_command_run_blocker}." if next_command_run_blocker else "Material recovery command needs additional flags before automatic execution."
         material_reason = _summary_material_recovery_reason(payload)
         return f"{reason} {material_reason}" if material_reason else reason
+    if automation_action == "complete_source_command":
+        return f"Source follow-up command needs additional flags before automatic execution: {next_command_run_blocker}." if next_command_run_blocker else "Source follow-up command needs additional flags before automatic execution."
     if automation_action == "replace_summary":
         return "Summary schema or kind is unsupported; regenerate the summary with the current ptcli."
     if automation_action == "provide_summary":
@@ -5154,6 +5176,10 @@ def _summary_candidate_commands(payload: dict[str, Any]) -> list[dict[str, Any]]
             if material_recovery_blocker:
                 run_allowed = False
                 run_blocker = material_recovery_blocker
+        source_run_blocker = _summary_source_command_run_blocker(argv)
+        if source_run_blocker:
+            run_allowed = False
+            run_blocker = source_run_blocker
         candidates.append({
             "stage": command_entry.get("stage"),
             "command": str(command),
