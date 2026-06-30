@@ -1907,7 +1907,9 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
     for hint in hints:
         command_flags = _material_recovery_action_flags(hint)
         existing_file_options = _string_list(hint.get("existing_file_options"))
-        existing_file_option_present = _argv_contains_any_option_value(argv, existing_file_options)
+        existing_file_values = _argv_option_values(argv, existing_file_options)
+        missing_existing_file_paths = _missing_existing_file_paths(existing_file_values)
+        existing_file_option_present = bool(existing_file_values) and not missing_existing_file_paths
         missing_command_flags = [flag for flag in command_flags if flag not in argv]
         command_covers_hint = bool(command_entry) and (existing_file_option_present or not missing_command_flags)
         enriched.append(
@@ -1916,6 +1918,8 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
                 "required_command_flags": command_flags,
                 "missing_command_flags": [] if existing_file_option_present else missing_command_flags if command_entry else command_flags,
                 "existing_file_option_present": existing_file_option_present,
+                "existing_file_values": existing_file_values,
+                "missing_existing_file_paths": missing_existing_file_paths,
                 "resume_command_available": command_covers_hint,
                 "resume_command_stage": command_entry.get("stage") if command_entry else None,
                 "resume_command": command if command_covers_hint else None,
@@ -1932,9 +1936,34 @@ def _material_recovery_action_flags(hint: dict[str, Any]) -> list[str]:
 
 
 def _argv_contains_any_option_value(argv: list[Any], options: list[str]) -> bool:
+    return bool(_argv_option_values(argv, options))
+
+
+def _argv_option_values(argv: list[Any], options: list[str]) -> dict[str, list[str]]:
     argv_values = [str(item) for item in argv]
     option_set = set(options)
-    return any(value in option_set and argv_values[index + 1] and not argv_values[index + 1].startswith("--") for index, value in enumerate(argv_values[:-1]))
+    values: dict[str, list[str]] = {}
+    for index, value in enumerate(argv_values[:-1]):
+        if value in option_set and argv_values[index + 1] and not argv_values[index + 1].startswith("--"):
+            values.setdefault(value, []).append(argv_values[index + 1])
+    return values
+
+
+def _missing_existing_file_paths(option_values: dict[str, list[str]]) -> dict[str, list[str]]:
+    missing: dict[str, list[str]] = {}
+    for option, values in option_values.items():
+        for value in values:
+            path = Path(value).expanduser()
+            if not path.is_file():
+                missing.setdefault(option, []).append(value)
+    return missing
+
+
+def _format_option_value_map(option_values: dict[str, list[str]]) -> str:
+    parts: list[str] = []
+    for option, values in option_values.items():
+        parts.extend(f"{option}={value}" for value in values)
+    return ", ".join(parts)
 
 
 def _argv_options_missing_values(argv: list[Any], options: list[str]) -> list[str]:
@@ -4531,7 +4560,15 @@ def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next
             if key and flags:
                 return f"material recovery command has {key} file option without a value: {flags}"
             return f"material recovery command has file option without a value: {flags}"
-        if _argv_contains_any_option_value(argv, existing_file_options):
+        existing_file_values = _argv_option_values(argv, existing_file_options)
+        missing_existing_file_paths = _missing_existing_file_paths(existing_file_values)
+        if missing_existing_file_paths:
+            key = hint.get("key")
+            missing_text = _format_option_value_map(missing_existing_file_paths)
+            if key and missing_text:
+                return f"material recovery command has {key} file option path that does not exist: {missing_text}"
+            return f"material recovery command has file option path that does not exist: {missing_text}"
+        if existing_file_values:
             continue
         missing_flags = [flag for flag in _material_recovery_action_flags(hint) if flag not in argv]
         if not missing_flags:
