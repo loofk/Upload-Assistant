@@ -176,6 +176,13 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--base-dir", help="Project/base directory used for cookies, defaults to current directory.")
     doctor.add_argument("--path", dest="content_path", help="Existing local content path on the seedbox.")
     doctor.add_argument("--source-torrent-file", help="Existing source .torrent file intended for qBittorrent injection.")
+    doctor.add_argument("--output-dir", default="./tmp/source", help="Directory for downloaded source .torrent files when pipeline-live needs source download.")
+    doctor.add_argument("--save-path", help="qBittorrent save path for source torrent injection when pipeline-live needs source download.")
+    doctor.add_argument("--qbit-category", help="Optional qBittorrent category for source torrent injection.")
+    doctor.add_argument("--qbit-tags", help="Optional qBittorrent tags for source torrent injection.")
+    doctor.add_argument("--paused", action="store_true", help="Add injected source torrent paused.")
+    doctor.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait for source torrent completion in pipeline-live.")
+    doctor.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds for source torrent completion in pipeline-live.")
     doctor.add_argument("--package-dir", help="Directory created by pipeline --prepare-target.")
     doctor.add_argument("--target-torrent-file", help="MTEAM .torrent file intended for target upload.")
     doctor.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
@@ -5517,7 +5524,7 @@ def _doctor_source_followup_plan(payload: dict[str, Any], artifacts: dict[str, A
             "next_actions": [],
         }
     argv = _argv_list(pipeline_live.get("argv")) or []
-    option_values = _argv_option_values(argv, ["--path", "--source-torrent-file", "--save-path"])
+    option_values = _argv_option_values(argv, ["--path", "--source-torrent-file", "--save-path", "--qbit-category", "--qbit-tags", "--wait-timeout", "--wait-interval"])
     content_path = _first_option_value(option_values, "--path") or _artifact_path(artifacts.get("content_path"))
     source_torrent_artifact = artifacts.get("source_torrent_file")
     source_torrent_file = _first_option_value(option_values, "--source-torrent-file") or _artifact_path(artifacts.get("source_torrent_file"))
@@ -5528,6 +5535,8 @@ def _doctor_source_followup_plan(payload: dict[str, Any], artifacts: dict[str, A
         and _path_artifact_exists(source_torrent_artifact)
     )
     save_path = _first_option_value(option_values, "--save-path")
+    wait_timeout = _first_option_value(option_values, "--wait-timeout")
+    wait_interval = _first_option_value(option_values, "--wait-interval")
     download_source = "--download-source" in argv or not bool(content_path or source_torrent_file)
     inject_source = "--inject-source" in argv or not bool(content_path)
     wait_complete = "--wait-complete" in argv or bool(content_path or inject_source)
@@ -5548,9 +5557,14 @@ def _doctor_source_followup_plan(payload: dict[str, Any], artifacts: dict[str, A
         "source_torrent_file": source_torrent_file,
         "source_torrent_file_ready": source_torrent_file_ready,
         "source_save_path": save_path,
+        "source_qbit_category": _first_option_value(option_values, "--qbit-category"),
+        "source_qbit_tags": _first_option_value(option_values, "--qbit-tags"),
+        "source_paused": "--paused" in argv,
         "source_wait_query": {
             "content_path": content_path,
             "save_path": content_path,
+            "timeout": float(wait_timeout) if wait_timeout is not None else None,
+            "interval": float(wait_interval) if wait_interval is not None else None,
         },
         "source_wait_evidence": False,
         "injection_visible_in_client": False if inject_source else None,
@@ -5582,6 +5596,13 @@ def _doctor_summary_inputs(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "content_path": args.content_path,
         "source_torrent_file": args.source_torrent_file,
+        "output_dir": getattr(args, "output_dir", None),
+        "save_path": getattr(args, "save_path", None),
+        "qbit_category": getattr(args, "qbit_category", None),
+        "qbit_tags": getattr(args, "qbit_tags", None),
+        "paused": bool(getattr(args, "paused", False)),
+        "wait_timeout": getattr(args, "wait_timeout", None),
+        "wait_interval": getattr(args, "wait_interval", None),
         "package_dir": args.package_dir,
         "target_torrent_file": args.target_torrent_file,
         "uploaded_torrent_id": args.uploaded_torrent_id,
@@ -5806,8 +5827,25 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
         pipeline_args.extend(["--base-dir", args.base_dir])
     if args.summary_output_dir:
         pipeline_args.extend(["--summary-output-dir", args.summary_output_dir])
+    output_dir = getattr(args, "output_dir", None)
+    if output_dir:
+        pipeline_args.extend(["--output-dir", str(output_dir)])
     _extend_command_path(pipeline_args, "--path", artifacts.get("content_path"))
     _extend_command_path(pipeline_args, "--source-torrent-file", artifacts.get("source_torrent_file"))
+    _append_option(pipeline_args, "--save-path", getattr(args, "save_path", None))
+    _append_option(pipeline_args, "--qbit-category", getattr(args, "qbit_category", None))
+    _append_option(pipeline_args, "--qbit-tags", getattr(args, "qbit_tags", None))
+    if getattr(args, "paused", False):
+        pipeline_args.append("--paused")
+    _append_wait_options(
+        pipeline_args,
+        timeout_option="--wait-timeout",
+        timeout=getattr(args, "wait_timeout", None),
+        default_timeout=3600.0,
+        interval_option="--wait-interval",
+        interval=getattr(args, "wait_interval", None),
+        default_interval=30.0,
+    )
     _extend_command_path(pipeline_args, "--package-dir", artifacts.get("package_dir"))
     _extend_command_path(pipeline_args, "--target-torrent-file", artifacts.get("target_torrent_file"))
     if uploaded_save_path:
@@ -5891,6 +5929,10 @@ def _doctor_retry_args(args: argparse.Namespace, *, force_probes: bool = False) 
     for option, value in (
         ("--path", args.content_path),
         ("--source-torrent-file", args.source_torrent_file),
+        ("--output-dir", getattr(args, "output_dir", None)),
+        ("--save-path", getattr(args, "save_path", None)),
+        ("--qbit-category", getattr(args, "qbit_category", None)),
+        ("--qbit-tags", getattr(args, "qbit_tags", None)),
         ("--package-dir", args.package_dir),
         ("--target-torrent-file", args.target_torrent_file),
         ("--uploaded-torrent-id", args.uploaded_torrent_id),
@@ -5902,6 +5944,17 @@ def _doctor_retry_args(args: argparse.Namespace, *, force_probes: bool = False) 
         if value:
             retry_args.extend([option, value])
     _append_uploaded_wait_options(retry_args, args)
+    _append_wait_options(
+        retry_args,
+        timeout_option="--wait-timeout",
+        timeout=getattr(args, "wait_timeout", None),
+        default_timeout=3600.0,
+        interval_option="--wait-interval",
+        interval=getattr(args, "wait_interval", None),
+        default_interval=30.0,
+    )
+    if getattr(args, "paused", False):
+        retry_args.append("--paused")
     for option, enabled in (
         ("--accept-rules", args.accept_rules),
         ("--target-execute", args.target_execute),

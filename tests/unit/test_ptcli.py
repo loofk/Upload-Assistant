@@ -11072,6 +11072,17 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
             "MTEAM",
             "--path",
             str(content_path),
+            "--save-path",
+            "/downloads",
+            "--qbit-category",
+            "U2",
+            "--qbit-tags",
+            "source,retorrent",
+            "--paused",
+            "--wait-timeout",
+            "123",
+            "--wait-interval",
+            "7",
             "--package-dir",
             package["package_dir"],
             "--target-torrent-file",
@@ -12016,6 +12027,17 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
             str(tmp_path),
             "--path",
             str(content_path),
+            "--save-path",
+            "/downloads",
+            "--qbit-category",
+            "U2",
+            "--qbit-tags",
+            "source,retorrent",
+            "--paused",
+            "--wait-timeout",
+            "123",
+            "--wait-interval",
+            "7",
             "--package-dir",
             package["package_dir"],
             "--target-torrent-file",
@@ -12058,6 +12080,12 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert summary_payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", str(tmp_path / "summary" / "ptcli-doctor-summary.json"), "--run-next-command"])
     assert summary_payload["mode"] == "live_upload"
     assert summary_payload["target_mode"] == "live_upload"
+    assert summary_payload["inputs"]["save_path"] == "/downloads"
+    assert summary_payload["inputs"]["qbit_category"] == "U2"
+    assert summary_payload["inputs"]["qbit_tags"] == "source,retorrent"
+    assert summary_payload["inputs"]["paused"] is True
+    assert summary_payload["inputs"]["wait_timeout"] == 123.0
+    assert summary_payload["inputs"]["wait_interval"] == 7.0
     assert summary_payload["artifacts"]["content_path"]["exists"] is True
     assert summary_payload["artifacts"]["package_dir"]["is_dir"] is True
     assert summary_payload["artifacts"]["target_torrent_file"]["is_file"] is True
@@ -12103,6 +12131,18 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert "--uploaded-wait-interval 3" in commands["pipeline-live"]
     assert "--uploaded-wait-timeout 42" in commands["doctor-retry"]
     assert "--uploaded-wait-interval 3" in commands["doctor-retry"]
+    assert "--save-path /downloads" in commands["pipeline-live"]
+    assert "--qbit-category U2" in commands["pipeline-live"]
+    assert "--qbit-tags source,retorrent" in commands["pipeline-live"]
+    assert "--paused" in commands["pipeline-live"]
+    assert "--wait-timeout 123" in commands["pipeline-live"]
+    assert "--wait-interval 7" in commands["pipeline-live"]
+    assert "--save-path /downloads" in commands["doctor-retry"]
+    assert "--qbit-category U2" in commands["doctor-retry"]
+    assert "--qbit-tags source,retorrent" in commands["doctor-retry"]
+    assert "--paused" in commands["doctor-retry"]
+    assert "--wait-timeout 123" in commands["doctor-retry"]
+    assert "--wait-interval 7" in commands["doctor-retry"]
     assert command_argv["doctor-retry"][:3] == ["python3", "ptcli.py", "doctor"]
     assert command_argv["doctor-live-probes"][:3] == ["python3", "ptcli.py", "doctor"]
     assert command_argv["pipeline-live"][:3] == ["python3", "ptcli.py", "pipeline"]
@@ -12115,6 +12155,10 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert "MTEAM" in command_argv["pipeline-live"]
     assert "retorrent" in command_argv["pipeline-live"]
     assert "--uploaded-paused" in command_argv["pipeline-live"]
+    assert "/downloads" in command_argv["pipeline-live"]
+    assert "U2" in command_argv["pipeline-live"]
+    assert "source,retorrent" in command_argv["pipeline-live"]
+    assert "--paused" in command_argv["pipeline-live"]
     assert summary_payload["resume_state"]["ready"] is True
     assert summary_payload["resume_state"]["live_safe_to_attempt"] is True
     assert summary_payload["resume_state"]["resume_available"] is True
@@ -12144,8 +12188,14 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert source_followup["mode"] == "pre_live_plan"
     assert source_followup["ready_for_source_seeding"] is False
     assert source_followup["planned"] == {"download_source": False, "inject_source": False, "wait_complete": True}
+    assert source_followup["source_save_path"] == "/downloads"
+    assert source_followup["source_qbit_category"] == "U2"
+    assert source_followup["source_qbit_tags"] == "source,retorrent"
+    assert source_followup["source_paused"] is True
     assert source_followup["source_wait_query"]["content_path"] == str(content_path)
     assert source_followup["source_wait_query"]["save_path"] == str(content_path)
+    assert source_followup["source_wait_query"]["timeout"] == 123.0
+    assert source_followup["source_wait_query"]["interval"] == 7.0
     assert source_followup["next_actions"] == ["Run the recommended pipeline-live command; its run summary will verify source torrent visibility and completion in qBittorrent."]
 
 
