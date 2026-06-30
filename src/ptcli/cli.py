@@ -1007,6 +1007,7 @@ def _readiness_uploaded_followup_summary(resume_state: dict[str, Any]) -> dict[s
         "uploaded_torrent_id": followup.get("uploaded_torrent_id"),
         "uploaded_torrent_hash": followup.get("uploaded_torrent_hash"),
         "injected_torrent_hash": followup.get("injected_torrent_hash"),
+        "injection_visible_in_client": followup.get("injection_visible_in_client") if isinstance(followup.get("injection_visible_in_client"), bool) else None,
         "uploaded_torrent_file": followup.get("uploaded_torrent_file"),
         "uploaded_torrent_file_evidence": torrent_evidence,
         "uploaded_save_path": followup.get("uploaded_save_path"),
@@ -9891,6 +9892,9 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_ID": uploaded_followup.get("uploaded_torrent_id"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_HASH": uploaded_followup.get("uploaded_torrent_hash"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTED_HASH": uploaded_followup.get("injected_torrent_hash"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTION_VISIBLE": _shell_bool(uploaded_followup.get("injection_visible_in_client"))
+        if uploaded_followup.get("injection_visible_in_client") is not None
+        else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_FILE": uploaded_followup.get("uploaded_torrent_file"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_SAVE_PATH": uploaded_followup.get("uploaded_save_path"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_HASH": uploaded_wait_query.get("torrent_hash"),

@@ -2505,12 +2505,13 @@ def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> N
         "uploaded_followup": {
             "ready": False,
             "ready_for_uploaded_seeding": False,
-            "missing": ["injected_torrent_hash", "uploaded_wait_evidence"],
-            "blockers": ["uploaded MTEAM torrent injection is not verified in qBittorrent", "qBittorrent has not reported the uploaded MTEAM torrent as complete"],
+            "missing": ["injected_torrent_hash", "injection_visible_in_client", "uploaded_wait_evidence"],
+            "blockers": ["uploaded MTEAM torrent is not visible in qBittorrent after injection", "qBittorrent has not reported the uploaded MTEAM torrent as complete"],
             "next_actions": ["Inject the uploaded MTEAM torrent into qBittorrent.", "Wait for qBittorrent to report the uploaded MTEAM torrent as complete."],
             "uploaded_torrent_id": "999",
             "uploaded_torrent_hash": uploaded_hash,
             "injected_torrent_hash": None,
+            "injection_visible_in_client": False,
             "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
             "uploaded_torrent_file_evidence": {
                 "path": "/tmp/MTEAM-999.torrent",
@@ -2531,7 +2532,7 @@ def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> N
                 "suggested_content_path": "/downloads/Other",
                 "suggested_save_path": "/downloads",
             },
-            "gates": {"downloaded": True, "injection_verified": False, "uploaded_wait_evidence": False},
+            "gates": {"downloaded": True, "injection_visible_in_client": False, "injection_verified": False, "uploaded_wait_evidence": False},
         }
     }
 
@@ -2540,12 +2541,13 @@ def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> N
     assert followup["present"] is True
     assert followup["ready"] is False
     assert followup["ready_for_uploaded_seeding"] is False
-    assert followup["missing"] == ["injected_torrent_hash", "uploaded_wait_evidence"]
-    assert followup["blockers"] == ["uploaded MTEAM torrent injection is not verified in qBittorrent", "qBittorrent has not reported the uploaded MTEAM torrent as complete"]
+    assert followup["missing"] == ["injected_torrent_hash", "injection_visible_in_client", "uploaded_wait_evidence"]
+    assert followup["blockers"] == ["uploaded MTEAM torrent is not visible in qBittorrent after injection", "qBittorrent has not reported the uploaded MTEAM torrent as complete"]
     assert followup["next_actions"] == ["Inject the uploaded MTEAM torrent into qBittorrent.", "Wait for qBittorrent to report the uploaded MTEAM torrent as complete."]
     assert followup["uploaded_torrent_id"] == "999"
     assert followup["uploaded_torrent_hash"] == uploaded_hash
     assert followup["injected_torrent_hash"] is None
+    assert followup["injection_visible_in_client"] is False
     assert followup["uploaded_torrent_file"] == "/tmp/MTEAM-999.torrent"
     assert followup["uploaded_torrent_file_evidence"]["torrent_hash"] == uploaded_hash
     assert followup["uploaded_save_path"] == "/downloads/Example"
@@ -2553,7 +2555,7 @@ def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> N
     assert followup["qbit_wait_mismatch"] is True
     assert followup["qbit_wait_mismatches"] == ["uploaded.requested_hash"]
     assert followup["wait_retry"]["suggested_torrent_hash"] == retry_hash
-    assert followup["gates"] == {"downloaded": True, "injection_verified": False, "uploaded_wait_evidence": False}
+    assert followup["gates"] == {"downloaded": True, "injection_visible_in_client": False, "injection_verified": False, "uploaded_wait_evidence": False}
 
 
 def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
@@ -2565,12 +2567,13 @@ def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
                 "present": True,
                 "ready": False,
                 "ready_for_uploaded_seeding": False,
-                "missing": ["injected_torrent_hash", "uploaded_wait_evidence"],
-                "blockers": ["uploaded MTEAM torrent injection is not verified in qBittorrent", "qBittorrent has not reported the uploaded MTEAM torrent as complete"],
+                "missing": ["injected_torrent_hash", "injection_visible_in_client", "uploaded_wait_evidence"],
+                "blockers": ["uploaded MTEAM torrent is not visible in qBittorrent after injection", "qBittorrent has not reported the uploaded MTEAM torrent as complete"],
                 "next_actions": ["Inject the uploaded MTEAM torrent into qBittorrent.", "Wait for qBittorrent to report the uploaded MTEAM torrent as complete."],
                 "uploaded_torrent_id": "999",
                 "uploaded_torrent_hash": uploaded_hash,
                 "injected_torrent_hash": None,
+                "injection_visible_in_client": False,
                 "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
                 "uploaded_save_path": "/downloads/Example",
                 "uploaded_wait_query": {"torrent_hash": uploaded_hash, "content_path": "/downloads/Example", "timeout": 42.0, "interval": 3.0},
@@ -2589,12 +2592,13 @@ def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_PRESENT"] == "1"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_READY"] == "0"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_READY_FOR_SEEDING"] == "0"
-    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_MISSING"] == "injected_torrent_hash,uploaded_wait_evidence"
-    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_BLOCKERS"] == "uploaded MTEAM torrent injection is not verified in qBittorrent|qBittorrent has not reported the uploaded MTEAM torrent as complete"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_MISSING"] == "injected_torrent_hash,injection_visible_in_client,uploaded_wait_evidence"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_BLOCKERS"] == "uploaded MTEAM torrent is not visible in qBittorrent after injection|qBittorrent has not reported the uploaded MTEAM torrent as complete"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_NEXT_ACTIONS"] == "Inject the uploaded MTEAM torrent into qBittorrent. | Wait for qBittorrent to report the uploaded MTEAM torrent as complete."
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_ID"] == "999"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_HASH"] == uploaded_hash
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTED_HASH"] is None
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTION_VISIBLE"] == "0"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_FILE"] == "/tmp/MTEAM-999.torrent"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_SAVE_PATH"] == "/downloads/Example"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_HASH"] == uploaded_hash
