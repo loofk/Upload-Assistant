@@ -17399,6 +17399,38 @@ def test_mteam_description_draft_uses_tmdb_tv_link_for_series() -> None:
     assert "TMDb: https://www.themoviedb.org/tv/321" in description
 
 
+def test_mteam_upload_preflight_accepts_tmdb_tv_link_for_series(tmp_path) -> None:
+    source_info = {
+        "tracker": "CHD",
+        "torrent_id": "12345",
+        "name": "Example.Show.S01.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 7654321,
+        "tmdb_id": 321,
+        "douban_id": "26752088",
+        "douban_url": "https://movie.douban.com/subject/26752088/",
+        "torrenthash": "b" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例剧集\n◎简　　介　示例简介",
+    }
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path="/downloads/Example.Show.S01")
+    torrent_file = make_mteam_safe_torrent(tmp_path, "show-upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "ready"
+    assert package["materials"]["metadata"]["category"] == "TV"
+    assert preflight["upload_payload"]["description_file"]["content"]["external_links"]["tmdb"] == "https://www.themoviedb.org/tv/321"
+    metadata_items = preflight["upload_payload"]["review"]["description"]["evidence"]["metadata_chain"]["items"]
+    assert metadata_items["tmdb"] == {
+        "ready": True,
+        "source_value": 321,
+        "expected_link": "https://www.themoviedb.org/tv/321",
+        "description_link": "https://www.themoviedb.org/tv/321",
+        "payload_value": None,
+        "payload_required": False,
+    }
+
+
 def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
     source_info = {
         "tracker": "U2",

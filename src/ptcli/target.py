@@ -831,6 +831,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "description_length": source_description_length,
         },
         "metadata": {
+            "category": meta_draft.get("category"),
             "imdb_id": meta_draft.get("imdb_id"),
             "tmdb_id": meta_draft.get("tmdb_id"),
             "douban_id": meta_draft.get("douban_id"),
@@ -1837,7 +1838,8 @@ def _mteam_metadata_expected_link(name: str, metadata: dict[str, Any]) -> str | 
         return f"https://www.imdb.com/title/tt{imdb_id}" if imdb_id else None
     if name == "tmdb":
         tmdb_id = metadata.get("tmdb_id")
-        return f"https://www.themoviedb.org/movie/{tmdb_id}" if tmdb_id else None
+        tmdb_kind = "tv" if metadata.get("category") == "TV" else "movie"
+        return f"https://www.themoviedb.org/{tmdb_kind}/{tmdb_id}" if tmdb_id else None
     if name == "douban":
         douban_url = metadata.get("douban_url")
         if douban_url:
