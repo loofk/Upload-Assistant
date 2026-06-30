@@ -5008,9 +5008,9 @@ def test_summary_check_consumes_target_material_chain_artifact(tmp_path, capsys)
     target_material_chain = {
         "ready": False,
         "chains": {
-            "metadata_chain": {"ready": False, "missing": ["metadata.tmdb"], "next_actions": ["Fetch TMDb metadata."]},
+            "metadata_chain": {"ready": False, "missing": ["metadata.tmdb"], "next_actions": ["Use --metadata-file with the reviewed TMDb id."]},
             "media_info_chain": {"ready": True, "missing": [], "next_actions": []},
-            "screenshot_chain": {"ready": False, "missing": ["description.screenshot_coverage"], "next_actions": ["Upload screenshots to an image host."]},
+            "screenshot_chain": {"ready": False, "missing": ["description.screenshot_coverage"], "next_actions": ["Reuse the image-host JSON and regenerate the MTEAM package."]},
         },
     }
     summary_file.write_text(
@@ -5036,11 +5036,11 @@ def test_summary_check_consumes_target_material_chain_artifact(tmp_path, capsys)
     assert payload["material_diagnostics"]["readiness"]["material_description_metadata_chain_missing"] == ["metadata.tmdb"]
     assert payload["readiness_summary"]["material_description_metadata_chain_ready"] is False
     assert payload["readiness_summary"]["material_description_metadata_chain_missing"] == ["metadata.tmdb"]
-    assert any("Fetch TMDb metadata" in action for action in payload["readiness_summary"]["material_description_metadata_chain_next_actions"])
+    assert payload["readiness_summary"]["material_description_metadata_chain_next_actions"] == ["Use --metadata-file with the reviewed TMDb id."]
     assert payload["readiness_summary"]["material_description_media_info_chain_ready"] is True
     assert payload["readiness_summary"]["material_description_screenshot_chain_ready"] is False
     assert payload["readiness_summary"]["material_description_screenshot_chain_missing"] == ["description.screenshot_coverage"]
-    assert any("Upload screenshots to an image host" in action for action in payload["readiness_summary"]["material_description_screenshot_chain_next_actions"])
+    assert payload["readiness_summary"]["material_description_screenshot_chain_next_actions"] == ["Reuse the image-host JSON and regenerate the MTEAM package."]
 
     code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
 
@@ -5048,11 +5048,11 @@ def test_summary_check_consumes_target_material_chain_artifact(tmp_path, capsys)
     out = capsys.readouterr().out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING=metadata.tmdb\n" in out
-    assert "Fetch TMDb metadata" in out
+    assert "Use --metadata-file with the reviewed TMDb id." in out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY=1\n" in out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING=description.screenshot_coverage\n" in out
-    assert "Upload screenshots to an image host" in out
+    assert "Reuse the image-host JSON and regenerate the MTEAM package." in out
 
 
 def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_package() -> None:

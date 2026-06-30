@@ -1008,6 +1008,9 @@ def _description_chain_recovery_missing(chain_name: str, chain: Any) -> list[str
 
 
 def _description_chain_next_actions(chain_name: str, chain: Any) -> list[str]:
+    explicit = _string_list(chain.get("next_actions")) if isinstance(chain, dict) else []
+    if explicit:
+        return explicit
     return _target_preparation_missing_next_actions(_description_chain_recovery_missing(chain_name, chain))
 
 
@@ -1070,6 +1073,7 @@ def _target_material_chain_evidence(material_chain: Any) -> dict[str, Any]:
         evidence[chain_name] = {
             "ready": chain.get("ready") if isinstance(chain.get("ready"), bool) else None,
             "missing": _string_list(chain.get("missing")),
+            "next_actions": _string_list(chain.get("next_actions")),
         }
     return evidence
 
