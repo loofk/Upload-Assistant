@@ -6390,6 +6390,7 @@ async def _pipeline_bdinfo_material_stage(
             "ok": True,
             "skipped": True,
             "message": "Existing BDInfo material file supplied; generation skipped.",
+            "result": {"status": "provided", "bdinfo_file": material_files.get("bdinfo_file")},
         }
     if not content_path:
         return {
@@ -6423,11 +6424,17 @@ async def _pipeline_mediainfo_material_stage(
     material_files: dict[str, Any],
 ) -> dict[str, Any]:
     if material_files.get("mediainfo_file") or material_files.get("bdinfo_file"):
+        provided: dict[str, Any] = {"status": "provided"}
+        if material_files.get("mediainfo_file"):
+            provided["mediainfo_file"] = material_files.get("mediainfo_file")
+        if material_files.get("bdinfo_file"):
+            provided["bdinfo_file"] = material_files.get("bdinfo_file")
         return {
             "stage": "materials-mediainfo",
             "ok": True,
             "skipped": True,
             "message": "Existing MediaInfo/BDInfo material file supplied; generation skipped.",
+            "result": provided,
         }
     if not content_path:
         return {
@@ -6453,11 +6460,13 @@ async def _pipeline_screenshot_material_stage(
     material_files: dict[str, Any],
 ) -> dict[str, Any]:
     if material_files.get("screenshot_files"):
+        screenshot_files = list(material_files.get("screenshot_files") or [])
         return {
             "stage": "materials-screenshots",
             "ok": True,
             "skipped": True,
             "message": "Existing screenshot material files supplied; generation skipped.",
+            "result": {"status": "provided", "screenshot_files": screenshot_files, "count": len(screenshot_files)},
         }
     if not content_path:
         return {
@@ -6488,6 +6497,7 @@ async def _pipeline_image_host_material_stage(
             "ok": True,
             "skipped": True,
             "message": "Existing image-host upload file supplied; upload skipped.",
+            "result": {"status": "provided", "image_host_file": material_files.get("image_host_file")},
         }
     screenshot_files = list(material_files.get("screenshot_files") or [])
     if not screenshot_files:

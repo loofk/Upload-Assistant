@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import hashlib
 import json
 import shlex
 import subprocess
@@ -16806,6 +16807,41 @@ async def test_upload_screenshot_image_hosts_blocks_legacy_imgbox_without_extra_
     assert result["count"] == 0
     assert "pyimgbox" in result["blockers"][0]
     assert await asyncio.to_thread(Path(result["image_host_file"]).exists)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_material_stages_record_provided_file_evidence(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    bdinfo = tmp_path / "BD_FULL_00.txt"
+    bdinfo.write_text("DISC INFO:\nDisc Title: Example\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host = tmp_path / "image-host-uploads.json"
+    image_host.write_text(json.dumps({"items": [{"img_url": "https://img.example/1.png"}]}), encoding="utf-8")
+    args = argparse.Namespace(source_tracker="U2", source_id="60635", target_output_dir=str(tmp_path / "target"))
+    source_info = {"tracker": "U2", "torrent_id": "60635"}
+
+    bdinfo_stage = await ptcli_cli._pipeline_bdinfo_material_stage(args, source_info, "/downloads/Example", {"bdinfo_file": str(bdinfo)})
+    mediainfo_stage = await ptcli_cli._pipeline_mediainfo_material_stage(args, source_info, "/downloads/Example", {"mediainfo_file": str(mediainfo)})
+    screenshot_stage = await ptcli_cli._pipeline_screenshot_material_stage(args, source_info, "/downloads/Example", {"screenshot_files": [str(screenshot)]})
+    image_host_stage = await ptcli_cli._pipeline_image_host_material_stage({}, args, source_info, {"image_host_file": str(image_host)})
+
+    artifacts = ptcli_cli._material_generation_artifacts([bdinfo_stage, mediainfo_stage, screenshot_stage, image_host_stage])
+
+    assert artifacts["bdinfo"]["skipped"] is True
+    assert artifacts["bdinfo"]["status"] == "provided"
+    assert artifacts["bdinfo"]["bdinfo_file_evidence"]["sha1"] == hashlib.sha1(bdinfo.read_bytes()).hexdigest()
+    assert artifacts["mediainfo"]["skipped"] is True
+    assert artifacts["mediainfo"]["status"] == "provided"
+    assert artifacts["mediainfo"]["mediainfo_file_evidence"]["sha1"] == hashlib.sha1(mediainfo.read_bytes()).hexdigest()
+    assert artifacts["screenshots"]["skipped"] is True
+    assert artifacts["screenshots"]["status"] == "provided"
+    assert artifacts["screenshots"]["count"] == 1
+    assert artifacts["screenshots"]["screenshot_files_evidence"][0]["sha1"] == hashlib.sha1(screenshot.read_bytes()).hexdigest()
+    assert artifacts["image_host"]["skipped"] is True
+    assert artifacts["image_host"]["status"] == "provided"
+    assert artifacts["image_host"]["image_host_file_evidence"]["sha1"] == hashlib.sha1(image_host.read_bytes()).hexdigest()
 
 
 def test_normalize_metadata_overrides_accepts_urls_ids_and_ptgen_description(tmp_path) -> None:
