@@ -2006,6 +2006,10 @@ def _material_option_value_valid(option: str, value: str) -> bool:
 
 def _material_option_value_covers_recovery_key(option: str, value: str, recovery_key: Any) -> bool:
     key = str(recovery_key or "")
+    if option == "--mediainfo-file":
+        return key not in {"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo", "payload.mediainfo"} or _mediainfo_file_looks_valid(value)
+    if option == "--bdinfo-file":
+        return key not in {"assets.mediainfo_or_bdinfo", "assets.bdinfo_for_disc", "description.mediainfo_or_bdinfo", "payload.mediainfo"} or _bdinfo_file_looks_valid(value)
     if option == "--image-host-file":
         return key not in {"assets.image_host_uploads", "description.screenshot_coverage"} or _image_host_file_has_usable_urls(value)
     if option == "--screenshot-file":
@@ -2044,6 +2048,27 @@ def _image_host_file_has_usable_urls(path_value: str) -> bool:
     else:
         items = []
     return bool(items) and all(isinstance(item, dict) and _image_host_recovery_item_has_url(item) for item in items)
+
+
+def _mediainfo_file_looks_valid(path_value: str) -> bool:
+    text = _read_recovery_text_file(path_value)
+    if not text:
+        return False
+    return bool(re.search(r"(?im)^(general|video|audio|text|menu)\s*$", text) and re.search(r"(?im)^\s*(complete name|format|duration|file size|bit rate)\s*:", text))
+
+
+def _bdinfo_file_looks_valid(path_value: str) -> bool:
+    text = _read_recovery_text_file(path_value)
+    if not text:
+        return False
+    return bool(re.search(r"(?im)^(disc info|playlist report|quick summary)\s*:", text) or re.search(r"(?im)^\s*(disc title|playlist|video|audio)\s*:", text))
+
+
+def _read_recovery_text_file(path_value: str, limit: int = 65536) -> str:
+    try:
+        return Path(path_value).expanduser().read_text(encoding="utf-8", errors="replace")[:limit]
+    except OSError:
+        return ""
 
 
 def _image_host_recovery_item_has_url(item: dict[str, Any]) -> bool:

@@ -7744,6 +7744,84 @@ def test_summary_check_requires_screenshot_file_to_look_like_image(tmp_path, cap
     assert recovery["hints"][0]["existing_file_option_present"] is False
 
 
+def test_summary_check_requires_mediainfo_file_to_look_like_report(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    mediainfo_file = tmp_path / "MI_FULL_00.txt"
+    mediainfo_file.write_text("not mediainfo", encoding="utf-8")
+    resume_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target", "--mediainfo-file", str(mediainfo_file)]
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "artifacts": {
+                    "target_materials_missing": ["assets.mediainfo_or_bdinfo"],
+                    "target_materials_ready": False,
+                    "target_preparation_ready": False,
+                },
+                "resume_commands": [{"stage": "resume-target-package", "command": shlex.join(resume_argv), "argv": resume_argv}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    recovery = payload["readiness_summary"]["material_recovery"]
+    assert payload["next_command_run_allowed"] is False
+    assert payload["automation_action"] == "complete_material_recovery_command"
+    assert payload["next_command_run_blocker"] == f"material recovery command has assets.mediainfo_or_bdinfo option value that does not satisfy recovery requirement: --mediainfo-file={mediainfo_file}"
+    assert recovery["invalid_existing_option_values"] == {"--mediainfo-file": [str(mediainfo_file)]}
+    assert recovery["missing_flags"] == ["--generate-mediainfo"]
+    assert recovery["hints"][0]["existing_file_option_present"] is False
+
+
+def test_summary_check_requires_bdinfo_file_to_look_like_report(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    bdinfo_file = tmp_path / "BD_FULL_00.txt"
+    bdinfo_file.write_text("not bdinfo", encoding="utf-8")
+    resume_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target", "--bdinfo-file", str(bdinfo_file)]
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "artifacts": {
+                    "target_materials_missing": ["assets.bdinfo_for_disc"],
+                    "target_materials_ready": False,
+                    "target_preparation_ready": False,
+                },
+                "resume_commands": [{"stage": "resume-target-package", "command": shlex.join(resume_argv), "argv": resume_argv}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    recovery = payload["readiness_summary"]["material_recovery"]
+    assert payload["next_command_run_allowed"] is False
+    assert payload["automation_action"] == "complete_material_recovery_command"
+    assert payload["next_command_run_blocker"] == f"material recovery command has assets.bdinfo_for_disc option value that does not satisfy recovery requirement: --bdinfo-file={bdinfo_file}"
+    assert recovery["invalid_existing_option_values"] == {"--bdinfo-file": [str(bdinfo_file)]}
+    assert recovery["missing_flags"] == ["--generate-bdinfo"]
+    assert recovery["hints"][0]["existing_file_option_present"] is False
+
+
 def test_summary_check_requires_value_for_existing_material_file_options(tmp_path, capsys) -> None:
     summary_file = tmp_path / "summary.json"
     resume_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target", "--metadata-file", "--image-host-file"]
