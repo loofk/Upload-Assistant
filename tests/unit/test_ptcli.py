@@ -2558,6 +2558,76 @@ def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> N
     assert followup["gates"] == {"downloaded": True, "injection_visible_in_client": False, "injection_verified": False, "uploaded_wait_evidence": False}
 
 
+def test_readiness_source_followup_summary_exposes_source_seeding_state() -> None:
+    source_hash = "a" * 40
+    retry_hash = "b" * 40
+    resume_state = {
+        "source_followup": {
+            "ready": False,
+            "ready_for_source_seeding": False,
+            "missing": ["injected_torrent_hash", "injection_visible_in_client", "source_wait_evidence"],
+            "blockers": ["source torrent is not visible in qBittorrent after injection", "qBittorrent has not reported the source torrent as complete"],
+            "next_actions": ["Inject the source torrent into qBittorrent.", "Wait for qBittorrent to report the source torrent as complete."],
+            "source_torrent_hash": source_hash,
+            "source_torrent_file": "/tmp/U2-60635.torrent",
+            "source_torrent_file_evidence": {
+                "path": "/tmp/U2-60635.torrent",
+                "exists": True,
+                "is_file": True,
+                "size_bytes": 1234,
+                "sha1": "c" * 40,
+                "torrent_hash": source_hash,
+                "metadata_readable": True,
+            },
+            "source_save_path": "/downloads",
+            "source_qbit_category": "U2",
+            "source_qbit_tags": ["retorrent"],
+            "source_paused": False,
+            "injected_torrent_hash": None,
+            "injection_visible_in_client": False,
+            "injection_verified": False,
+            "source_wait_evidence": False,
+            "hash_consistent": True,
+            "source_wait_query": {"torrent_hash": source_hash, "save_path": "/downloads", "timeout": 42.0, "interval": 3.0},
+            "qbit_wait_mismatch": True,
+            "qbit_wait_mismatches": ["source.requested_hash"],
+            "wait_retry": {
+                "retry_recommended": True,
+                "suggested_torrent_hash": retry_hash,
+                "suggested_content_path": "/downloads/Example",
+                "suggested_save_path": "/downloads",
+            },
+            "gates": {"source_torrent_file": True, "injection_visible_in_client": False, "injection_verified": False, "source_wait_evidence": False},
+        }
+    }
+
+    followup = ptcli_cli._readiness_source_followup_summary(resume_state)
+
+    assert followup["present"] is True
+    assert followup["ready"] is False
+    assert followup["ready_for_source_seeding"] is False
+    assert followup["missing"] == ["injected_torrent_hash", "injection_visible_in_client", "source_wait_evidence"]
+    assert followup["blockers"] == ["source torrent is not visible in qBittorrent after injection", "qBittorrent has not reported the source torrent as complete"]
+    assert followup["next_actions"] == ["Inject the source torrent into qBittorrent.", "Wait for qBittorrent to report the source torrent as complete."]
+    assert followup["source_torrent_hash"] == source_hash
+    assert followup["source_torrent_file"] == "/tmp/U2-60635.torrent"
+    assert followup["source_torrent_file_evidence"]["torrent_hash"] == source_hash
+    assert followup["source_save_path"] == "/downloads"
+    assert followup["source_qbit_category"] == "U2"
+    assert followup["source_qbit_tags"] == ["retorrent"]
+    assert followup["source_paused"] is False
+    assert followup["injected_torrent_hash"] is None
+    assert followup["injection_visible_in_client"] is False
+    assert followup["injection_verified"] is False
+    assert followup["source_wait_evidence"] is False
+    assert followup["hash_consistent"] is True
+    assert followup["source_wait_query"] == {"torrent_hash": source_hash, "save_path": "/downloads", "timeout": 42.0, "interval": 3.0}
+    assert followup["qbit_wait_mismatch"] is True
+    assert followup["qbit_wait_mismatches"] == ["source.requested_hash"]
+    assert followup["wait_retry"]["suggested_torrent_hash"] == retry_hash
+    assert followup["gates"] == {"source_torrent_file": True, "injection_visible_in_client": False, "injection_verified": False, "source_wait_evidence": False}
+
+
 def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
     uploaded_hash = "a" * 40
     retry_hash = "b" * 40
@@ -2611,6 +2681,65 @@ def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH"] == retry_hash
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH"] == "/downloads/Other"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH"] == "/downloads"
+
+
+def test_readiness_shell_fields_export_source_followup_state() -> None:
+    source_hash = "a" * 40
+    retry_hash = "b" * 40
+    fields = ptcli_cli._summary_check_readiness_shell_fields(
+        {
+            "source_followup": {
+                "present": True,
+                "ready": False,
+                "ready_for_source_seeding": False,
+                "missing": ["injected_torrent_hash", "injection_visible_in_client", "source_wait_evidence"],
+                "blockers": ["source torrent is not visible in qBittorrent after injection", "qBittorrent has not reported the source torrent as complete"],
+                "next_actions": ["Inject the source torrent into qBittorrent.", "Wait for qBittorrent to report the source torrent as complete."],
+                "source_torrent_hash": source_hash,
+                "source_torrent_file": "/tmp/U2-60635.torrent",
+                "source_save_path": "/downloads",
+                "injected_torrent_hash": None,
+                "injection_visible_in_client": False,
+                "injection_verified": False,
+                "source_wait_evidence": False,
+                "hash_consistent": True,
+                "source_wait_query": {"torrent_hash": source_hash, "save_path": "/downloads", "timeout": 42.0, "interval": 3.0},
+                "qbit_wait_mismatch": True,
+                "qbit_wait_mismatches": ["source.requested_hash"],
+                "wait_retry": {
+                    "retry_recommended": True,
+                    "suggested_torrent_hash": retry_hash,
+                    "suggested_content_path": "/downloads/Example",
+                    "suggested_save_path": "/downloads",
+                },
+            }
+        }
+    )
+
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_PRESENT"] == "1"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_READY"] == "0"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_READY_FOR_SEEDING"] == "0"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_MISSING"] == "injected_torrent_hash,injection_visible_in_client,source_wait_evidence"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_BLOCKERS"] == "source torrent is not visible in qBittorrent after injection|qBittorrent has not reported the source torrent as complete"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_NEXT_ACTIONS"] == "Inject the source torrent into qBittorrent. | Wait for qBittorrent to report the source torrent as complete."
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_HASH"] == source_hash
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_INJECTED_HASH"] is None
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_INJECTION_VISIBLE"] == "0"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_INJECTION_VERIFIED"] == "0"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_EVIDENCE"] == "0"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_CONSISTENT"] == "1"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_FILE"] == "/tmp/U2-60635.torrent"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_SAVE_PATH"] == "/downloads"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_HASH"] == source_hash
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_SAVE_PATH"] == "/downloads"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_TIMEOUT"] == 42.0
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_INTERVAL"] == 3.0
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_MISMATCH"] == "1"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_MISMATCHES"] == "source.requested_hash"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_RETRY_RECOMMENDED"] == "1"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_SUGGESTED_HASH"] == retry_hash
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH"] == "/downloads/Example"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH"] == "/downloads"
 
 
 def test_retorrent_execute_blockers_require_qbit_wait_match() -> None:
