@@ -5029,19 +5029,18 @@ def _pipeline_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, .
         )
     ):
         preferred.append("resume-source-torrent")
+    if any(name in missing_audit for name in ("uploaded_torrent_hash", "target.downloaded", "target.uploaded_torrent_hash")):
+        preferred.append("resume-uploaded-torrent-download")
     if any(
         name in missing_audit
         for name in (
-            "uploaded_torrent_hash",
             "injected_torrent_hash",
             "injection_visible_in_client",
             "injection_verified",
             "uploaded_wait_evidence",
-            "target.downloaded",
             "target.injected",
             "target.seeding",
             "target.hash_consistent",
-            "target.uploaded_torrent_hash",
             "target.injected_torrent_hash",
             "target.injection_visible_in_client",
             "target.injection_verified",
@@ -5122,7 +5121,7 @@ def _target_upload_summary_preferred_stages(missing_audit: list[str]) -> tuple[s
     preferred: list[str] = []
     if "target_preparation_ready" in missing_audit:
         preferred.append("resume-target-package")
-    if "uploaded_torrent_file" in missing_audit:
+    if any(name in missing_audit for name in ("uploaded_torrent_file", "uploaded_torrent_hash")):
         preferred.append("resume-uploaded-torrent-download")
     if any(name in missing_audit for name in ("injection_visible_in_client", "injection_verified", "uploaded_wait_evidence", "target_hash_consistent")):
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])

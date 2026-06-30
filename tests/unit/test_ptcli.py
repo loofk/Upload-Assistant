@@ -4676,6 +4676,16 @@ def test_completion_matrix_preferred_stages_map_domains_to_resume_commands() -> 
     assert readiness_stages == pipeline_stages
 
 
+def test_uploaded_torrent_download_missing_is_prioritized_before_injection_resume() -> None:
+    pipeline_download_missing = ptcli_cli._pipeline_summary_preferred_stages(["target.downloaded", "target.injected"])
+    pipeline_hash_missing = ptcli_cli._pipeline_summary_preferred_stages(["target.uploaded_torrent_hash", "target.injected"])
+    target_upload_hash_missing = ptcli_cli._target_upload_summary_preferred_stages(["uploaded_torrent_hash", "injection_verified"])
+
+    assert pipeline_download_missing[:2] == ("resume-uploaded-torrent-download", "resume-uploaded-torrent")
+    assert pipeline_hash_missing[:2] == ("resume-uploaded-torrent-download", "resume-uploaded-torrent")
+    assert target_upload_hash_missing[:2] == ("resume-uploaded-torrent-download", "resume-uploaded-torrent")
+
+
 def test_target_package_resume_args_reuse_generated_material_artifacts() -> None:
     args = ptcli_cli._target_package_material_resume_args(
         {"generate_mediainfo": True, "generate_screenshots": True, "upload_screenshots": True},
