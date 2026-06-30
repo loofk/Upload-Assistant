@@ -899,10 +899,13 @@ def _retorrent_readiness_summary(
         "material_description_screenshot_coverage_missing_urls": _string_list(screenshot_coverage_evidence.get("missing_urls")),
         "material_description_metadata_chain_ready": metadata_chain_evidence.get("ready") if isinstance(metadata_chain_evidence.get("ready"), bool) else None,
         "material_description_metadata_chain_missing": _description_chain_recovery_missing("metadata_chain", metadata_chain_evidence),
+        "material_description_metadata_chain_next_actions": _description_chain_next_actions("metadata_chain", metadata_chain_evidence),
         "material_description_media_info_chain_ready": media_info_chain_evidence.get("ready") if isinstance(media_info_chain_evidence.get("ready"), bool) else None,
         "material_description_media_info_chain_missing": _description_chain_recovery_missing("media_info_chain", media_info_chain_evidence),
+        "material_description_media_info_chain_next_actions": _description_chain_next_actions("media_info_chain", media_info_chain_evidence),
         "material_description_screenshot_chain_ready": screenshot_chain_evidence.get("ready") if isinstance(screenshot_chain_evidence.get("ready"), bool) else None,
         "material_description_screenshot_chain_missing": _description_chain_recovery_missing("screenshot_chain", screenshot_chain_evidence),
+        "material_description_screenshot_chain_next_actions": _description_chain_next_actions("screenshot_chain", screenshot_chain_evidence),
         "target_preflight_ready": target_preflight_diagnostics.get("ready") if isinstance(target_preflight_diagnostics.get("ready"), bool) else None,
         "target_preflight_materials_ready": target_preflight_diagnostics.get("materials_ready") if isinstance(target_preflight_diagnostics.get("materials_ready"), bool) else None,
         "target_preflight_description_ready": target_preflight_diagnostics.get("description_ready") if isinstance(target_preflight_diagnostics.get("description_ready"), bool) else None,
@@ -964,6 +967,10 @@ def _description_chain_recovery_missing(chain_name: str, chain: Any) -> list[str
     if explicit_missing:
         return explicit_missing
     return _description_evidence_recovery_missing({chain_name: chain})
+
+
+def _description_chain_next_actions(chain_name: str, chain: Any) -> list[str]:
+    return _target_preparation_missing_next_actions(_description_chain_recovery_missing(chain_name, chain))
 
 
 def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
@@ -9849,10 +9856,13 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_URLS": ",".join(_string_list(readiness_summary.get("material_description_screenshot_coverage_missing_urls"))),
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY": _shell_bool(readiness_summary.get("material_description_metadata_chain_ready")) if readiness_summary.get("material_description_metadata_chain_ready") is not None else None,
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING": ",".join(_string_list(readiness_summary.get("material_description_metadata_chain_missing"))),
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_NEXT_ACTIONS": " | ".join(_string_list(readiness_summary.get("material_description_metadata_chain_next_actions"))),
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY": _shell_bool(readiness_summary.get("material_description_media_info_chain_ready")) if readiness_summary.get("material_description_media_info_chain_ready") is not None else None,
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING": ",".join(_string_list(readiness_summary.get("material_description_media_info_chain_missing"))),
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_NEXT_ACTIONS": " | ".join(_string_list(readiness_summary.get("material_description_media_info_chain_next_actions"))),
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY": _shell_bool(readiness_summary.get("material_description_screenshot_chain_ready")) if readiness_summary.get("material_description_screenshot_chain_ready") is not None else None,
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING": ",".join(_string_list(readiness_summary.get("material_description_screenshot_chain_missing"))),
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS": " | ".join(_string_list(readiness_summary.get("material_description_screenshot_chain_next_actions"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_MISSING": ",".join(_string_list(readiness_summary.get("target_preflight_missing"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_DESCRIPTION_MISSING": ",".join(_string_list(readiness_summary.get("target_preflight_description_missing"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_BLOCKERS": "|".join(_string_list(readiness_summary.get("target_preflight_blockers"))),

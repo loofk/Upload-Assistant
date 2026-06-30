@@ -5175,14 +5175,26 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert readiness["material_description_screenshot_coverage_missing_urls"] == ["https://img.example/screen-1.png"]
     assert readiness["material_description_metadata_chain_ready"] is False
     assert readiness["material_description_metadata_chain_missing"] == ["description.external_ids.imdb", "payload.imdb", "metadata.tmdb"]
+    assert readiness["material_description_metadata_chain_next_actions"] == [
+        "Fetch IMDb metadata with --enrich-metadata or supply it with --metadata-file/--imdb-id, then rerun resume-target-package.",
+        "Fetch TMDb metadata with --enrich-metadata or supply it with --metadata-file/--tmdb-id, then rerun resume-target-package.",
+    ]
     assert readiness["material_description_media_info_chain_ready"] is False
     assert readiness["material_description_media_info_chain_missing"] == ["assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo", "payload.mediainfo"]
+    assert readiness["material_description_media_info_chain_next_actions"] == [
+        "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun resume-target-package."
+    ]
     assert readiness["material_description_screenshot_chain_ready"] is False
     assert readiness["material_description_screenshot_chain_missing"] == [
         "assets.screenshots",
         "assets.image_host_uploads",
         "description.screenshot_bbcode",
         "description.screenshot_coverage",
+    ]
+    assert readiness["material_description_screenshot_chain_next_actions"] == [
+        "Generate or provide screenshots with --generate-screenshots or --screenshot-file, then rerun resume-target-package.",
+        "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
+        "Regenerate the MTEAM description after screenshot and image-host materials are ready.",
     ]
     assert readiness["target_upload_payload_recovery_missing"] == ["description.screenshot_coverage"]
     assert readiness["target_upload_payload_next_actions"] == ["Upload screenshots to an image host before live upload."]
@@ -5193,10 +5205,16 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_URLS"] == "https://img.example/screen-1.png"
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY"] == "0"
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING"] == "description.external_ids.imdb,payload.imdb,metadata.tmdb"
+    assert "Fetch IMDb metadata" in readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_NEXT_ACTIONS"]
+    assert "Fetch TMDb metadata" in readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_NEXT_ACTIONS"]
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY"] == "0"
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING"] == "assets.mediainfo_or_bdinfo,description.mediainfo_or_bdinfo,payload.mediainfo"
+    assert "Generate or provide MediaInfo/BDInfo" in readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_NEXT_ACTIONS"]
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY"] == "0"
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING"] == "assets.screenshots,assets.image_host_uploads,description.screenshot_bbcode,description.screenshot_coverage"
+    assert "Generate or provide screenshots" in readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS"]
+    assert "Upload screenshots to an image host" in readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS"]
+    assert "Regenerate the MTEAM description" in readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS"]
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_RECOVERY_MISSING"] == "description.screenshot_coverage"
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_NEXT_ACTIONS"] == "Upload screenshots to an image host before live upload."
 
