@@ -2487,6 +2487,7 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
     downloaded = bool(_path_artifact_exists(uploaded_torrent_file))
     uploaded = bool(summary.get("uploaded"))
     injected = bool(summary.get("injected") or artifacts.get("injection_verified"))
+    injection_visible = bool(artifacts.get("injection_visible_in_client"))
     injection_verified = bool(artifacts.get("injection_verified"))
     wait_evidence = bool(artifacts.get("uploaded_wait_evidence"))
     hash_consistent = bool(artifacts.get("target_hash_consistent"))
@@ -2498,6 +2499,7 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
         "downloaded": downloaded,
         "uploaded_torrent_hash": bool(artifacts.get("uploaded_torrent_hash")),
         "injected_torrent_hash": bool(artifacts.get("injected_torrent_hash")),
+        "injection_visible_in_client": injection_visible,
         "injection_verified": injection_verified,
         "uploaded_wait_evidence": wait_evidence,
         "hash_consistent": hash_consistent,
@@ -2519,6 +2521,7 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
         "uploaded": uploaded,
         "downloaded": downloaded,
         "injected": injected,
+        "injection_visible_in_client": injection_visible,
         "injection_verified": injection_verified,
         "uploaded_wait_evidence": wait_evidence,
         "hash_consistent": hash_consistent,
@@ -2554,6 +2557,7 @@ def _target_upload_followup_blockers(missing: list[str]) -> list[str]:
         "downloaded": "uploaded MTEAM torrent file has not been downloaded or provided",
         "uploaded_torrent_hash": "uploaded MTEAM torrent hash evidence is missing",
         "injected_torrent_hash": "uploaded MTEAM torrent has not been injected into qBittorrent",
+        "injection_visible_in_client": "uploaded MTEAM torrent is not visible in qBittorrent after injection",
         "injection_verified": "uploaded MTEAM torrent injection is not verified in qBittorrent",
         "uploaded_wait_evidence": "qBittorrent has not reported the uploaded MTEAM torrent as complete",
         "hash_consistent": "uploaded torrent hash and qBittorrent injected hash are not verified consistent",
