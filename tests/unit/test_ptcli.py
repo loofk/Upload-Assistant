@@ -5068,6 +5068,7 @@ def test_summary_check_consumes_target_material_chain_artifact(tmp_path, capsys)
 
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
+    assert payload["target_material_chain"] == target_material_chain
     assert payload["material_diagnostics"]["present"] is True
     assert payload["material_diagnostics"]["readiness"]["material_description_metadata_chain_ready"] is False
     assert payload["material_diagnostics"]["readiness"]["material_description_metadata_chain_missing"] == ["metadata.tmdb"]
@@ -5083,6 +5084,13 @@ def test_summary_check_consumes_target_material_chain_artifact(tmp_path, capsys)
 
     assert code == 0
     out = capsys.readouterr().out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_PRESENT=1\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_READY=0\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_METADATA_READY=0\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_METADATA_MISSING=metadata.tmdb\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_READY=1\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_READY=0\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_MISSING=description.screenshot_coverage\n" in out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING=metadata.tmdb\n" in out
     assert "Use --metadata-file with the reviewed TMDb id." in out

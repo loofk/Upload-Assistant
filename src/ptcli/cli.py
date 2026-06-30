@@ -3043,6 +3043,8 @@ def _summary_check_from_payload(payload: dict[str, Any], summary_file: str) -> d
 def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     schema_version = payload.get("schema_version")
     kind = str(payload.get("kind") or "unknown")
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    target_material_chain = _summary_target_material_chain(payload, artifacts)
     qbit_wait_diagnostics = _summary_qbit_wait_diagnostics(payload)
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
     qbit_wait_retry_hints = _summary_qbit_wait_retry_hints(qbit_wait_diagnostics)
@@ -3068,6 +3070,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "kind": kind,
         "supported_kinds": list(SUPPORTED_SUMMARY_KINDS),
         "kind_supported": kind in SUPPORTED_SUMMARY_KINDS,
+        "target_material_chain": target_material_chain,
         "flow_diagnostics": flow_diagnostics,
         "credential_requirements": flow_diagnostics.get("credential_requirements", []),
         "material_diagnostics": material_diagnostics,
@@ -10192,6 +10195,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     closure_source = closure_status.get("source") if isinstance(closure_status.get("source"), dict) else {}
     closure_target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
     material_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
+    target_material_chain = payload.get("target_material_chain") if isinstance(payload.get("target_material_chain"), dict) else {}
     target_upload_diagnostics = payload.get("target_upload_diagnostics") if isinstance(payload.get("target_upload_diagnostics"), dict) else {}
     target_preflight_diagnostics = payload.get("target_preflight_diagnostics") if isinstance(payload.get("target_preflight_diagnostics"), dict) else {}
     closure_review = payload.get("closure_review") if isinstance(payload.get("closure_review"), dict) else {}
@@ -10269,6 +10273,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     }
     fields.update(_summary_check_closure_review_shell_fields(closure_review))
     fields.update(_summary_check_completion_matrix_shell_fields(completion_matrix))
+    fields.update(_summary_check_target_material_chain_shell_fields(target_material_chain))
     fields.update(_summary_check_material_shell_fields(material_diagnostics))
     fields.update(_summary_check_target_preflight_shell_fields(target_preflight_diagnostics))
     fields.update(_summary_check_target_upload_shell_fields(target_upload_diagnostics))
@@ -10489,6 +10494,31 @@ def _summary_check_completion_matrix_shell_fields(completion_matrix: dict[str, A
         if name == "target_upload":
             fields[f"{prefix}_READY_FOR_UPLOADED_SEEDING"] = _shell_bool(evidence.get("ready_for_uploaded_seeding")) if evidence.get("ready_for_uploaded_seeding") is not None else None
     return fields
+
+
+def _summary_check_target_material_chain_shell_fields(target_material_chain: dict[str, Any]) -> dict[str, Any]:
+    chains = target_material_chain.get("chains") if isinstance(target_material_chain.get("chains"), dict) else {}
+
+    def chain(name: str) -> dict[str, Any]:
+        value = chains.get(name)
+        return value if isinstance(value, dict) else {}
+
+    metadata_chain = chain("metadata_chain")
+    media_info_chain = chain("media_info_chain")
+    screenshot_chain = chain("screenshot_chain")
+    return {
+        "PTCLI_TARGET_MATERIAL_CHAIN_PRESENT": _shell_bool(bool(target_material_chain)) if target_material_chain else None,
+        "PTCLI_TARGET_MATERIAL_CHAIN_READY": _shell_bool(target_material_chain.get("ready")) if target_material_chain.get("ready") is not None else None,
+        "PTCLI_TARGET_MATERIAL_CHAIN_METADATA_READY": _shell_bool(metadata_chain.get("ready")) if metadata_chain.get("ready") is not None else None,
+        "PTCLI_TARGET_MATERIAL_CHAIN_METADATA_MISSING": ",".join(_string_list(metadata_chain.get("missing"))),
+        "PTCLI_TARGET_MATERIAL_CHAIN_METADATA_NEXT_ACTIONS": " | ".join(_string_list(metadata_chain.get("next_actions"))),
+        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_READY": _shell_bool(media_info_chain.get("ready")) if media_info_chain.get("ready") is not None else None,
+        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_MISSING": ",".join(_string_list(media_info_chain.get("missing"))),
+        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_NEXT_ACTIONS": " | ".join(_string_list(media_info_chain.get("next_actions"))),
+        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_READY": _shell_bool(screenshot_chain.get("ready")) if screenshot_chain.get("ready") is not None else None,
+        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_MISSING": ",".join(_string_list(screenshot_chain.get("missing"))),
+        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_NEXT_ACTIONS": " | ".join(_string_list(screenshot_chain.get("next_actions"))),
+    }
 
 
 def _summary_check_closure_review_shell_fields(closure_review: dict[str, Any]) -> dict[str, Any]:
