@@ -1657,7 +1657,20 @@ def _retorrent_execute_preflight_material_blockers(material_diagnostics: dict[st
     if preflight.get("present") and preflight.get("ready") is False:
         for blocker in _string_list(preflight.get("blockers")):
             _append_unique_string(blockers, f"target preflight: {blocker}")
+    _extend_unique_string(blockers, _retorrent_execute_material_live_gate_blockers(material, preflight))
     return blockers
+
+
+def _retorrent_execute_material_live_gate_blockers(material: dict[str, Any], preflight: dict[str, Any]) -> list[str]:
+    if not preflight.get("present") or preflight.get("materials_ready_required") is not True:
+        return []
+    live_gate = material.get("live_gate") if isinstance(material.get("live_gate"), dict) else {}
+    if live_gate.get("present") is not True:
+        return ["materials.live_gate"]
+    if live_gate.get("ready_for_mteam_upload") is False or live_gate.get("ready") is False:
+        blockers = _string_list(live_gate.get("blockers"))
+        return blockers or ["materials.live_gate"]
+    return []
 
 
 def _source_artifact_evidence_key(artifact_key: str) -> str:

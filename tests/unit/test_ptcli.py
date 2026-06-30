@@ -761,6 +761,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                 "ready_for_mteam_upload": True,
                 "target_materials_ready": True,
                 "target_preparation_ready": True,
+                "live_gate": {"present": True, "ready": True, "ready_for_mteam_upload": True, "blockers": [], "missing": []},
                 "critical_ready": True,
                 "critical_missing": [],
                 "critical_path": {"ready": True, "next_step": None, "missing": []},
@@ -3365,6 +3366,42 @@ def test_retorrent_execute_blockers_require_torrent_file_evidence() -> None:
     )
 
     assert blockers == ["source.torrent_file_evidence", "target.uploaded_torrent_file_evidence"]
+
+
+def test_retorrent_execute_blockers_require_material_live_gate_when_preflight_requires_materials() -> None:
+    blockers = ptcli_cli._retorrent_execute_preflight_material_blockers(
+        {
+            "present": True,
+            "ready_for_mteam_upload": True,
+            "live_gate": {"present": False},
+        },
+        {
+            "present": True,
+            "ready": True,
+            "materials_ready_required": True,
+            "blockers": [],
+        },
+    )
+
+    assert blockers == ["materials.live_gate"]
+
+
+def test_retorrent_execute_blockers_accept_ready_material_live_gate() -> None:
+    blockers = ptcli_cli._retorrent_execute_preflight_material_blockers(
+        {
+            "present": True,
+            "ready_for_mteam_upload": True,
+            "live_gate": {"present": True, "ready": True, "ready_for_mteam_upload": True, "blockers": []},
+        },
+        {
+            "present": True,
+            "ready": True,
+            "materials_ready_required": True,
+            "blockers": [],
+        },
+    )
+
+    assert blockers == []
 
 
 def test_retorrent_execute_next_actions_explain_wait_evidence_blockers() -> None:
