@@ -10942,6 +10942,7 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
     source_followup_planned = source_followup.get("planned") if isinstance(source_followup.get("planned"), dict) else {}
     source_wait_query = source_followup.get("source_wait_query") if isinstance(source_followup.get("source_wait_query"), dict) else {}
     source_wait_retry = source_followup.get("wait_retry") if isinstance(source_followup.get("wait_retry"), dict) else {}
+    source_command_recovery = readiness_summary.get("source_command_recovery") if isinstance(readiness_summary.get("source_command_recovery"), dict) else {}
     uploaded_followup = readiness_summary.get("uploaded_followup") if isinstance(readiness_summary.get("uploaded_followup"), dict) else {}
     uploaded_wait_query = uploaded_followup.get("uploaded_wait_query") if isinstance(uploaded_followup.get("uploaded_wait_query"), dict) else {}
     uploaded_wait_retry = uploaded_followup.get("wait_retry") if isinstance(uploaded_followup.get("wait_retry"), dict) else {}
@@ -11085,6 +11086,11 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_SUGGESTED_HASH": source_wait_retry.get("suggested_torrent_hash"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH": source_wait_retry.get("suggested_content_path"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH": source_wait_retry.get("suggested_save_path"),
+        "PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_PRESENT": _shell_bool(source_command_recovery.get("present")) if "present" in source_command_recovery else None,
+        "PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_MISSING": ",".join(_string_list(source_command_recovery.get("missing"))),
+        "PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_REQUIRED_FLAGS": ",".join(_string_list(source_command_recovery.get("required_flags"))),
+        "PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_EXAMPLE_FLAG": source_command_recovery.get("example_flag"),
+        "PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_NEXT_ACTIONS": " | ".join(_string_list(source_command_recovery.get("next_actions"))),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_PRESENT": _shell_bool(uploaded_followup.get("present")) if "present" in uploaded_followup else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_READY": _shell_bool(uploaded_followup.get("ready")) if uploaded_followup.get("ready") is not None else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_READY_FOR_SEEDING": _shell_bool(uploaded_followup.get("ready_for_uploaded_seeding"))

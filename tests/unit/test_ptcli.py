@@ -8629,6 +8629,12 @@ def test_summary_check_blocks_pipeline_live_source_injection_without_save_path(t
         "next_actions": ["Add --save-path pointing to the qBittorrent source download root, then rerun summary-check."],
     }
     assert payload["readiness_summary"]["source_command_recovery"] == payload["source_command_recovery"]
+    shell_fields = ptcli_cli._summary_check_readiness_shell_fields(payload["readiness_summary"])
+    assert shell_fields["PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_PRESENT"] == "1"
+    assert shell_fields["PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_MISSING"] == "source_save_path"
+    assert shell_fields["PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_REQUIRED_FLAGS"] == "--save-path"
+    assert shell_fields["PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_EXAMPLE_FLAG"] == "--save-path /downloads"
+    assert shell_fields["PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_NEXT_ACTIONS"] == "Add --save-path pointing to the qBittorrent source download root, then rerun summary-check."
     assert payload["automation_reason"] == "Source follow-up command needs additional flags before automatic execution: pipeline source injection requires --save-path before automatic execution."
 
 
