@@ -12208,7 +12208,7 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert source_followup["source_qbit_tags"] == "source,retorrent"
     assert source_followup["source_paused"] is True
     assert source_followup["source_wait_query"]["content_path"] == str(content_path)
-    assert source_followup["source_wait_query"]["save_path"] == str(content_path)
+    assert source_followup["source_wait_query"]["save_path"] == "/downloads"
     assert source_followup["source_wait_query"]["timeout"] == 123.0
     assert source_followup["source_wait_query"]["interval"] == 7.0
     assert source_followup["next_actions"] == ["Run the recommended pipeline-live command; its run summary will verify source torrent visibility and completion in qBittorrent."]

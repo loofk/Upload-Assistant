@@ -5566,7 +5566,7 @@ def _doctor_source_followup_plan(payload: dict[str, Any], artifacts: dict[str, A
         "source_paused": "--paused" in argv,
         "source_wait_query": {
             "content_path": content_path,
-            "save_path": content_path,
+            "save_path": save_path,
             "timeout": float(wait_timeout) if wait_timeout is not None else None,
             "interval": float(wait_interval) if wait_interval is not None else None,
         },
