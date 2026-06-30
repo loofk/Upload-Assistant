@@ -4676,6 +4676,34 @@ def test_completion_matrix_preferred_stages_map_domains_to_resume_commands() -> 
     assert readiness_stages == pipeline_stages
 
 
+def test_completion_matrix_requires_uploaded_torrent_visible_in_client() -> None:
+    matrix = ptcli_cli._summary_completion_matrix(
+        flow_diagnostics={},
+        material_diagnostics={},
+        target_upload_diagnostics={},
+        closure_review={},
+        closure_status={
+            "target": {
+                "ready": True,
+                "hash_consistent": True,
+                "duplicate_clean": True,
+                "uploaded_wait_evidence": True,
+                "injection_visible_in_client": False,
+                "injection_verified": True,
+            }
+        },
+        qbit_wait_mismatches=[],
+    )
+
+    target_upload = matrix["domains"]["target_upload"]
+    assert target_upload["ready"] is False
+    assert "target_upload" in matrix["missing_domains"]
+    assert target_upload["missing"] == ["injection_visible_in_client"]
+    assert target_upload["evidence"]["ready_for_uploaded_seeding"] is False
+    assert target_upload["evidence"]["injection_visible_in_client"] is False
+    assert target_upload["evidence"]["injection_verified"] is True
+
+
 def test_uploaded_torrent_download_missing_is_prioritized_before_injection_resume() -> None:
     pipeline_download_missing = ptcli_cli._pipeline_summary_preferred_stages(["target.downloaded", "target.injected"])
     pipeline_hash_missing = ptcli_cli._pipeline_summary_preferred_stages(["target.uploaded_torrent_hash", "target.injected"])

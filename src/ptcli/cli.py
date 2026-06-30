@@ -3457,8 +3457,9 @@ def _summary_completion_matrix(
                 "completion_complete": target_completion.get("complete"),
                 "ready_for_uploaded_seeding": ready_for_uploaded_seeding,
                 "closure_ready": closure_target.get("ready"),
-                "uploaded_wait_evidence": closure_target.get("uploaded_wait_evidence") or review_target.get("uploaded_wait_evidence"),
-                "injection_verified": closure_target.get("injection_verified") or review_target.get("injection_verified"),
+                "uploaded_wait_evidence": _first_bool_value(closure_target.get("uploaded_wait_evidence"), review_target.get("uploaded_wait_evidence")),
+                "injection_visible_in_client": _first_bool_value(closure_target.get("injection_visible_in_client"), review_target.get("injection_visible_in_client")),
+                "injection_verified": _first_bool_value(closure_target.get("injection_verified"), review_target.get("injection_verified")),
             },
         ),
         "qbit_wait": _completion_domain(
@@ -3467,7 +3468,7 @@ def _summary_completion_matrix(
             {
                 "mismatch": bool(qbit_wait_mismatches),
                 "source_wait_evidence": closure_source.get("wait_evidence"),
-                "uploaded_wait_evidence": closure_target.get("uploaded_wait_evidence") or review_target.get("uploaded_wait_evidence"),
+                "uploaded_wait_evidence": _first_bool_value(closure_target.get("uploaded_wait_evidence"), review_target.get("uploaded_wait_evidence")),
             },
         ),
     }
@@ -3552,6 +3553,9 @@ def _rules_matrix_ready(closure_target: dict[str, Any], review_target: dict[str,
 
 def _target_upload_matrix_ready(target_upload_diagnostics: dict[str, Any], closure_target: dict[str, Any], review_target: dict[str, Any]) -> bool | None:
     completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
+    ready_for_uploaded_seeding = _target_upload_ready_for_uploaded_seeding(target_upload_diagnostics, closure_target, review_target)
+    if isinstance(ready_for_uploaded_seeding, bool):
+        return ready_for_uploaded_seeding
     if target_upload_diagnostics.get("present"):
         return bool(completion.get("complete"))
     if closure_target or review_target:
@@ -3564,10 +3568,11 @@ def _target_upload_ready_for_uploaded_seeding(target_upload_diagnostics: dict[st
     if isinstance(ready, bool):
         return ready
     target_ready = closure_target.get("ready")
-    uploaded_wait_evidence = closure_target.get("uploaded_wait_evidence") or review_target.get("uploaded_wait_evidence")
-    injection_verified = closure_target.get("injection_verified") or review_target.get("injection_verified")
-    if any(isinstance(value, bool) for value in (target_ready, uploaded_wait_evidence, injection_verified)):
-        return bool(target_ready and uploaded_wait_evidence and injection_verified)
+    uploaded_wait_evidence = _first_bool_value(closure_target.get("uploaded_wait_evidence"), review_target.get("uploaded_wait_evidence"))
+    injection_visible = _first_bool_value(closure_target.get("injection_visible_in_client"), review_target.get("injection_visible_in_client"))
+    injection_verified = _first_bool_value(closure_target.get("injection_verified"), review_target.get("injection_verified"))
+    if any(isinstance(value, bool) for value in (target_ready, uploaded_wait_evidence, injection_visible, injection_verified)):
+        return bool(target_ready and uploaded_wait_evidence and injection_visible and injection_verified)
     return None
 
 
@@ -3576,7 +3581,7 @@ def _target_upload_matrix_missing(target_upload_diagnostics: dict[str, Any], clo
     missing = _string_list(completion.get("missing"))
     if target_upload_diagnostics.get("present"):
         return missing
-    for key in ("ready", "hash_consistent", "duplicate_clean", "uploaded_wait_evidence", "injection_verified"):
+    for key in ("ready", "hash_consistent", "duplicate_clean", "uploaded_wait_evidence", "injection_visible_in_client", "injection_verified"):
         if closure_target.get(key) is False or review_target.get(key) is False:
             _append_unique_string(missing, key)
     return missing
@@ -4334,6 +4339,19 @@ def _summary_qbit_wait_from(container: dict[str, Any], fallback_key: str) -> dic
     }
 
 
+def _summary_qbit_injection_visible(*containers: dict[str, Any]) -> bool | None:
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        if isinstance(container.get("injection_visible_in_client"), bool):
+            return container["injection_visible_in_client"]
+        qbit_closure = container.get("qbit_closure") if isinstance(container.get("qbit_closure"), dict) else {}
+        injection = qbit_closure.get("injection") if isinstance(qbit_closure.get("injection"), dict) else container.get("injected_torrent")
+        if isinstance(injection, dict):
+            return _injected_torrent_visible(injection)
+    return None
+
+
 def _summary_qbit_wait_retry_hints(qbit_wait_diagnostics: dict[str, Any]) -> dict[str, Any]:
     hints: dict[str, Any] = {}
     for scope, diagnostics in qbit_wait_diagnostics.items():
@@ -4447,6 +4465,7 @@ def _closure_status_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "mode": evidence_source.get("mode"),
             "hash_consistent": bool(closure_source.get("hash_consistent") or evidence_source.get("hash_consistent")),
             "wait_evidence": _wait_result_completed(closure_source.get("source_wait")) or bool(evidence_source.get("source_wait_evidence")),
+            "injection_visible_in_client": _summary_qbit_injection_visible(closure_source, evidence_source),
             "injection_verified": bool(closure_source.get("injection_verified") or evidence_source.get("injection_verified")),
         },
         "target": {
@@ -4467,6 +4486,7 @@ def _closure_status_summary(payload: dict[str, Any]) -> dict[str, Any]:
                 closure_target.get("rule_obligations") if isinstance(closure_target.get("rule_obligations"), dict) else evidence_target.get("rule_obligations")
             ),
             "uploaded_wait_evidence": _wait_result_completed(closure_target.get("uploaded_wait")) or bool(evidence_target.get("uploaded_wait_evidence")),
+            "injection_visible_in_client": _summary_qbit_injection_visible(closure_target, evidence_target),
             "injection_verified": bool(closure_target.get("injection_verified") or evidence_target.get("injection_verified")),
         },
     }
