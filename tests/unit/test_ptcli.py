@@ -2342,6 +2342,73 @@ def test_target_package_material_recovery_missing_includes_recovery_plan_domains
     assert "--mediainfo-file" not in flags
 
 
+def test_target_package_material_recovery_missing_includes_target_material_chain() -> None:
+    artifacts = {
+        "target_material_chain": {
+            "ready": False,
+            "chains": {
+                "metadata_chain": {"ready": False, "missing": ["metadata.tmdb", "metadata.ptgen_description"]},
+                "media_info_chain": {"ready": False, "missing": ["assets.mediainfo_or_bdinfo"]},
+                "screenshot_chain": {"ready": False, "missing": ["assets.screenshots", "assets.image_host_uploads", "description.screenshot_coverage"]},
+            },
+        }
+    }
+
+    missing = ptcli_cli._target_package_material_recovery_missing(artifacts)
+    flags = ptcli_cli._target_package_material_auto_flags(artifacts)
+    args = ptcli_cli._target_package_material_resume_args({}, {}, {"screenshot_count": 3, "image_host": "ptpimg"}, artifacts)
+
+    assert missing == ["metadata.tmdb", "metadata.ptgen_description", "assets.mediainfo_or_bdinfo", "assets.screenshots", "assets.image_host_uploads", "description.screenshot_coverage"]
+    assert "--enrich-metadata" in flags
+    assert "--fetch-ptgen" in flags
+    assert "--generate-mediainfo" in flags
+    assert "--generate-screenshots" in flags
+    assert "--upload-screenshots" in flags
+    assert "--enrich-metadata" in args
+    assert "--fetch-ptgen" in args
+    assert "--generate-mediainfo" in args
+    assert "--generate-screenshots" in args
+    assert "--screenshot-count" in args
+    assert "3" in args
+    assert "--upload-screenshots" in args
+    assert "--image-host" in args
+    assert "ptpimg" in args
+
+
+def test_target_material_chain_recovery_missing_falls_back_by_chain_domain() -> None:
+    artifacts = {
+        "target_material_chain": {
+            "ready": False,
+            "chains": {
+                "metadata_chain": {"ready": False},
+                "media_info_chain": {"ready": False},
+                "screenshot_chain": {"ready": False},
+            },
+        }
+    }
+
+    missing = ptcli_cli._target_package_material_recovery_missing(artifacts)
+    flags = ptcli_cli._target_package_material_auto_flags(artifacts)
+
+    assert missing == [
+        "metadata.imdb_id",
+        "metadata.tmdb_id",
+        "metadata.douban",
+        "metadata.ptgen_description",
+        "assets.mediainfo_or_bdinfo",
+        "assets.screenshots",
+        "assets.image_host_uploads",
+        "description.screenshot_bbcode",
+        "description.screenshot_coverage",
+    ]
+    assert "--enrich-metadata" in flags
+    assert "--fetch-ptgen" in flags
+    assert "--generate-mediainfo" in flags
+    assert "--generate-screenshots" in flags
+    assert "--upload-screenshots" in flags
+    assert "--prepare-target" in flags
+
+
 def test_target_package_resume_args_use_material_recovery_plan_flags() -> None:
     args = ptcli_cli._target_package_material_resume_args(
         {},

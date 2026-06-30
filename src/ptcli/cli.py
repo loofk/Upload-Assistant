@@ -8500,12 +8500,33 @@ def _target_package_material_recovery_missing(artifacts: dict[str, Any] | None) 
     artifacts = artifacts if isinstance(artifacts, dict) else {}
     missing = _string_list(artifacts.get("target_materials_missing"))
     _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
+    _extend_unique_string(missing, _target_material_chain_recovery_missing(artifacts))
     _extend_unique_string(missing, _target_material_recovery_plan_missing(artifacts))
     _extend_unique_string(missing, _target_payload_review_description_recovery_missing(artifacts.get("target_payload_review")))
     preparation_audit = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
     _extend_unique_string(missing, _target_material_recovery_plan_missing(preparation_audit))
     _extend_unique_string(missing, _target_payload_review_description_recovery_missing(preparation_audit.get("payload_review")))
     _extend_unique_string(missing, _target_preflight_recovery_missing(artifacts.get("target_preflight_gates")))
+    return missing
+
+
+def _target_material_chain_recovery_missing(artifacts: dict[str, Any] | None) -> list[str]:
+    if not isinstance(artifacts, dict):
+        return []
+    material_chain = artifacts.get("target_material_chain") if isinstance(artifacts.get("target_material_chain"), dict) else {}
+    chains = material_chain.get("chains") if isinstance(material_chain.get("chains"), dict) else {}
+    fallback_missing = {
+        "metadata_chain": ["metadata.imdb_id", "metadata.tmdb_id", "metadata.douban", "metadata.ptgen_description"],
+        "media_info_chain": ["assets.mediainfo_or_bdinfo"],
+        "screenshot_chain": ["assets.screenshots", "assets.image_host_uploads", "description.screenshot_bbcode", "description.screenshot_coverage"],
+    }
+    missing: list[str] = []
+    for chain_name, fallback in fallback_missing.items():
+        chain = chains.get(chain_name) if isinstance(chains.get(chain_name), dict) else {}
+        if not chain or chain.get("ready") is True:
+            continue
+        chain_missing = _string_list(chain.get("missing")) or fallback
+        _extend_unique_string(missing, chain_missing)
     return missing
 
 
