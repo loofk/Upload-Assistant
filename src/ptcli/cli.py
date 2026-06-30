@@ -1049,6 +1049,31 @@ def _evidence_with_target_material_chain(evidence: Any, artifacts: dict[str, Any
     return enriched
 
 
+def _summary_target_material_chain(payload: dict[str, Any], artifacts: dict[str, Any]) -> dict[str, Any]:
+    material_chain = artifacts.get("target_material_chain") if isinstance(artifacts.get("target_material_chain"), dict) else {}
+    if material_chain:
+        return material_chain
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    evidence_target = evidence.get("target") if isinstance(evidence.get("target"), dict) else {}
+    return evidence_target.get("target_material_chain") if isinstance(evidence_target.get("target_material_chain"), dict) else {}
+
+
+def _target_material_chain_evidence(material_chain: Any) -> dict[str, Any]:
+    if not isinstance(material_chain, dict):
+        return {}
+    chains = material_chain.get("chains") if isinstance(material_chain.get("chains"), dict) else {}
+    evidence: dict[str, Any] = {}
+    for chain_name in ("metadata_chain", "media_info_chain", "screenshot_chain"):
+        chain = chains.get(chain_name) if isinstance(chains.get(chain_name), dict) else {}
+        if not chain:
+            continue
+        evidence[chain_name] = {
+            "ready": chain.get("ready") if isinstance(chain.get("ready"), bool) else None,
+            "missing": _string_list(chain.get("missing")),
+        }
+    return evidence
+
+
 def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
     materials = resume_state.get("materials") if isinstance(resume_state.get("materials"), dict) else {}
     recovery_hints = materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else []
@@ -3407,6 +3432,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     target_assets = target_materials.get("assets") if isinstance(target_materials.get("assets"), dict) else {}
     description_input_chain = target_materials.get("description") if isinstance(target_materials.get("description"), dict) else {}
     target_preparation_audit = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
+    target_material_chain = _summary_target_material_chain(payload, artifacts)
     disc_structure = target_assets.get("disc_structure") if isinstance(target_assets.get("disc_structure"), dict) else {}
     description = target_preparation_audit.get("description") if isinstance(target_preparation_audit.get("description"), dict) else {}
     target_payload_review = _summary_target_payload_review(artifacts, target_preparation_audit)
@@ -3472,13 +3498,15 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     description_evidence = (
         description.get("evidence")
         if isinstance(description.get("evidence"), dict)
-        else target_payload_description.get("evidence") if isinstance(target_payload_description.get("evidence"), dict) else {}
+        else target_payload_description.get("evidence")
+        if isinstance(target_payload_description.get("evidence"), dict)
+        else _target_material_chain_evidence(target_material_chain)
     )
     metadata_chain_evidence = description_evidence.get("metadata_chain") if isinstance(description_evidence.get("metadata_chain"), dict) else {}
     media_info_chain_evidence = description_evidence.get("media_info_chain") if isinstance(description_evidence.get("media_info_chain"), dict) else {}
     screenshot_chain_evidence = description_evidence.get("screenshot_chain") if isinstance(description_evidence.get("screenshot_chain"), dict) else {}
     return {
-        "present": bool(material_generation or target_materials or target_preparation_audit),
+        "present": bool(material_generation or target_materials or target_preparation_audit or target_material_chain),
         "generation_present": bool(material_generation),
         "target_materials_present": bool(target_materials),
         "generation_ready": all(bool(section.get("ok")) for section in sections.values()) if sections else None,
