@@ -1860,9 +1860,9 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
     enrich_metadata = _retorrent_execute_default(args.enrich_metadata, True)
     fetch_ptgen = _retorrent_execute_default(args.fetch_ptgen, True)
     generate_bdinfo = _retorrent_execute_default(args.generate_bdinfo, not bool(args.bdinfo_file))
-    generate_mediainfo = _retorrent_execute_default(args.generate_mediainfo, True)
-    generate_screenshots = _retorrent_execute_default(args.generate_screenshots, True)
-    upload_screenshots = _retorrent_execute_default(args.upload_screenshots, True)
+    generate_mediainfo = _retorrent_execute_default(args.generate_mediainfo, not bool(args.mediainfo_file or args.bdinfo_file))
+    generate_screenshots = _retorrent_execute_default(args.generate_screenshots, not bool(getattr(args, "screenshot_file", []) or []))
+    upload_screenshots = _retorrent_execute_default(args.upload_screenshots, not bool(args.image_host_file))
     return argparse.Namespace(
         command="pipeline",
         config=args.config,

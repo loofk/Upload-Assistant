@@ -1385,6 +1385,60 @@ async def test_retorrent_execute_defaults_to_export_target_torrent(monkeypatch) 
 
 
 @pytest.mark.asyncio
+async def test_retorrent_execute_uses_provided_material_files_without_default_generation(monkeypatch, tmp_path) -> None:
+    captured_args = {}
+
+    async def fake_pipeline_payload(args):
+        captured_args["args"] = args
+        return {
+            "status": "ok",
+            "ready": False,
+            "summary": {"blockers": ["blocked for inspection"]},
+            "closure": {"complete": False, "blockers": ["blocked for inspection"]},
+            "evidence": {},
+            "blockers": ["blocked for inspection"],
+            "resume_commands": [],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "pipeline_payload", fake_pipeline_payload)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "retorrent",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--execute",
+            "--accept-rules",
+            "--confirm-upload",
+            "--path",
+            "/downloads/Name",
+            "--mediainfo-file",
+            str(tmp_path / "MI_FULL_00.txt"),
+            "--screenshot-file",
+            str(tmp_path / "screen-1.png"),
+            "--image-host-file",
+            str(tmp_path / "image-host-uploads.json"),
+            "--json",
+        ]
+    )
+
+    await ptcli_cli.retorrent_payload(args)
+
+    pipeline_args = captured_args["args"]
+    assert pipeline_args.mediainfo_file == str(tmp_path / "MI_FULL_00.txt")
+    assert pipeline_args.screenshot_file == [str(tmp_path / "screen-1.png")]
+    assert pipeline_args.image_host_file == str(tmp_path / "image-host-uploads.json")
+    assert pipeline_args.generate_mediainfo is False
+    assert pipeline_args.generate_screenshots is False
+    assert pipeline_args.upload_screenshots is False
+    assert pipeline_args.generate_bdinfo is True
+
+
+@pytest.mark.asyncio
 async def test_retorrent_execute_can_disable_default_material_chain(monkeypatch) -> None:
     captured_args = {}
 
