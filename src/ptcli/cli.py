@@ -5031,6 +5031,8 @@ def _target_upload_summary_preferred_stages(missing_audit: list[str]) -> tuple[s
     preferred: list[str] = []
     if "target_preparation_ready" in missing_audit:
         preferred.append("resume-target-package")
+    if "uploaded_torrent_file" in missing_audit:
+        preferred.append("resume-uploaded-torrent-download")
     if any(name in missing_audit for name in ("injection_visible_in_client", "injection_verified", "uploaded_wait_evidence", "target_hash_consistent")):
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
     if "target_duplicate_clean" in missing_audit or "target_rule_obligations" in missing_audit:

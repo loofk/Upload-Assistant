@@ -6193,6 +6193,12 @@ def test_summary_check_prefers_uploaded_resume_for_target_visibility_artifact(tm
     assert "injection_visible_in_client" in payload["missing_artifacts"]
 
 
+def test_target_upload_summary_preferred_stages_download_uploaded_torrent_file_first() -> None:
+    stages = ptcli_cli._target_upload_summary_preferred_stages(["uploaded_torrent_file", "injection_verified", "uploaded_wait_evidence"])
+
+    assert stages[:2] == ("resume-uploaded-torrent-download", "resume-uploaded-torrent")
+
+
 def test_summary_check_reports_qbit_wait_request_mismatch(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
