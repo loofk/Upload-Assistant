@@ -1444,11 +1444,11 @@ def _target_preparation_missing_next_action(missing: str) -> str | None:
     normalized = _target_preparation_missing_key(missing)
     if normalized in {"description.ptgen_description", "metadata.ptgen_description"}:
         return "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package."
-    if normalized in {"metadata.imdb", "metadata.imdb_id", "description.external_ids.imdb"}:
+    if normalized in {"metadata.imdb", "metadata.imdb_id", "description.external_ids.imdb", "payload.imdb"}:
         return "Fetch IMDb metadata with --enrich-metadata or supply it with --metadata-file/--imdb-id, then rerun resume-target-package."
     if normalized in {"metadata.tmdb", "metadata.tmdb_id", "description.external_ids.tmdb"}:
         return "Fetch TMDb metadata with --enrich-metadata or supply it with --metadata-file/--tmdb-id, then rerun resume-target-package."
-    if normalized in {"metadata.douban", "metadata.douban_id", "metadata.douban_url", "description.external_ids.douban"}:
+    if normalized in {"metadata.douban", "metadata.douban_id", "metadata.douban_url", "description.external_ids.douban", "payload.douban"}:
         return "Fetch Douban metadata with --fetch-ptgen or supply it with --metadata-file/--douban-id/--douban-url, then rerun resume-target-package."
     if normalized.startswith("metadata.") or normalized.startswith("description.external_ids"):
         return "Fetch or supply IMDb/TMDb/Douban metadata with --enrich-metadata, --fetch-ptgen, --metadata-file, --imdb-id, --tmdb-id, or --douban-id, then rerun resume-target-package."
@@ -1525,7 +1525,7 @@ def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
             ["--enrich-metadata", "--fetch-ptgen"],
             ["--metadata-file"],
         )
-    if normalized in {"metadata.imdb", "metadata.imdb_id", "description.external_ids.imdb"}:
+    if normalized in {"metadata.imdb", "metadata.imdb_id", "description.external_ids.imdb", "payload.imdb"}:
         return _material_recovery_hint(
             "metadata.imdb_id",
             "Fetch or supply IMDb metadata before regenerating the MTEAM package.",
@@ -1539,7 +1539,7 @@ def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
             ["--enrich-metadata"],
             ["--metadata-file", "--tmdb-id"],
         )
-    if normalized in {"metadata.douban", "metadata.douban_id", "metadata.douban_url", "description.external_ids.douban"}:
+    if normalized in {"metadata.douban", "metadata.douban_id", "metadata.douban_url", "description.external_ids.douban", "payload.douban"}:
         return _material_recovery_hint(
             "metadata.douban",
             "Fetch or supply Douban metadata before regenerating the MTEAM package.",
@@ -8025,6 +8025,19 @@ def _description_evidence_recovery_missing(evidence: Any) -> list[str]:
                     _append_unique_string(missing, f"description.external_ids.{normalized}")
         else:
             _append_unique_string(missing, "description.external_ids")
+    metadata_chain = evidence.get("metadata_chain") if isinstance(evidence.get("metadata_chain"), dict) else {}
+    if metadata_chain.get("ready") is False:
+        items = metadata_chain.get("items") if isinstance(metadata_chain.get("items"), dict) else {}
+        for name in ("imdb", "tmdb", "douban"):
+            item = items.get(name) if isinstance(items.get(name), dict) else {}
+            if not item or item.get("ready") is True:
+                continue
+            if not item.get("expected_link"):
+                _append_unique_string(missing, f"metadata.{name if name != 'imdb' else 'imdb_id'}")
+            if item.get("description_link") != item.get("expected_link"):
+                _append_unique_string(missing, f"description.external_ids.{name}")
+            if item.get("payload_required") and item.get("payload_value") != item.get("expected_link"):
+                _append_unique_string(missing, f"payload.{name}")
     mediainfo = evidence.get("mediainfo_or_bdinfo") if isinstance(evidence.get("mediainfo_or_bdinfo"), dict) else {}
     if mediainfo.get("ready") is False:
         _append_unique_string(missing, "description.mediainfo_or_bdinfo")

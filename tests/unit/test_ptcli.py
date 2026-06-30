@@ -2147,6 +2147,55 @@ def test_target_upload_payload_recovery_summary_uses_media_info_chain_evidence()
     assert any("Generate or provide MediaInfo/BDInfo" in action for action in recovery["next_actions"])
 
 
+def test_target_upload_payload_recovery_summary_uses_metadata_chain_evidence() -> None:
+    recovery = ptcli_cli._target_upload_payload_recovery_summary(
+        {
+            "target_payload_review": {
+                "description": {
+                    "evidence": {
+                        "metadata_chain": {
+                            "ready": False,
+                            "items": {
+                                "imdb": {
+                                    "ready": False,
+                                    "expected_link": "https://www.imdb.com/title/tt1234567",
+                                    "description_link": None,
+                                    "payload_value": None,
+                                    "payload_required": True,
+                                },
+                                "tmdb": {
+                                    "ready": False,
+                                    "expected_link": None,
+                                    "description_link": None,
+                                    "payload_value": None,
+                                    "payload_required": False,
+                                },
+                                "douban": {
+                                    "ready": False,
+                                    "expected_link": "https://movie.douban.com/subject/1291546/",
+                                    "description_link": "https://movie.douban.com/subject/1291546/",
+                                    "payload_value": None,
+                                    "payload_required": True,
+                                },
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+    assert recovery["recovery_missing"] == [
+        "description.external_ids.imdb",
+        "payload.imdb",
+        "metadata.tmdb",
+        "payload.douban",
+    ]
+    assert any("Fetch IMDb metadata" in action for action in recovery["next_actions"])
+    assert any("Fetch TMDb metadata" in action for action in recovery["next_actions"])
+    assert any("Fetch Douban metadata" in action for action in recovery["next_actions"])
+
+
 def test_target_package_material_auto_flags_include_preparation_payload_review_completeness() -> None:
     flags = ptcli_cli._target_package_material_auto_flags(
         {
@@ -17808,6 +17857,35 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
                 "imdb": "https://www.imdb.com/title/tt1234567",
                 "tmdb": "https://www.themoviedb.org/movie/999",
                 "douban": "https://movie.douban.com/subject/1291546/",
+            },
+        },
+        "metadata_chain": {
+            "ready": True,
+            "items": {
+                "imdb": {
+                    "ready": True,
+                    "source_value": 1234567,
+                    "expected_link": "https://www.imdb.com/title/tt1234567",
+                    "description_link": "https://www.imdb.com/title/tt1234567",
+                    "payload_value": "https://www.imdb.com/title/tt1234567",
+                    "payload_required": True,
+                },
+                "tmdb": {
+                    "ready": True,
+                    "source_value": 999,
+                    "expected_link": "https://www.themoviedb.org/movie/999",
+                    "description_link": "https://www.themoviedb.org/movie/999",
+                    "payload_value": None,
+                    "payload_required": False,
+                },
+                "douban": {
+                    "ready": True,
+                    "source_value": "https://movie.douban.com/subject/1291546/",
+                    "expected_link": "https://movie.douban.com/subject/1291546/",
+                    "description_link": "https://movie.douban.com/subject/1291546/",
+                    "payload_value": "https://movie.douban.com/subject/1291546/",
+                    "payload_required": True,
+                },
             },
         },
         "mediainfo_or_bdinfo": {"ready": True, "source": str(mediainfo), "length": len(mediainfo.read_text(encoding="utf-8"))},

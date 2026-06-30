@@ -1619,6 +1619,7 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
             "evidence": _mteam_description_evidence_summary(
                 content,
                 metadata,
+                form_fields=form_fields,
                 media_info_source=media_info_source,
                 media_info_length=media_info_length,
                 payload_media_info_source=payload_media_info.get("source"),
@@ -1651,6 +1652,7 @@ def _mteam_description_evidence_summary(
     content: dict[str, Any],
     metadata: dict[str, Any],
     *,
+    form_fields: dict[str, Any],
     media_info_source: str | None,
     media_info_length: int,
     payload_media_info_source: Any,
@@ -1661,6 +1663,7 @@ def _mteam_description_evidence_summary(
     image_host_urls: list[str],
 ) -> dict[str, Any]:
     external_id_readiness = content.get("external_id_readiness") if isinstance(content.get("external_id_readiness"), dict) else {}
+    external_links = content.get("external_links") if isinstance(content.get("external_links"), dict) else {}
     description_urls = screenshot_coverage.get("description_urls") if isinstance(screenshot_coverage.get("description_urls"), list) else []
     expected_urls = screenshot_coverage.get("expected_urls") if isinstance(screenshot_coverage.get("expected_urls"), list) else []
     missing_urls = screenshot_coverage.get("missing_urls") if isinstance(screenshot_coverage.get("missing_urls"), list) else []
@@ -1677,7 +1680,11 @@ def _mteam_description_evidence_summary(
             "ready": all(external_id_readiness.get(name) is True for name in ("imdb", "tmdb", "douban")),
             "readiness": external_id_readiness,
             "missing": [name for name in ("imdb", "tmdb", "douban") if external_id_readiness.get(name) is not True],
-            "links": content.get("external_links") if isinstance(content.get("external_links"), dict) else {},
+            "links": external_links,
+        },
+        "metadata_chain": {
+            "ready": all(_mteam_metadata_chain_item(name, metadata, external_links, form_fields).get("ready") is True for name in ("imdb", "tmdb", "douban")),
+            "items": {name: _mteam_metadata_chain_item(name, metadata, external_links, form_fields) for name in ("imdb", "tmdb", "douban")},
         },
         "mediainfo_or_bdinfo": {
             "ready": bool(content.get("has_mediainfo_or_bdinfo")),
@@ -1726,6 +1733,54 @@ def _mteam_description_evidence_summary(
             "missing_urls": missing_urls,
         },
     }
+
+
+def _mteam_metadata_chain_item(name: str, metadata: dict[str, Any], external_links: dict[str, Any], form_fields: dict[str, Any]) -> dict[str, Any]:
+    expected = _mteam_metadata_expected_link(name, metadata)
+    description_link = external_links.get(name)
+    payload_value = _mteam_metadata_payload_value(name, form_fields)
+    payload_required = name in {"imdb", "douban"}
+    payload_ready = not payload_required or (payload_value == expected and bool(payload_value))
+    return {
+        "ready": bool(expected and description_link == expected and payload_ready),
+        "source_value": _mteam_metadata_source_value(name, metadata),
+        "expected_link": expected,
+        "description_link": description_link,
+        "payload_value": payload_value,
+        "payload_required": payload_required,
+    }
+
+
+def _mteam_metadata_source_value(name: str, metadata: dict[str, Any]) -> Any:
+    if name == "imdb":
+        return metadata.get("imdb_id")
+    if name == "tmdb":
+        return metadata.get("tmdb_id")
+    if name == "douban":
+        return metadata.get("douban_url") or metadata.get("douban_id")
+    return None
+
+
+def _mteam_metadata_expected_link(name: str, metadata: dict[str, Any]) -> str | None:
+    if name == "imdb":
+        imdb_id = _normalize_imdb_id(metadata.get("imdb_id"))
+        return f"https://www.imdb.com/title/tt{imdb_id}" if imdb_id else None
+    if name == "tmdb":
+        tmdb_id = metadata.get("tmdb_id")
+        return f"https://www.themoviedb.org/movie/{tmdb_id}" if tmdb_id else None
+    if name == "douban":
+        douban_url = metadata.get("douban_url")
+        if douban_url:
+            return str(douban_url)
+        douban_id = metadata.get("douban_id")
+        return f"https://movie.douban.com/subject/{douban_id}/" if douban_id else None
+    return None
+
+
+def _mteam_metadata_payload_value(name: str, form_fields: dict[str, Any]) -> str | None:
+    if name in {"imdb", "douban"} and form_fields.get(name):
+        return str(form_fields[name])
+    return None
 
 
 def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_length: int, materials: dict[str, Any] | None = None) -> list[dict[str, Any]]:
