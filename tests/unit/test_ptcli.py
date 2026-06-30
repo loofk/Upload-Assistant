@@ -18971,6 +18971,80 @@ def test_target_upload_summary_exposes_target_preparation_audit(tmp_path) -> Non
     assert summary_payload["resume_state"]["artifacts"]["target_preparation_ready"] is True
 
 
+@pytest.mark.parametrize("source_tracker", ["U2", "CHD"])
+def test_target_upload_preflight_chain_evidence_ready_for_u2_and_chd_to_mteam(tmp_path, source_tracker: str) -> None:
+    source_info = {
+        "tracker": source_tracker,
+        "torrent_id": "60635" if source_tracker == "U2" else "2468",
+        "name": f"{source_tracker}.Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+        "torrenthash": "a" * 40 if source_tracker == "U2" else "b" * 40,
+        "description_length": 100,
+    }
+    package = write_material_ready_mteam_package(source_info, tmp_path, output_dir=str(tmp_path / "target"))
+    torrent_file = make_mteam_safe_torrent(tmp_path, f"{source_tracker.lower()}-upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "ready"
+    assert preflight["upload_gate"]["ready"] is True
+    description = preflight["upload_payload"]["review"]["description"]
+    evidence = description["evidence"]
+    assert description["external_id_missing"] == []
+    assert description["has_mediainfo_or_bdinfo"] is True
+    assert description["has_screenshot_bbcode"] is True
+    assert evidence["metadata_chain"]["ready"] is True
+    assert evidence["media_info_chain"]["ready"] is True
+    assert evidence["screenshot_chain"]["ready"] is True
+    assert evidence["media_info_chain"]["payload_source"].endswith("MI_FULL_00.txt")
+    assert evidence["media_info_chain"]["payload_length"] > 0
+    assert evidence["screenshot_chain"]["local_screenshot_count"] == 1
+    assert evidence["screenshot_chain"]["image_host_count"] == 1
+    assert evidence["screenshot_chain"]["description_image_count"] == 1
+    metadata_items = evidence["metadata_chain"]["items"]
+    assert metadata_items["imdb"]["ready"] is True
+    assert metadata_items["tmdb"]["ready"] is True
+    assert metadata_items["douban"]["ready"] is True
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--package-dir",
+            package["package_dir"],
+            "--torrent-file",
+            str(torrent_file),
+            "--execute",
+            "--confirm-upload",
+            "--download-uploaded-torrent",
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+    )
+    summary_file = ptcli_cli._write_target_upload_summary({"status": "uploaded", "uploaded_torrent_id": "999"}, preflight, args, package["package_dir"])
+    summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+
+    assert summary_payload["summary"]["target_preparation_ready"] is True
+    assert summary_payload["material_diagnostics"]["ready_for_mteam_upload"] is True
+    assert summary_payload["material_diagnostics"]["critical_path"]["ready"] is True
+    readiness = summary_payload["material_diagnostics"]["readiness"]
+    assert readiness["material_description_metadata_chain_ready"] is True
+    assert readiness["material_description_metadata_chain_missing"] == []
+    assert readiness["material_description_media_info_chain_ready"] is True
+    assert readiness["material_description_media_info_chain_missing"] == []
+    assert readiness["material_description_screenshot_chain_ready"] is True
+    assert readiness["material_description_screenshot_chain_missing"] == []
+    assert summary_payload["resume_state"]["artifacts"]["target_preparation_ready"] is True
+
+
 def test_target_upload_retry_command_uses_inferred_uploaded_save_path(tmp_path) -> None:
     source_info = {
         "tracker": "U2",

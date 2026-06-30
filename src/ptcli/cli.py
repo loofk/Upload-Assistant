@@ -3195,6 +3195,14 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         description_ready=target_preparation_audit.get("description_ready"),
         material_missing=material_missing,
     )
+    description_evidence = (
+        description.get("evidence")
+        if isinstance(description.get("evidence"), dict)
+        else target_payload_description.get("evidence") if isinstance(target_payload_description.get("evidence"), dict) else {}
+    )
+    metadata_chain_evidence = description_evidence.get("metadata_chain") if isinstance(description_evidence.get("metadata_chain"), dict) else {}
+    media_info_chain_evidence = description_evidence.get("media_info_chain") if isinstance(description_evidence.get("media_info_chain"), dict) else {}
+    screenshot_chain_evidence = description_evidence.get("screenshot_chain") if isinstance(description_evidence.get("screenshot_chain"), dict) else {}
     return {
         "present": bool(material_generation or target_materials or target_preparation_audit),
         "generation_present": bool(material_generation),
@@ -3223,6 +3231,14 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "bdinfo_required": bdinfo_required,
         "media_info_requirement": "bdinfo" if bdinfo_required else "mediainfo_or_bdinfo",
         "metadata_fields": metadata_fields,
+        "readiness": {
+            "material_description_metadata_chain_ready": metadata_chain_evidence.get("ready") if isinstance(metadata_chain_evidence.get("ready"), bool) else None,
+            "material_description_metadata_chain_missing": _description_chain_recovery_missing("metadata_chain", metadata_chain_evidence),
+            "material_description_media_info_chain_ready": media_info_chain_evidence.get("ready") if isinstance(media_info_chain_evidence.get("ready"), bool) else None,
+            "material_description_media_info_chain_missing": _description_chain_recovery_missing("media_info_chain", media_info_chain_evidence),
+            "material_description_screenshot_chain_ready": screenshot_chain_evidence.get("ready") if isinstance(screenshot_chain_evidence.get("ready"), bool) else None,
+            "material_description_screenshot_chain_missing": _description_chain_recovery_missing("screenshot_chain", screenshot_chain_evidence),
+        },
         "description": {
             "ready": target_preparation_audit.get("description_ready"),
             "path": description.get("path"),
@@ -3235,11 +3251,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "external_id_readiness": description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {},
             "external_id_missing": _string_list(description.get("external_id_missing")),
             "external_links": description.get("external_links") if isinstance(description.get("external_links"), dict) else {},
-            "evidence": (
-                description.get("evidence")
-                if isinstance(description.get("evidence"), dict)
-                else target_payload_description.get("evidence") if isinstance(target_payload_description.get("evidence"), dict) else {}
-            ),
+            "evidence": description_evidence,
             "has_mediainfo_or_bdinfo": description.get("has_mediainfo_or_bdinfo"),
             "media_info": description.get("media_info") if isinstance(description.get("media_info"), dict) else {},
             "has_screenshot_bbcode": description.get("has_screenshot_bbcode"),
