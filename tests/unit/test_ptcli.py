@@ -7455,6 +7455,72 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_FIRST_REJECTED_COMMAND_BLOCKER='ptcli subcommand inspect is not in the summary-check auto-run allowlist'\n" in out
 
 
+def test_summary_check_exposes_source_info_diagnostics(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    source_info_diagnostics = {
+        "present": True,
+        "tracker": "U2",
+        "source_torrent_id": "60635",
+        "source_info_adapter": "generic_details_cookie",
+        "source_download_adapter": "nexusphp_passkey",
+        "has_signal": False,
+        "signal_fields": {"imdb_id": False, "tmdb_id": False, "name": False, "torrenthash": False, "description": False, "douban": False},
+        "missing": ["source_info.imdb_id", "source_info.tmdb_id", "source_info.name", "source_info.torrenthash", "source_info.description", "source_info.douban"],
+        "credential_ready": False,
+        "credential_checks": [{"name": "U2.cookie_file", "type": "cookie_file", "ok": False, "path": "data/cookies/U2.txt"}],
+        "blockers": [
+            "Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
+            "Source cookie file is missing: data/cookies/U2.txt",
+        ],
+        "next_actions": [
+            "Create data/cookies/U2.txt from a logged-in browser session, then rerun source-info or source-download.",
+            "Verify the source torrent id/details URL and tracker session, then rerun source-info before downloading.",
+        ],
+    }
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["source-info: Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data."],
+                "stages": [
+                    {
+                        "stage": "source-info",
+                        "ok": False,
+                        "error": "Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
+                        "result": {"tracker": "U2", "torrent_id": "60635", "source_info_diagnostics": source_info_diagnostics},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["source_info_diagnostics"] == source_info_diagnostics
+    shell_fields = ptcli_cli._summary_check_source_info_shell_fields(payload["source_info_diagnostics"])
+    assert shell_fields["PTCLI_SOURCE_INFO_PRESENT"] == "1"
+    assert shell_fields["PTCLI_SOURCE_INFO_TRACKER"] == "U2"
+    assert shell_fields["PTCLI_SOURCE_INFO_HAS_SIGNAL"] == "0"
+    assert shell_fields["PTCLI_SOURCE_INFO_CREDENTIAL_READY"] == "0"
+    assert shell_fields["PTCLI_SOURCE_INFO_FIRST_CREDENTIAL_PATH"] == "data/cookies/U2.txt"
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_SOURCE_INFO_PRESENT=1\n" in out
+    assert "export PTCLI_SOURCE_INFO_TRACKER=U2\n" in out
+    assert "export PTCLI_SOURCE_INFO_HAS_SIGNAL=0\n" in out
+    assert "export PTCLI_SOURCE_INFO_CREDENTIAL_READY=0\n" in out
+    assert "export PTCLI_SOURCE_INFO_FIRST_CREDENTIAL_PATH=data/cookies/U2.txt\n" in out
+
+
 def test_summary_check_print_shell_exports_qbit_wait_mismatch(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(

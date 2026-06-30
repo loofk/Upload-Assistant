@@ -3424,6 +3424,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     qbit_wait_mismatches = _summary_qbit_wait_mismatches(qbit_wait_diagnostics)
     qbit_wait_retry_hints = _summary_qbit_wait_retry_hints(qbit_wait_diagnostics)
     flow_diagnostics = _summary_flow_diagnostics(payload)
+    source_info_diagnostics = _summary_source_info_diagnostics(payload)
     material_diagnostics = _summary_material_diagnostics(payload)
     target_upload_diagnostics = _summary_target_upload_diagnostics(payload)
     target_preflight_diagnostics = _summary_target_preflight_diagnostics(payload, target_upload_diagnostics)
@@ -3448,6 +3449,7 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "target_material_chain": target_material_chain,
         "flow_diagnostics": flow_diagnostics,
         "credential_requirements": flow_diagnostics.get("credential_requirements", []),
+        "source_info_diagnostics": source_info_diagnostics,
         "material_diagnostics": material_diagnostics,
         "target_upload_diagnostics": target_upload_diagnostics,
         "target_preflight_diagnostics": target_preflight_diagnostics,
@@ -3462,6 +3464,21 @@ def _summary_check_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "source_mode": closure_modes.get("source"),
         "target_mode": closure_modes.get("target"),
     }
+
+
+def _summary_source_info_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
+    for candidate in (
+        payload.get("source_info_diagnostics"),
+        payload.get("source", {}).get("source_info_diagnostics") if isinstance(payload.get("source"), dict) else None,
+    ):
+        if isinstance(candidate, dict):
+            return {"present": True, **candidate}
+    source_info_stage = _find_stage(payload.get("stages") if isinstance(payload.get("stages"), list) else [], "source-info")
+    result = source_info_stage.get("result") if isinstance(source_info_stage, dict) and isinstance(source_info_stage.get("result"), dict) else {}
+    diagnostics = result.get("source_info_diagnostics") if isinstance(result.get("source_info_diagnostics"), dict) else {}
+    if diagnostics:
+        return {"present": True, **diagnostics}
+    return {"present": False}
 
 
 def _summary_target_preflight_diagnostics(payload: dict[str, Any], target_upload_diagnostics: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -10927,6 +10944,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     closure_status = payload.get("closure_status") if isinstance(payload.get("closure_status"), dict) else {}
     closure_source = closure_status.get("source") if isinstance(closure_status.get("source"), dict) else {}
     closure_target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
+    source_info_diagnostics = payload.get("source_info_diagnostics") if isinstance(payload.get("source_info_diagnostics"), dict) else {}
     material_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
     target_material_chain = payload.get("target_material_chain") if isinstance(payload.get("target_material_chain"), dict) else {}
     target_upload_diagnostics = payload.get("target_upload_diagnostics") if isinstance(payload.get("target_upload_diagnostics"), dict) else {}
@@ -11006,6 +11024,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     }
     fields.update(_summary_check_closure_review_shell_fields(closure_review))
     fields.update(_summary_check_completion_matrix_shell_fields(completion_matrix))
+    fields.update(_summary_check_source_info_shell_fields(source_info_diagnostics))
     fields.update(_summary_check_target_material_chain_shell_fields(target_material_chain))
     fields.update(_summary_check_material_shell_fields(material_diagnostics))
     fields.update(_summary_check_target_preflight_shell_fields(target_preflight_diagnostics))
@@ -11219,6 +11238,30 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH": uploaded_wait_retry.get("suggested_torrent_hash"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH": uploaded_wait_retry.get("suggested_content_path"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH": uploaded_wait_retry.get("suggested_save_path"),
+    }
+
+
+def _summary_check_source_info_shell_fields(source_info_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    signal_fields = source_info_diagnostics.get("signal_fields") if isinstance(source_info_diagnostics.get("signal_fields"), dict) else {}
+    credential_checks = source_info_diagnostics.get("credential_checks") if isinstance(source_info_diagnostics.get("credential_checks"), list) else []
+    first_credential = next((check for check in credential_checks if isinstance(check, dict)), {})
+    return {
+        "PTCLI_SOURCE_INFO_PRESENT": _shell_bool(source_info_diagnostics.get("present")) if "present" in source_info_diagnostics else None,
+        "PTCLI_SOURCE_INFO_TRACKER": source_info_diagnostics.get("tracker"),
+        "PTCLI_SOURCE_INFO_TORRENT_ID": source_info_diagnostics.get("source_torrent_id"),
+        "PTCLI_SOURCE_INFO_ADAPTER": source_info_diagnostics.get("source_info_adapter"),
+        "PTCLI_SOURCE_DOWNLOAD_ADAPTER": source_info_diagnostics.get("source_download_adapter"),
+        "PTCLI_SOURCE_INFO_HAS_SIGNAL": _shell_bool(source_info_diagnostics.get("has_signal")) if source_info_diagnostics.get("has_signal") is not None else None,
+        "PTCLI_SOURCE_INFO_SIGNAL_FIELDS": json.dumps(signal_fields, ensure_ascii=False) if signal_fields else None,
+        "PTCLI_SOURCE_INFO_MISSING": ",".join(_string_list(source_info_diagnostics.get("missing"))),
+        "PTCLI_SOURCE_INFO_CREDENTIAL_READY": _shell_bool(source_info_diagnostics.get("credential_ready")) if source_info_diagnostics.get("credential_ready") is not None else None,
+        "PTCLI_SOURCE_INFO_CREDENTIAL_CHECK_COUNT": len(credential_checks),
+        "PTCLI_SOURCE_INFO_FIRST_CREDENTIAL_NAME": first_credential.get("name"),
+        "PTCLI_SOURCE_INFO_FIRST_CREDENTIAL_TYPE": first_credential.get("type"),
+        "PTCLI_SOURCE_INFO_FIRST_CREDENTIAL_OK": _shell_bool(first_credential.get("ok")) if first_credential.get("ok") is not None else None,
+        "PTCLI_SOURCE_INFO_FIRST_CREDENTIAL_PATH": first_credential.get("path"),
+        "PTCLI_SOURCE_INFO_BLOCKERS": "|".join(_string_list(source_info_diagnostics.get("blockers"))),
+        "PTCLI_SOURCE_INFO_NEXT_ACTIONS": " | ".join(_string_list(source_info_diagnostics.get("next_actions"))),
     }
 
 
