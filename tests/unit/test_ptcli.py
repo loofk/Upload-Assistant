@@ -5352,10 +5352,15 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert json.loads(shell_fields["PTCLI_MATERIAL_DESCRIPTION_EVIDENCE"]) == description_evidence
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY"] == "0"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING"] == "description.external_ids.imdb,payload.imdb,metadata.tmdb"
+    assert "Fetch IMDb metadata" in shell_fields["PTCLI_MATERIAL_DESCRIPTION_METADATA_CHAIN_NEXT_ACTIONS"]
+    assert "Fetch TMDb metadata" in shell_fields["PTCLI_MATERIAL_DESCRIPTION_METADATA_CHAIN_NEXT_ACTIONS"]
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY"] == "0"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING"] == "assets.mediainfo_or_bdinfo,description.mediainfo_or_bdinfo,payload.mediainfo"
+    assert "Generate or provide MediaInfo/BDInfo" in shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_NEXT_ACTIONS"]
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY"] == "0"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING"] == "assets.screenshots,assets.image_host_uploads,description.screenshot_bbcode,description.screenshot_coverage"
+    assert "Generate or provide screenshots" in shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS"]
+    assert "Upload screenshots to an image host" in shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS"]
 
     matrix = ptcli_cli._summary_completion_matrix(
         flow_diagnostics={},
