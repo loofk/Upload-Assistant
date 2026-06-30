@@ -1912,7 +1912,7 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
         existing_file_options = _string_list(hint.get("existing_file_options"))
         existing_file_values = _argv_option_values(argv, existing_file_options)
         missing_existing_file_paths = _missing_existing_file_paths(_file_option_values(existing_file_values))
-        invalid_existing_option_values = _invalid_material_option_values(existing_file_values)
+        invalid_existing_option_values = _invalid_material_option_values(existing_file_values, hint.get("key"))
         existing_file_option_present = bool(existing_file_values) and not missing_existing_file_paths and not invalid_existing_option_values
         missing_command_flags = [flag for flag in command_flags if flag not in argv]
         command_covers_hint = bool(command_entry) and (existing_file_option_present or not missing_command_flags)
@@ -1972,13 +1972,19 @@ def _is_material_file_option(option: str) -> bool:
     return option.endswith("-file")
 
 
-def _invalid_material_option_values(option_values: dict[str, list[str]]) -> dict[str, list[str]]:
+def _invalid_material_option_values(option_values: dict[str, list[str]], recovery_key: Any = None) -> dict[str, list[str]]:
     invalid: dict[str, list[str]] = {}
     for option, values in option_values.items():
         for value in values:
-            if not _material_option_value_valid(option, value):
+            if not _material_option_value_valid(option, value) or not _material_option_value_covers_recovery_key(option, value, recovery_key):
                 invalid.setdefault(option, []).append(value)
     return invalid
+
+
+def _invalid_material_option_values_label(option_values: dict[str, list[str]], recovery_key: Any = None) -> str:
+    if any(option == "--metadata-file" and _material_option_value_valid(option, value) and not _material_option_value_covers_recovery_key(option, value, recovery_key) for option, values in option_values.items() for value in values):
+        return "option value that does not satisfy recovery requirement"
+    return "option value with invalid format"
 
 
 def _material_option_value_valid(option: str, value: str) -> bool:
@@ -1995,6 +2001,29 @@ def _material_option_value_valid(option: str, value: str) -> bool:
         return bool(re.fullmatch(r"\d{5,}", text))
     if option == "--douban-url":
         return bool(re.search(r"douban\.com/subject/\d{5,}", text, flags=re.IGNORECASE))
+    return True
+
+
+def _material_option_value_covers_recovery_key(option: str, value: str, recovery_key: Any) -> bool:
+    if option != "--metadata-file":
+        return True
+    key = str(recovery_key or "")
+    try:
+        overrides = load_metadata_overrides(value)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    if key == "metadata.ptgen_description":
+        return bool(overrides.get("ptgen_description"))
+    if key == "metadata.imdb_id":
+        return bool(overrides.get("imdb_id"))
+    if key == "metadata.tmdb_id":
+        return bool(overrides.get("tmdb_id"))
+    if key == "metadata.douban":
+        return bool(overrides.get("douban_id") or overrides.get("douban_url"))
+    if key == "metadata.external_ids":
+        return any(bool(overrides.get(field)) for field in ("imdb_id", "tmdb_id", "douban_id", "douban_url"))
+    if key.startswith("metadata."):
+        return bool(overrides)
     return True
 
 
@@ -4607,13 +4636,14 @@ def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next
             if key and missing_text:
                 return f"material recovery command has {key} file option path that does not exist: {missing_text}"
             return f"material recovery command has file option path that does not exist: {missing_text}"
-        invalid_existing_option_values = _invalid_material_option_values(existing_file_values)
+        invalid_existing_option_values = _invalid_material_option_values(existing_file_values, hint.get("key"))
         if invalid_existing_option_values:
             key = hint.get("key")
             invalid_text = _format_option_value_map(invalid_existing_option_values)
+            invalid_label = _invalid_material_option_values_label(existing_file_values, hint.get("key"))
             if key and invalid_text:
-                return f"material recovery command has {key} option value with invalid format: {invalid_text}"
-            return f"material recovery command has option value with invalid format: {invalid_text}"
+                return f"material recovery command has {key} {invalid_label}: {invalid_text}"
+            return f"material recovery command has {invalid_label}: {invalid_text}"
         if existing_file_values:
             continue
         missing_flags = [flag for flag in _material_recovery_action_flags(hint) if flag not in argv]
