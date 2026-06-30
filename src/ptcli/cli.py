@@ -3427,11 +3427,12 @@ def _summary_completion_matrix(
         ),
         "source": _completion_domain(
             _source_matrix_ready(closure_source),
-            _false_keys(closure_source, ("ready", "hash_consistent", "wait_evidence", "injection_verified")),
+            _source_matrix_missing(closure_source),
             {
                 "mode": closure_source.get("mode"),
                 "hash_consistent": closure_source.get("hash_consistent"),
                 "wait_evidence": closure_source.get("wait_evidence"),
+                "injection_visible_in_client": closure_source.get("injection_visible_in_client"),
                 "injection_verified": closure_source.get("injection_verified"),
             },
         ),
@@ -3503,10 +3504,23 @@ def _material_matrix_ready(material_diagnostics: dict[str, Any], review_target: 
 
 
 def _source_matrix_ready(closure_source: dict[str, Any]) -> bool | None:
-    has_evidence = bool(closure_source.get("mode")) or any(closure_source.get(key) is True for key in ("ready", "hash_consistent", "wait_evidence", "injection_verified"))
-    if not has_evidence:
+    if not _source_matrix_has_evidence(closure_source):
         return None
-    return bool(closure_source.get("ready"))
+    if isinstance(closure_source.get("ready"), bool):
+        return closure_source["ready"]
+    return bool(closure_source.get("hash_consistent") and closure_source.get("wait_evidence") and closure_source.get("injection_visible_in_client") and closure_source.get("injection_verified"))
+
+
+def _source_matrix_missing(closure_source: dict[str, Any]) -> list[str]:
+    if not _source_matrix_has_evidence(closure_source):
+        return []
+    if closure_source.get("ready") is False:
+        return _false_keys(closure_source, ("ready", "hash_consistent", "wait_evidence", "injection_visible_in_client", "injection_verified"))
+    return _false_keys(closure_source, ("hash_consistent", "wait_evidence", "injection_visible_in_client", "injection_verified"))
+
+
+def _source_matrix_has_evidence(closure_source: dict[str, Any]) -> bool:
+    return bool(closure_source.get("mode")) or any(isinstance(closure_source.get(key), bool) and closure_source.get(key) is True for key in ("hash_consistent", "wait_evidence", "injection_visible_in_client", "injection_verified"))
 
 
 def _material_matrix_missing(material_diagnostics: dict[str, Any], review_target: dict[str, Any]) -> list[str]:

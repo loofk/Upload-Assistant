@@ -4704,6 +4704,56 @@ def test_completion_matrix_requires_uploaded_torrent_visible_in_client() -> None
     assert target_upload["evidence"]["injection_verified"] is True
 
 
+def test_completion_matrix_derives_source_ready_from_followup_evidence() -> None:
+    matrix = ptcli_cli._summary_completion_matrix(
+        flow_diagnostics={},
+        material_diagnostics={},
+        target_upload_diagnostics={},
+        closure_review={},
+        closure_status={
+            "source": {
+                "mode": "downloaded",
+                "hash_consistent": True,
+                "wait_evidence": True,
+                "injection_visible_in_client": True,
+                "injection_verified": True,
+            }
+        },
+        qbit_wait_mismatches=[],
+    )
+
+    source = matrix["domains"]["source"]
+    assert source["ready"] is True
+    assert source["missing"] == []
+    assert source["evidence"]["injection_visible_in_client"] is True
+    assert "source" not in matrix["missing_domains"]
+
+
+def test_completion_matrix_requires_source_torrent_visible_in_client() -> None:
+    matrix = ptcli_cli._summary_completion_matrix(
+        flow_diagnostics={},
+        material_diagnostics={},
+        target_upload_diagnostics={},
+        closure_review={},
+        closure_status={
+            "source": {
+                "mode": "downloaded",
+                "hash_consistent": True,
+                "wait_evidence": True,
+                "injection_visible_in_client": False,
+                "injection_verified": True,
+            }
+        },
+        qbit_wait_mismatches=[],
+    )
+
+    source = matrix["domains"]["source"]
+    assert source["ready"] is False
+    assert source["missing"] == ["injection_visible_in_client"]
+    assert source["evidence"]["injection_visible_in_client"] is False
+    assert "source" in matrix["missing_domains"]
+
+
 def test_uploaded_torrent_download_missing_is_prioritized_before_injection_resume() -> None:
     pipeline_download_missing = ptcli_cli._pipeline_summary_preferred_stages(["target.downloaded", "target.injected"])
     pipeline_hash_missing = ptcli_cli._pipeline_summary_preferred_stages(["target.uploaded_torrent_hash", "target.injected"])
@@ -5028,6 +5078,9 @@ def test_summary_check_reports_pipeline_completion(tmp_path, capsys) -> None:
                     "available_stages": [],
                     "artifacts": {
                         "source_hash_consistent": True,
+                        "source_injected_torrent_hash": True,
+                        "source_injection_visible_in_client": True,
+                        "source_injection_verified": True,
                         "source_wait_evidence": True,
                         "uploaded_torrent_hash": True,
                         "injected_torrent_hash": True,
