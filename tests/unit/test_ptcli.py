@@ -5824,6 +5824,49 @@ def test_run_summary_exposes_qbit_wait_request_mismatch(tmp_path) -> None:
     assert payload["artifacts"]["qbit_wait_retry_hints"]["uploaded"]["suggested_save_path"] == "/downloads"
 
 
+@pytest.mark.parametrize("container_key", ["closure", "summary"])
+def test_run_summary_recovers_source_qbit_wait_from_lightweight_containers(tmp_path, capsys, container_key: str) -> None:
+    source_wait = {
+        "complete": True,
+        "query": {"torrent_hash": "a" * 40, "content_path": "/downloads/Expected"},
+        "completion_verification": {
+            "matched_count": 1,
+            "complete_count": 1,
+            "any_complete": True,
+            "requested_hash_matched": False,
+            "requested_content_path_matched": True,
+            "observed_hashes": ["f" * 40],
+            "observed_content_paths": ["/downloads/Expected"],
+            "observed_save_paths": ["/downloads"],
+        },
+    }
+    payload = {
+        "status": "blocked",
+        "ready": False,
+        "complete": False,
+        "blockers": ["source.wait_evidence"],
+        "stages": [],
+    }
+    payload[container_key] = {"source": {"source_wait": source_wait}}
+
+    summary_file = ptcli_cli._write_run_summary(payload, str(tmp_path))
+    summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+
+    assert summary_payload["qbit_wait_mismatch"] is True
+    assert summary_payload["qbit_wait_mismatches"] == ["source.requested_hash"]
+    assert summary_payload["qbit_wait_diagnostics"]["source"]["requested_hash"] == "a" * 40
+    assert summary_payload["qbit_wait_diagnostics"]["source"]["observed_hashes"] == ["f" * 40]
+    assert summary_payload["artifacts"]["qbit_wait_retry_hints"]["source"]["suggested_torrent_hash"] == "f" * 40
+
+    code = main(["summary-check", "--summary-file", summary_file, "--json"])
+
+    assert code == 1
+    checked_payload = json.loads(capsys.readouterr().out)
+    assert checked_payload["qbit_wait_mismatch"] is True
+    assert checked_payload["qbit_wait_mismatches"] == ["source.requested_hash"]
+    assert checked_payload["qbit_wait_retry_hints"]["source"]["suggested_torrent_hash"] == "f" * 40
+
+
 def test_summary_check_falls_back_to_pipeline_resume_command(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(

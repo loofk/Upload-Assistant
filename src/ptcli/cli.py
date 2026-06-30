@@ -3656,14 +3656,28 @@ def _summary_qbit_wait_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
     evidence_source = evidence.get("source") if isinstance(evidence.get("source"), dict) else {}
     evidence_target = evidence.get("target") if isinstance(evidence.get("target"), dict) else {}
+    closure = payload.get("closure") if isinstance(payload.get("closure"), dict) else {}
+    closure_source = closure.get("source") if isinstance(closure.get("source"), dict) else {}
+    closure_target = closure.get("target") if isinstance(closure.get("target"), dict) else {}
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    summary_source = summary.get("source") if isinstance(summary.get("source"), dict) else {}
+    summary_target = summary.get("target") if isinstance(summary.get("target"), dict) else {}
     diagnostics: dict[str, Any] = {}
 
-    source_wait = _summary_qbit_wait_from(evidence_source, "source_wait")
+    source_wait = (
+        _summary_qbit_wait_from(evidence_source, "source_wait")
+        or _summary_qbit_wait_from(closure_source, "source_wait")
+        or _summary_qbit_wait_from(summary_source, "source_wait")
+    )
     if source_wait:
         diagnostics["source"] = source_wait
 
-    uploaded_wait = _summary_qbit_wait_from(evidence_target, "uploaded_wait") or _summary_qbit_wait_from(summary, "uploaded_wait")
+    uploaded_wait = (
+        _summary_qbit_wait_from(evidence_target, "uploaded_wait")
+        or _summary_qbit_wait_from(closure_target, "uploaded_wait")
+        or _summary_qbit_wait_from(summary, "uploaded_wait")
+        or _summary_qbit_wait_from(summary_target, "uploaded_wait")
+    )
     if uploaded_wait:
         diagnostics["uploaded"] = uploaded_wait
 
