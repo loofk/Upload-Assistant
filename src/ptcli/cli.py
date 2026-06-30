@@ -741,7 +741,8 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     )
     completion_next_stages = _completion_matrix_preferred_stages(completion_matrix, kind="ptcli.pipeline.run_summary")
     resume_state = _retorrent_execute_resume_state(pipeline_result, artifacts, blockers, resume_commands, preferred_stages=completion_next_stages)
-    resume_command_audit = _resume_command_audit_fields(resume_commands, resume_state.get("next_command"), resume_state.get("next_command_argv"))
+    resume_state = _resume_state_with_material_recovery_completion(resume_state, resume_commands)
+    resume_command_audit = _resume_command_audit_fields(resume_commands, resume_state.get("next_command"), resume_state.get("next_command_argv"), resume_state=resume_state)
     retorrent_status = "complete" if not blockers else "blocked"
     retorrent_complete = not blockers
     automation_fields = _retorrent_automation_fields(
@@ -1473,18 +1474,57 @@ def _retorrent_source_followup_next_actions(missing: list[str]) -> list[str]:
     return actions
 
 
-def _resume_command_audit_fields(resume_commands: Any, next_command: Any, next_command_argv: Any) -> dict[str, Any]:
+def _resume_state_with_material_recovery_completion(resume_state: dict[str, Any], resume_commands: Any) -> dict[str, Any]:
     commands = resume_commands if isinstance(resume_commands, list) else []
-    candidate_commands = _summary_candidate_commands({"resume_commands": commands})
-    first_runnable_command = _first_runnable_candidate_command(candidate_commands)
+    candidates = _summary_candidate_commands({"resume_commands": commands, "resume_state": resume_state})
+    first_runnable = _first_runnable_candidate_command(candidates)
+    if first_runnable.get("source") != "material_recovery_completion" or not first_runnable.get("command"):
+        return resume_state
+    return {
+        **resume_state,
+        "next_stage": first_runnable.get("stage"),
+        "next_command": first_runnable.get("command"),
+        "next_command_argv": _argv_list(first_runnable.get("argv")),
+        "next_command_source": first_runnable.get("source"),
+    }
+
+
+def _resume_command_audit_fields(resume_commands: Any, next_command: Any, next_command_argv: Any, *, resume_state: dict[str, Any] | None = None) -> dict[str, Any]:
+    commands = resume_commands if isinstance(resume_commands, list) else []
+    candidate_payload = {"resume_commands": commands}
+    if isinstance(resume_state, dict):
+        candidate_payload["resume_state"] = resume_state
+        if resume_state.get("next_stage"):
+            candidate_payload["next_stage"] = resume_state.get("next_stage")
+        if next_command:
+            candidate_payload["next_command"] = next_command
+        if next_command_argv:
+            candidate_payload["next_command_argv"] = next_command_argv
+    candidate_commands = _summary_candidate_commands(candidate_payload)
     next_argv = _summary_next_command_raw_argv(next_command_argv) if next_command_argv else _summary_next_command_raw_argv(str(next_command)) if next_command else None
+    if next_command and not any(_argv_list(command.get("argv")) == next_argv for command in candidate_commands if isinstance(command, dict)):
+        next_metadata_for_candidate = _summary_next_command_metadata(next_argv)
+        candidate_commands.append(
+            {
+                "stage": resume_state.get("next_stage") if isinstance(resume_state, dict) else None,
+                "command": str(next_command),
+                "argv": next_argv,
+                "source": resume_state.get("next_command_source") if isinstance(resume_state, dict) else "resume_state",
+                "subcommand": next_metadata_for_candidate["subcommand"],
+                "run_allowed": next_metadata_for_candidate["run_allowed"],
+                "run_blocker": next_metadata_for_candidate["run_blocker"],
+                "placeholder": next_metadata_for_candidate["placeholder"],
+            }
+        )
+    first_runnable_command = _first_runnable_candidate_command(candidate_commands)
     next_metadata = _summary_next_command_metadata(next_argv)
+    material_recovery_run_blocker = _summary_material_recovery_command_run_blocker(candidate_payload, str(candidate_payload.get("next_stage") or ""))
     return {
         "next_command_subcommand": next_metadata["subcommand"],
         "next_command_ready": bool(next_command) and not bool(next_metadata["placeholder"]),
         "next_command_placeholder": bool(next_metadata["placeholder"]),
-        "next_command_run_allowed": bool(next_command and next_metadata["run_allowed"]),
-        "next_command_run_blocker": next_metadata["run_blocker"],
+        "next_command_run_allowed": bool(next_command and next_metadata["run_allowed"] and not material_recovery_run_blocker),
+        "next_command_run_blocker": material_recovery_run_blocker or next_metadata["run_blocker"],
         "candidate_commands": candidate_commands,
         "candidate_command_count": len(candidate_commands),
         "runnable_command_count": sum(1 for command in candidate_commands if isinstance(command, dict) and command.get("run_allowed") is True),

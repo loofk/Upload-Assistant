@@ -1747,6 +1747,57 @@ def test_retorrent_resume_state_prefers_material_recovery_over_pipeline_followup
     assert resume_state["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--fetch-ptgen"]
 
 
+def test_retorrent_resume_state_promotes_material_recovery_completion() -> None:
+    resume_commands = [
+        {
+            "stage": "resume-target-package",
+            "command": "python3 ptcli.py pipeline --prepare-target",
+            "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+        }
+    ]
+    resume_state = {
+        "next_stage": "resume-target-package",
+        "next_command": "python3 ptcli.py pipeline --prepare-target",
+        "next_command_argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+        "materials": {
+            "recovery_hints": [
+                {
+                    "key": "metadata.ptgen_description",
+                    "required_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                    "missing_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                    "resume_command_available": False,
+                },
+                {
+                    "key": "assets.image_host_uploads",
+                    "required_command_flags": ["--upload-screenshots"],
+                    "missing_command_flags": ["--upload-screenshots"],
+                    "resume_command_available": False,
+                },
+            ]
+        },
+    }
+
+    promoted = ptcli_cli._resume_state_with_material_recovery_completion(resume_state, resume_commands)
+    audit = ptcli_cli._resume_command_audit_fields(resume_commands, promoted["next_command"], promoted["next_command_argv"], resume_state=promoted)
+
+    assert promoted["next_stage"] == "resume-target-package"
+    assert promoted["next_command_source"] == "material_recovery_completion"
+    assert promoted["next_command_argv"] == [
+        "python3",
+        "ptcli.py",
+        "pipeline",
+        "--prepare-target",
+        "--enrich-metadata",
+        "--fetch-ptgen",
+        "--upload-screenshots",
+    ]
+    assert audit["next_command_run_allowed"] is True
+    assert audit["next_command_run_blocker"] is None
+    assert audit["first_runnable_command_source"] == "material_recovery_completion"
+    assert audit["rejected_command_count"] == 1
+    assert audit["first_rejected_command_blocker"] == "material recovery command does not cover metadata.ptgen_description; missing flags: --enrich-metadata,--fetch-ptgen"
+
+
 @pytest.mark.asyncio
 async def test_retorrent_execute_surfaces_material_preflight_blockers(monkeypatch) -> None:
     async def fake_pipeline_payload(_args):
