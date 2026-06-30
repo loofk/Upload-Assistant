@@ -12138,6 +12138,15 @@ def test_doctor_target_execute_live_safe_returns_zero(monkeypatch, tmp_path, cap
     assert summary_payload["resume_state"]["artifacts"]["download_uploaded_torrent"] is True
     assert summary_payload["resume_state"]["artifacts"]["inject_uploaded_torrent"] is True
     assert summary_payload["resume_state"]["artifacts"]["wait_uploaded_complete"] is True
+    source_followup = summary_payload["resume_state"]["source_followup"]
+    assert source_followup["present"] is True
+    assert source_followup["scope"] == "pipeline-live"
+    assert source_followup["mode"] == "pre_live_plan"
+    assert source_followup["ready_for_source_seeding"] is False
+    assert source_followup["planned"] == {"download_source": False, "inject_source": False, "wait_complete": True}
+    assert source_followup["source_wait_query"]["content_path"] == str(content_path)
+    assert source_followup["source_wait_query"]["save_path"] == str(content_path)
+    assert source_followup["next_actions"] == ["Run the recommended pipeline-live command; its run summary will verify source torrent visibility and completion in qBittorrent."]
 
 
 def test_doctor_summary_check_preserves_resume_state(monkeypatch, tmp_path, capsys) -> None:
@@ -12215,6 +12224,11 @@ def test_doctor_summary_check_preserves_resume_state(monkeypatch, tmp_path, caps
     assert payload["resume_state"]["artifacts"]["download_uploaded_torrent"] is True
     assert payload["resume_state"]["artifacts"]["inject_uploaded_torrent"] is True
     assert payload["resume_state"]["artifacts"]["wait_uploaded_complete"] is True
+    assert payload["resume_state"]["source_followup"]["present"] is True
+    assert payload["resume_state"]["source_followup"]["scope"] == "pipeline-live"
+    assert payload["resume_state"]["source_followup"]["planned"] == {"download_source": False, "inject_source": False, "wait_complete": True}
+    assert payload["readiness_summary"]["ready_for_source_seeding"] is False
+    assert payload["readiness_summary"]["source_followup"]["source_wait_query"]["content_path"] == str(content_path)
 
 
 def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, capsys) -> None:

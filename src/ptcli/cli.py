@@ -5463,6 +5463,7 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
     next_command_argv = _resume_state_next_command_argv(next_command, recommended_commands)
     target_preflight = artifacts.get("target_preflight_gates") if isinstance(artifacts.get("target_preflight_gates"), dict) else {}
     target_preflight_torrent = target_preflight.get("torrent_file") if isinstance(target_preflight.get("torrent_file"), dict) else {}
+    source_followup = _doctor_source_followup_plan(payload, artifacts, recommended_commands)
     return {
         "ready": bool(payload.get("ready")),
         "live_safe_to_attempt": bool(payload.get("live_safe_to_attempt")),
@@ -5495,9 +5496,77 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
             "download_uploaded_torrent": bool(artifacts.get("download_uploaded_torrent")),
             "inject_uploaded_torrent": bool(artifacts.get("inject_uploaded_torrent")),
             "wait_uploaded_complete": bool(artifacts.get("wait_uploaded_complete")),
+            "source_followup_plan": bool(source_followup.get("present")),
         },
+        "source_followup": source_followup,
         "failed_check_names": [str(check.get("name")) for check in failed_checks if isinstance(check, dict)],
     }
+
+
+def _doctor_source_followup_plan(payload: dict[str, Any], artifacts: dict[str, Any], recommended_commands: list[dict[str, Any]]) -> dict[str, Any]:
+    pipeline_live = next((command for command in recommended_commands if isinstance(command, dict) and command.get("stage") == "pipeline-live"), None)
+    if not payload.get("live_safe_to_attempt") or not pipeline_live:
+        return {
+            "present": False,
+            "scope": "not_pipeline_live",
+            "ready": None,
+            "ready_for_source_seeding": None,
+            "planned": {},
+            "missing": [],
+            "blockers": [],
+            "next_actions": [],
+        }
+    argv = _argv_list(pipeline_live.get("argv")) or []
+    option_values = _argv_option_values(argv, ["--path", "--source-torrent-file", "--save-path"])
+    content_path = _first_option_value(option_values, "--path") or _artifact_path(artifacts.get("content_path"))
+    source_torrent_artifact = artifacts.get("source_torrent_file")
+    source_torrent_file = _first_option_value(option_values, "--source-torrent-file") or _artifact_path(artifacts.get("source_torrent_file"))
+    source_torrent_file_ready = bool(
+        source_torrent_file
+        and isinstance(source_torrent_artifact, dict)
+        and source_torrent_artifact.get("path") == source_torrent_file
+        and _path_artifact_exists(source_torrent_artifact)
+    )
+    save_path = _first_option_value(option_values, "--save-path")
+    download_source = "--download-source" in argv or not bool(content_path or source_torrent_file)
+    inject_source = "--inject-source" in argv or not bool(content_path)
+    wait_complete = "--wait-complete" in argv or bool(content_path or inject_source)
+    missing: list[str] = []
+    if inject_source and not save_path:
+        missing.append("source_save_path")
+    return {
+        "present": True,
+        "scope": "pipeline-live",
+        "ready": False,
+        "ready_for_source_seeding": False,
+        "mode": "pre_live_plan",
+        "planned": {
+            "download_source": download_source,
+            "inject_source": inject_source,
+            "wait_complete": wait_complete,
+        },
+        "source_torrent_file": source_torrent_file,
+        "source_torrent_file_ready": source_torrent_file_ready,
+        "source_save_path": save_path,
+        "source_wait_query": {
+            "content_path": content_path,
+            "save_path": content_path,
+        },
+        "source_wait_evidence": False,
+        "injection_visible_in_client": False if inject_source else None,
+        "injection_verified": False if inject_source else None,
+        "hash_consistent": None,
+        "missing": missing,
+        "blockers": [f"planned source follow-up is missing {name}" for name in missing],
+        "next_actions": ["Run the recommended pipeline-live command; its run summary will verify source torrent visibility and completion in qBittorrent."],
+    }
+
+
+def _first_option_value(option_values: dict[str, list[str]], option: str) -> str | None:
+    values = option_values.get(option)
+    if not values:
+        return None
+    return str(values[0])
 
 
 def _doctor_next_command(payload: dict[str, Any], commands_by_stage: dict[str, str]) -> dict[str, str | None]:
