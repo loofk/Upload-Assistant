@@ -16344,6 +16344,20 @@ def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
     assert materials["metadata"]["applied"] == {"douban_url": "https://movie.douban.com/subject/1291546/"}
     assert materials["metadata"]["readiness"]["ptgen_description"] == {"ready": False, "required": True, "source": None}
     assert materials["metadata"]["readiness_blockers"] == ["PTGen/Douban description is missing after enrichment."]
+    assert materials["description"]["ready"] is False
+    assert materials["description"]["inputs"]["metadata"]["tmdb"] is True
+    assert materials["description"]["inputs"]["metadata"]["ptgen_description"] is False
+    assert materials["description"]["inputs"]["media_info"]["mediainfo_or_bdinfo"] is False
+    assert materials["description"]["inputs"]["screenshots"]["screenshots"] is False
+    assert materials["description"]["inputs"]["image_host"]["image_host_uploads"] is False
+    assert materials["description"]["missing"] == ["metadata.ptgen_description", "assets.mediainfo_or_bdinfo", "assets.screenshots", "assets.image_host_uploads"]
+    assert materials["description"]["next_actions"] == [
+        "Complete IMDb/TMDb/Douban metadata and PTGen/Douban description before regenerating the MTEAM description.",
+        "Generate or provide MediaInfo/BDInfo before regenerating the MTEAM description.",
+        "Generate or provide local screenshots before regenerating the MTEAM description.",
+        "Upload screenshots to an image host before regenerating the MTEAM description.",
+        "Regenerate the MTEAM target package/description after the missing inputs are ready.",
+    ]
     assert materials["ready"] is False
     assert materials["missing"] == ["metadata.ptgen_description", "assets.mediainfo_or_bdinfo", "assets.screenshots", "assets.image_host_uploads"]
     assert "Fetch or supply IMDb/TMDb/Douban metadata" in materials["next_actions"][0]
@@ -16411,6 +16425,18 @@ def test_mteam_materials_manifest_records_existing_material_files(tmp_path) -> N
     assert materials["assets"]["mediainfo"]["sha1"]
     assert materials["assets"]["screenshots"]["count"] == 1
     assert materials["assets"]["image_hosts"]["count"] == 1
+    assert materials["description"]["ready"] is True
+    assert materials["description"]["missing"] == []
+    assert materials["description"]["inputs"]["metadata"] == {
+        "ready": True,
+        "imdb": True,
+        "tmdb": True,
+        "douban": True,
+        "ptgen_description": True,
+    }
+    assert materials["description"]["inputs"]["media_info"]["ready"] is True
+    assert materials["description"]["inputs"]["screenshots"]["ready"] is True
+    assert materials["description"]["inputs"]["image_host"]["ready"] is True
     assert materials["ready"] is True
     assert materials["missing"] == []
 
@@ -16524,6 +16550,7 @@ def test_mteam_materials_manifest_recovery_plan_ready_when_materials_ready(tmp_p
     summary = ptcli_cli._target_materials_summary(package)
     assert summary["critical_path"] == materials["critical_path"]
     assert summary["recovery_plan"] == materials["recovery_plan"]
+    assert summary["description"] == materials["description"]
 
 
 def test_mteam_materials_manifest_rejects_non_web_image_host_urls(tmp_path) -> None:

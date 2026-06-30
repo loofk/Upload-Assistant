@@ -8796,6 +8796,7 @@ def _target_materials_summary(package: Any) -> dict[str, Any]:
     asset_checks = checks.get("assets") if isinstance(checks.get("assets"), list) else []
     missing = _target_material_missing_checks(metadata_checks, "metadata") + _target_material_missing_checks(asset_checks, "assets")
     assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
+    description = materials.get("description") if isinstance(materials.get("description"), dict) else {}
     return {
         "ready": bool(materials.get("ready")),
         "metadata_ready": bool(metadata_checks) and not _target_material_missing_checks(metadata_checks, "metadata"),
@@ -8808,6 +8809,7 @@ def _target_materials_summary(package: Any) -> dict[str, Any]:
             "image_hosts": _material_asset_count_ready(assets, "image_hosts"),
             "disc_structure": assets.get("disc_structure") if isinstance(assets.get("disc_structure"), dict) else {},
         },
+        "description": description,
         "missing": missing,
         "warnings": materials.get("warnings") if isinstance(materials.get("warnings"), list) else [],
         "critical_path": materials.get("critical_path") if isinstance(materials.get("critical_path"), dict) else {},

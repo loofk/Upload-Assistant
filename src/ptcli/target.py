@@ -818,6 +818,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
     ]
     all_checks = [*metadata_checks, *asset_checks]
     warnings = [check["message"] for check in [*metadata_checks, *asset_checks] if not check["ok"]]
+    description_inputs = _mteam_description_input_summary(metadata_checks, asset_checks)
     return {
         "schema_version": 1,
         "kind": "ptcli.mteam.materials",
@@ -854,6 +855,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "disc_structure": disc_structure,
             "description": {"ready": True, "path": REQUIRED_MTEAM_PACKAGE_FILES["description_draft"]},
         },
+        "description": description_inputs,
         "checks": {
             "metadata": metadata_checks,
             "assets": asset_checks,
@@ -865,6 +867,74 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
         "recovery_plan": _mteam_material_recovery_plan(all_checks),
         "next_actions": _mteam_material_next_actions(all_checks),
     }
+
+
+def _mteam_description_input_summary(metadata_checks: list[dict[str, Any]], asset_checks: list[dict[str, Any]]) -> dict[str, Any]:
+    metadata_by_name = {str(check.get("name") or ""): bool(check.get("ok")) for check in metadata_checks if isinstance(check, dict)}
+    asset_by_name = {str(check.get("name") or ""): bool(check.get("ok")) for check in asset_checks if isinstance(check, dict)}
+    inputs = {
+        "metadata": {
+            "ready": all(metadata_by_name.get(name) is True for name in ("imdb", "tmdb", "douban", "ptgen_description")),
+            "imdb": metadata_by_name.get("imdb"),
+            "tmdb": metadata_by_name.get("tmdb"),
+            "douban": metadata_by_name.get("douban"),
+            "ptgen_description": metadata_by_name.get("ptgen_description"),
+        },
+        "media_info": {
+            "ready": bool(asset_by_name.get("mediainfo_or_bdinfo") and asset_by_name.get("bdinfo_for_disc")),
+            "mediainfo_or_bdinfo": asset_by_name.get("mediainfo_or_bdinfo"),
+            "bdinfo_for_disc": asset_by_name.get("bdinfo_for_disc"),
+        },
+        "screenshots": {
+            "ready": asset_by_name.get("screenshots"),
+            "screenshots": asset_by_name.get("screenshots"),
+        },
+        "image_host": {
+            "ready": asset_by_name.get("image_host_uploads"),
+            "image_host_uploads": asset_by_name.get("image_host_uploads"),
+        },
+    }
+    missing = _mteam_description_input_missing(inputs)
+    return {
+        "generated": True,
+        "ready": not missing,
+        "inputs": inputs,
+        "missing": missing,
+        "next_actions": _mteam_description_input_next_actions(missing),
+    }
+
+
+def _mteam_description_input_missing(inputs: dict[str, Any]) -> list[str]:
+    metadata = inputs.get("metadata") if isinstance(inputs.get("metadata"), dict) else {}
+    media_info = inputs.get("media_info") if isinstance(inputs.get("media_info"), dict) else {}
+    screenshots = inputs.get("screenshots") if isinstance(inputs.get("screenshots"), dict) else {}
+    image_host = inputs.get("image_host") if isinstance(inputs.get("image_host"), dict) else {}
+    missing = [f"metadata.{name}" for name in ("imdb", "tmdb", "douban", "ptgen_description") if metadata.get(name) is not True]
+    if media_info.get("mediainfo_or_bdinfo") is not True:
+        missing.append("assets.mediainfo_or_bdinfo")
+    if media_info.get("bdinfo_for_disc") is not True:
+        missing.append("assets.bdinfo_for_disc")
+    if screenshots.get("screenshots") is not True:
+        missing.append("assets.screenshots")
+    if image_host.get("image_host_uploads") is not True:
+        missing.append("assets.image_host_uploads")
+    return missing
+
+
+def _mteam_description_input_next_actions(missing: list[str]) -> list[str]:
+    actions: list[str] = []
+    missing_set = set(missing)
+    if any(item.startswith("metadata.") for item in missing_set):
+        actions.append("Complete IMDb/TMDb/Douban metadata and PTGen/Douban description before regenerating the MTEAM description.")
+    if missing_set.intersection({"assets.mediainfo_or_bdinfo", "assets.bdinfo_for_disc"}):
+        actions.append("Generate or provide MediaInfo/BDInfo before regenerating the MTEAM description.")
+    if "assets.screenshots" in missing_set:
+        actions.append("Generate or provide local screenshots before regenerating the MTEAM description.")
+    if "assets.image_host_uploads" in missing_set:
+        actions.append("Upload screenshots to an image host before regenerating the MTEAM description.")
+    if actions:
+        actions.append("Regenerate the MTEAM target package/description after the missing inputs are ready.")
+    return actions
 
 
 def _material_check(name: str, ok: bool, ok_message: str, missing_message: str) -> dict[str, Any]:
