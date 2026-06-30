@@ -661,6 +661,24 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     async def fake_pipeline_payload(args):
         captured_args["args"] = args
         rule_obligations = {"ready": True, "count": 2, "missing": []}
+        payload_review = {
+            "present": True,
+            "description": {
+                "has_ptgen_description": True,
+                "evidence": {
+                    "metadata_chain": {"ready": True, "items": {"imdb": {"ready": True}, "tmdb": {"ready": True}, "douban": {"ready": True}}},
+                    "media_info_chain": {
+                        "ready": True,
+                        "material_source": "/tmp/MI.txt",
+                        "material_length": 10,
+                        "description_has_excerpt": True,
+                        "payload_source": "/tmp/MI.txt",
+                        "payload_length": 10,
+                    },
+                    "screenshot_chain": {"ready": True, "local_screenshot_count": 1, "image_host_count": 1, "description_image_count": 1, "missing_urls": []},
+                },
+            },
+        }
         return {
             "ready": True,
             "closure": {"complete": True, "blockers": [], "source": {"complete": True}, "target": {"uploaded": True, "injected": True}},
@@ -706,6 +724,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "hash_consistent": True,
                     "duplicate_clean": True,
                     "rule_obligations": rule_obligations,
+                    "payload_review": payload_review,
                     "preparation_audit": {
                         "ready": True,
                         "materials_ready": True,
@@ -731,6 +750,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                             "payload_checks_ready": True,
                             "description_checks_ready": True,
                         },
+                        "payload_review": payload_review,
                     },
                     "uploaded_wait_evidence": True,
                 },
@@ -897,6 +917,10 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["closure_audit"]["missing"] == []
     assert payload["evidence"]["source"]["mode"] == "downloaded"
     assert payload["evidence"]["target"]["uploaded_torrent_hash"] == "b" * 40
+    assert payload["evidence"]["target"]["target_material_chain"]["ready"] is True
+    assert payload["evidence"]["target"]["target_material_chain"]["chains"]["metadata_chain"]["ready"] is True
+    assert payload["artifacts"]["target_material_chain"]["ready"] is True
+    assert payload["artifacts"]["target_material_chain"]["chains"]["screenshot_chain"]["ready"] is True
     assert payload["summary"]["status"] == "complete"
     assert payload["material_diagnostics"]["ready_for_mteam_upload"] is True
     assert payload["material_diagnostics"]["critical_path"]["ready"] is True
@@ -943,7 +967,11 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["readiness_summary"]["summary_file"] == payload["summary_file"]
     assert payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--json"]
     assert payload["automation_handoff"]["run_next_command"]["command"] == shlex.join(["python3", "ptcli.py", "summary-check", "--summary-file", payload["summary_file"], "--run-next-command"])
-    assert payload["artifacts"] == {
+    legacy_artifacts = json.loads(json.dumps(payload["artifacts"]))
+    legacy_artifacts.pop("target_payload_review", None)
+    legacy_artifacts.pop("target_material_chain", None)
+    legacy_artifacts["target_preparation_audit"].pop("payload_review", None)
+    assert legacy_artifacts == {
         "source_torrent_hash": "a" * 40,
         "source_torrent_file": "/tmp/U2-60635.torrent",
         "source_torrent_file_evidence": True,
@@ -14072,6 +14100,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "description_urls": ["https://img.example/thumb.png"],
         "missing_urls": [],
     }
+    assert summary_payload["evidence"]["target"]["target_material_chain"]["ready"] is True
+    assert summary_payload["evidence"]["target"]["target_material_chain"]["chains"]["metadata_chain"]["ready"] is True
     assert summary_payload["summary"]["closure_audit"]["ready"] is True
     assert summary_payload["config"] == str(tmp_path / "config.py")
     assert summary_payload["base_dir"] == str(tmp_path)
@@ -14089,6 +14119,9 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["target_preparation_audit"]["description"]["has_screenshot_bbcode"] is True
     assert summary_payload["artifacts"]["target_payload_review"]["description"]["has_ptgen_description"] is True
     assert summary_payload["artifacts"]["target_payload_review"]["materials"]["image_host_urls"] == ["https://img.example/thumb.png"]
+    assert summary_payload["artifacts"]["target_material_chain"]["ready"] is True
+    assert summary_payload["artifacts"]["target_material_chain"]["chains"]["media_info_chain"]["ready"] is True
+    assert summary_payload["artifacts"]["target_material_chain"]["chains"]["screenshot_chain"]["missing"] == []
     assert summary_payload["material_diagnostics"]["present"] is True
     assert summary_payload["material_diagnostics"]["ready_for_mteam_upload"] is True
     assert summary_payload["material_diagnostics"]["critical_ready"] is True

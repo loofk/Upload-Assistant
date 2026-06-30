@@ -705,6 +705,7 @@ async def retorrent_payload(args: argparse.Namespace) -> dict[str, Any]:
     closure_audit = pipeline_result.get("closure_audit") if isinstance(pipeline_result.get("closure_audit"), dict) else _pipeline_closure_audit(closure, evidence)
     ready = bool(pipeline_result.get("ready"))
     artifacts = _retorrent_execute_artifacts(pipeline_result, evidence, closure)
+    evidence = _evidence_with_target_material_chain(evidence, artifacts)
     material_diagnostics = pipeline_result.get("material_diagnostics") if isinstance(pipeline_result.get("material_diagnostics"), dict) else _summary_material_diagnostics({"artifacts": artifacts})
     target_preflight_diagnostics = (
         pipeline_result.get("target_preflight_diagnostics") if isinstance(pipeline_result.get("target_preflight_diagnostics"), dict) else _summary_target_preflight_diagnostics({"artifacts": artifacts})
@@ -1032,6 +1033,20 @@ def _target_material_chain_summary(payload_review: Any) -> dict[str, Any]:
         "ready": all(ready_values) if ready_values else None,
         "chains": chains,
     }
+
+
+def _evidence_with_target_material_chain(evidence: Any, artifacts: dict[str, Any]) -> dict[str, Any] | Any:
+    if not isinstance(evidence, dict):
+        return evidence
+    material_chain = artifacts.get("target_material_chain") if isinstance(artifacts.get("target_material_chain"), dict) else {}
+    if not material_chain:
+        return evidence
+    target = evidence.get("target") if isinstance(evidence.get("target"), dict) else {}
+    if isinstance(target.get("target_material_chain"), dict):
+        return evidence
+    enriched = dict(evidence)
+    enriched["target"] = {**target, "target_material_chain": material_chain}
+    return enriched
 
 
 def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
@@ -6073,6 +6088,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         summary["summary_file"] = summary_file
     artifacts = _run_summary_artifacts(payload, str(payload.get("summary_file") or ""))
     payload["artifacts"] = artifacts
+    payload["evidence"] = _evidence_with_target_material_chain(payload.get("evidence"), artifacts)
     payload["closure_review"] = _pipeline_closure_review(payload, artifacts)
     payload["material_diagnostics"] = _summary_material_diagnostics({"artifacts": artifacts})
     payload["target_preflight_diagnostics"] = _summary_target_preflight_diagnostics({"artifacts": artifacts})
@@ -7395,6 +7411,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
     material_diagnostics = _summary_material_diagnostics({"artifacts": artifacts})
     target_preflight_diagnostics = _summary_target_preflight_diagnostics({"artifacts": artifacts})
     target_upload_payload_recovery = _target_upload_payload_recovery_summary(artifacts)
+    evidence = _evidence_with_target_material_chain(payload.get("evidence"), artifacts)
     summary_payload = {
         "schema_version": 1,
         "kind": "ptcli.pipeline.run_summary",
@@ -7430,7 +7447,7 @@ def _write_run_summary(payload: dict[str, Any], output_dir: str | None) -> str:
         "target_upload_payload_recovery": target_upload_payload_recovery,
         "flow_check": payload.get("flow_check"),
         "summary": payload.get("summary"),
-        "evidence": payload.get("evidence"),
+        "evidence": evidence,
         "next_actions": _merge_target_upload_payload_recovery_next_actions(payload.get("next_actions", []), target_upload_payload_recovery),
         **_qbit_wait_summary_fields(payload),
         "artifacts": artifacts,
@@ -7504,6 +7521,12 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         artifacts["target_preflight_gates"] = _target_preflight_gates({"status": "ready" if artifacts["target_preparation_ready"] else "blocked"}, artifacts["target_preparation_audit"])
     if _artifact_value_present(evidence_target.get("payload_review")):
         artifacts["target_payload_review"] = evidence_target.get("payload_review")
+    if _artifact_value_present(evidence_target.get("target_material_chain")):
+        artifacts["target_material_chain"] = evidence_target.get("target_material_chain")
+    if "target_material_chain" not in artifacts:
+        material_chain = _target_material_chain_summary(artifacts.get("target_payload_review"))
+        if material_chain:
+            artifacts["target_material_chain"] = material_chain
     if isinstance(source_download, dict):
         source_result = source_download.get("result")
         if isinstance(source_result, dict):
