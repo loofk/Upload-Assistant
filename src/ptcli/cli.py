@@ -851,6 +851,12 @@ def _retorrent_readiness_summary(
     materials_domain = domain("materials")
     target_upload_evidence = domain_evidence("target_upload")
     live_gate = material_diagnostics.get("live_gate") if isinstance(material_diagnostics.get("live_gate"), dict) else {}
+    description_input_chain = material_diagnostics.get("description_input_chain") if isinstance(material_diagnostics.get("description_input_chain"), dict) else {}
+    if not description_input_chain:
+        material_description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
+        description_input_chain = material_description.get("input_chain") if isinstance(material_description.get("input_chain"), dict) else {}
+    if not description_input_chain:
+        description_input_chain = _description_input_chain_from_readiness(material_diagnostics.get("readiness"))
     material_description_evidence = _readiness_material_description_evidence(material_diagnostics, target_upload_diagnostics)
     screenshot_coverage_evidence = material_description_evidence.get("screenshot_coverage") if isinstance(material_description_evidence.get("screenshot_coverage"), dict) else {}
     external_id_evidence = material_description_evidence.get("external_ids") if isinstance(material_description_evidence.get("external_ids"), dict) else {}
@@ -913,6 +919,10 @@ def _retorrent_readiness_summary(
         "material_description_screenshot_chain_ready": screenshot_chain_evidence.get("ready") if isinstance(screenshot_chain_evidence.get("ready"), bool) else None,
         "material_description_screenshot_chain_missing": _description_chain_recovery_missing("screenshot_chain", screenshot_chain_evidence),
         "material_description_screenshot_chain_next_actions": _description_chain_next_actions("screenshot_chain", screenshot_chain_evidence),
+        "material_description_input_chain_ready": description_input_chain.get("ready") if isinstance(description_input_chain.get("ready"), bool) else None,
+        "material_description_input_chain_missing": _string_list(description_input_chain.get("missing")),
+        "material_description_input_chain_next_actions": _string_list(description_input_chain.get("next_actions")),
+        "material_description_input_chain": description_input_chain,
         "target_preflight_ready": target_preflight_diagnostics.get("ready") if isinstance(target_preflight_diagnostics.get("ready"), bool) else None,
         "target_preflight_materials_ready": target_preflight_diagnostics.get("materials_ready") if isinstance(target_preflight_diagnostics.get("materials_ready"), bool) else None,
         "target_preflight_description_ready": target_preflight_diagnostics.get("description_ready") if isinstance(target_preflight_diagnostics.get("description_ready"), bool) else None,
@@ -967,6 +977,24 @@ def _description_evidence_from_readiness(readiness: Any) -> dict[str, Any]:
             chain["missing"] = missing
         evidence[chain_name] = chain
     return evidence
+
+
+def _description_input_chain_from_readiness(readiness: Any) -> dict[str, Any]:
+    if not isinstance(readiness, dict):
+        return {}
+    ready = readiness.get("material_description_input_chain_ready")
+    missing = _string_list(readiness.get("material_description_input_chain_missing"))
+    next_actions = _string_list(readiness.get("material_description_input_chain_next_actions"))
+    if not isinstance(ready, bool) and not missing and not next_actions:
+        return {}
+    result: dict[str, Any] = {}
+    if isinstance(ready, bool):
+        result["ready"] = ready
+    if missing:
+        result["missing"] = missing
+    if next_actions:
+        result["next_actions"] = next_actions
+    return result
 
 
 def _description_chain_recovery_missing(chain_name: str, chain: Any) -> list[str]:
@@ -3333,6 +3361,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     live_material_gate = artifacts.get("live_material_gate") if isinstance(artifacts.get("live_material_gate"), dict) else {}
     target_materials = artifacts.get("target_materials") if isinstance(artifacts.get("target_materials"), dict) else {}
     target_assets = target_materials.get("assets") if isinstance(target_materials.get("assets"), dict) else {}
+    description_input_chain = target_materials.get("description") if isinstance(target_materials.get("description"), dict) else {}
     target_preparation_audit = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
     disc_structure = target_assets.get("disc_structure") if isinstance(target_assets.get("disc_structure"), dict) else {}
     description = target_preparation_audit.get("description") if isinstance(target_preparation_audit.get("description"), dict) else {}
@@ -3429,6 +3458,10 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
         "critical_path": critical_path,
         "target_material_critical_path": target_materials.get("critical_path") if isinstance(target_materials.get("critical_path"), dict) else {},
         "target_material_recovery_plan": target_materials.get("recovery_plan") if isinstance(target_materials.get("recovery_plan"), dict) else {},
+        "description_input_chain": description_input_chain,
+        "description_input_chain_ready": description_input_chain.get("ready") if isinstance(description_input_chain.get("ready"), bool) else None,
+        "description_input_chain_missing": _string_list(description_input_chain.get("missing")),
+        "description_input_chain_next_actions": _string_list(description_input_chain.get("next_actions")),
         "disc_structure": disc_structure,
         "bdinfo_required": bdinfo_required,
         "media_info_requirement": "bdinfo" if bdinfo_required else "mediainfo_or_bdinfo",
@@ -3440,9 +3473,12 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             "material_description_media_info_chain_missing": _description_chain_recovery_missing("media_info_chain", media_info_chain_evidence),
             "material_description_screenshot_chain_ready": screenshot_chain_evidence.get("ready") if isinstance(screenshot_chain_evidence.get("ready"), bool) else None,
             "material_description_screenshot_chain_missing": _description_chain_recovery_missing("screenshot_chain", screenshot_chain_evidence),
+            "material_description_input_chain_ready": description_input_chain.get("ready") if isinstance(description_input_chain.get("ready"), bool) else None,
+            "material_description_input_chain_missing": _string_list(description_input_chain.get("missing")),
         },
         "description": {
             "ready": target_preparation_audit.get("description_ready"),
+            "input_chain": description_input_chain,
             "path": description.get("path"),
             "exists": description.get("exists"),
             "char_length": description.get("char_length"),
@@ -7991,6 +8027,7 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
     mediainfo_asset = target_assets.get("mediainfo") if isinstance(target_assets.get("mediainfo"), dict) else {}
     screenshot_asset = target_assets.get("screenshots") if isinstance(target_assets.get("screenshots"), dict) else {}
     image_host_asset = target_assets.get("image_hosts") if isinstance(target_assets.get("image_hosts"), dict) else {}
+    description_input_chain = target_materials.get("description") if isinstance(target_materials.get("description"), dict) else {}
     bdinfo_generation = generation.get("bdinfo") if isinstance(generation.get("bdinfo"), dict) else {}
     mediainfo_generation = generation.get("mediainfo") if isinstance(generation.get("mediainfo"), dict) else {}
     screenshot_generation = generation.get("screenshots") if isinstance(generation.get("screenshots"), dict) else {}
@@ -8064,6 +8101,10 @@ def _run_summary_material_closure(artifacts: dict[str, Any], material_missing: l
         },
         "description": {
             "ready": description_ready,
+            "input_chain": description_input_chain,
+            "input_chain_ready": description_input_chain.get("ready") if isinstance(description_input_chain.get("ready"), bool) else None,
+            "input_chain_missing": _string_list(description_input_chain.get("missing")),
+            "input_chain_next_actions": _string_list(description_input_chain.get("next_actions")),
             "missing": _string_list(description.get("missing")),
             "path": description.get("path"),
             "has_ptgen_description": bool(description.get("has_ptgen_description")),
@@ -10179,6 +10220,9 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY": _shell_bool(readiness_summary.get("material_description_screenshot_chain_ready")) if readiness_summary.get("material_description_screenshot_chain_ready") is not None else None,
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING": ",".join(_string_list(readiness_summary.get("material_description_screenshot_chain_missing"))),
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS": " | ".join(_string_list(readiness_summary.get("material_description_screenshot_chain_next_actions"))),
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_INPUT_CHAIN_READY": _shell_bool(readiness_summary.get("material_description_input_chain_ready")) if readiness_summary.get("material_description_input_chain_ready") is not None else None,
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_INPUT_CHAIN_MISSING": ",".join(_string_list(readiness_summary.get("material_description_input_chain_missing"))),
+        "PTCLI_READINESS_MATERIAL_DESCRIPTION_INPUT_CHAIN_NEXT_ACTIONS": " | ".join(_string_list(readiness_summary.get("material_description_input_chain_next_actions"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_MISSING": ",".join(_string_list(readiness_summary.get("target_preflight_missing"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_DESCRIPTION_MISSING": ",".join(_string_list(readiness_summary.get("target_preflight_description_missing"))),
         "PTCLI_READINESS_TARGET_PREFLIGHT_BLOCKERS": "|".join(_string_list(readiness_summary.get("target_preflight_blockers"))),
@@ -10747,6 +10791,14 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     image_host_urls = material_diagnostics.get("image_host_urls") if isinstance(material_diagnostics.get("image_host_urls"), dict) else {}
     disc_structure = material_diagnostics.get("disc_structure") if isinstance(material_diagnostics.get("disc_structure"), dict) else {}
     description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
+    description_input_chain = material_diagnostics.get("description_input_chain") if isinstance(material_diagnostics.get("description_input_chain"), dict) else {}
+    if not description_input_chain and isinstance(description.get("input_chain"), dict):
+        description_input_chain = description["input_chain"]
+    description_input_inputs = description_input_chain.get("inputs") if isinstance(description_input_chain.get("inputs"), dict) else {}
+    description_input_metadata = description_input_inputs.get("metadata") if isinstance(description_input_inputs.get("metadata"), dict) else {}
+    description_input_media_info = description_input_inputs.get("media_info") if isinstance(description_input_inputs.get("media_info"), dict) else {}
+    description_input_screenshots = description_input_inputs.get("screenshots") if isinstance(description_input_inputs.get("screenshots"), dict) else {}
+    description_input_image_host = description_input_inputs.get("image_host") if isinstance(description_input_inputs.get("image_host"), dict) else {}
     description_completeness = description.get("completeness") if isinstance(description.get("completeness"), dict) else {}
     description_evidence = description.get("evidence") if isinstance(description.get("evidence"), dict) else {}
     if not description_evidence:
@@ -10854,6 +10906,21 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_IMAGE_HOST_IMG_URLS": ",".join(_string_list(image_host_urls.get("img_urls"))),
         "PTCLI_MATERIAL_IMAGE_HOST_WEB_URLS": ",".join(_string_list(image_host_urls.get("web_urls"))),
         "PTCLI_MATERIAL_DESCRIPTION_READY": _shell_bool(description.get("ready")) if description.get("ready") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_CHAIN_READY": _shell_bool(description_input_chain.get("ready")) if description_input_chain.get("ready") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_CHAIN_MISSING": ",".join(_string_list(description_input_chain.get("missing"))),
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_CHAIN_NEXT_ACTIONS": " | ".join(_string_list(description_input_chain.get("next_actions"))),
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_METADATA_READY": _shell_bool(description_input_metadata.get("ready")) if description_input_metadata.get("ready") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_METADATA_IMDB": _shell_bool(description_input_metadata.get("imdb")) if description_input_metadata.get("imdb") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_METADATA_TMDB": _shell_bool(description_input_metadata.get("tmdb")) if description_input_metadata.get("tmdb") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_METADATA_DOUBAN": _shell_bool(description_input_metadata.get("douban")) if description_input_metadata.get("douban") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_METADATA_PTGEN": _shell_bool(description_input_metadata.get("ptgen_description")) if description_input_metadata.get("ptgen_description") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_MEDIA_INFO_READY": _shell_bool(description_input_media_info.get("ready")) if description_input_media_info.get("ready") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_MEDIAINFO_OR_BDINFO": _shell_bool(description_input_media_info.get("mediainfo_or_bdinfo"))
+        if description_input_media_info.get("mediainfo_or_bdinfo") is not None
+        else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_BDINFO_FOR_DISC": _shell_bool(description_input_media_info.get("bdinfo_for_disc")) if description_input_media_info.get("bdinfo_for_disc") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_SCREENSHOTS_READY": _shell_bool(description_input_screenshots.get("ready")) if description_input_screenshots.get("ready") is not None else None,
+        "PTCLI_MATERIAL_DESCRIPTION_INPUT_IMAGE_HOST_READY": _shell_bool(description_input_image_host.get("ready")) if description_input_image_host.get("ready") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_COMPLETE": _shell_bool(description_completeness.get("ready")) if description_completeness.get("ready") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_MISSING": ",".join(_string_list(description_completeness.get("missing"))),
         "PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING": ",".join(_string_list(description_completeness.get("recovery_missing"))),

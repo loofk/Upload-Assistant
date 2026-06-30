@@ -4813,6 +4813,8 @@ def test_summary_check_consumes_lightweight_material_readiness(tmp_path, capsys)
         "material_description_media_info_chain_missing": ["assets.mediainfo_or_bdinfo"],
         "material_description_screenshot_chain_ready": True,
         "material_description_screenshot_chain_missing": [],
+        "material_description_input_chain_ready": False,
+        "material_description_input_chain_missing": ["metadata.tmdb", "assets.mediainfo_or_bdinfo"],
     }
     summary_file.write_text(
         json.dumps(
@@ -4844,6 +4846,8 @@ def test_summary_check_consumes_lightweight_material_readiness(tmp_path, capsys)
     assert readiness["material_description_media_info_chain_missing"] == ["assets.mediainfo_or_bdinfo"]
     assert readiness["material_description_screenshot_chain_ready"] is True
     assert readiness["material_description_screenshot_chain_missing"] == []
+    assert readiness["material_description_input_chain_ready"] is False
+    assert readiness["material_description_input_chain_missing"] == ["metadata.tmdb", "assets.mediainfo_or_bdinfo"]
 
     code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
 
@@ -4854,6 +4858,8 @@ def test_summary_check_consumes_lightweight_material_readiness(tmp_path, capsys)
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING=assets.mediainfo_or_bdinfo\n" in out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY=1\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_INPUT_CHAIN_READY=0\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_INPUT_CHAIN_MISSING=metadata.tmdb,assets.mediainfo_or_bdinfo\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY=0\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING=metadata.tmdb,description.external_ids.tmdb\n" in out
     assert "export PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY=0\n" in out
@@ -19519,6 +19525,14 @@ def test_target_upload_preflight_chain_evidence_ready_for_u2_and_chd_to_mteam(tm
     assert summary_payload["summary"]["target_preparation_ready"] is True
     assert summary_payload["material_diagnostics"]["ready_for_mteam_upload"] is True
     assert summary_payload["material_diagnostics"]["critical_path"]["ready"] is True
+    assert summary_payload["material_diagnostics"]["description_input_chain_ready"] is True
+    assert summary_payload["material_diagnostics"]["description_input_chain_missing"] == []
+    input_chain = summary_payload["material_diagnostics"]["description_input_chain"]
+    assert input_chain["ready"] is True
+    assert input_chain["inputs"]["metadata"]["ready"] is True
+    assert input_chain["inputs"]["media_info"]["ready"] is True
+    assert input_chain["inputs"]["screenshots"]["ready"] is True
+    assert input_chain["inputs"]["image_host"]["ready"] is True
     readiness = summary_payload["material_diagnostics"]["readiness"]
     assert readiness["material_description_metadata_chain_ready"] is True
     assert readiness["material_description_metadata_chain_missing"] == []
@@ -19526,6 +19540,8 @@ def test_target_upload_preflight_chain_evidence_ready_for_u2_and_chd_to_mteam(tm
     assert readiness["material_description_media_info_chain_missing"] == []
     assert readiness["material_description_screenshot_chain_ready"] is True
     assert readiness["material_description_screenshot_chain_missing"] == []
+    assert readiness["material_description_input_chain_ready"] is True
+    assert readiness["material_description_input_chain_missing"] == []
     assert summary_payload["resume_state"]["artifacts"]["target_preparation_ready"] is True
 
 
