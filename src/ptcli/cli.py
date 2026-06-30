@@ -1982,7 +1982,7 @@ def _invalid_material_option_values(option_values: dict[str, list[str]], recover
 
 
 def _invalid_material_option_values_label(option_values: dict[str, list[str]], recovery_key: Any = None) -> str:
-    if any(option == "--metadata-file" and _material_option_value_valid(option, value) and not _material_option_value_covers_recovery_key(option, value, recovery_key) for option, values in option_values.items() for value in values):
+    if any(_material_option_value_valid(option, value) and not _material_option_value_covers_recovery_key(option, value, recovery_key) for option, values in option_values.items() for value in values):
         return "option value that does not satisfy recovery requirement"
     return "option value with invalid format"
 
@@ -2005,9 +2005,13 @@ def _material_option_value_valid(option: str, value: str) -> bool:
 
 
 def _material_option_value_covers_recovery_key(option: str, value: str, recovery_key: Any) -> bool:
+    key = str(recovery_key or "")
+    if option == "--image-host-file":
+        return key not in {"assets.image_host_uploads", "description.screenshot_coverage"} or _image_host_file_has_usable_urls(value)
+    if option == "--screenshot-file":
+        return key != "assets.screenshots" or _screenshot_file_looks_like_image(value)
     if option != "--metadata-file":
         return True
-    key = str(recovery_key or "")
     try:
         overrides = load_metadata_overrides(value)
     except (OSError, ValueError, json.JSONDecodeError):
@@ -2025,6 +2029,38 @@ def _material_option_value_covers_recovery_key(option: str, value: str, recovery
     if key.startswith("metadata."):
         return bool(overrides)
     return True
+
+
+def _image_host_file_has_usable_urls(path_value: str) -> bool:
+    try:
+        payload = json.loads(Path(path_value).expanduser().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        raw_items = payload.get("items") or payload.get("images") or payload.get("uploaded_images")
+        items = raw_items if isinstance(raw_items, list) else []
+    else:
+        items = []
+    return bool(items) and all(isinstance(item, dict) and _image_host_recovery_item_has_url(item) for item in items)
+
+
+def _image_host_recovery_item_has_url(item: dict[str, Any]) -> bool:
+    return any(_is_http_url(item.get(key)) for key in ("raw_url", "url", "img_url", "web_url"))
+
+
+def _is_http_url(value: Any) -> bool:
+    return bool(re.match(r"^https?://", str(value or "").strip(), flags=re.IGNORECASE))
+
+
+def _screenshot_file_looks_like_image(path_value: str) -> bool:
+    try:
+        header = Path(path_value).expanduser().read_bytes()[:16]
+    except OSError:
+        return False
+    image_signatures = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"BM", b"RIFF")
+    return any(header.startswith(signature) for signature in image_signatures)
 
 
 def _format_option_value_map(option_values: dict[str, list[str]]) -> str:

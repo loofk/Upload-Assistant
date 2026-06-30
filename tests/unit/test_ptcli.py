@@ -7666,6 +7666,84 @@ def test_summary_check_requires_metadata_file_to_cover_recovery_key(tmp_path, ca
     assert recovery["hints"][0]["existing_file_option_present"] is False
 
 
+def test_summary_check_requires_image_host_file_to_have_usable_urls(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    image_host_file = tmp_path / "image-host.json"
+    image_host_file.write_text(json.dumps({"items": [{"local_file": "/tmp/screen.png"}]}), encoding="utf-8")
+    resume_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target", "--image-host-file", str(image_host_file)]
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "artifacts": {
+                    "target_materials_missing": ["assets.image_host_uploads"],
+                    "target_materials_ready": False,
+                    "target_preparation_ready": False,
+                },
+                "resume_commands": [{"stage": "resume-target-package", "command": shlex.join(resume_argv), "argv": resume_argv}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    recovery = payload["readiness_summary"]["material_recovery"]
+    assert payload["next_command_run_allowed"] is False
+    assert payload["automation_action"] == "complete_material_recovery_command"
+    assert payload["next_command_run_blocker"] == f"material recovery command has assets.image_host_uploads option value that does not satisfy recovery requirement: --image-host-file={image_host_file}"
+    assert recovery["invalid_existing_option_values"] == {"--image-host-file": [str(image_host_file)]}
+    assert recovery["missing_flags"] == ["--upload-screenshots"]
+    assert recovery["hints"][0]["existing_file_option_present"] is False
+
+
+def test_summary_check_requires_screenshot_file_to_look_like_image(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    screenshot_file = tmp_path / "screen.txt"
+    screenshot_file.write_text("not image data", encoding="utf-8")
+    resume_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target", "--screenshot-file", str(screenshot_file)]
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "artifacts": {
+                    "target_materials_missing": ["assets.screenshots"],
+                    "target_materials_ready": False,
+                    "target_preparation_ready": False,
+                },
+                "resume_commands": [{"stage": "resume-target-package", "command": shlex.join(resume_argv), "argv": resume_argv}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    recovery = payload["readiness_summary"]["material_recovery"]
+    assert payload["next_command_run_allowed"] is False
+    assert payload["automation_action"] == "complete_material_recovery_command"
+    assert payload["next_command_run_blocker"] == f"material recovery command has assets.screenshots option value that does not satisfy recovery requirement: --screenshot-file={screenshot_file}"
+    assert recovery["invalid_existing_option_values"] == {"--screenshot-file": [str(screenshot_file)]}
+    assert recovery["missing_flags"] == ["--generate-screenshots"]
+    assert recovery["hints"][0]["existing_file_option_present"] is False
+
+
 def test_summary_check_requires_value_for_existing_material_file_options(tmp_path, capsys) -> None:
     summary_file = tmp_path / "summary.json"
     resume_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target", "--metadata-file", "--image-host-file"]
