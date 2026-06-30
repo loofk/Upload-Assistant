@@ -3011,12 +3011,18 @@ def test_readiness_shell_fields_export_source_followup_state() -> None:
                 "present": True,
                 "ready": False,
                 "ready_for_source_seeding": False,
+                "mode": "pre_live_plan",
+                "scope": "pipeline-live",
+                "planned": {"download_source": True, "inject_source": True, "wait_complete": True},
                 "missing": ["injected_torrent_hash", "injection_visible_in_client", "source_wait_evidence"],
                 "blockers": ["source torrent is not visible in qBittorrent after injection", "qBittorrent has not reported the source torrent as complete"],
                 "next_actions": ["Inject the source torrent into qBittorrent.", "Wait for qBittorrent to report the source torrent as complete."],
                 "source_torrent_hash": source_hash,
                 "source_torrent_file": "/tmp/U2-60635.torrent",
                 "source_save_path": "/downloads",
+                "source_qbit_category": "U2",
+                "source_qbit_tags": "source,retorrent",
+                "source_paused": True,
                 "source_torrent_file_ready": True,
                 "injected": False,
                 "injected_torrent_hash": None,
@@ -3040,6 +3046,11 @@ def test_readiness_shell_fields_export_source_followup_state() -> None:
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_PRESENT"] == "1"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_READY"] == "0"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_READY_FOR_SEEDING"] == "0"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_MODE"] == "pre_live_plan"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_SCOPE"] == "pipeline-live"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_PLANNED_DOWNLOAD"] == "1"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_PLANNED_INJECT"] == "1"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_PLANNED_WAIT"] == "1"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_MISSING"] == "injected_torrent_hash,injection_visible_in_client,source_wait_evidence"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_BLOCKERS"] == "source torrent is not visible in qBittorrent after injection|qBittorrent has not reported the source torrent as complete"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_NEXT_ACTIONS"] == "Inject the source torrent into qBittorrent. | Wait for qBittorrent to report the source torrent as complete."
@@ -3053,6 +3064,9 @@ def test_readiness_shell_fields_export_source_followup_state() -> None:
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_CONSISTENT"] == "1"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_FILE"] == "/tmp/U2-60635.torrent"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_SAVE_PATH"] == "/downloads"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_QBIT_CATEGORY"] == "U2"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_QBIT_TAGS"] == "source,retorrent"
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_PAUSED"] == "1"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_HASH"] == source_hash
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_SAVE_PATH"] == "/downloads"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_TIMEOUT"] == 42.0

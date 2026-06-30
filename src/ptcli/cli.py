@@ -1144,10 +1144,14 @@ def _readiness_source_followup_summary(resume_state: dict[str, Any]) -> dict[str
     wait_query = followup.get("source_wait_query") if isinstance(followup.get("source_wait_query"), dict) else {}
     wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
     gates = followup.get("gates") if isinstance(followup.get("gates"), dict) else {}
+    planned = followup.get("planned") if isinstance(followup.get("planned"), dict) else {}
     return {
         "present": bool(followup),
         "ready": followup.get("ready") if isinstance(followup.get("ready"), bool) else None,
         "ready_for_source_seeding": followup.get("ready_for_source_seeding") if isinstance(followup.get("ready_for_source_seeding"), bool) else None,
+        "mode": followup.get("mode"),
+        "scope": followup.get("scope"),
+        "planned": planned,
         "missing": _string_list(followup.get("missing")),
         "blockers": _string_list(followup.get("blockers")),
         "next_actions": _string_list(followup.get("next_actions")),
@@ -10892,6 +10896,7 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
     material_recovery_coverage = material_recovery.get("command_coverage") if isinstance(material_recovery.get("command_coverage"), dict) else {}
     material_description_evidence = readiness_summary.get("material_description_evidence") if isinstance(readiness_summary.get("material_description_evidence"), dict) else {}
     source_followup = readiness_summary.get("source_followup") if isinstance(readiness_summary.get("source_followup"), dict) else {}
+    source_followup_planned = source_followup.get("planned") if isinstance(source_followup.get("planned"), dict) else {}
     source_wait_query = source_followup.get("source_wait_query") if isinstance(source_followup.get("source_wait_query"), dict) else {}
     source_wait_retry = source_followup.get("wait_retry") if isinstance(source_followup.get("wait_retry"), dict) else {}
     uploaded_followup = readiness_summary.get("uploaded_followup") if isinstance(readiness_summary.get("uploaded_followup"), dict) else {}
@@ -11001,6 +11006,11 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_SOURCE_FOLLOWUP_PRESENT": _shell_bool(source_followup.get("present")) if "present" in source_followup else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_READY": _shell_bool(source_followup.get("ready")) if source_followup.get("ready") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_READY_FOR_SEEDING": _shell_bool(source_followup.get("ready_for_source_seeding")) if source_followup.get("ready_for_source_seeding") is not None else None,
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_MODE": source_followup.get("mode"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_SCOPE": source_followup.get("scope"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_PLANNED_DOWNLOAD": _shell_bool(source_followup_planned.get("download_source")) if source_followup_planned.get("download_source") is not None else None,
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_PLANNED_INJECT": _shell_bool(source_followup_planned.get("inject_source")) if source_followup_planned.get("inject_source") is not None else None,
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_PLANNED_WAIT": _shell_bool(source_followup_planned.get("wait_complete")) if source_followup_planned.get("wait_complete") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_MISSING": ",".join(_string_list(source_followup.get("missing"))),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_BLOCKERS": "|".join(_string_list(source_followup.get("blockers"))),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_NEXT_ACTIONS": " | ".join(_string_list(source_followup.get("next_actions"))),
@@ -11018,6 +11028,9 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_CONSISTENT": _shell_bool(source_followup.get("hash_consistent")) if source_followup.get("hash_consistent") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_FILE": source_followup.get("source_torrent_file"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_SAVE_PATH": source_followup.get("source_save_path"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_QBIT_CATEGORY": source_followup.get("source_qbit_category"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_QBIT_TAGS": source_followup.get("source_qbit_tags"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_PAUSED": _shell_bool(source_followup.get("source_paused")) if source_followup.get("source_paused") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_HASH": source_wait_query.get("torrent_hash"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_SAVE_PATH": source_wait_query.get("save_path"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_TIMEOUT": source_wait_query.get("timeout"),
