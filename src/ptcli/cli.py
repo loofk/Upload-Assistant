@@ -1109,6 +1109,7 @@ def _readiness_source_followup_summary(resume_state: dict[str, Any]) -> dict[str
     torrent_evidence = followup.get("source_torrent_file_evidence") if isinstance(followup.get("source_torrent_file_evidence"), dict) else {}
     wait_query = followup.get("source_wait_query") if isinstance(followup.get("source_wait_query"), dict) else {}
     wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
+    gates = followup.get("gates") if isinstance(followup.get("gates"), dict) else {}
     return {
         "present": bool(followup),
         "ready": followup.get("ready") if isinstance(followup.get("ready"), bool) else None,
@@ -1118,11 +1119,13 @@ def _readiness_source_followup_summary(resume_state: dict[str, Any]) -> dict[str
         "next_actions": _string_list(followup.get("next_actions")),
         "source_torrent_hash": followup.get("source_torrent_hash"),
         "source_torrent_file": followup.get("source_torrent_file"),
+        "source_torrent_file_ready": _first_bool_value(followup.get("source_torrent_file_ready"), gates.get("source_torrent_file"), _torrent_file_evidence_ready(torrent_evidence)),
         "source_torrent_file_evidence": torrent_evidence,
         "source_save_path": followup.get("source_save_path"),
         "source_qbit_category": followup.get("source_qbit_category"),
         "source_qbit_tags": followup.get("source_qbit_tags"),
         "source_paused": followup.get("source_paused") if isinstance(followup.get("source_paused"), bool) else None,
+        "injected": _first_bool_value(followup.get("injected"), gates.get("injected")),
         "injected_torrent_hash": followup.get("injected_torrent_hash"),
         "injection_visible_in_client": followup.get("injection_visible_in_client") if isinstance(followup.get("injection_visible_in_client"), bool) else None,
         "injection_verified": followup.get("injection_verified") if isinstance(followup.get("injection_verified"), bool) else None,
@@ -1132,7 +1135,7 @@ def _readiness_source_followup_summary(resume_state: dict[str, Any]) -> dict[str
         "qbit_wait_mismatch": followup.get("qbit_wait_mismatch") if isinstance(followup.get("qbit_wait_mismatch"), bool) else None,
         "qbit_wait_mismatches": _string_list(followup.get("qbit_wait_mismatches")),
         "wait_retry": wait_retry,
-        "gates": followup.get("gates") if isinstance(followup.get("gates"), dict) else {},
+        "gates": gates,
     }
 
 
@@ -10378,6 +10381,10 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_SOURCE_FOLLOWUP_BLOCKERS": "|".join(_string_list(source_followup.get("blockers"))),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_NEXT_ACTIONS": " | ".join(_string_list(source_followup.get("next_actions"))),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_HASH": source_followup.get("source_torrent_hash"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_FILE_READY": _shell_bool(source_followup.get("source_torrent_file_ready"))
+        if source_followup.get("source_torrent_file_ready") is not None
+        else None,
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_INJECTED": _shell_bool(source_followup.get("injected")) if source_followup.get("injected") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_INJECTED_HASH": source_followup.get("injected_torrent_hash"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_INJECTION_VISIBLE": _shell_bool(source_followup.get("injection_visible_in_client"))
         if source_followup.get("injection_visible_in_client") is not None
