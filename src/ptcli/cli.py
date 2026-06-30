@@ -1081,6 +1081,8 @@ def _target_material_chain_evidence(material_chain: Any) -> dict[str, Any]:
 def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
     materials = resume_state.get("materials") if isinstance(resume_state.get("materials"), dict) else {}
     recovery_hints = materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else []
+    first_hint = next((hint for hint in recovery_hints if isinstance(hint, dict)), {})
+    first_key = str(first_hint.get("key")) if first_hint.get("key") else None
     first_recovery_command = _first_material_recovery_command(recovery_hints)
     first_argv = _argv_list(first_recovery_command.get("argv")) or []
     command_coverage = _material_recovery_command_coverage(recovery_hints)
@@ -1092,6 +1094,10 @@ def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[s
         "next_actions": _string_list(materials.get("next_actions")),
         "hint_count": len(recovery_hints),
         "keys": [str(hint.get("key")) for hint in recovery_hints if isinstance(hint, dict) and hint.get("key")],
+        "first_key": first_key,
+        "first_domain": _material_recovery_key_domain(first_key),
+        "first_reason": first_hint.get("reason"),
+        "first_required_flags": _material_recovery_action_flags(first_hint) if first_hint else [],
         "required_flags": _material_recovery_required_flags(recovery_hints),
         "missing_flags": _material_recovery_missing_flags(recovery_hints),
         "existing_file_options": _material_recovery_existing_file_options(recovery_hints),
@@ -1102,6 +1108,23 @@ def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[s
         "completion_command_argv": completion_command.get("argv"),
         "hints": recovery_hints,
     }
+
+
+def _material_recovery_key_domain(key: str | None) -> str | None:
+    if not key:
+        return None
+    normalized = _target_preparation_missing_key(key)
+    if normalized.startswith("metadata.") or normalized.startswith("description.external_ids") or normalized.startswith("payload."):
+        return "metadata"
+    if normalized in {"assets.mediainfo_or_bdinfo", "assets.bdinfo_for_disc", "description.mediainfo_or_bdinfo", "payload.mediainfo"}:
+        return "media_info"
+    if normalized == "assets.screenshots":
+        return "screenshots"
+    if normalized in {"assets.image_host_uploads", "description.screenshot_coverage"}:
+        return "image_host"
+    if normalized.startswith("description."):
+        return "description"
+    return "materials"
 
 
 def _readiness_source_followup_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
@@ -10387,6 +10410,10 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_MATERIAL_RECOVERY_TARGET_PREPARATION_MISSING": ",".join(_string_list(material_recovery.get("target_preparation_missing"))),
         "PTCLI_READINESS_MATERIAL_RECOVERY_HINT_COUNT": material_recovery.get("hint_count"),
         "PTCLI_READINESS_MATERIAL_RECOVERY_KEYS": ",".join(_string_list(material_recovery.get("keys"))),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_FIRST_KEY": material_recovery.get("first_key"),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_FIRST_DOMAIN": material_recovery.get("first_domain"),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_FIRST_REASON": material_recovery.get("first_reason"),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_FIRST_REQUIRED_FLAGS": ",".join(_string_list(material_recovery.get("first_required_flags"))),
         "PTCLI_READINESS_MATERIAL_RECOVERY_REQUIRED_FLAGS": ",".join(_string_list(material_recovery.get("required_flags"))),
         "PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_FLAGS": ",".join(_string_list(material_recovery.get("missing_flags"))),
         "PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS": ",".join(_string_list(material_recovery.get("existing_file_options"))),

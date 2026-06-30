@@ -2594,6 +2594,10 @@ def test_readiness_material_recovery_summary_exposes_actionable_commands() -> No
     assert recovery["next_actions"] == ["Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package."]
     assert recovery["hint_count"] == 1
     assert recovery["keys"] == ["assets.image_host_uploads"]
+    assert recovery["first_key"] == "assets.image_host_uploads"
+    assert recovery["first_domain"] == "image_host"
+    assert recovery["first_reason"] == "Upload screenshots to an image host or provide existing image-host upload evidence before regenerating the MTEAM package."
+    assert recovery["first_required_flags"] == ["--upload-screenshots"]
     assert recovery["required_flags"] == ["--upload-screenshots"]
     assert recovery["missing_flags"] == []
     assert recovery["existing_file_options"] == ["--image-host-file"]
@@ -7221,6 +7225,9 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_TARGET_PREPARATION_MISSING=description.content\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_HINT_COUNT=2\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_KEYS=metadata.ptgen_description,assets.image_host_uploads\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_FIRST_KEY=metadata.ptgen_description\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_FIRST_DOMAIN=metadata\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_FIRST_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
