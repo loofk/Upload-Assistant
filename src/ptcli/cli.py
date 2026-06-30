@@ -1910,7 +1910,7 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
         command_flags = _material_recovery_action_flags(hint)
         existing_file_options = _string_list(hint.get("existing_file_options"))
         existing_file_values = _argv_option_values(argv, existing_file_options)
-        missing_existing_file_paths = _missing_existing_file_paths(existing_file_values)
+        missing_existing_file_paths = _missing_existing_file_paths(_file_option_values(existing_file_values))
         existing_file_option_present = bool(existing_file_values) and not missing_existing_file_paths
         missing_command_flags = [flag for flag in command_flags if flag not in argv]
         command_covers_hint = bool(command_entry) and (existing_file_option_present or not missing_command_flags)
@@ -1959,6 +1959,14 @@ def _missing_existing_file_paths(option_values: dict[str, list[str]]) -> dict[st
             if not path.is_file():
                 missing.setdefault(option, []).append(value)
     return missing
+
+
+def _file_option_values(option_values: dict[str, list[str]]) -> dict[str, list[str]]:
+    return {option: values for option, values in option_values.items() if _is_material_file_option(option)}
+
+
+def _is_material_file_option(option: str) -> bool:
+    return option.endswith("-file")
 
 
 def _format_option_value_map(option_values: dict[str, list[str]]) -> str:
@@ -4563,7 +4571,7 @@ def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next
                 return f"material recovery command has {key} file option without a value: {flags}"
             return f"material recovery command has file option without a value: {flags}"
         existing_file_values = _argv_option_values(argv, existing_file_options)
-        missing_existing_file_paths = _missing_existing_file_paths(existing_file_values)
+        missing_existing_file_paths = _missing_existing_file_paths(_file_option_values(existing_file_values))
         if missing_existing_file_paths:
             key = hint.get("key")
             missing_text = _format_option_value_map(missing_existing_file_paths)
