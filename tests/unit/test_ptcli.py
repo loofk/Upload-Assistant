@@ -12838,9 +12838,13 @@ async def test_pipeline_material_prerequisite_check_blocks_missing_image_host(mo
     assert prerequisite_stage["ok"] is False
     assert "--upload-screenshots requires --image-host" in prerequisite_stage["result"]["blockers"][0]
     assert image_host_stage["ok"] is False
+    assert image_host_stage["result"]["status"] == "blocked"
+    assert image_host_stage["result"]["blockers"] == prerequisite_stage["result"]["blockers"]
     assert payload["artifacts"]["material_generation"]["prerequisites"]["ok"] is False
     assert payload["artifacts"]["material_generation"]["prerequisites"]["blockers"] == prerequisite_stage["result"]["blockers"]
     assert payload["artifacts"]["material_generation"]["image_host"]["skipped"] is True
+    assert payload["artifacts"]["material_generation"]["image_host"]["status"] == "blocked"
+    assert payload["artifacts"]["material_generation"]["image_host"]["blockers"] == prerequisite_stage["result"]["blockers"]
     assert any(blocker.startswith("material-prerequisite-check:") for blocker in payload["blockers"])
     assert "Fix the metadata/material prerequisites" in payload["next_actions"][0]
 

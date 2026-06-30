@@ -5845,7 +5845,16 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                 material_files["screenshot_files"] = list(generated_screenshots)
         if args.upload_screenshots:
             if not _material_prerequisite_check_ready(stages):
-                stages.append({"stage": "materials-image-host", "ok": False, "skipped": True, "message": "Skipped because material-prerequisite-check did not pass."})
+                prerequisite_result = material_prerequisite_check if isinstance(material_prerequisite_check, dict) else {}
+                stages.append(
+                    {
+                        "stage": "materials-image-host",
+                        "ok": False,
+                        "skipped": True,
+                        "message": "Skipped because material-prerequisite-check did not pass.",
+                        "result": {"status": "blocked", "blockers": _string_list(prerequisite_result.get("blockers"))},
+                    }
+                )
             else:
                 image_host_stage = await _pipeline_image_host_material_stage(config, args, source_result if isinstance(source_result, dict) else None, material_files)
                 stages.append(image_host_stage)
