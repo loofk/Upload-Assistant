@@ -4248,9 +4248,38 @@ def test_run_summary_resume_commands_use_source_qbit_wait_retry_hint() -> None:
 
     commands = {command["stage"]: command for command in ptcli_cli._run_summary_resume_commands(payload, artifacts)}
 
-    assert "--save-path /downloads/ObservedSource" in commands["resume-source-torrent"]["command"]
-    assert "/downloads/ObservedSource" in commands["resume-source-torrent"]["argv"]
+    assert "--save-path /downloads" in commands["resume-source-torrent"]["command"]
+    assert "/downloads" in commands["resume-source-torrent"]["argv"]
+    assert "/downloads/ObservedSource" not in commands["resume-source-torrent"]["argv"]
     assert "/verified/source" not in commands["resume-source-torrent"]["argv"]
+
+
+def test_run_summary_resume_commands_keep_uploaded_qbit_wait_content_path_retry() -> None:
+    payload = {
+        "source_tracker": "U2",
+        "source_torrent_id": "60635",
+        "target_trackers": ["MTEAM"],
+        "client": "default",
+    }
+    artifacts = {
+        "target_package_dir": "/tmp/package",
+        "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
+        "uploaded_save_path": "/verified/uploaded",
+        "qbit_wait_retry_hints": {
+            "uploaded": {
+                "retry_recommended": True,
+                "suggested_torrent_hash": "b" * 40,
+                "suggested_content_path": "/downloads/ObservedUploaded",
+                "suggested_save_path": "/downloads",
+            }
+        },
+    }
+
+    commands = {command["stage"]: command for command in ptcli_cli._run_summary_resume_commands(payload, artifacts)}
+
+    assert "--uploaded-save-path /downloads/ObservedUploaded" in commands["resume-uploaded-torrent"]["command"]
+    assert "/downloads/ObservedUploaded" in commands["resume-uploaded-torrent"]["argv"]
+    assert "/verified/uploaded" not in commands["resume-uploaded-torrent"]["argv"]
 
 
 def test_run_summary_resume_commands_include_source_download_retry_without_torrent_file() -> None:
