@@ -3030,7 +3030,7 @@ def test_readiness_shell_fields_export_source_followup_state() -> None:
                 "injection_verified": False,
                 "source_wait_evidence": False,
                 "hash_consistent": True,
-                "source_wait_query": {"torrent_hash": source_hash, "save_path": "/downloads", "timeout": 42.0, "interval": 3.0},
+                "source_wait_query": {"torrent_hash": source_hash, "content_path": "/downloads/Example", "save_path": "/downloads", "timeout": 42.0, "interval": 3.0},
                 "qbit_wait_mismatch": True,
                 "qbit_wait_mismatches": ["source.requested_hash"],
                 "wait_retry": {
@@ -3068,6 +3068,7 @@ def test_readiness_shell_fields_export_source_followup_state() -> None:
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_QBIT_TAGS"] == "source,retorrent"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_PAUSED"] == "1"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_HASH"] == source_hash
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_CONTENT_PATH"] == "/downloads/Example"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_SAVE_PATH"] == "/downloads"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_TIMEOUT"] == 42.0
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_INTERVAL"] == 3.0

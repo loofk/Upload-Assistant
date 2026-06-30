@@ -11032,6 +11032,7 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_SOURCE_FOLLOWUP_QBIT_TAGS": source_followup.get("source_qbit_tags"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_PAUSED": _shell_bool(source_followup.get("source_paused")) if source_followup.get("source_paused") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_HASH": source_wait_query.get("torrent_hash"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_CONTENT_PATH": source_wait_query.get("content_path"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_SAVE_PATH": source_wait_query.get("save_path"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_TIMEOUT": source_wait_query.get("timeout"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_QUERY_INTERVAL": source_wait_query.get("interval"),
