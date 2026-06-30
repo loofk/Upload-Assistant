@@ -4929,6 +4929,47 @@ def test_summary_material_diagnostics_blocks_upload_when_material_evidence_is_in
 
 def test_summary_material_diagnostics_blocks_upload_when_description_completeness_is_missing() -> None:
     description_evidence = {
+        "metadata_chain": {
+            "ready": False,
+            "items": {
+                "imdb": {
+                    "ready": False,
+                    "expected_link": "https://www.imdb.com/title/tt1234567",
+                    "description_link": None,
+                    "payload_value": None,
+                    "payload_required": True,
+                },
+                "tmdb": {
+                    "ready": False,
+                    "expected_link": None,
+                    "description_link": None,
+                    "payload_value": None,
+                    "payload_required": False,
+                },
+                "douban": {
+                    "ready": True,
+                    "expected_link": "https://movie.douban.com/subject/1291546/",
+                    "description_link": "https://movie.douban.com/subject/1291546/",
+                    "payload_value": "https://movie.douban.com/subject/1291546/",
+                    "payload_required": True,
+                },
+            },
+        },
+        "media_info_chain": {
+            "ready": False,
+            "material_source": None,
+            "material_length": 0,
+            "description_has_excerpt": False,
+            "payload_source": None,
+            "payload_length": 0,
+        },
+        "screenshot_chain": {
+            "ready": False,
+            "local_screenshot_count": 0,
+            "image_host_count": 0,
+            "description_image_count": 0,
+            "missing_urls": ["https://img.example/screen-1.png"],
+        },
         "screenshot_coverage": {
             "ready": False,
             "expected_count": 1,
@@ -4996,6 +5037,12 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETE"] == "0"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING"] == "description.screenshot_coverage"
     assert json.loads(shell_fields["PTCLI_MATERIAL_DESCRIPTION_EVIDENCE"]) == description_evidence
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING"] == "description.external_ids.imdb,payload.imdb,metadata.tmdb"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING"] == "assets.mediainfo_or_bdinfo,description.mediainfo_or_bdinfo,payload.mediainfo"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING"] == "assets.screenshots,assets.image_host_uploads,description.screenshot_bbcode,description.screenshot_coverage"
 
     matrix = ptcli_cli._summary_completion_matrix(
         flow_diagnostics={},
@@ -5036,6 +5083,17 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert readiness["material_description_screenshot_coverage_ready"] is False
     assert readiness["material_description_screenshot_coverage_missing_count"] == 1
     assert readiness["material_description_screenshot_coverage_missing_urls"] == ["https://img.example/screen-1.png"]
+    assert readiness["material_description_metadata_chain_ready"] is False
+    assert readiness["material_description_metadata_chain_missing"] == ["description.external_ids.imdb", "payload.imdb", "metadata.tmdb"]
+    assert readiness["material_description_media_info_chain_ready"] is False
+    assert readiness["material_description_media_info_chain_missing"] == ["assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo", "payload.mediainfo"]
+    assert readiness["material_description_screenshot_chain_ready"] is False
+    assert readiness["material_description_screenshot_chain_missing"] == [
+        "assets.screenshots",
+        "assets.image_host_uploads",
+        "description.screenshot_bbcode",
+        "description.screenshot_coverage",
+    ]
     assert readiness["target_upload_payload_recovery_missing"] == ["description.screenshot_coverage"]
     assert readiness["target_upload_payload_next_actions"] == ["Upload screenshots to an image host before live upload."]
     readiness_shell_fields = ptcli_cli._summary_check_readiness_shell_fields(readiness)
@@ -5043,6 +5101,12 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_READY"] == "0"
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_COUNT"] == 1
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_MISSING_URLS"] == "https://img.example/screen-1.png"
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY"] == "0"
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING"] == "description.external_ids.imdb,payload.imdb,metadata.tmdb"
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY"] == "0"
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING"] == "assets.mediainfo_or_bdinfo,description.mediainfo_or_bdinfo,payload.mediainfo"
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY"] == "0"
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING"] == "assets.screenshots,assets.image_host_uploads,description.screenshot_bbcode,description.screenshot_coverage"
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_RECOVERY_MISSING"] == "description.screenshot_coverage"
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_NEXT_ACTIONS"] == "Upload screenshots to an image host before live upload."
 
