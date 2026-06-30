@@ -7310,6 +7310,8 @@ def test_summary_check_promotes_material_recovery_command(tmp_path, capsys) -> N
     assert payload["next_command_source"] == "material_recovery"
     assert payload["next_command_run_allowed"] is True
     assert payload["automation_action"] == "run_next_command"
+    assert "Highest-priority material blocker is image_host:assets.image_host_uploads." in payload["automation_reason"]
+    assert "Required flags: --upload-screenshots." in payload["automation_reason"]
     assert payload["readiness_summary"]["material_recovery"]["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg"
 
 
@@ -7358,6 +7360,8 @@ def test_summary_check_derives_material_recovery_from_description_evidence(tmp_p
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["automation_action"] == "complete_material_recovery_command"
+    assert "Highest-priority material blocker is metadata:metadata.ptgen_description." in payload["automation_reason"]
+    assert "Required flags: --enrich-metadata,--fetch-ptgen." in payload["automation_reason"]
     assert payload["next_command_run_allowed"] is False
     assert payload["first_runnable_command_source"] == "material_recovery_completion"
     assert payload["first_runnable_command_argv"] == [

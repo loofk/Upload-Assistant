@@ -4443,11 +4443,15 @@ def _summary_automation_reason(payload: dict[str, Any], automation_action: str, 
         return "Next command contains placeholders and requires manual values before execution."
     if automation_action == "run_next_command":
         stage = payload.get("next_stage")
-        return f"Next generated ptcli command is ready to run for stage {stage}." if stage else "Next generated ptcli command is ready to run."
+        reason = f"Next generated ptcli command is ready to run for stage {stage}." if stage else "Next generated ptcli command is ready to run."
+        material_reason = _summary_material_recovery_reason(payload)
+        return f"{reason} {material_reason}" if material_reason else reason
     if automation_action == "unsupported_next_command":
         return f"Next command is present but is not allowed for automatic execution: {next_command_run_blocker}." if next_command_run_blocker else "Next command is present but is not allowed for automatic execution."
     if automation_action == "complete_material_recovery_command":
-        return f"Material recovery command needs additional flags before automatic execution: {next_command_run_blocker}." if next_command_run_blocker else "Material recovery command needs additional flags before automatic execution."
+        reason = f"Material recovery command needs additional flags before automatic execution: {next_command_run_blocker}." if next_command_run_blocker else "Material recovery command needs additional flags before automatic execution."
+        material_reason = _summary_material_recovery_reason(payload)
+        return f"{reason} {material_reason}" if material_reason else reason
     if automation_action == "replace_summary":
         return "Summary schema or kind is unsupported; regenerate the summary with the current ptcli."
     if automation_action == "provide_summary":
@@ -4459,6 +4463,22 @@ def _summary_automation_reason(payload: dict[str, Any], automation_action: str, 
     if blockers:
         return f"Resolve blockers before automation can continue: {blockers[0]}"
     return "Resolve blockers before automation can continue."
+
+
+def _summary_material_recovery_reason(payload: dict[str, Any]) -> str:
+    if payload.get("next_stage") != "resume-target-package" and payload.get("next_command_source") != "material_recovery":
+        return ""
+    resume_state = _summary_resume_state_with_material_recovery(payload)
+    material_recovery = _readiness_material_recovery_summary(resume_state)
+    first_key = material_recovery.get("first_key")
+    first_domain = material_recovery.get("first_domain")
+    if not first_key:
+        return ""
+    flags = ",".join(_string_list(material_recovery.get("first_required_flags")))
+    flag_text = f" Required flags: {flags}." if flags else ""
+    reason = material_recovery.get("first_reason")
+    reason_text = f" {reason}" if reason else ""
+    return f"Highest-priority material blocker is {first_domain or 'materials'}:{first_key}.{flag_text}{reason_text}".strip()
 
 
 def _qbit_wait_retry_hint_reason(qbit_wait_retry_hints: Any) -> str:
