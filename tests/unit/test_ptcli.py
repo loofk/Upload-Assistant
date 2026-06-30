@@ -7712,7 +7712,23 @@ def test_summary_check_requires_existing_material_file_paths(tmp_path, capsys) -
     assert recovery["hints"][0]["existing_file_values"] == {"--metadata-file": [str(missing_metadata)]}
     assert recovery["hints"][0]["missing_existing_file_paths"] == {"--metadata-file": [str(missing_metadata)]}
     assert recovery["hints"][0]["existing_file_option_present"] is False
+    assert recovery["existing_file_values"] == {"--metadata-file": [str(missing_metadata)]}
+    assert recovery["missing_existing_file_paths"] == {"--metadata-file": [str(missing_metadata)]}
     assert recovery["missing_flags"] == ["--enrich-metadata", "--fetch-ptgen"]
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_AUTOMATION_ACTION=complete_material_recovery_command\n" in out
+    assert "export PTCLI_NEXT_COMMAND_RUN_ALLOWED=0\n" in out
+    assert f"--metadata-file={missing_metadata}" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_VALUES=" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_EXISTING_FILE_PATHS=" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_EXISTING_FILE_PATHS_TEXT=" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_VALUES=" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_EXISTING_FILE_PATHS=" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_EXISTING_FILE_PATHS_TEXT=" in out
 
 
 def test_doctor_summary_check_promotes_material_recovery_completion(tmp_path, capsys) -> None:

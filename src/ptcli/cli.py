@@ -1102,6 +1102,8 @@ def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[s
         "required_flags": _material_recovery_required_flags(recovery_hints),
         "missing_flags": _material_recovery_missing_flags(recovery_hints),
         "existing_file_options": _material_recovery_existing_file_options(recovery_hints),
+        "existing_file_values": _material_recovery_option_value_map(recovery_hints, "existing_file_values"),
+        "missing_existing_file_paths": _material_recovery_option_value_map(recovery_hints, "missing_existing_file_paths"),
         "first_command": first_recovery_command.get("command"),
         "first_command_argv": first_argv,
         "command_coverage": command_coverage,
@@ -10679,6 +10681,15 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_MATERIAL_RECOVERY_REQUIRED_FLAGS": ",".join(_string_list(material_recovery.get("required_flags"))),
         "PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_FLAGS": ",".join(_string_list(material_recovery.get("missing_flags"))),
         "PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS": ",".join(_string_list(material_recovery.get("existing_file_options"))),
+        "PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_VALUES": json.dumps(material_recovery.get("existing_file_values"), ensure_ascii=False)
+        if isinstance(material_recovery.get("existing_file_values"), dict) and material_recovery.get("existing_file_values")
+        else None,
+        "PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_EXISTING_FILE_PATHS": json.dumps(material_recovery.get("missing_existing_file_paths"), ensure_ascii=False)
+        if isinstance(material_recovery.get("missing_existing_file_paths"), dict) and material_recovery.get("missing_existing_file_paths")
+        else None,
+        "PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_EXISTING_FILE_PATHS_TEXT": _format_option_value_map(material_recovery.get("missing_existing_file_paths"))
+        if isinstance(material_recovery.get("missing_existing_file_paths"), dict) and material_recovery.get("missing_existing_file_paths")
+        else None,
         "PTCLI_READINESS_MATERIAL_FIRST_RECOVERY_COMMAND": material_recovery.get("first_command"),
         "PTCLI_READINESS_MATERIAL_FIRST_RECOVERY_COMMAND_ARGV": json.dumps(material_recovery.get("first_command_argv"), ensure_ascii=False) if material_recovery.get("first_command_argv") else None,
         "PTCLI_READINESS_MATERIAL_RECOVERY_COMPLETION_COMMAND": material_recovery.get("completion_command"),
@@ -11013,6 +11024,17 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
         "PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_FLAGS": ",".join(_material_recovery_missing_flags(recovery_hints)),
         "PTCLI_RESUME_MATERIAL_RECOVERY_REQUIRED_FLAGS": ",".join(_material_recovery_required_flags(recovery_hints)),
         "PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS": ",".join(_material_recovery_existing_file_options(recovery_hints)),
+        "PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_VALUES": json.dumps(_material_recovery_option_value_map(recovery_hints, "existing_file_values"), ensure_ascii=False)
+        if _material_recovery_option_value_map(recovery_hints, "existing_file_values")
+        else None,
+        "PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_EXISTING_FILE_PATHS": json.dumps(_material_recovery_option_value_map(recovery_hints, "missing_existing_file_paths"), ensure_ascii=False)
+        if _material_recovery_option_value_map(recovery_hints, "missing_existing_file_paths")
+        else None,
+        "PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_EXISTING_FILE_PATHS_TEXT": _format_option_value_map(
+            _material_recovery_option_value_map(recovery_hints, "missing_existing_file_paths")
+        )
+        if _material_recovery_option_value_map(recovery_hints, "missing_existing_file_paths")
+        else None,
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMPLETION_COMMAND": recovery_completion_command.get("command"),
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMPLETION_COMMAND_ARGV": json.dumps(recovery_completion_command.get("argv"), ensure_ascii=False) if recovery_completion_command.get("argv") else None,
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY": _shell_bool(recovery_command_coverage.get("ready")) if recovery_command_coverage.get("ready") is not None else None,
@@ -11049,6 +11071,16 @@ def _material_recovery_existing_file_options(recovery_hints: list[Any]) -> list[
         if isinstance(hint, dict):
             _extend_unique_string(options, _string_list(hint.get("existing_file_options")))
     return options
+
+
+def _material_recovery_option_value_map(recovery_hints: list[Any], field: str) -> dict[str, list[str]]:
+    values: dict[str, list[str]] = {}
+    for hint in recovery_hints:
+        if not isinstance(hint, dict) or not isinstance(hint.get(field), dict):
+            continue
+        for option, option_values in hint[field].items():
+            _extend_unique_string(values.setdefault(str(option), []), _string_list(option_values))
+    return values
 
 
 def _material_recovery_command_coverage(recovery_hints: list[Any]) -> dict[str, Any]:
