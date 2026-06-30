@@ -5611,6 +5611,58 @@ def test_summary_material_diagnostics_exposes_ready_for_mteam_upload() -> None:
         qbit_wait_mismatches=[],
     )
     assert matrix["domains"]["materials"]["evidence"]["ready_for_mteam_upload"] is True
+    assert matrix["domains"]["materials"]["evidence"]["domains"]["metadata"]["ready"] is True
+    assert matrix["domains"]["materials"]["evidence"]["domains"]["image_host"]["missing"] == []
+
+
+def test_completion_matrix_materials_domain_exposes_live_gate_evidence() -> None:
+    diagnostics = {
+        "present": True,
+        "ready_for_mteam_upload": False,
+        "target_materials_ready": True,
+        "target_preparation_ready": True,
+        "critical_ready": False,
+        "critical_missing": ["metadata.tmdb"],
+        "critical_domains": {
+            "metadata": {"ready": False, "missing": ["metadata.tmdb"]},
+            "media_info": {"ready": True, "missing": []},
+            "screenshots": {"ready": True, "missing": []},
+            "image_host": {"ready": False, "missing": ["assets.image_host_uploads"]},
+            "description": {"ready": True, "missing": []},
+        },
+        "upload_material_blockers": ["target materials are not ready"],
+        "live_gate": {
+            "present": True,
+            "ready": False,
+            "ready_for_mteam_upload": False,
+            "missing": ["assets.image_host_uploads"],
+            "blockers": ["MTEAM material live upload gate has blockers."],
+        },
+    }
+
+    matrix = ptcli_cli._summary_completion_matrix(
+        flow_diagnostics={},
+        material_diagnostics=diagnostics,
+        target_upload_diagnostics={},
+        closure_review={},
+        closure_status={},
+        qbit_wait_mismatches=[],
+    )
+
+    materials = matrix["domains"]["materials"]
+    assert materials["ready"] is False
+    assert materials["missing"] == [
+        "metadata.tmdb",
+        "target materials are not ready",
+        "assets.image_host_uploads",
+        "MTEAM material live upload gate has blockers.",
+    ]
+    evidence = materials["evidence"]
+    assert evidence["live_gate_present"] is True
+    assert evidence["live_gate_ready"] is False
+    assert evidence["live_gate_missing"] == ["assets.image_host_uploads"]
+    assert evidence["domains"]["metadata"] == {"ready": False, "missing": ["metadata.tmdb"]}
+    assert evidence["domains"]["image_host"] == {"ready": False, "missing": ["assets.image_host_uploads"]}
 
 
 def test_summary_material_diagnostics_blocks_upload_when_material_evidence_is_invalid(tmp_path) -> None:

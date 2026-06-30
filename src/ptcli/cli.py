@@ -3244,13 +3244,7 @@ def _summary_completion_matrix(
         "materials": _completion_domain(
             _material_matrix_ready(material_diagnostics, review_target),
             _material_matrix_missing(material_diagnostics, review_target),
-            {
-                "target_materials_ready": material_diagnostics.get("target_materials_ready"),
-                "target_preparation_ready": material_diagnostics.get("target_preparation_ready") or review_target.get("preparation_ready"),
-                "critical_ready": material_diagnostics.get("critical_ready"),
-                "ready_for_mteam_upload": material_diagnostics.get("ready_for_mteam_upload"),
-                "description_ready": review_target.get("description_ready"),
-            },
+            _material_matrix_evidence(material_diagnostics, review_target),
         ),
         "rules": _completion_domain(
             _rules_matrix_ready(closure_target, review_target, target_checks),
@@ -3325,7 +3319,34 @@ def _material_matrix_missing(material_diagnostics: dict[str, Any], review_target
     _extend_unique_string(missing, _string_list(material_diagnostics.get("target_materials_missing")))
     _extend_unique_string(missing, _string_list(material_diagnostics.get("target_preparation_missing") or review_target.get("preparation_missing")))
     _extend_unique_string(missing, _string_list(material_diagnostics.get("upload_material_blockers")))
+    live_gate = material_diagnostics.get("live_gate") if isinstance(material_diagnostics.get("live_gate"), dict) else {}
+    _extend_unique_string(missing, _string_list(live_gate.get("missing")))
+    _extend_unique_string(missing, _string_list(live_gate.get("blockers")))
     return missing
+
+
+def _material_matrix_evidence(material_diagnostics: dict[str, Any], review_target: dict[str, Any]) -> dict[str, Any]:
+    critical_domains = material_diagnostics.get("critical_domains") if isinstance(material_diagnostics.get("critical_domains"), dict) else {}
+    live_gate = material_diagnostics.get("live_gate") if isinstance(material_diagnostics.get("live_gate"), dict) else {}
+    return {
+        "target_materials_ready": material_diagnostics.get("target_materials_ready"),
+        "target_preparation_ready": material_diagnostics.get("target_preparation_ready") or review_target.get("preparation_ready"),
+        "critical_ready": material_diagnostics.get("critical_ready"),
+        "ready_for_mteam_upload": material_diagnostics.get("ready_for_mteam_upload"),
+        "description_ready": review_target.get("description_ready"),
+        "live_gate_present": live_gate.get("present") if isinstance(live_gate.get("present"), bool) else None,
+        "live_gate_ready": live_gate.get("ready") if isinstance(live_gate.get("ready"), bool) else None,
+        "live_gate_ready_for_mteam_upload": live_gate.get("ready_for_mteam_upload") if isinstance(live_gate.get("ready_for_mteam_upload"), bool) else None,
+        "live_gate_missing": _string_list(live_gate.get("missing")),
+        "live_gate_blockers": _string_list(live_gate.get("blockers")),
+        "domains": {
+            name: {
+                "ready": _material_critical_domain_ready(critical_domains, name),
+                "missing": _material_critical_domain_missing(critical_domains, name),
+            }
+            for name in ("metadata", "media_info", "screenshots", "image_host", "description")
+        },
+    }
 
 
 def _rules_matrix_ready(closure_target: dict[str, Any], review_target: dict[str, Any], target_checks: dict[str, Any]) -> bool | None:
