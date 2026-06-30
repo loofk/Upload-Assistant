@@ -19199,6 +19199,8 @@ def test_mteam_upload_payload_summary_blocks_invalid_optional_urls(tmp_path) -> 
     douban_check = next(check for check in preflight["upload_payload"]["field_checks"] if check["name"] == "payload.douban")
     assert douban_check["ok"] is False
     assert any("payload.douban" in blocker for blocker in preflight["upload_payload"]["blockers"])
+    assert "payload.douban" in preflight["upload_payload"]["recovery_missing"]
+    assert any("Fetch Douban metadata" in action for action in preflight["upload_payload"]["next_actions"])
 
 
 def test_mteam_upload_payload_summary_blocks_unknown_standard(tmp_path) -> None:

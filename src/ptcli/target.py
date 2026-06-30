@@ -321,7 +321,7 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
     torrent_summary, torrent_blockers = _torrent_file_summary(torrent_file)
     field_checks = _mteam_upload_field_checks(form_fields)
     material_checks = _mteam_upload_material_checks(description_summary, description_length, materials=materials)
-    recovery_missing = _mteam_upload_recovery_missing(material_checks)
+    recovery_missing = _mteam_upload_recovery_missing([*field_checks, *material_checks])
     blockers = [f"{check['name']}: {check['message']}" for check in field_checks if not check["ok"]]
     enforce_materials = require_materials
     blockers.extend(f"{check['name']}: {check['message']}" for check in material_checks if not check["ok"] and (enforce_materials or check["name"].startswith("payload.description_")))
@@ -1968,6 +1968,8 @@ def _mteam_upload_recovery_keys(name: str) -> list[str]:
     mapping = {
         "payload.description_file": ["description.content"],
         "payload.description_length": ["description.content"],
+        "payload.imdb": ["payload.imdb"],
+        "payload.douban": ["payload.douban"],
         "materials.metadata.imdb": ["metadata.imdb_id"],
         "materials.metadata.tmdb": ["metadata.tmdb_id"],
         "materials.metadata.douban": ["metadata.douban"],
@@ -1992,17 +1994,17 @@ def _mteam_upload_recovery_keys(name: str) -> list[str]:
 def _mteam_upload_recovery_next_actions(missing: list[str]) -> list[str]:
     actions: list[str] = []
     normalized = set(missing)
-    if normalized.intersection({"metadata.imdb_id", "description.external_ids.imdb"}):
+    if normalized.intersection({"metadata.imdb_id", "description.external_ids.imdb", "payload.imdb"}):
         actions.append("Fetch IMDb metadata with --enrich-metadata or supply --metadata-file/--imdb-id before live upload.")
     if normalized.intersection({"metadata.tmdb_id", "description.external_ids.tmdb"}):
         actions.append("Fetch TMDb metadata with --enrich-metadata or supply --metadata-file/--tmdb-id before live upload.")
-    if normalized.intersection({"metadata.douban", "description.external_ids.douban"}):
+    if normalized.intersection({"metadata.douban", "description.external_ids.douban", "payload.douban"}):
         actions.append("Fetch Douban metadata with --fetch-ptgen or supply --metadata-file/--douban-id/--douban-url before live upload.")
     if normalized.intersection({"metadata.ptgen_description", "description.ptgen_description"}):
         actions.append("Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description before live upload.")
     if normalized.intersection({"description.external_ids"}):
         actions.append("Fetch or supply IMDb/TMDb/Douban metadata before live upload.")
-    if normalized.intersection({"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo"}):
+    if normalized.intersection({"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo", "payload.mediainfo"}):
         actions.append("Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file before live upload.")
     if "assets.bdinfo_for_disc" in normalized:
         actions.append("Provide a BDInfo text file with --bdinfo-file for BDMV disc content before live upload.")
