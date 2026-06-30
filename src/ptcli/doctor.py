@@ -69,6 +69,7 @@ def build_doctor_check(
     if check_runtime:
         checks.append(_runtime_dependency_check())
     checks.extend(_upload_followup_checks(download_uploaded_torrent, uploaded_torrent_id, uploaded_torrent_file, inject_uploaded_torrent, effective_uploaded_save_path, target_execute, wait_uploaded_complete))
+    material_gate = _material_gate_summary(package_preflight.get("preflight") if package_preflight else None, target_execute)
 
     return {
         "status": "ok",
@@ -79,6 +80,7 @@ def build_doctor_check(
         "rule_check": rule_check,
         "package_preflight": package_preflight.get("preflight") if package_preflight else None,
         "compliance": _doctor_compliance_summary(rule_check, package_preflight.get("preflight") if package_preflight else None),
+        "material_gate": material_gate,
         "checks": checks,
         "next_actions": _next_actions(checks, target_execute),
     }
@@ -279,6 +281,11 @@ def _string_list(value: Any) -> list[str]:
     return [str(item) for item in value if isinstance(item, str)]
 
 
+def _append_unique_string(items: list[str], value: str | None) -> None:
+    if value and value not in items:
+        items.append(value)
+
+
 def _package_content_path(package_preflight: dict[str, Any] | None) -> str | None:
     if not package_preflight:
         return None
@@ -341,6 +348,87 @@ def _target_material_checks(preflight: dict[str, Any] | None, target_execute: bo
         "MTEAM material gate is ready." if not failed else f"MTEAM material gate has blockers: {'; '.join(check['message'] for check in failed)}",
     )
     return [aggregate, *normalized]
+
+
+def _material_gate_summary(preflight: dict[str, Any] | None, target_execute: bool) -> dict[str, Any]:
+    if not target_execute:
+        return {"present": False, "ready": None, "message": "Live upload is not requested.", "missing": [], "blockers": [], "next_actions": []}
+    if not isinstance(preflight, dict):
+        return {
+            "present": False,
+            "ready": False,
+            "message": "MTEAM material readiness cannot be checked without a target package preflight.",
+            "missing": ["target.package"],
+            "blockers": ["MTEAM material readiness cannot be checked without a target package preflight."],
+            "next_actions": ["Prepare the MTEAM target package before live target upload."],
+        }
+    upload_payload = preflight.get("upload_payload")
+    material_checks = upload_payload.get("material_checks") if isinstance(upload_payload, dict) else None
+    if not isinstance(material_checks, list):
+        return {
+            "present": True,
+            "ready": False,
+            "message": "MTEAM upload payload summary is missing material checks.",
+            "missing": ["materials.checks"],
+            "blockers": ["MTEAM upload payload summary is missing material checks."],
+            "next_actions": ["Regenerate the MTEAM target package before live target upload."],
+        }
+    failed = [check for check in material_checks if isinstance(check, dict) and not check.get("ok")]
+    missing = _material_gate_missing(failed)
+    blockers = [str(check.get("message") or "MTEAM material check failed.") for check in failed]
+    return {
+        "present": True,
+        "ready": not failed,
+        "message": "MTEAM material gate is ready." if not failed else f"MTEAM material gate has blockers: {'; '.join(blockers)}",
+        "missing": missing,
+        "blockers": blockers,
+        "next_actions": _material_gate_next_actions(missing),
+        "failed_checks": [
+            {
+                "name": str(check.get("name") or "materials"),
+                "message": str(check.get("message") or "MTEAM material check failed."),
+            }
+            for check in failed
+            if isinstance(check, dict)
+        ],
+    }
+
+
+def _material_gate_missing(failed_checks: list[dict[str, Any]]) -> list[str]:
+    missing: list[str] = []
+    for check in failed_checks:
+        name = str(check.get("name") or "")
+        if name.startswith("materials."):
+            name = name.removeprefix("materials.")
+        if name:
+            _append_unique_string(missing, name)
+    return missing
+
+
+def _material_gate_next_actions(missing: list[str]) -> list[str]:
+    actions: list[str] = []
+    normalized = set(missing)
+    if normalized.intersection({"metadata.imdb", "metadata.imdb_id", "description.external_ids.imdb", "description.external_ids"}):
+        _append_unique_string(actions, "Fetch IMDb metadata with --enrich-metadata or supply it with --metadata-file/--imdb-id, then rerun doctor.")
+    if normalized.intersection({"metadata.tmdb", "metadata.tmdb_id", "description.external_ids.tmdb", "description.external_ids"}):
+        _append_unique_string(actions, "Fetch TMDb metadata with --enrich-metadata or supply it with --metadata-file/--tmdb-id, then rerun doctor.")
+    if normalized.intersection({"metadata.douban", "metadata.douban_id", "metadata.douban_url", "description.external_ids.douban", "description.external_ids"}):
+        _append_unique_string(actions, "Fetch Douban metadata with --fetch-ptgen or supply it with --metadata-file/--douban-id/--douban-url, then rerun doctor.")
+    if normalized.intersection({"metadata.ptgen_description", "description.ptgen_description"}):
+        _append_unique_string(actions, "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun doctor.")
+    if normalized.intersection({"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo"}):
+        _append_unique_string(actions, "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun doctor.")
+    if "assets.bdinfo_for_disc" in normalized:
+        _append_unique_string(actions, "Provide BDInfo for BDMV disc content with --bdinfo-file or --generate-bdinfo, then rerun doctor.")
+    if "assets.screenshots" in normalized:
+        _append_unique_string(actions, "Generate or provide screenshots with --generate-screenshots or --screenshot-file, then rerun doctor.")
+    if normalized.intersection({"assets.image_host_uploads", "description.screenshot_coverage"}):
+        _append_unique_string(actions, "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun doctor.")
+    if "description.screenshot_bbcode" in normalized:
+        _append_unique_string(actions, "Regenerate the MTEAM description after screenshot and image-host materials are ready, then rerun doctor.")
+    if "description.content" in normalized:
+        _append_unique_string(actions, "Regenerate the MTEAM description after metadata, MediaInfo/BDInfo, screenshot, and image-host materials are ready, then rerun doctor.")
+    return actions
 
 
 def _doctor_compliance_summary(rule_check: dict[str, Any], preflight: dict[str, Any] | None) -> dict[str, Any]:

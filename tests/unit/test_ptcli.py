@@ -9744,6 +9744,10 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
     assert payload["ready"] is True
     assert payload["live_safe_to_attempt"] is True
     assert payload["package_preflight"]["status"] == "ready"
+    assert payload["material_gate"]["present"] is True
+    assert payload["material_gate"]["ready"] is True
+    assert payload["material_gate"]["missing"] == []
+    assert payload["material_gate"]["blockers"] == []
     assert payload["compliance"]["ready"] is True
     assert payload["compliance"]["rules_acknowledged"] is True
     assert payload["compliance"]["site_specific_rules_encoded"] is False
@@ -9792,10 +9796,14 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
     assert audit["description"]["bbcode_image_count"] == 1
     assert summary["artifacts"]["target_preparation_ready"] is True
     assert summary["artifacts"]["target_materials_ready"] is True
+    assert summary["artifacts"]["material_gate"]["ready"] is True
+    assert summary["artifacts"]["live_material_gate"]["ready"] is True
     assert summary["artifacts"]["target_preparation_missing"] == []
     material_diagnostics = summary["material_diagnostics"]
     assert material_diagnostics["present"] is True
     assert material_diagnostics["ready_for_mteam_upload"] is True
+    assert material_diagnostics["live_gate"]["present"] is True
+    assert material_diagnostics["live_gate"]["ready"] is True
     assert material_diagnostics["critical_path"]["ready"] is True
     assert material_diagnostics["critical_path"]["next_step"] is None
     gates = summary["artifacts"]["target_preflight_gates"]
@@ -9820,6 +9828,7 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
     assert summary["resume_state"]["artifacts"]["target_preflight_description_ready"] is True
     assert summary["resume_state"]["artifacts"]["target_preflight_payload_ready"] is True
     assert summary["resume_state"]["artifacts"]["target_preflight_torrent_safe"] is True
+    assert summary["resume_state"]["artifacts"]["material_gate_ready"] is True
 
 
 def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
@@ -9934,6 +9943,13 @@ def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
     assert gates["torrent_file"]["source_flag"] == "MTEAM"
     assert summary["material_diagnostics"]["present"] is True
     assert summary["material_diagnostics"]["ready_for_mteam_upload"] is False
+    assert summary["material_gate"]["ready"] is False
+    assert "metadata.tmdb" in summary["material_gate"]["missing"]
+    assert summary["artifacts"]["material_gate"]["ready"] is False
+    assert summary["artifacts"]["live_material_gate"]["ready"] is False
+    assert "metadata.tmdb" in summary["artifacts"]["live_material_gate"]["missing"]
+    assert summary["material_diagnostics"]["live_gate"]["present"] is True
+    assert summary["material_diagnostics"]["live_gate"]["ready"] is False
     assert summary["material_diagnostics"]["critical_path"]["ready"] is False
     assert summary["material_diagnostics"]["critical_path"]["next_step"] == "metadata"
     assert "metadata.ptgen_description" in summary["material_diagnostics"]["critical_path"]["missing"]
@@ -9957,6 +9973,7 @@ def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
     assert summary["resume_state"]["artifacts"]["target_preflight_description_ready"] is False
     assert summary["resume_state"]["artifacts"]["target_preflight_payload_ready"] is False
     assert summary["resume_state"]["artifacts"]["target_preflight_torrent_safe"] is True
+    assert summary["resume_state"]["artifacts"]["material_gate_ready"] is False
 
 
 def test_doctor_auto_enables_uploaded_torrent_followup_for_live_closure(tmp_path) -> None:
@@ -10230,6 +10247,12 @@ def test_doctor_surfaces_material_gate_checks(tmp_path) -> None:
 
     assert payload["ready"] is False
     assert payload["live_safe_to_attempt"] is False
+    assert payload["material_gate"]["present"] is True
+    assert payload["material_gate"]["ready"] is False
+    assert "metadata.tmdb" in payload["material_gate"]["missing"]
+    assert "assets.image_host_uploads" in payload["material_gate"]["missing"]
+    assert any("Fetch TMDb metadata" in action for action in payload["material_gate"]["next_actions"])
+    assert any("Upload screenshots to an image host" in action for action in payload["material_gate"]["next_actions"])
     assert checks["target_materials"]["ok"] is False
     assert checks["target_materials_metadata_tmdb"]["ok"] is False
     assert checks["target_materials_metadata_douban"]["ok"] is False

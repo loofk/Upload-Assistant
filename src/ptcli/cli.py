@@ -4714,6 +4714,7 @@ def _doctor_summary_payload(payload: dict[str, Any], args: argparse.Namespace, s
         "client": args.client,
         "inputs": _doctor_summary_inputs(args),
         "artifacts": artifacts,
+        "material_gate": payload.get("material_gate") if isinstance(payload.get("material_gate"), dict) else {},
         "material_diagnostics": material_diagnostics,
         "failed_checks": failed_checks,
         "failed_check_names": [str(check.get("name")) for check in failed_checks if isinstance(check, dict)],
@@ -4764,6 +4765,7 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
             "target_preflight_description_ready": bool(target_preflight.get("description_ready")),
             "target_preflight_payload_ready": bool(target_preflight.get("payload_ready")),
             "target_preflight_torrent_safe": bool(target_preflight_torrent.get("mteam_safe")),
+            "material_gate_ready": artifacts.get("material_gate", {}).get("ready") is True if isinstance(artifacts.get("material_gate"), dict) else False,
             "download_uploaded_torrent": bool(artifacts.get("download_uploaded_torrent")),
             "inject_uploaded_torrent": bool(artifacts.get("inject_uploaded_torrent")),
             "wait_uploaded_complete": bool(artifacts.get("wait_uploaded_complete")),
@@ -4823,6 +4825,7 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
     rule_check = payload.get("rule_check") if isinstance(payload.get("rule_check"), dict) else {}
     compliance = payload.get("compliance") if isinstance(payload.get("compliance"), dict) else {}
     package_preflight = payload.get("package_preflight") if isinstance(payload.get("package_preflight"), dict) else {}
+    material_gate = payload.get("material_gate") if isinstance(payload.get("material_gate"), dict) else {}
     target_rule_obligations = compliance.get("target_rule_obligation_review")
     if not isinstance(target_rule_obligations, dict):
         target_rule_obligations = package_preflight.get("rule_obligation_review") if isinstance(package_preflight.get("rule_obligation_review"), dict) else None
@@ -4844,6 +4847,8 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
         "target_preparation_missing": _string_list(preparation_audit.get("missing")),
         "target_materials_ready": preparation_audit.get("materials_ready"),
         "target_preflight_gates": target_preflight,
+        "material_gate": material_gate,
+        "live_material_gate": _doctor_live_material_gate_artifact(material_gate),
         "uploaded_torrent_id": args.uploaded_torrent_id,
         "uploaded_torrent_file": _path_artifact(args.uploaded_torrent_file),
         "effective_uploaded_save_path": _path_artifact(str(effective_uploaded_save_path)) if effective_uploaded_save_path else None,
@@ -4862,6 +4867,23 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
 
 def _doctor_check_ok(checks: list[Any], name: str) -> bool:
     return any(isinstance(check, dict) and check.get("name") == name and check.get("ok") is True for check in checks)
+
+
+def _doctor_live_material_gate_artifact(material_gate: dict[str, Any]) -> dict[str, Any]:
+    if not material_gate:
+        return {}
+    return {
+        "ready": material_gate.get("ready") if isinstance(material_gate.get("ready"), bool) else None,
+        "skipped": material_gate.get("present") is False,
+        "message": material_gate.get("message"),
+        "ready_for_mteam_upload": material_gate.get("ready") if isinstance(material_gate.get("ready"), bool) else None,
+        "gates": material_gate.get("gates") if isinstance(material_gate.get("gates"), dict) else {},
+        "missing": _string_list(material_gate.get("missing")),
+        "blockers": _string_list(material_gate.get("blockers")),
+        "next_actions": _string_list(material_gate.get("next_actions")),
+        "critical_path": material_gate.get("critical_path") if isinstance(material_gate.get("critical_path"), dict) else {},
+        "readiness": material_gate.get("readiness") if isinstance(material_gate.get("readiness"), dict) else {},
+    }
 
 
 def _path_artifact(path: str | None) -> dict[str, Any] | None:
