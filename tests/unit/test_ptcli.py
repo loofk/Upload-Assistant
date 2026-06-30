@@ -4197,6 +4197,32 @@ def test_source_info_blocks_unsupported_tracker_before_fetch(monkeypatch, capsys
     assert payload["blockers"] == ["Unsupported tracker(s) for focused CLI scope: PTP"]
 
 
+def test_source_info_reports_missing_cookie_diagnostics(monkeypatch, capsys, tmp_path) -> None:
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+
+    code = main(["source-info", "--tracker", "U2", "--source-id", "60635", "--base-dir", str(tmp_path), "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    diagnostics = payload["source_info_diagnostics"]
+    cookie_path = tmp_path / "data" / "cookies" / "U2.txt"
+    assert payload["source"]["source_info_diagnostics"] == diagnostics
+    assert diagnostics["source_info_adapter"] == "generic_details_cookie"
+    assert diagnostics["source_download_adapter"] == "nexusphp_passkey"
+    assert diagnostics["has_signal"] is False
+    assert diagnostics["credential_ready"] is False
+    assert diagnostics["credential_checks"][0]["path"] == str(cookie_path)
+    assert diagnostics["credential_checks"][0]["ok"] is False
+    assert diagnostics["blockers"] == [
+        "Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
+        "Source cookie file is missing: data/cookies/U2.txt",
+    ]
+    assert diagnostics["next_actions"] == [
+        "Create data/cookies/U2.txt from a logged-in browser session, then rerun source-info or source-download.",
+        "Verify the source torrent id/details URL and tracker session, then rerun source-info before downloading.",
+    ]
+
+
 def test_source_download_requires_rule_ack(monkeypatch, capsys) -> None:
     async def fake_download_source_torrent(*_args, **_kwargs):
         raise AssertionError("download must not run without rule acknowledgement")
@@ -4230,6 +4256,45 @@ def test_source_download_blocks_unsupported_tracker_before_config(monkeypatch, c
     assert payload["source_torrent_id"] == "123"
     assert payload["target_trackers"] == ["MTEAM"]
     assert payload["blockers"] == ["Unsupported tracker(s) for focused CLI scope: PTP"]
+
+
+def test_source_download_reports_source_info_diagnostics_when_metadata_has_no_signal(monkeypatch, capsys, tmp_path) -> None:
+    async def fake_download_source_torrent(*_args, **_kwargs):
+        raise AssertionError("download must not run when source metadata has no signal")
+
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {})
+    monkeypatch.setattr(ptcli_cli, "download_source_torrent", fake_download_source_torrent)
+
+    code = main(
+        [
+            "source-download",
+            "--tracker",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--base-dir",
+            str(tmp_path),
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    diagnostics = payload["source_info_diagnostics"]
+    assert payload["status"] == "blocked"
+    assert payload["source"]["source_info_diagnostics"] == diagnostics
+    assert diagnostics["has_signal"] is False
+    assert diagnostics["credential_checks"][0]["type"] == "cookie_file"
+    assert diagnostics["credential_checks"][0]["ok"] is False
+    assert payload["blockers"] == [
+        "source-info: Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
+        "source-info: Source cookie file is missing: data/cookies/U2.txt",
+    ]
 
 
 def test_source_download_runs_after_rule_gate(monkeypatch, capsys, tmp_path) -> None:

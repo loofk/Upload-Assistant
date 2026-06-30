@@ -440,6 +440,86 @@ async def export_qbit(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _source_info_payload(config: dict[str, Any], tracker: str, source_id: str, base_dir: str | None, info: Any) -> dict[str, Any]:
+    source = info.to_dict()
+    source["source_info_diagnostics"] = _source_info_diagnostics(config, tracker, source_id, base_dir, source)
+    return source
+
+
+def _source_info_diagnostics(config: dict[str, Any], tracker: str, source_id: str, base_dir: str | None, source: dict[str, Any]) -> dict[str, Any]:
+    source_tracker = normalize_tracker(tracker)
+    source_torrent_id = extract_torrent_id(source_id)
+    signal_fields = {
+        "imdb_id": bool(source.get("imdb_id")),
+        "tmdb_id": bool(source.get("tmdb_id")),
+        "name": bool(source.get("name")),
+        "torrenthash": bool(source.get("torrenthash")),
+        "description": int(source.get("description_length", 0) or 0) > 0,
+        "douban": bool(source.get("douban_id") or source.get("douban_url")),
+    }
+    has_signal = any(signal_fields.values())
+    credential_checks = _source_info_credential_checks(config, source_tracker, base_dir)
+    credential_ready = all(bool(check.get("ok")) for check in credential_checks) if credential_checks else None
+    missing = [f"source_info.{name}" for name, ready in signal_fields.items() if not ready]
+    blockers = []
+    if not has_signal:
+        blockers.append("Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.")
+        blockers.extend(str(check.get("message") or f"{check.get('name')} is not ready.") for check in credential_checks if not check.get("ok"))
+    return {
+        "present": True,
+        "tracker": source_tracker,
+        "source_torrent_id": source_torrent_id,
+        "source_info_adapter": source_info_adapter(source_tracker),
+        "source_download_adapter": source_download_adapter(source_tracker),
+        "has_signal": has_signal,
+        "signal_fields": signal_fields,
+        "missing": missing,
+        "credential_ready": credential_ready,
+        "credential_checks": credential_checks,
+        "blockers": blockers,
+        "next_actions": _source_info_diagnostic_next_actions(source_tracker, has_signal, credential_checks),
+    }
+
+
+def _source_info_credential_checks(config: dict[str, Any], tracker: str, base_dir: str | None) -> list[dict[str, Any]]:
+    adapter = source_info_adapter(tracker)
+    checks: list[dict[str, Any]] = []
+    if adapter == "generic_details_cookie":
+        cookie_path = Path(os.path.abspath(base_dir or os.getcwd())) / "data" / "cookies" / f"{tracker}.txt"
+        checks.append(
+            {
+                "name": f"{tracker}.cookie_file",
+                "type": "cookie_file",
+                "ok": cookie_path.exists(),
+                "path": str(cookie_path),
+                "message": f"Source cookie file exists: data/cookies/{tracker}.txt" if cookie_path.exists() else f"Source cookie file is missing: data/cookies/{tracker}.txt",
+            }
+        )
+    elif adapter == "mteam_api":
+        api_key = str(config.get("TRACKERS", {}).get(tracker, {}).get("api_key", "")).strip() if isinstance(config, dict) else ""
+        checks.append(
+            {
+                "name": f"{tracker}.api_key",
+                "type": "config",
+                "ok": bool(api_key),
+                "path": f"TRACKERS.{tracker}.api_key",
+                "message": f"{tracker} API key is configured." if api_key else f"{tracker} API key is missing.",
+            }
+        )
+    return checks
+
+
+def _source_info_diagnostic_next_actions(tracker: str, has_signal: bool, credential_checks: list[dict[str, Any]]) -> list[str]:
+    actions: list[str] = []
+    if any(check.get("type") == "cookie_file" and not check.get("ok") for check in credential_checks):
+        actions.append(f"Create data/cookies/{tracker}.txt from a logged-in browser session, then rerun source-info or source-download.")
+    if any(check.get("type") == "config" and not check.get("ok") for check in credential_checks):
+        actions.append(f"Configure TRACKERS.{tracker}.api_key, then rerun source-info or source-download.")
+    if not has_signal:
+        actions.append("Verify the source torrent id/details URL and tracker session, then rerun source-info before downloading.")
+    return actions
+
+
 async def source_info(args: argparse.Namespace) -> dict[str, Any]:
     tracker = normalize_tracker(args.tracker)
     scope_block = _tracker_scope_block_payload("source-info", tracker, source_id=args.source_id)
@@ -447,7 +527,7 @@ async def source_info(args: argparse.Namespace) -> dict[str, Any]:
         return {"tracker": tracker, **scope_block}
     config = load_config(args.config)
     info = await fetch_source_info(config, tracker, args.source_id, base_dir=args.base_dir)
-    source = info.to_dict()
+    source = _source_info_payload(config, tracker, args.source_id, args.base_dir, info)
     source_id_context = {
         "requested_source_id": args.source_id,
         "input_source_id": args.source_id,
@@ -458,6 +538,7 @@ async def source_info(args: argparse.Namespace) -> dict[str, Any]:
         "tracker": source["tracker"],
         **source_id_context,
         "source": source,
+        "source_info_diagnostics": source["source_info_diagnostics"],
     }
 
 
@@ -491,8 +572,10 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
         }
     config = load_config(args.config)
     info = await fetch_source_info(config, source_tracker, args.source_id, base_dir=args.base_dir)
-    source = info.to_dict()
+    source = _source_info_payload(config, source_tracker, args.source_id, args.base_dir, info)
     if not source_info_has_signal(info):
+        source_info_diagnostics = source["source_info_diagnostics"]
+        diagnostic_blockers = _string_list(source_info_diagnostics.get("blockers")) if isinstance(source_info_diagnostics, dict) else []
         return {
             "status": "blocked",
             "tracker": source_tracker,
@@ -500,7 +583,8 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
             "target_trackers": target_trackers,
             "rule_check": rule_check,
             "source": source,
-            "blockers": ["source-info: Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data."],
+            "source_info_diagnostics": source_info_diagnostics,
+            "blockers": [f"source-info: {blocker}" for blocker in diagnostic_blockers] or ["source-info: Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data."],
         }
     output_path = await download_source_torrent(config, source_tracker, args.source_id, args.output_dir, base_dir=args.base_dir)
     source_torrent = _torrent_file_evidence(output_path, require_metadata=True)
@@ -519,6 +603,7 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
             "target_trackers": target_trackers,
             "rule_check": rule_check,
             "source": source,
+            "source_info_diagnostics": source["source_info_diagnostics"],
             "source_torrent": source_torrent,
             "source_torrent_verification": verification,
             "qbit_handoff": qbit_handoff,
@@ -535,6 +620,7 @@ async def source_download(args: argparse.Namespace) -> dict[str, Any]:
         "target_trackers": target_trackers,
         "rule_check": rule_check,
         "source": source,
+        "source_info_diagnostics": source["source_info_diagnostics"],
         "source_torrent": source_torrent,
         "source_torrent_verification": source_torrent_verification["result"],
         "qbit_handoff": qbit_handoff,
@@ -6389,7 +6475,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
         source_info_result = await _pipeline_stage(
             "source-info",
             lambda: fetch_source_info(config, source_tracker, source_torrent_id, base_dir=args.base_dir),
-            lambda info: info.to_dict(),
+            lambda info: _source_info_payload(config, source_tracker, source_torrent_id, args.base_dir, info),
             validate=lambda info: source_info_has_signal(info),
             invalid_message="Source metadata lookup returned no usable identifiers, name, hash, description, or Douban data.",
         )
