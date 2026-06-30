@@ -4609,6 +4609,63 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert "critical material missing: assets.bdinfo_for_disc" in out
 
 
+def test_summary_check_consumes_lightweight_material_readiness(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    material_readiness = {
+        "material_description_metadata_chain_ready": False,
+        "material_description_metadata_chain_missing": ["metadata.tmdb", "description.external_ids.tmdb"],
+        "material_description_media_info_chain_ready": False,
+        "material_description_media_info_chain_missing": ["assets.mediainfo_or_bdinfo"],
+        "material_description_screenshot_chain_ready": True,
+        "material_description_screenshot_chain_missing": [],
+    }
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.pipeline.run_summary",
+                "ready": False,
+                "complete": False,
+                "blockers": ["material chain is incomplete"],
+                "material_diagnostics": {
+                    "present": True,
+                    "ready_for_mteam_upload": False,
+                    "readiness": material_readiness,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["material_diagnostics"]["readiness"] == material_readiness
+    readiness = payload["readiness_summary"]
+    assert readiness["material_description_metadata_chain_ready"] is False
+    assert readiness["material_description_metadata_chain_missing"] == ["metadata.tmdb", "description.external_ids.tmdb"]
+    assert readiness["material_description_media_info_chain_ready"] is False
+    assert readiness["material_description_media_info_chain_missing"] == ["assets.mediainfo_or_bdinfo"]
+    assert readiness["material_description_screenshot_chain_ready"] is True
+    assert readiness["material_description_screenshot_chain_missing"] == []
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY=0\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING=metadata.tmdb,description.external_ids.tmdb\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY=0\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING=assets.mediainfo_or_bdinfo\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY=1\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY=0\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING=metadata.tmdb,description.external_ids.tmdb\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY=0\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING=assets.mediainfo_or_bdinfo\n" in out
+    assert "export PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY=1\n" in out
+
+
 def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_package() -> None:
     readiness = {
         "imdb_id": {"ready": True, "required": True, "source": "source"},

@@ -925,15 +925,44 @@ def _readiness_material_description_evidence(material_diagnostics: dict[str, Any
     evidence = description.get("evidence") if isinstance(description.get("evidence"), dict) else {}
     if evidence:
         return evidence
+    evidence = _description_evidence_from_readiness(material_diagnostics.get("readiness"))
+    if evidence:
+        return evidence
     payload_review = target_upload_diagnostics.get("payload_review") if isinstance(target_upload_diagnostics.get("payload_review"), dict) else {}
     payload_description = payload_review.get("description") if isinstance(payload_review.get("description"), dict) else {}
     evidence = payload_description.get("evidence") if isinstance(payload_description.get("evidence"), dict) else {}
     return evidence
 
 
+def _description_evidence_from_readiness(readiness: Any) -> dict[str, Any]:
+    if not isinstance(readiness, dict):
+        return {}
+    evidence: dict[str, Any] = {}
+    chain_fields = {
+        "metadata_chain": ("material_description_metadata_chain_ready", "material_description_metadata_chain_missing"),
+        "media_info_chain": ("material_description_media_info_chain_ready", "material_description_media_info_chain_missing"),
+        "screenshot_chain": ("material_description_screenshot_chain_ready", "material_description_screenshot_chain_missing"),
+    }
+    for chain_name, (ready_key, missing_key) in chain_fields.items():
+        ready = readiness.get(ready_key)
+        missing = _string_list(readiness.get(missing_key))
+        if not isinstance(ready, bool) and not missing:
+            continue
+        chain: dict[str, Any] = {}
+        if isinstance(ready, bool):
+            chain["ready"] = ready
+        if missing:
+            chain["missing"] = missing
+        evidence[chain_name] = chain
+    return evidence
+
+
 def _description_chain_recovery_missing(chain_name: str, chain: Any) -> list[str]:
     if not isinstance(chain, dict):
         return []
+    explicit_missing = _string_list(chain.get("missing"))
+    if explicit_missing:
+        return explicit_missing
     return _description_evidence_recovery_missing({chain_name: chain})
 
 
@@ -3128,7 +3157,10 @@ def _target_preflight_gates(preflight: dict[str, Any] | None, preparation_audit:
 
 
 def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
+    provided_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
     artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    if not artifacts and provided_diagnostics:
+        return provided_diagnostics
     material_generation = artifacts.get("material_generation") if isinstance(artifacts.get("material_generation"), dict) else {}
     target_materials = artifacts.get("target_materials") if isinstance(artifacts.get("target_materials"), dict) else {}
     target_assets = target_materials.get("assets") if isinstance(target_materials.get("assets"), dict) else {}
@@ -10335,6 +10367,8 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     description = material_diagnostics.get("description") if isinstance(material_diagnostics.get("description"), dict) else {}
     description_completeness = description.get("completeness") if isinstance(description.get("completeness"), dict) else {}
     description_evidence = description.get("evidence") if isinstance(description.get("evidence"), dict) else {}
+    if not description_evidence:
+        description_evidence = _description_evidence_from_readiness(material_diagnostics.get("readiness"))
     description_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
     description_external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
     media_info = description.get("media_info") if isinstance(description.get("media_info"), dict) else {}
