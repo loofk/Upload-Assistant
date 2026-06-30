@@ -1104,6 +1104,7 @@ def _readiness_material_recovery_summary(resume_state: dict[str, Any]) -> dict[s
         "existing_file_options": _material_recovery_existing_file_options(recovery_hints),
         "existing_file_values": _material_recovery_option_value_map(recovery_hints, "existing_file_values"),
         "missing_existing_file_paths": _material_recovery_option_value_map(recovery_hints, "missing_existing_file_paths"),
+        "invalid_existing_option_values": _material_recovery_option_value_map(recovery_hints, "invalid_existing_option_values"),
         "first_command": first_recovery_command.get("command"),
         "first_command_argv": first_argv,
         "command_coverage": command_coverage,
@@ -1911,7 +1912,8 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
         existing_file_options = _string_list(hint.get("existing_file_options"))
         existing_file_values = _argv_option_values(argv, existing_file_options)
         missing_existing_file_paths = _missing_existing_file_paths(_file_option_values(existing_file_values))
-        existing_file_option_present = bool(existing_file_values) and not missing_existing_file_paths
+        invalid_existing_option_values = _invalid_material_option_values(existing_file_values)
+        existing_file_option_present = bool(existing_file_values) and not missing_existing_file_paths and not invalid_existing_option_values
         missing_command_flags = [flag for flag in command_flags if flag not in argv]
         command_covers_hint = bool(command_entry) and (existing_file_option_present or not missing_command_flags)
         enriched.append(
@@ -1922,6 +1924,7 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
                 "existing_file_option_present": existing_file_option_present,
                 "existing_file_values": existing_file_values,
                 "missing_existing_file_paths": missing_existing_file_paths,
+                "invalid_existing_option_values": invalid_existing_option_values,
                 "resume_command_available": command_covers_hint,
                 "resume_command_stage": command_entry.get("stage") if command_entry else None,
                 "resume_command": command if command_covers_hint else None,
@@ -1967,6 +1970,32 @@ def _file_option_values(option_values: dict[str, list[str]]) -> dict[str, list[s
 
 def _is_material_file_option(option: str) -> bool:
     return option.endswith("-file")
+
+
+def _invalid_material_option_values(option_values: dict[str, list[str]]) -> dict[str, list[str]]:
+    invalid: dict[str, list[str]] = {}
+    for option, values in option_values.items():
+        for value in values:
+            if not _material_option_value_valid(option, value):
+                invalid.setdefault(option, []).append(value)
+    return invalid
+
+
+def _material_option_value_valid(option: str, value: str) -> bool:
+    text = str(value).strip()
+    if not text:
+        return False
+    if _is_material_file_option(option):
+        return True
+    if option == "--imdb-id":
+        return bool(re.fullmatch(r"(?:tt)?\d+", text, flags=re.IGNORECASE))
+    if option == "--tmdb-id":
+        return bool(re.fullmatch(r"\d+", text))
+    if option == "--douban-id":
+        return bool(re.fullmatch(r"\d{5,}", text))
+    if option == "--douban-url":
+        return bool(re.search(r"douban\.com/subject/\d{5,}", text, flags=re.IGNORECASE))
+    return True
 
 
 def _format_option_value_map(option_values: dict[str, list[str]]) -> str:
@@ -4578,6 +4607,13 @@ def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next
             if key and missing_text:
                 return f"material recovery command has {key} file option path that does not exist: {missing_text}"
             return f"material recovery command has file option path that does not exist: {missing_text}"
+        invalid_existing_option_values = _invalid_material_option_values(existing_file_values)
+        if invalid_existing_option_values:
+            key = hint.get("key")
+            invalid_text = _format_option_value_map(invalid_existing_option_values)
+            if key and invalid_text:
+                return f"material recovery command has {key} option value with invalid format: {invalid_text}"
+            return f"material recovery command has option value with invalid format: {invalid_text}"
         if existing_file_values:
             continue
         missing_flags = [flag for flag in _material_recovery_action_flags(hint) if flag not in argv]
@@ -10698,6 +10734,12 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_EXISTING_FILE_PATHS_TEXT": _format_option_value_map(material_recovery.get("missing_existing_file_paths"))
         if isinstance(material_recovery.get("missing_existing_file_paths"), dict) and material_recovery.get("missing_existing_file_paths")
         else None,
+        "PTCLI_READINESS_MATERIAL_RECOVERY_INVALID_EXISTING_OPTION_VALUES": json.dumps(material_recovery.get("invalid_existing_option_values"), ensure_ascii=False)
+        if isinstance(material_recovery.get("invalid_existing_option_values"), dict) and material_recovery.get("invalid_existing_option_values")
+        else None,
+        "PTCLI_READINESS_MATERIAL_RECOVERY_INVALID_EXISTING_OPTION_VALUES_TEXT": _format_option_value_map(material_recovery.get("invalid_existing_option_values"))
+        if isinstance(material_recovery.get("invalid_existing_option_values"), dict) and material_recovery.get("invalid_existing_option_values")
+        else None,
         "PTCLI_READINESS_MATERIAL_FIRST_RECOVERY_COMMAND": material_recovery.get("first_command"),
         "PTCLI_READINESS_MATERIAL_FIRST_RECOVERY_COMMAND_ARGV": json.dumps(material_recovery.get("first_command_argv"), ensure_ascii=False) if material_recovery.get("first_command_argv") else None,
         "PTCLI_READINESS_MATERIAL_RECOVERY_COMPLETION_COMMAND": material_recovery.get("completion_command"),
@@ -11042,6 +11084,16 @@ def _summary_check_resume_material_shell_fields(resume_state: dict[str, Any]) ->
             _material_recovery_option_value_map(recovery_hints, "missing_existing_file_paths")
         )
         if _material_recovery_option_value_map(recovery_hints, "missing_existing_file_paths")
+        else None,
+        "PTCLI_RESUME_MATERIAL_RECOVERY_INVALID_EXISTING_OPTION_VALUES": json.dumps(
+            _material_recovery_option_value_map(recovery_hints, "invalid_existing_option_values"), ensure_ascii=False
+        )
+        if _material_recovery_option_value_map(recovery_hints, "invalid_existing_option_values")
+        else None,
+        "PTCLI_RESUME_MATERIAL_RECOVERY_INVALID_EXISTING_OPTION_VALUES_TEXT": _format_option_value_map(
+            _material_recovery_option_value_map(recovery_hints, "invalid_existing_option_values")
+        )
+        if _material_recovery_option_value_map(recovery_hints, "invalid_existing_option_values")
         else None,
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMPLETION_COMMAND": recovery_completion_command.get("command"),
         "PTCLI_RESUME_MATERIAL_RECOVERY_COMPLETION_COMMAND_ARGV": json.dumps(recovery_completion_command.get("argv"), ensure_ascii=False) if recovery_completion_command.get("argv") else None,

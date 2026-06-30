@@ -7771,6 +7771,55 @@ def test_summary_check_treats_id_options_as_material_recovery_values(tmp_path, c
     assert recovery["hints"][0]["existing_file_option_present"] is True
 
 
+def test_summary_check_blocks_invalid_metadata_recovery_values(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    resume_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target", "--imdb-id", "not-an-imdb-id"]
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "artifacts": {
+                    "target_materials_missing": ["metadata.imdb"],
+                    "target_materials_ready": False,
+                    "target_preparation_ready": False,
+                },
+                "resume_commands": [{"stage": "resume-target-package", "command": shlex.join(resume_argv), "argv": resume_argv}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    recovery = payload["readiness_summary"]["material_recovery"]
+    assert payload["next_command_run_allowed"] is False
+    assert payload["automation_action"] == "complete_material_recovery_command"
+    assert payload["next_command_run_blocker"] == "material recovery command has metadata.imdb_id option value with invalid format: --imdb-id=not-an-imdb-id"
+    assert recovery["command_coverage"]["ready"] is False
+    assert recovery["existing_file_values"] == {"--imdb-id": ["not-an-imdb-id"]}
+    assert recovery["invalid_existing_option_values"] == {"--imdb-id": ["not-an-imdb-id"]}
+    assert recovery["missing_flags"] == ["--enrich-metadata"]
+    assert recovery["hints"][0]["existing_file_option_present"] is False
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "export PTCLI_AUTOMATION_ACTION=complete_material_recovery_command\n" in out
+    assert "export PTCLI_NEXT_COMMAND_RUN_ALLOWED=0\n" in out
+    assert "--imdb-id=not-an-imdb-id" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_INVALID_EXISTING_OPTION_VALUES=" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_INVALID_EXISTING_OPTION_VALUES=" in out
+
+
 def test_doctor_summary_check_promotes_material_recovery_completion(tmp_path, capsys) -> None:
     summary_file = tmp_path / "doctor-summary.json"
     summary_file.write_text(
