@@ -1906,13 +1906,16 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
     enriched: list[dict[str, Any]] = []
     for hint in hints:
         command_flags = _material_recovery_action_flags(hint)
+        existing_file_options = _string_list(hint.get("existing_file_options"))
+        existing_file_option_present = _argv_contains_any_option(argv, existing_file_options)
         missing_command_flags = [flag for flag in command_flags if flag not in argv]
-        command_covers_hint = bool(command_entry) and not missing_command_flags
+        command_covers_hint = bool(command_entry) and (existing_file_option_present or not missing_command_flags)
         enriched.append(
             {
                 **hint,
                 "required_command_flags": command_flags,
-                "missing_command_flags": missing_command_flags if command_entry else command_flags,
+                "missing_command_flags": [] if existing_file_option_present else missing_command_flags if command_entry else command_flags,
+                "existing_file_option_present": existing_file_option_present,
                 "resume_command_available": command_covers_hint,
                 "resume_command_stage": command_entry.get("stage") if command_entry else None,
                 "resume_command": command if command_covers_hint else None,
@@ -1926,6 +1929,11 @@ def _material_recovery_action_flags(hint: dict[str, Any]) -> list[str]:
     value_options = {"--screenshot-count", "--image-host"}
     flags = _string_list(hint.get("required_command_flags") or hint.get("command_flags"))
     return [flag for flag in flags if flag not in value_options]
+
+
+def _argv_contains_any_option(argv: list[Any], options: list[str]) -> bool:
+    argv_set = {str(item) for item in argv}
+    return any(option in argv_set for option in options)
 
 
 def _resume_command_entry_by_stage(resume_commands: list[dict[str, Any]], stage: str) -> dict[str, Any] | None:
@@ -4501,6 +4509,8 @@ def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next
         return "material recovery command does not expose argv for validation"
     for hint in hints:
         if not isinstance(hint, dict):
+            continue
+        if _argv_contains_any_option(argv, _string_list(hint.get("existing_file_options"))):
             continue
         missing_flags = [flag for flag in _material_recovery_action_flags(hint) if flag not in argv]
         if not missing_flags:

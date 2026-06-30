@@ -7567,6 +7567,65 @@ def test_summary_check_promotes_material_recovery_command(tmp_path, capsys) -> N
     assert payload["readiness_summary"]["material_recovery"]["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg"
 
 
+def test_summary_check_treats_existing_material_files_as_recovery_coverage(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    metadata_file = tmp_path / "metadata.json"
+    image_host_file = tmp_path / "image-host.json"
+    metadata_file.write_text(json.dumps({"ptgen_description": "◎译　　名　示例电影"}), encoding="utf-8")
+    image_host_file.write_text(json.dumps({"items": [{"img_url": "https://img.example/1.png"}]}), encoding="utf-8")
+    resume_argv = [
+        "python3",
+        "ptcli.py",
+        "pipeline",
+        "--prepare-target",
+        "--metadata-file",
+        str(metadata_file),
+        "--image-host-file",
+        str(image_host_file),
+    ]
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "artifacts": {
+                    "target_materials_missing": ["metadata.ptgen_description", "assets.image_host_uploads"],
+                    "target_materials_ready": False,
+                    "target_preparation_ready": False,
+                },
+                "resume_commands": [
+                    {
+                        "stage": "resume-target-package",
+                        "command": shlex.join(resume_argv),
+                        "argv": resume_argv,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    recovery = payload["readiness_summary"]["material_recovery"]
+    assert payload["next_stage"] == "resume-target-package"
+    assert payload["next_command_argv"] == resume_argv
+    assert payload["next_command_run_allowed"] is True
+    assert payload["next_command_run_blocker"] is None
+    assert payload["automation_action"] == "run_next_command"
+    assert recovery["command_coverage"]["ready"] is True
+    assert recovery["missing_flags"] == []
+    assert recovery["completion_command_argv"] == []
+    assert all(hint["existing_file_option_present"] is True for hint in recovery["hints"])
+
+
 def test_doctor_summary_check_promotes_material_recovery_completion(tmp_path, capsys) -> None:
     summary_file = tmp_path / "doctor-summary.json"
     summary_file.write_text(
