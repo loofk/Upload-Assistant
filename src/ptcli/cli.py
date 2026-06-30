@@ -850,6 +850,7 @@ def _retorrent_readiness_summary(
     materials_evidence = domain_evidence("materials")
     materials_domain = domain("materials")
     target_upload_evidence = domain_evidence("target_upload")
+    live_gate = material_diagnostics.get("live_gate") if isinstance(material_diagnostics.get("live_gate"), dict) else {}
     material_description_evidence = _readiness_material_description_evidence(material_diagnostics, target_upload_diagnostics)
     screenshot_coverage_evidence = material_description_evidence.get("screenshot_coverage") if isinstance(material_description_evidence.get("screenshot_coverage"), dict) else {}
     external_id_evidence = material_description_evidence.get("external_ids") if isinstance(material_description_evidence.get("external_ids"), dict) else {}
@@ -888,6 +889,11 @@ def _retorrent_readiness_summary(
         "material_missing": _string_list(materials_domain.get("missing")),
         "material_upload_gates": material_diagnostics.get("upload_material_gates") if isinstance(material_diagnostics.get("upload_material_gates"), dict) else {},
         "material_upload_blockers": _string_list(material_diagnostics.get("upload_material_blockers")),
+        "material_live_gate_present": live_gate.get("present") if isinstance(live_gate.get("present"), bool) else None,
+        "material_live_gate_ready": live_gate.get("ready") if isinstance(live_gate.get("ready"), bool) else None,
+        "material_live_gate_missing": _string_list(live_gate.get("missing")),
+        "material_live_gate_blockers": _string_list(live_gate.get("blockers")),
+        "material_live_gate_next_actions": _string_list(live_gate.get("next_actions")),
         "material_description_evidence": material_description_evidence,
         "material_description_ptgen_ready": ptgen_evidence.get("ready") if isinstance(ptgen_evidence.get("ready"), bool) else None,
         "material_description_external_ids_ready": external_id_evidence.get("ready") if isinstance(external_id_evidence.get("ready"), bool) else None,
@@ -3179,6 +3185,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
     if not artifacts and provided_diagnostics:
         return provided_diagnostics
     material_generation = artifacts.get("material_generation") if isinstance(artifacts.get("material_generation"), dict) else {}
+    live_material_gate = artifacts.get("live_material_gate") if isinstance(artifacts.get("live_material_gate"), dict) else {}
     target_materials = artifacts.get("target_materials") if isinstance(artifacts.get("target_materials"), dict) else {}
     target_assets = target_materials.get("assets") if isinstance(target_materials.get("assets"), dict) else {}
     target_preparation_audit = artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
@@ -3270,6 +3277,7 @@ def _summary_material_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
             material_evidence_blockers,
             description_completeness_blockers,
         ),
+        "live_gate": _material_live_gate_summary(live_material_gate),
         "critical_ready": not critical_missing,
         "critical_missing": critical_missing,
         "critical_domains": critical_domains,
@@ -3320,6 +3328,23 @@ def _summary_material_missing(artifacts: dict[str, Any], target_materials: dict[
     missing = _string_list(artifacts.get("target_materials_missing") or target_materials.get("missing"))
     _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
     return missing
+
+
+def _material_live_gate_summary(live_material_gate: dict[str, Any]) -> dict[str, Any]:
+    if not live_material_gate:
+        return {"present": False}
+    return {
+        "present": True,
+        "ready": live_material_gate.get("ready") if isinstance(live_material_gate.get("ready"), bool) else None,
+        "message": live_material_gate.get("message"),
+        "ready_for_mteam_upload": live_material_gate.get("ready_for_mteam_upload") if isinstance(live_material_gate.get("ready_for_mteam_upload"), bool) else None,
+        "gates": live_material_gate.get("gates") if isinstance(live_material_gate.get("gates"), dict) else {},
+        "missing": _string_list(live_material_gate.get("missing")),
+        "blockers": _string_list(live_material_gate.get("blockers")),
+        "next_actions": _string_list(live_material_gate.get("next_actions")),
+        "critical_path": live_material_gate.get("critical_path") if isinstance(live_material_gate.get("critical_path"), dict) else {},
+        "readiness": live_material_gate.get("readiness") if isinstance(live_material_gate.get("readiness"), dict) else {},
+    }
 
 
 def _summary_target_payload_review(artifacts: dict[str, Any], target_preparation_audit: dict[str, Any]) -> dict[str, Any]:
@@ -7174,6 +7199,7 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
     source_download = _find_stage(stages, "source-download") if isinstance(stages, list) else None
     inject_source = _find_stage(stages, "inject-source") if isinstance(stages, list) else None
     target_prepare = _find_stage(stages, "target-prepare") if isinstance(stages, list) else None
+    live_material_gate = _find_stage(stages, "live-material-gate") if isinstance(stages, list) else None
     target_upload = _find_stage(stages, "target-upload") if isinstance(stages, list) else None
 
     artifacts: dict[str, Any] = {
@@ -7185,6 +7211,20 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         material_generation = _material_generation_artifacts(stages)
         if material_generation:
             artifacts["material_generation"] = material_generation
+    if isinstance(live_material_gate, dict):
+        gate_result = live_material_gate.get("result") if isinstance(live_material_gate.get("result"), dict) else {}
+        artifacts["live_material_gate"] = {
+            "ready": bool(live_material_gate.get("ok")),
+            "skipped": bool(live_material_gate.get("skipped")),
+            "message": live_material_gate.get("error") or live_material_gate.get("message"),
+            "ready_for_mteam_upload": gate_result.get("ready_for_mteam_upload") if isinstance(gate_result.get("ready_for_mteam_upload"), bool) else None,
+            "gates": gate_result.get("gates") if isinstance(gate_result.get("gates"), dict) else {},
+            "missing": _string_list(gate_result.get("missing")),
+            "blockers": _string_list(gate_result.get("blockers")),
+            "next_actions": _string_list(gate_result.get("next_actions")),
+            "critical_path": gate_result.get("critical_path") if isinstance(gate_result.get("critical_path"), dict) else {},
+            "readiness": gate_result.get("readiness") if isinstance(gate_result.get("readiness"), dict) else {},
+        }
     qbit_wait_fields = _qbit_wait_summary_fields(payload)
     if qbit_wait_fields["qbit_wait_mismatch"]:
         artifacts["qbit_wait_mismatches"] = qbit_wait_fields["qbit_wait_mismatches"]
@@ -9944,6 +9984,11 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_MATERIAL_MISSING": ",".join(_string_list(readiness_summary.get("material_missing"))),
         "PTCLI_READINESS_MATERIAL_UPLOAD_GATES": json.dumps(readiness_summary.get("material_upload_gates"), ensure_ascii=False) if isinstance(readiness_summary.get("material_upload_gates"), dict) else None,
         "PTCLI_READINESS_MATERIAL_UPLOAD_BLOCKERS": "|".join(_string_list(readiness_summary.get("material_upload_blockers"))),
+        "PTCLI_READINESS_MATERIAL_LIVE_GATE_PRESENT": _shell_bool(readiness_summary.get("material_live_gate_present")) if readiness_summary.get("material_live_gate_present") is not None else None,
+        "PTCLI_READINESS_MATERIAL_LIVE_GATE_READY": _shell_bool(readiness_summary.get("material_live_gate_ready")) if readiness_summary.get("material_live_gate_ready") is not None else None,
+        "PTCLI_READINESS_MATERIAL_LIVE_GATE_MISSING": ",".join(_string_list(readiness_summary.get("material_live_gate_missing"))),
+        "PTCLI_READINESS_MATERIAL_LIVE_GATE_BLOCKERS": "|".join(_string_list(readiness_summary.get("material_live_gate_blockers"))),
+        "PTCLI_READINESS_MATERIAL_LIVE_GATE_NEXT_ACTIONS": " | ".join(_string_list(readiness_summary.get("material_live_gate_next_actions"))),
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_EVIDENCE": json.dumps(material_description_evidence, ensure_ascii=False) if material_description_evidence else None,
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_PTGEN_READY": _shell_bool(readiness_summary.get("material_description_ptgen_ready")) if readiness_summary.get("material_description_ptgen_ready") is not None else None,
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_EXTERNAL_IDS_READY": _shell_bool(readiness_summary.get("material_description_external_ids_ready")) if readiness_summary.get("material_description_external_ids_ready") is not None else None,
@@ -10516,6 +10561,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     screenshot_chain = description_evidence.get("screenshot_chain") if isinstance(description_evidence.get("screenshot_chain"), dict) else {}
     critical_domains = material_diagnostics.get("critical_domains") if isinstance(material_diagnostics.get("critical_domains"), dict) else {}
     critical_path = material_diagnostics.get("critical_path") if isinstance(material_diagnostics.get("critical_path"), dict) else {}
+    live_gate = material_diagnostics.get("live_gate") if isinstance(material_diagnostics.get("live_gate"), dict) else {}
     return {
         "PTCLI_MATERIAL_PRESENT": _shell_bool(material_diagnostics.get("present")) if "present" in material_diagnostics else None,
         "PTCLI_MATERIAL_GENERATION_PRESENT": _shell_bool(material_diagnostics.get("generation_present")) if "generation_present" in material_diagnostics else None,
@@ -10528,6 +10574,13 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_READY_FOR_MTEAM_UPLOAD": _shell_bool(material_diagnostics.get("ready_for_mteam_upload")) if material_diagnostics.get("ready_for_mteam_upload") is not None else None,
         "PTCLI_MATERIAL_UPLOAD_BLOCKERS": "|".join(_string_list(material_diagnostics.get("upload_material_blockers"))),
         "PTCLI_MATERIAL_UPLOAD_GATES": json.dumps(material_diagnostics.get("upload_material_gates"), ensure_ascii=False) if isinstance(material_diagnostics.get("upload_material_gates"), dict) else None,
+        "PTCLI_MATERIAL_LIVE_GATE_PRESENT": _shell_bool(live_gate.get("present")) if "present" in live_gate else None,
+        "PTCLI_MATERIAL_LIVE_GATE_READY": _shell_bool(live_gate.get("ready")) if live_gate.get("ready") is not None else None,
+        "PTCLI_MATERIAL_LIVE_GATE_READY_FOR_MTEAM_UPLOAD": _shell_bool(live_gate.get("ready_for_mteam_upload")) if live_gate.get("ready_for_mteam_upload") is not None else None,
+        "PTCLI_MATERIAL_LIVE_GATE_MISSING": ",".join(_string_list(live_gate.get("missing"))),
+        "PTCLI_MATERIAL_LIVE_GATE_BLOCKERS": "|".join(_string_list(live_gate.get("blockers"))),
+        "PTCLI_MATERIAL_LIVE_GATE_NEXT_ACTIONS": " | ".join(_string_list(live_gate.get("next_actions"))),
+        "PTCLI_MATERIAL_LIVE_GATE_GATES": json.dumps(live_gate.get("gates"), ensure_ascii=False) if isinstance(live_gate.get("gates"), dict) else None,
         "PTCLI_MATERIAL_CRITICAL_READY": _shell_bool(material_diagnostics.get("critical_ready")) if material_diagnostics.get("critical_ready") is not None else None,
         "PTCLI_MATERIAL_CRITICAL_MISSING": ",".join(_string_list(material_diagnostics.get("critical_missing"))),
         "PTCLI_MATERIAL_CRITICAL_METADATA_READY": _shell_bool(_material_critical_domain_ready(critical_domains, "metadata")),

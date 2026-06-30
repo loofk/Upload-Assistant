@@ -4531,6 +4531,21 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
                     "target_materials_missing": ["assets.bdinfo_for_disc", "assets.image_host_uploads"],
                     "target_materials_warnings": ["BDMV disc content requires --bdinfo-file.", "Image-host uploads are missing."],
                     "target_preparation_missing": ["assets.bdinfo_for_disc", "assets.image_host_uploads"],
+                    "live_material_gate": {
+                        "ready": False,
+                        "message": "MTEAM material live upload gate has blockers.",
+                        "ready_for_mteam_upload": False,
+                        "gates": {
+                            "critical_ready": False,
+                            "target_materials_ready": False,
+                            "target_preparation_ready": False,
+                            "material_evidence_ready": True,
+                            "description_completeness_ready": True,
+                        },
+                        "missing": ["assets.bdinfo_for_disc", "assets.image_host_uploads"],
+                        "blockers": ["critical material missing: assets.bdinfo_for_disc", "target materials are not ready"],
+                        "next_actions": ["Provide BDInfo for BDMV disc content with --bdinfo-file or --generate-bdinfo, then rerun resume-target-package."],
+                    },
                 },
                 "resume_state": {
                     "next_stage": "resume-target-package",
@@ -4601,6 +4616,12 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert diagnostics["image_host_urls"]["valid_count"] == 1
     assert diagnostics["image_host_urls"]["invalid_count"] == 0
     assert diagnostics["blockers"] == ["prerequisites: --upload-screenshots requires --image-host.", "BDMV disc content requires --bdinfo-file.", "Image-host uploads are missing."]
+    assert diagnostics["live_gate"]["present"] is True
+    assert diagnostics["live_gate"]["ready"] is False
+    assert diagnostics["live_gate"]["ready_for_mteam_upload"] is False
+    assert diagnostics["live_gate"]["missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
+    assert "target materials are not ready" in diagnostics["live_gate"]["blockers"]
+    assert any("Provide BDInfo" in action for action in diagnostics["live_gate"]["next_actions"])
     readiness = payload["readiness_summary"]
     assert readiness["materials_ready"] is False
     assert readiness["ready_for_mteam_upload"] is False
@@ -4611,6 +4632,10 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert "target preparation is not ready" in readiness["material_missing"]
     assert readiness["material_upload_gates"] == diagnostics["upload_material_gates"]
     assert readiness["material_upload_blockers"] == diagnostics["upload_material_blockers"]
+    assert readiness["material_live_gate_present"] is True
+    assert readiness["material_live_gate_ready"] is False
+    assert readiness["material_live_gate_missing"] == ["assets.bdinfo_for_disc", "assets.image_host_uploads"]
+    assert "target materials are not ready" in readiness["material_live_gate_blockers"]
     code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
     assert code == 0
     out = capsys.readouterr().out
@@ -4640,6 +4665,14 @@ def test_summary_check_exposes_material_diagnostics(tmp_path, capsys) -> None:
     assert "description_completeness_ready" in out
     assert "export PTCLI_READINESS_MATERIAL_UPLOAD_BLOCKERS=" in out
     assert "critical material missing: assets.bdinfo_for_disc" in out
+    assert "export PTCLI_MATERIAL_LIVE_GATE_PRESENT=1\n" in out
+    assert "export PTCLI_MATERIAL_LIVE_GATE_READY=0\n" in out
+    assert "export PTCLI_MATERIAL_LIVE_GATE_READY_FOR_MTEAM_UPLOAD=0\n" in out
+    assert "export PTCLI_MATERIAL_LIVE_GATE_MISSING=assets.bdinfo_for_disc,assets.image_host_uploads\n" in out
+    assert "export PTCLI_MATERIAL_LIVE_GATE_BLOCKERS=" in out
+    assert "export PTCLI_READINESS_MATERIAL_LIVE_GATE_PRESENT=1\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_LIVE_GATE_READY=0\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_LIVE_GATE_MISSING=assets.bdinfo_for_disc,assets.image_host_uploads\n" in out
 
 
 def test_summary_check_consumes_lightweight_material_readiness(tmp_path, capsys) -> None:
@@ -15153,6 +15186,11 @@ async def test_pipeline_target_execute_blocks_incomplete_material_gate(monkeypat
     assert "description.external_ids.tmdb" in material_gate["result"]["missing"]
     assert any("Fetch TMDb metadata" in action for action in material_gate["result"]["next_actions"])
     assert any("Fetch PTGen/Douban description" in action for action in material_gate["result"]["next_actions"])
+    assert payload["artifacts"]["live_material_gate"]["ready"] is False
+    assert payload["artifacts"]["live_material_gate"]["missing"] == material_gate["result"]["missing"]
+    assert payload["material_diagnostics"]["live_gate"]["present"] is True
+    assert payload["material_diagnostics"]["live_gate"]["ready"] is False
+    assert payload["material_diagnostics"]["live_gate"]["missing"] == material_gate["result"]["missing"]
     assert upload_stage["ok"] is False
     assert upload_stage["skipped"] is True
     assert "MTEAM material and description gates are not ready" in upload_stage["message"]
