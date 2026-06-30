@@ -2489,6 +2489,24 @@ def test_target_package_material_recovery_missing_includes_target_material_chain
     assert "ptpimg" in args
 
 
+def test_target_package_material_recovery_missing_includes_live_material_gate() -> None:
+    artifacts = {
+        "live_material_gate": {
+            "ready": False,
+            "missing": ["metadata.ptgen_description", "assets.image_host_uploads", "description.screenshot_coverage"],
+            "blockers": ["target materials are not ready"],
+        }
+    }
+
+    missing = ptcli_cli._target_package_material_recovery_missing(artifacts)
+    flags = ptcli_cli._target_package_material_auto_flags(artifacts)
+
+    assert missing == ["metadata.ptgen_description", "assets.image_host_uploads", "description.screenshot_coverage"]
+    assert "--enrich-metadata" in flags
+    assert "--fetch-ptgen" in flags
+    assert "--upload-screenshots" in flags
+
+
 def test_target_material_chain_recovery_missing_falls_back_by_chain_domain() -> None:
     artifacts = {
         "target_material_chain": {
@@ -3413,6 +3431,22 @@ def test_retorrent_execute_next_actions_explain_wait_evidence_blockers() -> None
     assert any("--wait-complete" in action for action in actions)
     assert any("--wait-uploaded-complete" in action for action in actions)
     assert all(not action.startswith("Retorrent closure is complete;") for action in actions)
+
+
+def test_retorrent_execute_next_actions_expand_material_live_gate_missing() -> None:
+    actions = ptcli_cli._retorrent_execute_next_actions(
+        {
+            "artifacts": {
+                "target_materials_missing": ["metadata.tmdb", "assets.image_host_uploads"],
+                "target_preparation_missing": ["description.screenshot_coverage"],
+            }
+        },
+        ["materials.live_gate"],
+    )
+
+    assert actions[0].startswith("Complete the MTEAM material live gate")
+    assert any("Fetch TMDb metadata" in action for action in actions)
+    assert any("Upload screenshots to an image host" in action for action in actions)
 
 
 def test_retorrent_execute_next_actions_surface_qbit_wait_mismatches() -> None:

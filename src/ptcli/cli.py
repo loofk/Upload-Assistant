@@ -1727,7 +1727,7 @@ def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: l
         _append_unique_string(actions, action)
     for blocker in blockers:
         _append_unique_string(actions, _retorrent_execute_blocker_next_action(str(blocker)))
-        if str(blocker) in {"target_preparation_ready", "target.preparation_ready", "target.materials_ready"}:
+        if str(blocker) in {"target_preparation_ready", "target.preparation_ready", "target.materials_ready", "materials.live_gate"}:
             for action in _target_preparation_missing_next_actions(_target_preparation_missing_from_pipeline_result(pipeline_result)):
                 _append_unique_string(actions, action)
     pipeline_actions = pipeline_result.get("next_actions")
@@ -1804,6 +1804,8 @@ def _retorrent_execute_blocker_next_action(blocker: str) -> str:
         return "Verify the uploaded target torrent is active in qBittorrent, then re-run with --wait-uploaded-complete."
     if blocker == "target.uploaded":
         return "Resume the MTEAM target upload stage after duplicate and rule gates are ready."
+    if blocker == "materials.live_gate":
+        return "Complete the MTEAM material live gate by fixing IMDb/TMDb/Douban metadata, PTGen/Douban description, MediaInfo/BDInfo, screenshots, image-host uploads, and regenerated description evidence."
     if blocker in {"target_preparation_ready", "target.preparation_ready", "target.materials_ready"}:
         return "Regenerate the MTEAM target package after completing IMDb/TMDb/Douban metadata, PTGen/Douban description, MediaInfo/BDInfo, screenshot, and image-host materials."
     if blocker == "pipeline did not report ready.":
@@ -8630,6 +8632,7 @@ def _target_package_material_recovery_missing(artifacts: dict[str, Any] | None) 
     artifacts = artifacts if isinstance(artifacts, dict) else {}
     missing = _string_list(artifacts.get("target_materials_missing"))
     _extend_unique_string(missing, _string_list(artifacts.get("target_preparation_missing")))
+    _extend_unique_string(missing, _target_live_material_gate_recovery_missing(artifacts.get("live_material_gate")))
     _extend_unique_string(missing, _target_material_chain_recovery_missing(artifacts))
     _extend_unique_string(missing, _target_material_recovery_plan_missing(artifacts))
     _extend_unique_string(missing, _target_payload_review_description_recovery_missing(artifacts.get("target_payload_review")))
@@ -8638,6 +8641,15 @@ def _target_package_material_recovery_missing(artifacts: dict[str, Any] | None) 
     _extend_unique_string(missing, _target_payload_review_description_recovery_missing(preparation_audit.get("payload_review")))
     _extend_unique_string(missing, _target_preflight_recovery_missing(artifacts.get("target_preflight_gates")))
     return missing
+
+
+def _target_live_material_gate_recovery_missing(live_gate: Any) -> list[str]:
+    if not isinstance(live_gate, dict) or live_gate.get("ready") is True:
+        return []
+    missing = _string_list(live_gate.get("missing"))
+    if missing:
+        return missing
+    return _string_list(live_gate.get("blockers"))
 
 
 def _target_material_chain_recovery_missing(artifacts: dict[str, Any] | None) -> list[str]:
