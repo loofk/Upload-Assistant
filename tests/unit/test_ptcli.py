@@ -1955,8 +1955,8 @@ async def test_retorrent_execute_surfaces_material_preflight_blockers(monkeypatc
     assert payload["readiness_summary"]["target_preflight_blockers"] == ["materials.description.screenshot_coverage: Description has fewer hosted screenshots than local screenshots."]
     material_recovery = payload["readiness_summary"]["material_recovery"]
     assert material_recovery["present"] is True
-    assert material_recovery["keys"] == ["description.content", "assets.image_host_uploads"]
-    assert material_recovery["required_flags"] == ["--prepare-target", "--upload-screenshots"]
+    assert material_recovery["keys"] == ["assets.image_host_uploads", "description.content"]
+    assert material_recovery["required_flags"] == ["--upload-screenshots", "--prepare-target"]
     assert material_recovery["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots"
     assert material_recovery["first_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--upload-screenshots"]
     assert material_recovery["command_coverage"]["ready"] is True
@@ -1969,7 +1969,7 @@ async def test_retorrent_execute_surfaces_material_preflight_blockers(monkeypatc
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_PREFLIGHT_MISSING"] == "description.content,materials.description.screenshot_coverage"
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_PREFLIGHT_DESCRIPTION_MISSING"] == "materials.description.screenshot_coverage"
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_PREFLIGHT_BLOCKERS"] == "materials.description.screenshot_coverage: Description has fewer hosted screenshots than local screenshots."
-    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_RECOVERY_KEYS"] == "description.content,assets.image_host_uploads"
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_RECOVERY_KEYS"] == "assets.image_host_uploads,description.content"
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY"] == "1"
     shell_fields = ptcli_cli._summary_check_target_preflight_shell_fields(payload["target_preflight_diagnostics"])
     assert shell_fields["PTCLI_TARGET_PREFLIGHT_MISSING"] == "description.content,materials.description.screenshot_coverage"
@@ -7557,6 +7557,67 @@ def test_summary_check_promotes_material_recovery_command(tmp_path, capsys) -> N
     assert payload["readiness_summary"]["material_recovery"]["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg"
 
 
+def test_doctor_summary_check_promotes_material_recovery_completion(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "doctor-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.doctor.live_readiness",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "live_safe_to_attempt": False,
+                "failed_check_names": ["target_materials"],
+                "artifacts": {
+                    "live_material_gate": {
+                        "ready": False,
+                        "missing": ["metadata.ptgen_description", "assets.image_host_uploads"],
+                        "blockers": ["MTEAM material live upload gate has blockers."],
+                    },
+                    "target_materials_ready": False,
+                    "target_preparation_ready": False,
+                    "target_preparation_missing": ["description.content"],
+                },
+                "recommended_commands": [
+                    {
+                        "stage": "resume-target-package",
+                        "command": "python3 ptcli.py pipeline --prepare-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+                    },
+                    {
+                        "stage": "doctor-retry",
+                        "command": "python3 ptcli.py doctor --target-execute",
+                        "argv": ["python3", "ptcli.py", "doctor", "--target-execute"],
+                    },
+                ],
+                "resume_state": {
+                    "next_stage": "resume-target-package",
+                    "next_command": "python3 ptcli.py pipeline --prepare-target",
+                    "next_command_argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+                    "available_stages": ["resume-target-package", "doctor-retry"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["next_stage"] == "resume-target-package"
+    assert payload["next_command"] == "python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen --upload-screenshots"
+    assert payload["next_command_source"] == "material_recovery_completion"
+    assert payload["next_command_run_allowed"] is True
+    assert payload["automation_action"] == "run_next_command"
+    completion_candidates = [command for command in payload["candidate_commands"] if command["source"] == "material_recovery_completion"]
+    assert completion_candidates
+    assert completion_candidates[0]["command"] == payload["next_command"]
+    assert payload["readiness_summary"]["material_recovery"]["required_flags"] == ["--enrich-metadata", "--fetch-ptgen", "--upload-screenshots", "--prepare-target"]
+    assert payload["readiness_summary"]["material_recovery"]["missing_flags"] == ["--enrich-metadata", "--fetch-ptgen", "--upload-screenshots"]
+
+
 def test_summary_check_derives_material_recovery_from_description_evidence(tmp_path, capsys) -> None:
     summary_file = tmp_path / "summary.json"
     description_evidence = {
@@ -7602,7 +7663,7 @@ def test_summary_check_derives_material_recovery_from_description_evidence(tmp_p
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["automation_action"] == "run_next_command"
-    assert "Highest-priority material blocker is metadata:metadata.ptgen_description." in payload["automation_reason"]
+    assert "Highest-priority material blocker is metadata:metadata.douban." in payload["automation_reason"]
     assert "Required flags: --enrich-metadata,--fetch-ptgen." in payload["automation_reason"]
     assert payload["next_command_run_allowed"] is True
     assert payload["next_command_source"] == "material_recovery_completion"
@@ -7630,11 +7691,11 @@ def test_summary_check_derives_material_recovery_from_description_evidence(tmp_p
     recovery = payload["readiness_summary"]["material_recovery"]
     assert recovery["present"] is True
     assert recovery["keys"] == [
-        "metadata.ptgen_description",
-        "metadata.tmdb_id",
         "metadata.douban",
+        "metadata.tmdb_id",
         "assets.mediainfo_or_bdinfo",
         "assets.image_host_uploads",
+        "metadata.ptgen_description",
     ]
     assert recovery["required_flags"] == ["--enrich-metadata", "--fetch-ptgen", "--generate-mediainfo", "--upload-screenshots"]
     assert recovery["missing_flags"] == ["--enrich-metadata", "--fetch-ptgen", "--generate-mediainfo", "--upload-screenshots"]
@@ -14158,7 +14219,7 @@ async def test_pipeline_summary_recovers_missing_image_host_uploads(monkeypatch,
     assert "export PTCLI_RESUME_MATERIAL_IMAGE_HOST_INVALID_COUNT=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_HAS_SCREENSHOTS=0\n" in out
     assert "export PTCLI_RESUME_MATERIAL_DESCRIPTION_SCREENSHOT_COVERAGE_READY=1\n" in out
-    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=assets.image_host_uploads,description.screenshot_bbcode,description.content\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_KEYS=assets.image_host_uploads,description.content,description.screenshot_bbcode\n" in out
     assert "--upload-screenshots" in out
 
 
