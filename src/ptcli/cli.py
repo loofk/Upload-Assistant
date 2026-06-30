@@ -4662,6 +4662,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         automation_action = "resolve_blockers"
     next_command_run_blocker = command_run_blocker or next_command_metadata["run_blocker"]
     automation_reason = _summary_automation_reason(payload, automation_action, blockers, next_command_run_blocker=next_command_run_blocker)
+    source_command_recovery = _summary_source_command_recovery(next_command_run_blocker)
     result = {
         **payload,
         "automation_handoff": automation_handoff,
@@ -4672,6 +4673,7 @@ def _summary_check_result(payload: dict[str, Any]) -> dict[str, Any]:
         "next_command_run_allowed": next_command_run_allowed,
         "next_command_subcommand": next_command_metadata["subcommand"],
         "next_command_run_blocker": next_command_run_blocker,
+        "source_command_recovery": source_command_recovery,
         "next_command_source": payload.get("next_command_source"),
         "candidate_commands": candidate_commands,
         "candidate_command_count": len(candidate_commands),
@@ -4694,12 +4696,13 @@ def _summary_check_readiness_summary(payload: dict[str, Any]) -> dict[str, Any]:
     material_diagnostics = payload.get("material_diagnostics") if isinstance(payload.get("material_diagnostics"), dict) else {}
     target_upload_diagnostics = payload.get("target_upload_diagnostics") if isinstance(payload.get("target_upload_diagnostics"), dict) else {}
     target_preflight_diagnostics = payload.get("target_preflight_diagnostics") if isinstance(payload.get("target_preflight_diagnostics"), dict) else {}
+    source_command_recovery = payload.get("source_command_recovery") if isinstance(payload.get("source_command_recovery"), dict) else {}
     resume_state = _summary_resume_state_with_material_recovery(payload)
     effective_resume_state = dict(resume_state)
     for key in ("next_stage", "next_command", "next_command_argv"):
         if payload.get(key) is not None:
             effective_resume_state[key] = payload.get(key)
-    return _retorrent_readiness_summary(
+    readiness = _retorrent_readiness_summary(
         status=str(payload.get("status") or "blocked"),
         ready=payload.get("ready") is True,
         complete=payload.get("complete") is True,
@@ -4717,6 +4720,8 @@ def _summary_check_readiness_summary(payload: dict[str, Any]) -> dict[str, Any]:
         },
         summary_file=payload.get("summary_file"),
     )
+    readiness["source_command_recovery"] = source_command_recovery
+    return readiness
 
 
 def _summary_material_recovery_command_run_blocker(payload: dict[str, Any], next_stage: str) -> str | None:
@@ -4783,6 +4788,18 @@ def _summary_source_command_run_blocker(argv: list[str] | None) -> str | None:
     if not _argv_option_values(argv, ["--save-path"]):
         return "pipeline source injection requires --save-path before automatic execution"
     return None
+
+
+def _summary_source_command_recovery(run_blocker: str | None) -> dict[str, Any]:
+    if not run_blocker or not run_blocker.startswith("pipeline source injection"):
+        return {}
+    return {
+        "present": True,
+        "missing": ["source_save_path"],
+        "required_flags": ["--save-path"],
+        "example_flag": "--save-path /downloads",
+        "next_actions": ["Add --save-path pointing to the qBittorrent source download root, then rerun summary-check."],
+    }
 
 
 def _summary_resume_state_with_material_recovery(payload: dict[str, Any]) -> dict[str, Any]:

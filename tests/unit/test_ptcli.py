@@ -8621,6 +8621,14 @@ def test_summary_check_blocks_pipeline_live_source_injection_without_save_path(t
     assert payload["candidate_commands"][0]["run_allowed"] is False
     assert payload["candidate_commands"][0]["run_blocker"] == "pipeline source injection requires --save-path before automatic execution"
     assert payload["rejected_command_blockers"] == ["pipeline source injection requires --save-path before automatic execution"]
+    assert payload["source_command_recovery"] == {
+        "present": True,
+        "missing": ["source_save_path"],
+        "required_flags": ["--save-path"],
+        "example_flag": "--save-path /downloads",
+        "next_actions": ["Add --save-path pointing to the qBittorrent source download root, then rerun summary-check."],
+    }
+    assert payload["readiness_summary"]["source_command_recovery"] == payload["source_command_recovery"]
     assert payload["automation_reason"] == "Source follow-up command needs additional flags before automatic execution: pipeline source injection requires --save-path before automatic execution."
 
 
