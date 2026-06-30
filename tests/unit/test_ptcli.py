@@ -20951,6 +20951,36 @@ def test_target_upload_summary_retries_when_uploaded_hash_is_inconsistent_after_
     assert summary_payload["resume_state"]["next_command"] == commands["target-upload-retry"]
 
 
+def test_target_upload_followup_requires_uploaded_torrent_visible_in_client(tmp_path) -> None:
+    uploaded_torrent = tmp_path / "MTEAM-999.torrent"
+    uploaded_torrent.write_bytes(b"torrent")
+
+    followup = ptcli_cli._target_upload_followup_closure(
+        {"uploaded": True, "uploaded_wait": {"query": {"torrent_hash": "a" * 40, "content_path": "/downloads/Example"}}},
+        {
+            "uploaded_torrent_file": {"path": str(uploaded_torrent), "exists": True, "is_file": True, "size_bytes": uploaded_torrent.stat().st_size},
+            "uploaded_torrent_hash": "a" * 40,
+            "injected_torrent_hash": "a" * 40,
+            "injection_visible_in_client": False,
+            "injection_verified": True,
+            "uploaded_wait_evidence": True,
+            "target_hash_consistent": True,
+            "target_duplicate_clean": True,
+            "target_rule_obligations": {"ready": True},
+            "uploaded_save_path": {"path": "/downloads/Example"},
+        },
+        {},
+    )
+
+    assert followup["ready"] is False
+    assert followup["ready_for_uploaded_seeding"] is False
+    assert followup["gates"]["injection_visible_in_client"] is False
+    assert followup["gates"]["injection_verified"] is True
+    assert followup["gates"]["uploaded_wait_evidence"] is True
+    assert followup["missing"] == ["injection_visible_in_client"]
+    assert followup["blockers"] == ["uploaded MTEAM torrent is not visible in qBittorrent after injection"]
+
+
 @pytest.mark.asyncio
 async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_path) -> None:
     source_info = {

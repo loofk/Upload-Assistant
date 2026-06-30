@@ -3047,7 +3047,7 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
     hash_consistent = bool(artifacts.get("target_hash_consistent"))
     duplicate_clean = bool(artifacts.get("target_duplicate_clean"))
     rule_obligations_ready = _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations"))
-    ready = bool(uploaded and downloaded and injected and injection_verified and wait_evidence and hash_consistent and duplicate_clean and rule_obligations_ready)
+    ready = bool(uploaded and downloaded and injected and injection_visible and injection_verified and wait_evidence and hash_consistent and duplicate_clean and rule_obligations_ready)
     checks = {
         "uploaded": uploaded,
         "downloaded": downloaded,
