@@ -1798,6 +1798,68 @@ def test_retorrent_resume_state_promotes_material_recovery_completion() -> None:
     assert audit["first_rejected_command_blocker"] == "material recovery command does not cover metadata.ptgen_description; missing flags: --enrich-metadata,--fetch-ptgen"
 
 
+def test_retorrent_resume_state_keeps_source_resume_before_material_recovery_completion() -> None:
+    resume_commands = [
+        {
+            "stage": "resume-target-package",
+            "command": "python3 ptcli.py pipeline --prepare-target",
+            "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+        },
+        {
+            "stage": "resume-source-torrent",
+            "command": "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent --inject-source --save-path /downloads --wait-complete",
+            "argv": [
+                "python3",
+                "ptcli.py",
+                "pipeline",
+                "--source-torrent-file",
+                "/tmp/U2-60635.torrent",
+                "--inject-source",
+                "--save-path",
+                "/downloads",
+                "--wait-complete",
+            ],
+        },
+    ]
+    resume_state = {
+        "next_stage": "resume-source-torrent",
+        "next_command": "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent --inject-source --save-path /downloads --wait-complete",
+        "next_command_argv": [
+            "python3",
+            "ptcli.py",
+            "pipeline",
+            "--source-torrent-file",
+            "/tmp/U2-60635.torrent",
+            "--inject-source",
+            "--save-path",
+            "/downloads",
+            "--wait-complete",
+        ],
+        "materials": {
+            "recovery_hints": [
+                {
+                    "key": "metadata.ptgen_description",
+                    "required_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                    "missing_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                    "resume_command_available": False,
+                }
+            ]
+        },
+    }
+
+    promoted = ptcli_cli._resume_state_with_material_recovery_completion(resume_state, resume_commands)
+    audit = ptcli_cli._resume_command_audit_fields(resume_commands, promoted["next_command"], promoted["next_command_argv"], resume_state=promoted)
+
+    assert promoted["next_stage"] == "resume-source-torrent"
+    assert promoted.get("next_command_source") is None
+    assert promoted["next_command_argv"] == resume_state["next_command_argv"]
+    assert audit["next_command_run_allowed"] is True
+    assert audit["first_runnable_stage"] == "resume-source-torrent"
+    assert audit["first_runnable_command_source"] == "resume_commands"
+    assert audit["rejected_command_count"] == 1
+    assert audit["first_rejected_stage"] == "resume-target-package"
+
+
 @pytest.mark.asyncio
 async def test_retorrent_execute_surfaces_material_preflight_blockers(monkeypatch) -> None:
     async def fake_pipeline_payload(_args):

@@ -1475,6 +1475,8 @@ def _retorrent_source_followup_next_actions(missing: list[str]) -> list[str]:
 
 
 def _resume_state_with_material_recovery_completion(resume_state: dict[str, Any], resume_commands: Any) -> dict[str, Any]:
+    if resume_state.get("next_stage") != "resume-target-package":
+        return resume_state
     commands = resume_commands if isinstance(resume_commands, list) else []
     candidates = _summary_candidate_commands({"resume_commands": commands, "resume_state": resume_state})
     first_runnable = _first_runnable_candidate_command(candidates)
