@@ -17925,6 +17925,7 @@ async def test_mteam_live_upload_requires_confirmation(tmp_path) -> None:
 
     assert result["status"] == "blocked"
     assert "confirm-upload" in result["blockers"][0]
+    assert any("--confirm-upload" in action for action in result["next_actions"])
 
 
 @pytest.mark.asyncio

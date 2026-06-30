@@ -243,7 +243,7 @@ async def upload_mteam_from_package(
     if not confirm_upload:
         blockers.append("MTEAM live upload requires --confirm-upload.")
     if blockers:
-        return {**preflight, "status": "blocked", "dry_run": False, "blockers": blockers}
+        return {**preflight, "status": "blocked", "dry_run": False, "blockers": blockers, "next_actions": _upload_preflight_next_actions(blockers, execute)}
 
     upload_func = uploader or _submit_mteam_upload
     upload_result = await upload_func(config, package_dir, torrent_file)
@@ -2187,6 +2187,11 @@ def _summarize_mteam_upload_response(response: Any) -> dict[str, Any]:
 
 
 def _upload_preflight_next_actions(blockers: list[str], execute: bool) -> list[str]:
+    if any("--confirm-upload" in blocker for blocker in blockers):
+        return [
+            "Review the MTEAM upload payload, rule obligations, duplicate status, torrent safety, and seeding plan.",
+            "Rerun with --execute --confirm-upload only after the live upload intent has been manually confirmed.",
+        ]
     if blockers:
         return [
             "Review every blocker before upload.",
