@@ -12343,6 +12343,72 @@ def test_job_store_marks_blocked_results(tmp_path) -> None:
     assert job["next_actions"] == ["accept rules"]
 
 
+def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    result = {
+        "status": "blocked",
+        "blockers": ["materials incomplete"],
+        "summary_file": str(summary_file),
+        "material_diagnostics": {
+            "present": True,
+            "ready_for_mteam_upload": False,
+            "critical_ready": False,
+            "critical_missing": ["metadata.tmdb", "description.content"],
+            "critical_path": {"ready": False, "next_step": "metadata", "missing": ["metadata.tmdb"]},
+            "media_info_requirement": "mediainfo_or_bdinfo",
+            "metadata_fields": {
+                "imdb_id": {"ready": True, "value": "1234567"},
+                "tmdb_id": {"ready": False},
+                "douban_id": {"ready": True, "value": "1291546"},
+                "ptgen_description": {"ready": False, "length": 0},
+            },
+            "description": {
+                "ready": False,
+                "has_ptgen_description": False,
+                "has_mediainfo_or_bdinfo": True,
+                "has_screenshot_bbcode": True,
+                "bbcode_image_count": 2,
+                "external_id_readiness": {"imdb": True, "tmdb": False, "douban": True},
+                "external_links": {"imdb": "https://www.imdb.com/title/tt1234567"},
+                "external_id_missing": ["tmdb"],
+            },
+            "image_host_urls": {"img_urls": ["https://img.example/1.png", "https://img.example/2.png"]},
+            "upload_material_blockers": ["description completeness missing: ptgen_description"],
+        },
+        "target_preflight_diagnostics": {
+            "ready": False,
+            "materials_ready": False,
+            "metadata_ready": False,
+            "assets_ready": True,
+            "description_ready": False,
+            "payload_ready": False,
+            "missing": ["materials.metadata.tmdb"],
+            "description_missing": ["materials.description.external_ids.tmdb"],
+        },
+        "resume_state": {
+            "resume_available": True,
+            "next_stage": "resume-target-package",
+            "next_command_argv": ["python3", "ptcli.py", "pipeline", "--json"],
+            "materials": {"target_materials_missing": ["metadata.tmdb"], "recovery_hints": [{"key": "metadata.tmdb"}]},
+        },
+    }
+    summary_file.write_text(json.dumps(result), encoding="utf-8")
+    store = ptcli_service.JobStore(tmp_path / "jobs", run_inline=True)
+
+    job = store.create("ptcli.test", {"source": "u2"}, ["ptcli", "retorrent", "--json"], lambda: result)
+    summary = store.summary(job["job_id"])
+
+    assert job["status"] == "blocked"
+    assert job["agent_summary"]["metadata"]["tmdb_ready"] is False
+    assert job["agent_summary"]["metadata"]["ptgen_description_ready"] is False
+    assert job["agent_summary"]["materials"]["critical_path"]["next_step"] == "metadata"
+    assert job["agent_summary"]["materials"]["screenshot_count"] == 2
+    assert job["agent_summary"]["target_preflight"]["description_ready"] is False
+    assert job["agent_summary"]["resume"]["next_stage"] == "resume-target-package"
+    assert summary["agent_summary"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
+    assert summary["agent_summary"]["resume"]["materials_missing"] == ["metadata.tmdb"]
+
+
 def test_job_store_resume_blocks_without_next_command(tmp_path) -> None:
     store = ptcli_service.JobStore(tmp_path, run_inline=True)
     parent = store.create("ptcli.test", {}, ["ptcli", "retorrent"], lambda: {"status": "blocked", "blockers": ["missing"]})

@@ -97,7 +97,8 @@
           "blockers",
           "next_actions",
           "summary_file",
-          "resume_state"
+          "resume_state",
+          "agent_summary"
         ],
         "status_values": [
           "queued",
@@ -187,7 +188,8 @@
           "blockers",
           "next_actions",
           "summary_file",
-          "resume_state"
+          "resume_state",
+          "agent_summary"
         ]
       },
       "safety": {

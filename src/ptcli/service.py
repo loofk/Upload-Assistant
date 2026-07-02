@@ -73,6 +73,7 @@ class JobStore:
             "next_actions": [],
             "summary_file": None,
             "resume_state": None,
+            "agent_summary": None,
             "duplicate_check": None,
             "result": None,
         }
@@ -105,6 +106,7 @@ class JobStore:
             "kind": job.get("kind"),
             "summary_file": summary_file,
             "summary": summary_payload,
+            "agent_summary": _agent_summary(summary_payload) or _agent_summary(job.get("result")),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -160,6 +162,7 @@ class JobStore:
                     "next_actions": _string_list(result.get("next_actions")),
                     "summary_file": _result_summary_file(result),
                     "resume_state": _result_resume_state(result),
+                    "agent_summary": _agent_summary(result),
                     "duplicate_check": result.get("duplicate_check") if isinstance(result.get("duplicate_check"), dict) else None,
                     "result": result,
                 }
@@ -634,6 +637,7 @@ def _service_result(kind: str, request: dict[str, Any], argv: list[str], result:
         "next_actions": next_actions,
         "summary_file": summary_file,
         "resume_state": resume_state,
+        "agent_summary": _agent_summary(result),
         "next_stage": _nested_value(result, "next_stage"),
         "next_command": _nested_value(result, "next_command"),
         "next_command_argv": next_command_argv,
@@ -692,6 +696,160 @@ def _result_blockers(result: dict[str, Any]) -> list[str]:
     return blockers
 
 
+def _agent_summary(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    material = _nested_dict(payload, "material_diagnostics")
+    target_preflight = _nested_dict(payload, "target_preflight_diagnostics")
+    resume_state = _nested_dict(payload, "resume_state")
+    closure_status = _nested_dict(payload, "closure_status")
+    target_upload_diagnostics = _nested_dict(payload, "target_upload_diagnostics")
+    qbit_wait = _nested_dict(payload, "qbit_wait_diagnostics")
+    duplicate_check = payload.get("duplicate_check") if isinstance(payload.get("duplicate_check"), dict) else _duplicate_check(payload)
+    summary = {
+        "status": _nested_value(payload, "status"),
+        "ok": payload.get("ok") if isinstance(payload.get("ok"), bool) else None,
+        "duplicate_check": duplicate_check,
+        "metadata": _agent_metadata_summary(material),
+        "materials": _agent_materials_summary(material),
+        "target_preflight": _agent_target_preflight_summary(target_preflight, target_upload_diagnostics),
+        "qbit": _agent_qbit_summary(closure_status, qbit_wait),
+        "resume": _agent_resume_summary(resume_state, payload),
+    }
+    return summary if any(value for value in summary.values()) else None
+
+
+def _agent_metadata_summary(material: dict[str, Any]) -> dict[str, Any]:
+    metadata_fields = material.get("metadata_fields") if isinstance(material.get("metadata_fields"), dict) else {}
+    description = material.get("description") if isinstance(material.get("description"), dict) else {}
+    external_links = description.get("external_links") if isinstance(description.get("external_links"), dict) else {}
+    external_id_readiness = description.get("external_id_readiness") if isinstance(description.get("external_id_readiness"), dict) else {}
+    return {
+        "ready": _metadata_ready(metadata_fields, external_id_readiness),
+        "fields": metadata_fields,
+        "imdb_ready": _field_ready(metadata_fields, "imdb") or _field_ready(metadata_fields, "imdb_id") or external_id_readiness.get("imdb"),
+        "tmdb_ready": _field_ready(metadata_fields, "tmdb") or _field_ready(metadata_fields, "tmdb_id") or external_id_readiness.get("tmdb"),
+        "douban_ready": _field_ready(metadata_fields, "douban") or _field_ready(metadata_fields, "douban_id") or external_id_readiness.get("douban"),
+        "ptgen_description_ready": _field_ready(metadata_fields, "ptgen_description") or bool(description.get("has_ptgen_description")),
+        "ptgen_description_length": _metadata_field_value(metadata_fields, "ptgen_description", "length") or description.get("ptgen_description_length"),
+        "external_links": external_links,
+        "missing": _string_list(description.get("external_id_missing")),
+    }
+
+
+def _agent_materials_summary(material: dict[str, Any]) -> dict[str, Any]:
+    description = material.get("description") if isinstance(material.get("description"), dict) else {}
+    critical_path = material.get("critical_path") if isinstance(material.get("critical_path"), dict) else {}
+    image_host_urls = material.get("image_host_urls") if isinstance(material.get("image_host_urls"), dict) else {}
+    live_gate = material.get("live_gate") if isinstance(material.get("live_gate"), dict) else {}
+    return {
+        "present": bool(material.get("present")),
+        "ready_for_mteam_upload": material.get("ready_for_mteam_upload"),
+        "critical_ready": material.get("critical_ready"),
+        "critical_missing": _string_list(material.get("critical_missing")),
+        "critical_path": {
+            "ready": critical_path.get("ready"),
+            "next_step": critical_path.get("next_step"),
+            "missing": _string_list(critical_path.get("missing")),
+        },
+        "media_info_requirement": material.get("media_info_requirement"),
+        "mediainfo_or_bdinfo_ready": description.get("has_mediainfo_or_bdinfo"),
+        "screenshots_ready": description.get("has_screenshot_bbcode"),
+        "screenshot_count": description.get("bbcode_image_count"),
+        "image_host_urls": image_host_urls,
+        "description_ready": description.get("ready"),
+        "description_input_chain_ready": material.get("description_input_chain_ready"),
+        "target_materials_ready": material.get("target_materials_ready"),
+        "target_preparation_ready": material.get("target_preparation_ready"),
+        "upload_material_blockers": _string_list(material.get("upload_material_blockers")),
+        "live_gate": live_gate,
+    }
+
+
+def _agent_target_preflight_summary(target_preflight: dict[str, Any], target_upload_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    preflight = target_upload_diagnostics.get("preflight") if isinstance(target_upload_diagnostics.get("preflight"), dict) else {}
+    source = target_preflight or preflight
+    return {
+        "ready": source.get("ready"),
+        "target_preparation_ready": source.get("target_preparation_ready"),
+        "materials_ready": source.get("materials_ready"),
+        "metadata_ready": source.get("metadata_ready"),
+        "assets_ready": source.get("assets_ready"),
+        "description_ready": source.get("description_ready"),
+        "payload_ready": source.get("payload_ready"),
+        "materials_ready_required": source.get("materials_ready_required"),
+        "missing": _string_list(source.get("missing")),
+        "description_missing": _string_list(source.get("description_missing")),
+        "blockers": _string_list(source.get("blockers")),
+    }
+
+
+def _agent_qbit_summary(closure_status: dict[str, Any], qbit_wait: dict[str, Any]) -> dict[str, Any]:
+    source = closure_status.get("source") if isinstance(closure_status.get("source"), dict) else {}
+    target = closure_status.get("target") if isinstance(closure_status.get("target"), dict) else {}
+    return {
+        "source": {
+            "ready": source.get("ready"),
+            "torrent_hash": source.get("torrent_hash"),
+            "content_path": source.get("content_path"),
+            "injection_verified": source.get("injection_verified"),
+            "wait_complete": source.get("wait_complete"),
+        },
+        "target": {
+            "ready": target.get("ready"),
+            "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
+            "injected_torrent_hash": target.get("injected_torrent_hash"),
+            "injection_visible_in_client": target.get("injection_visible_in_client"),
+            "injection_verified": target.get("injection_verified"),
+            "uploaded_wait_evidence": target.get("uploaded_wait_evidence"),
+        },
+        "wait_diagnostics": qbit_wait,
+    }
+
+
+def _agent_resume_summary(resume_state: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    materials = resume_state.get("materials") if isinstance(resume_state.get("materials"), dict) else {}
+    return {
+        "available": resume_state.get("resume_available"),
+        "ready": resume_state.get("ready"),
+        "next_stage": resume_state.get("next_stage") or _nested_value(payload, "next_stage"),
+        "next_command": resume_state.get("next_command") or _nested_value(payload, "next_command"),
+        "next_command_argv": _argv_list(resume_state.get("next_command_argv")) or _result_next_command_argv(payload),
+        "materials_missing": _string_list(materials.get("target_materials_missing")) or _string_list(materials.get("target_preparation_missing")),
+        "material_recovery_hints": materials.get("recovery_hints") if isinstance(materials.get("recovery_hints"), list) else [],
+    }
+
+
+def _nested_dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    value = _nested_value(payload, key)
+    return value if isinstance(value, dict) else {}
+
+
+def _metadata_ready(metadata_fields: dict[str, Any], external_id_readiness: dict[str, Any]) -> bool | None:
+    checks = [
+        _field_ready(metadata_fields, "imdb") or _field_ready(metadata_fields, "imdb_id") or external_id_readiness.get("imdb"),
+        _field_ready(metadata_fields, "tmdb") or _field_ready(metadata_fields, "tmdb_id") or external_id_readiness.get("tmdb"),
+        _field_ready(metadata_fields, "douban") or _field_ready(metadata_fields, "douban_id") or external_id_readiness.get("douban"),
+        _field_ready(metadata_fields, "ptgen_description"),
+    ]
+    boolean_checks = [check for check in checks if isinstance(check, bool)]
+    return all(boolean_checks) if boolean_checks else None
+
+
+def _field_ready(metadata_fields: dict[str, Any], key: str) -> bool | None:
+    field = metadata_fields.get(key)
+    if isinstance(field, dict) and isinstance(field.get("ready"), bool):
+        return field["ready"]
+    return None
+
+
+def _metadata_field_value(metadata_fields: dict[str, Any], key: str, field_name: str) -> Any:
+    field = metadata_fields.get(key)
+    if isinstance(field, dict):
+        return field.get(field_name)
+    return None
+
+
 def _resolve_job_dir(root: str | Path | None) -> Path:
     if root:
         return Path(root).expanduser()
@@ -723,6 +881,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "duplicate_check": job.get("duplicate_check"),
         "summary_file": job.get("summary_file"),
         "resume_state": job.get("resume_state"),
+        "agent_summary": job.get("agent_summary") if isinstance(job.get("agent_summary"), dict) else _agent_summary(job.get("result")),
         "result_status": _nested_value(job.get("result"), "status"),
         "next_stage": _nested_value(job.get("result"), "next_stage"),
         "next_command": _nested_value(job.get("result"), "next_command"),
@@ -1009,7 +1168,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -1110,7 +1269,7 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
         "blocked_fields": ["blockers", "next_actions", "resume_state", "next_command_argv"],
     }
@@ -1252,6 +1411,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "duplicate_check": {"type": "object"},
             "summary_file": {"type": ["string", "null"]},
             "resume_state": {"type": ["object", "null"]},
+            "agent_summary": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
         },
     }
