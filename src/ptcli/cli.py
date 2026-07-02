@@ -10829,6 +10829,9 @@ async def _apply_uploaded_torrent_followup(config: dict[str, Any], args: argpars
             args.uploaded_paused,
         )
         injected_payload = _with_uploaded_injection(result, inject_result)
+        injected_payload = _verify_uploaded_injection_hash(injected_payload)
+        if injected_payload.get("status") == "blocked":
+            return injected_payload
         if args.wait_uploaded_complete:
             return await _with_uploaded_wait(config, args, injected_payload, uploaded_save_path)
         return injected_payload
@@ -10877,6 +10880,44 @@ def _with_uploaded_injection(result: dict[str, Any], inject_result: dict[str, An
             downloaded_hash = _torrent_hash_from_result(downloaded_torrent)
             payload["downloaded_torrent"] = {**downloaded_torrent, "hash": downloaded_hash or uploaded_torrent_hash}
     return payload
+
+
+def _verify_uploaded_injection_hash(result: dict[str, Any]) -> dict[str, Any]:
+    downloaded_hash = _torrent_hash_from_result(result.get("downloaded_torrent"))
+    injected_hash = _torrent_hash_from_result(result.get("injected_torrent"))
+    injected_torrent = result.get("injected_torrent")
+    if not isinstance(injected_torrent, dict) or not downloaded_hash or not injected_hash:
+        return result
+    if downloaded_hash == injected_hash:
+        return {
+            **result,
+            "injected_torrent": {
+                **injected_torrent,
+                "hash_matched": True,
+                "expected_hash": downloaded_hash,
+                "actual_hash": injected_hash,
+            },
+        }
+    injected_blockers = _string_list(injected_torrent.get("blockers"))
+    _append_unique_string(injected_blockers, f"injected uploaded torrent hash mismatch: expected {downloaded_hash}, got {injected_hash}")
+    blockers = _string_list(result.get("blockers"))
+    _append_unique_string(blockers, "injected_torrent: Injected uploaded MTEAM torrent infohash does not match downloaded MTEAM torrent.")
+    return {
+        **result,
+        "status": "blocked",
+        "blockers": blockers,
+        "injected_torrent": {
+            **injected_torrent,
+            "hash_matched": False,
+            "expected_hash": downloaded_hash,
+            "actual_hash": injected_hash,
+            "blockers": injected_blockers,
+        },
+        "uploaded_wait": {
+            "skipped": True,
+            "blockers": ["qBittorrent wait skipped because injected uploaded torrent hash mismatches downloaded MTEAM torrent."],
+        },
+    }
 
 
 async def _with_uploaded_wait(config: dict[str, Any], args: argparse.Namespace, result: dict[str, Any], uploaded_save_path: str | None) -> dict[str, Any]:

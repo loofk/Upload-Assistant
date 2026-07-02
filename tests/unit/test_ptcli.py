@@ -23715,7 +23715,7 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
     }
     package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
     uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
-    uploaded_hash = "f" * 40
+    uploaded_hash = str(Torrent.read(uploaded_torrent, validate=False).infohash)
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
 
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
@@ -23791,6 +23791,85 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
     assert result["summary"]["injected_torrent_hash"] == uploaded_hash
     assert result["summary"]["duplicate_clean"] is True
     assert result["summary"]["fresh_duplicate_check"]["source"] == "target_package_upload_gate"
+
+
+@pytest.mark.asyncio
+async def test_target_upload_blocks_uploaded_torrent_injection_hash_mismatch(monkeypatch, tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
+    downloaded_hash = str(Torrent.read(uploaded_torrent, validate=False).infohash)
+    injected_hash = "f" * 40 if downloaded_hash != "f" * 40 else "e" * 40
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
+
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+        return {
+            "client": client_name,
+            "hash": injected_hash,
+            "torrent_path": torrent_path,
+            "save_path": save_path,
+            "category": category,
+            "tags": tags,
+            "paused": paused,
+            "visible_in_client": True,
+            "verified_in_client": True,
+        }
+
+    async def fake_wait_complete_with_config(*_args, **_kwargs):
+        raise AssertionError("uploaded torrent wait must not run when injected hash mismatches downloaded MTEAM torrent")
+
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    monkeypatch.setattr(ptcli_cli, "_wait_complete_with_config", fake_wait_complete_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--config",
+            "config.py",
+            "--package-dir",
+            package["package_dir"],
+            "--uploaded-torrent-file",
+            str(uploaded_torrent),
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--client",
+            "default",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["status"] == "blocked"
+    assert result["downloaded_torrent"]["torrent_hash"] == downloaded_hash
+    assert result["injected_torrent"]["hash"] == injected_hash
+    assert result["injected_torrent"]["hash_matched"] is False
+    assert result["injected_torrent"]["expected_hash"] == downloaded_hash
+    assert result["injected_torrent"]["actual_hash"] == injected_hash
+    assert "injected uploaded torrent hash mismatch" in result["injected_torrent"]["blockers"][0]
+    assert result["uploaded_wait"]["skipped"] is True
+    assert "injected_torrent: Injected uploaded MTEAM torrent infohash does not match downloaded MTEAM torrent." in result["blockers"]
+    assert result["summary"]["ready"] is False
+    assert result["summary"]["hash_consistent"] is False
+    assert f"downloaded_torrent={downloaded_hash}" in result["summary"]["hash_consistency_blockers"][0]
+    assert f"injected_torrent={injected_hash}" in result["summary"]["hash_consistency_blockers"][0]
+    summary_payload = json.loads((Path(package["package_dir"]) / "ptcli-target-upload-summary.json").read_text(encoding="utf-8"))
+    assert summary_payload["summary"]["completion_review"]["checks"]["hash_consistent"] is False
+    assert summary_payload["resume_state"]["uploaded_followup"]["hash_consistent"] is False
+    assert summary_payload["resume_state"]["uploaded_followup"]["uploaded_wait_evidence"] is False
 
 
 @pytest.mark.asyncio
