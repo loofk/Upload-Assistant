@@ -201,7 +201,7 @@ def write_material_ready_mteam_package(source_info: dict, tmp_path: Path, conten
     screenshot.write_bytes(b"png")
     image_host_file = material_dir / "image-host-uploads.json"
     image_host_file.write_text(
-        json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}),
+        json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png", web_url="https://img.example/page")]}),
         encoding="utf-8",
     )
     return write_mteam_prepare_package(
@@ -213,6 +213,15 @@ def write_material_ready_mteam_package(source_info: dict, tmp_path: Path, conten
         accept_rules=True,
         material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
     )
+
+
+def image_host_item_for_screenshot(screenshot: Path | str, **urls: str) -> dict[str, str]:
+    path = Path(screenshot)
+    return {
+        "local_file": str(path),
+        "local_sha1": hashlib.sha1(path.read_bytes()).hexdigest(),
+        **urls,
+    }
 
 
 def patch_pipeline_live_material_stages(monkeypatch) -> None:
@@ -12258,7 +12267,7 @@ def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
     screenshot.write_bytes(b"png")
     image_host_file = material_dir / "image-host-uploads.json"
     image_host_file.write_text(
-        json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}),
+        json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png", web_url="https://img.example/page")]}),
         encoding="utf-8",
     )
     package = write_mteam_prepare_package(
@@ -15593,7 +15602,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     image_host_file = tmp_path / "image-host-uploads.json"
     await asyncio.to_thread(
         image_host_file.write_text,
-        json.dumps([{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]),
+        json.dumps([image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png", web_url="https://img.example/page")]),
         encoding="utf-8",
     )
     parser = build_parser()
@@ -15944,7 +15953,7 @@ async def test_pipeline_summary_recovers_missing_image_host_uploads(monkeypatch,
     assert material_closure["critical_domains"]["metadata"]["ready"] is True
     assert material_closure["critical_domains"]["media_info"]["ready"] is True
     assert material_closure["critical_domains"]["screenshots"]["ready"] is True
-    assert material_closure["critical_domains"]["image_host"] == {"ready": False, "missing": ["assets.image_host_uploads"]}
+    assert material_closure["critical_domains"]["image_host"] == {"ready": False, "missing": ["assets.image_host_uploads", "description.screenshot_coverage"]}
     assert material_closure["critical_domains"]["description"] == {"ready": False, "missing": ["description.screenshot_bbcode", "description.content"]}
     assert material_closure["screenshots"]["ready"] is True
     assert material_closure["screenshots"]["count"] == 1
@@ -15969,7 +15978,7 @@ async def test_pipeline_summary_recovers_missing_image_host_uploads(monkeypatch,
     assert code == 0
     out = capsys.readouterr().out
     assert "export PTCLI_RESUME_MATERIAL_CRITICAL_IMAGE_HOST_READY=0\n" in out
-    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_IMAGE_HOST_MISSING=assets.image_host_uploads\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_CRITICAL_IMAGE_HOST_MISSING=assets.image_host_uploads,description.screenshot_coverage\n" in out
     assert "export PTCLI_RESUME_MATERIAL_SCREENSHOTS_READY=1\n" in out
     assert "export PTCLI_RESUME_MATERIAL_SCREENSHOTS_COUNT=1\n" in out
     assert f"export PTCLI_RESUME_MATERIAL_SCREENSHOTS_FILES={screenshot}\n" in out
@@ -16129,7 +16138,10 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
     image_host_file = tmp_path / "image-host-uploads.json"
-    image_host_file.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}), encoding="utf-8")
+    image_host_file.write_text(
+        json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png", web_url="https://img.example/page")]}),
+        encoding="utf-8",
+    )
     uploaded_hash: str | None = None
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
@@ -18618,13 +18630,13 @@ def test_mteam_description_draft_and_upload_gate() -> None:
 
 
 def test_mteam_description_draft_includes_material_screenshots(tmp_path) -> None:
-    image_host_file = tmp_path / "image-host-uploads.json"
-    image_host_file.write_text(
-        json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}),
-        encoding="utf-8",
-    )
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(
+        json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png", web_url="https://img.example/page")]}),
+        encoding="utf-8",
+    )
     mediainfo = tmp_path / "MI_FULL_00.txt"
     mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
     source_info = {
@@ -18856,7 +18868,7 @@ def test_mteam_materials_manifest_records_existing_material_files(tmp_path) -> N
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
     image_hosts = tmp_path / "image-host.json"
-    image_hosts.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png"}]}), encoding="utf-8")
+    image_hosts.write_text(json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png")]}), encoding="utf-8")
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -19087,7 +19099,7 @@ def test_mteam_image_host_alias_urls_feed_description_and_preflight(tmp_path) ->
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
     image_hosts = tmp_path / "image-host.json"
-    image_hosts.write_text(json.dumps({"items": [{"thumb": "https://img.example/thumb.png", "link": "https://img.example/page"}]}), encoding="utf-8")
+    image_hosts.write_text(json.dumps({"items": [image_host_item_for_screenshot(screenshot, thumb="https://img.example/thumb.png", link="https://img.example/page")]}), encoding="utf-8")
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -19133,7 +19145,7 @@ def test_mteam_materials_manifest_requires_bdinfo_for_bdmv_content(tmp_path) -> 
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
     image_hosts = tmp_path / "image-host.json"
-    image_hosts.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png"}]}), encoding="utf-8")
+    image_hosts.write_text(json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png")]}), encoding="utf-8")
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -19290,6 +19302,8 @@ async def test_upload_screenshot_image_hosts_writes_upload_json(tmp_path) -> Non
     assert result["status"] == "uploaded"
     assert result["host"] == "ptpimg"
     assert result["count"] == 1
+    assert result["items"][0]["local_file"] == str(screenshot)
+    assert result["items"][0]["local_sha1"] == hashlib.sha1(screenshot.read_bytes()).hexdigest()
     assert result["items"][0]["raw_url"] == "https://ptpimg/raw/screen-1.png"
     assert await asyncio.to_thread(Path(result["image_host_file"]).exists)
 
@@ -20184,7 +20198,7 @@ def test_mteam_upload_preflight_reads_ready_package(tmp_path) -> None:
     screenshot.write_bytes(b"png")
     image_host_file = material_dir / "image-host-uploads.json"
     image_host_file.write_text(
-        json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}),
+        json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png", web_url="https://img.example/page")]}),
         encoding="utf-8",
     )
     package = write_mteam_prepare_package(
@@ -20799,7 +20813,10 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     screenshot = material_dir / "screen-1.png"
     screenshot.write_bytes(b"png")
     image_host_file = material_dir / "image-host-uploads.json"
-    image_host_file.write_text(json.dumps({"items": [{"img_url": "https://img.example/screen-1.png", "web_url": "https://img.example/view/screen-1"}]}), encoding="utf-8")
+    image_host_file.write_text(
+        json.dumps({"items": [image_host_item_for_screenshot(screenshot, img_url="https://img.example/screen-1.png", web_url="https://img.example/view/screen-1")]}),
+        encoding="utf-8",
+    )
     package = write_mteam_prepare_package(
         source_info,
         ["MTEAM"],
@@ -20990,7 +21007,10 @@ def test_mteam_upload_preflight_exposes_missing_description_external_id(tmp_path
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
     image_host_file = tmp_path / "image-host-uploads.json"
-    image_host_file.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}), encoding="utf-8")
+    image_host_file.write_text(
+        json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png", web_url="https://img.example/page")]}),
+        encoding="utf-8",
+    )
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -21081,7 +21101,10 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
     image_host_file = tmp_path / "image-host-uploads.json"
-    image_host_file.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}), encoding="utf-8")
+    image_host_file.write_text(
+        json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png", web_url="https://img.example/page")]}),
+        encoding="utf-8",
+    )
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -21126,6 +21149,28 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
     assert review["description"]["external_id_missing"] == []
     assert review["description"]["bbcode_image_count"] == 1
     assert review["description"]["bbcode_image_urls"] == ["https://img.example/thumb.png"]
+    screenshot_sha1 = hashlib.sha1(screenshot.read_bytes()).hexdigest()
+    screenshot_linkage = {
+        "ready": True,
+        "local_screenshot_count": 1,
+        "image_host_count": 1,
+        "matched_count": 1,
+        "unverified_item_indexes": [],
+        "unmatched_item_indexes": [],
+        "sha1_mismatches": [],
+        "missing_local_files": [],
+        "items": [
+            {
+                "index": 1,
+                "img_url": "https://img.example/thumb.png",
+                "local_file": str(screenshot),
+                "local_sha1": screenshot_sha1,
+                "matched": True,
+                "reason": None,
+                "matched_screenshot": str(screenshot),
+            }
+        ],
+    }
     assert review["description"]["screenshot_coverage"] == {
         "ready": True,
         "expected_urls": ["https://img.example/thumb.png"],
@@ -21184,7 +21229,7 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
             "payload_length": len(mediainfo.read_text(encoding="utf-8")),
         },
         "screenshots": {"ready": True, "bbcode_image_count": 1, "bbcode_image_urls": ["https://img.example/thumb.png"]},
-        "image_host": {"count": 1, "urls": ["https://img.example/thumb.png"]},
+        "image_host": {"count": 1, "urls": ["https://img.example/thumb.png"], "screenshot_linkage": screenshot_linkage},
         "screenshot_coverage": {
             "ready": True,
             "expected_count": 1,
@@ -21202,6 +21247,12 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
             "image_host_urls": ["https://img.example/thumb.png"],
             "description_urls": ["https://img.example/thumb.png"],
             "missing_urls": [],
+            "source_verified": True,
+            "matched_count": 1,
+            "unverified_item_indexes": [],
+            "unmatched_item_indexes": [],
+            "missing_local_files": [],
+            "sha1_mismatches": [],
         },
     }
     assert review["materials"]["mediainfo_or_bdinfo_source"] == str(mediainfo)
@@ -21234,7 +21285,10 @@ def test_mteam_upload_preflight_blocks_stale_mediainfo_excerpt(tmp_path) -> None
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
     image_host_file = tmp_path / "image-host-uploads.json"
-    image_host_file.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}), encoding="utf-8")
+    image_host_file.write_text(
+        json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png", web_url="https://img.example/page")]}),
+        encoding="utf-8",
+    )
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -21303,8 +21357,8 @@ def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_descri
         json.dumps(
             {
                 "items": [
-                    {"raw_url": "https://img.example/raw-1.png", "img_url": "https://img.example/thumb-1.png", "web_url": "https://img.example/page-1"},
-                    {"raw_url": "https://img.example/raw-2.png", "img_url": "https://img.example/thumb-2.png", "web_url": "https://img.example/page-2"},
+                    image_host_item_for_screenshot(screenshots[0], raw_url="https://img.example/raw-1.png", img_url="https://img.example/thumb-1.png", web_url="https://img.example/page-1"),
+                    image_host_item_for_screenshot(screenshots[1], raw_url="https://img.example/raw-2.png", img_url="https://img.example/thumb-2.png", web_url="https://img.example/page-2"),
                 ]
             }
         ),
@@ -21389,7 +21443,7 @@ def test_mteam_upload_preflight_blocks_partial_image_host_uploads(tmp_path) -> N
         screenshots.append(str(screenshot))
     image_host_file = tmp_path / "image-host-uploads.json"
     image_host_file.write_text(
-        json.dumps({"items": [{"raw_url": "https://img.example/raw-1.png", "img_url": "https://img.example/thumb-1.png", "web_url": "https://img.example/page-1"}]}),
+        json.dumps({"items": [image_host_item_for_screenshot(screenshots[0], raw_url="https://img.example/raw-1.png", img_url="https://img.example/thumb-1.png", web_url="https://img.example/page-1")]}),
         encoding="utf-8",
     )
     source_info = {
@@ -21439,14 +21493,85 @@ def test_mteam_upload_preflight_blocks_partial_image_host_uploads(tmp_path) -> N
         "local_screenshot_count": 2,
         "image_host_count": 1,
         "description_image_count": 1,
-        "image_host_urls": ["https://img.example/thumb-1.png"],
-        "description_urls": ["https://img.example/thumb-1.png"],
-        "missing_urls": [],
-    }
+            "image_host_urls": ["https://img.example/thumb-1.png"],
+            "description_urls": ["https://img.example/thumb-1.png"],
+            "missing_urls": [],
+            "source_verified": False,
+            "matched_count": 1,
+            "unverified_item_indexes": [],
+            "unmatched_item_indexes": [],
+            "missing_local_files": [screenshots[1]],
+            "sha1_mismatches": [],
+        }
     assert ptcli_cli._description_chain_recovery_missing("screenshot_chain", review["description"]["evidence"]["screenshot_chain"]) == [
         "assets.image_host_uploads",
         "description.screenshot_coverage",
     ]
+    audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
+    assert audit["description_ready"] is False
+    assert "materials.description.screenshot_coverage" in audit["description"]["missing"]
+
+
+def test_mteam_upload_preflight_blocks_stale_image_host_screenshot_hash(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"current-png")
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "local_file": str(screenshot),
+                        "local_sha1": "0" * 40,
+                        "raw_url": "https://img.example/raw.png",
+                        "img_url": "https://img.example/thumb.png",
+                        "web_url": "https://img.example/page",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+    }
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        "/downloads/Example",
+        str(tmp_path),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    checks = {check["name"]: check for check in preflight["upload_payload"]["material_checks"]}
+    assert checks["materials.assets.image_host_uploads"]["ok"] is False
+    assert checks["materials.description.screenshot_coverage"]["ok"] is False
+    assert checks["materials.description.screenshot_coverage"]["source_verified"] is False
+    blockers = preflight["upload_payload"]["blockers"]
+    assert any("materials.assets.image_host_uploads" in blocker and "hashes" in blocker for blocker in blockers)
+    assert "assets.image_host_uploads" in preflight["upload_payload"]["recovery_missing"]
+    assert "description.screenshot_coverage" in preflight["upload_payload"]["recovery_missing"]
+    linkage = preflight["upload_payload"]["review"]["description"]["evidence"]["screenshot_chain"]
+    assert linkage["source_verified"] is False
+    assert linkage["sha1_mismatches"] == [{"index": 1, "local_file": str(screenshot), "expected_sha1": hashlib.sha1(screenshot.read_bytes()).hexdigest(), "actual_sha1": "0" * 40}]
+    assert linkage["missing_local_files"] == [str(screenshot)]
     audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
     assert audit["description_ready"] is False
     assert "materials.description.screenshot_coverage" in audit["description"]["missing"]
@@ -21458,7 +21583,10 @@ def test_mteam_upload_preflight_execute_blocks_stale_description_materials(tmp_p
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
     image_host_file = tmp_path / "image-host-uploads.json"
-    image_host_file.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}), encoding="utf-8")
+    image_host_file.write_text(
+        json.dumps({"items": [image_host_item_for_screenshot(screenshot, raw_url="https://img.example/raw.png", img_url="https://img.example/thumb.png", web_url="https://img.example/page")]}),
+        encoding="utf-8",
+    )
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -21948,6 +22076,12 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
         "image_host_urls": ["https://img.example/thumb.png"],
         "description_urls": ["https://img.example/thumb.png"],
         "missing_urls": [],
+        "source_verified": True,
+        "matched_count": 1,
+        "unverified_item_indexes": [],
+        "unmatched_item_indexes": [],
+        "missing_local_files": [],
+        "sha1_mismatches": [],
     }
     assert payload_review["description"]["completeness"] == {
         "ready": True,

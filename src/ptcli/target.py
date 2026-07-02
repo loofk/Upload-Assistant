@@ -803,6 +803,8 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
     bdinfo = _material_file_asset(material_files.get("bdinfo_file"))
     screenshots = _screenshots_asset(material_files.get("screenshot_files"))
     image_hosts = _image_host_asset(material_files.get("image_host_file"))
+    image_host_linkage = _image_host_screenshot_linkage(screenshots, image_hosts)
+    image_hosts = {**image_hosts, "url_ready": image_hosts.get("ready"), "ready": bool(image_hosts.get("ready") and image_host_linkage.get("ready")), "screenshot_linkage": image_host_linkage}
     disc_structure = _disc_structure_asset(content_path)
     ptgen_description_length = len(str(source_info.get("ptgen_description") or "")) if isinstance(source_info, dict) else 0
     if not metadata_field_evidence:
@@ -823,7 +825,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
         _material_check("mediainfo_or_bdinfo", bool(mediainfo.get("ready") or bdinfo.get("ready")), "MediaInfo/BDInfo is present.", "MediaInfo/BDInfo has not been generated into the package yet."),
         _material_check("bdinfo_for_disc", not disc_structure.get("bdmv") or bool(bdinfo.get("ready")), "BDInfo requirement for disc content is satisfied.", "BDMV disc content requires --bdinfo-file for MTEAM target preparation."),
         _material_check("screenshots", bool(screenshots.get("ready")), "Screenshots are present.", "Screenshots have not been generated into the package yet."),
-        _material_check("image_host_uploads", bool(image_hosts.get("ready")), "Image host uploads are present.", "Screenshot image-host upload results are missing usable image URLs."),
+        _material_check("image_host_uploads", bool(image_hosts.get("ready")), "Image host uploads are present and linked to local screenshots.", _image_host_uploads_missing_message(image_hosts)),
         _material_check("description_draft", True, "MTEAM description draft has been generated.", "MTEAM description draft is missing."),
     ]
     all_checks = [*metadata_checks, *asset_checks]
@@ -1062,6 +1064,112 @@ def _image_host_asset(path_value: Any) -> dict[str, Any]:
         "invalid_count": len(items) - len(valid_items),
         "items": items,
     }
+
+
+def _image_host_screenshot_linkage(screenshots: dict[str, Any], image_hosts: dict[str, Any]) -> dict[str, Any]:
+    screenshot_files = screenshots.get("files") if isinstance(screenshots.get("files"), list) else []
+    image_host_items = image_hosts.get("items") if isinstance(image_hosts.get("items"), list) else []
+    screenshot_by_path = {_normalized_local_file_path(file.get("path")): file for file in screenshot_files if isinstance(file, dict) and file.get("path")}
+    screenshot_by_sha1 = {str(file.get("sha1")).lower(): file for file in screenshot_files if isinstance(file, dict) and file.get("sha1")}
+    matched_paths: set[str] = set()
+    linked_items = []
+    unverified_items = []
+    unmatched_items = []
+    sha1_mismatches = []
+    for index, item in enumerate(image_host_items, start=1):
+        if not isinstance(item, dict):
+            linked_items.append({"index": index, "matched": False, "reason": "invalid_item"})
+            unmatched_items.append(index)
+            continue
+        img_url, _web_url = _image_host_item_urls(item)
+        local_file = _image_host_item_local_file(item)
+        local_sha1 = _image_host_item_sha1(item)
+        matched_file: dict[str, Any] | None = None
+        reason: str | None = None
+        if local_file:
+            normalized = _normalized_local_file_path(local_file)
+            matched_file = screenshot_by_path.get(normalized)
+            if matched_file is None:
+                reason = "local_file_not_in_screenshot_files"
+            else:
+                expected_sha1 = str(matched_file.get("sha1") or "").lower()
+                if local_sha1 and expected_sha1 and local_sha1 != expected_sha1:
+                    reason = "sha1_mismatch"
+                    sha1_mismatches.append({"index": index, "local_file": local_file, "expected_sha1": expected_sha1, "actual_sha1": local_sha1})
+                else:
+                    matched_paths.add(normalized)
+        elif local_sha1:
+            matched_file = screenshot_by_sha1.get(local_sha1)
+            if matched_file is None:
+                reason = "sha1_not_in_screenshot_files"
+            else:
+                matched_paths.add(_normalized_local_file_path(matched_file.get("path")))
+        else:
+            reason = "missing_local_file_or_sha1"
+            unverified_items.append(index)
+        matched = bool(matched_file is not None and reason is None)
+        if not matched and index not in unverified_items and reason != "sha1_mismatch":
+            unmatched_items.append(index)
+        linked_items.append(
+            {
+                "index": index,
+                "img_url": img_url,
+                "local_file": local_file,
+                "local_sha1": local_sha1,
+                "matched": matched,
+                "reason": reason,
+                "matched_screenshot": matched_file.get("path") if matched_file else None,
+            }
+        )
+    missing_local_files = [str(file.get("path")) for file in screenshot_files if isinstance(file, dict) and file.get("path") and _normalized_local_file_path(file.get("path")) not in matched_paths]
+    local_count = len([file for file in screenshot_files if isinstance(file, dict)])
+    image_host_count = len(image_host_items)
+    matched_count = len([item for item in linked_items if item.get("matched") is True])
+    return {
+        "ready": bool(local_count > 0 and image_host_count == local_count and matched_count == image_host_count and not unverified_items and not unmatched_items and not sha1_mismatches and not missing_local_files),
+        "local_screenshot_count": local_count,
+        "image_host_count": image_host_count,
+        "matched_count": matched_count,
+        "unverified_item_indexes": unverified_items,
+        "unmatched_item_indexes": unmatched_items,
+        "sha1_mismatches": sha1_mismatches,
+        "missing_local_files": missing_local_files,
+        "items": linked_items,
+    }
+
+
+def _image_host_item_local_file(item: dict[str, Any]) -> str | None:
+    value = _first_image_host_value(item, ("local_file", "screenshot_file", "source_file", "file_path", "file"))
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text or re.match(r"^[a-z][a-z0-9+.-]*://", text, flags=re.IGNORECASE):
+        return None
+    return text
+
+
+def _image_host_item_sha1(item: dict[str, Any]) -> str | None:
+    value = _first_image_host_value(item, ("local_sha1", "sha1", "file_sha1", "source_sha1"))
+    text = str(value or "").strip().lower()
+    return text if re.fullmatch(r"[0-9a-f]{40}", text) else None
+
+
+def _normalized_local_file_path(value: Any) -> str:
+    return str(Path(str(value or "")).expanduser())
+
+
+def _image_host_uploads_missing_message(image_hosts: dict[str, Any]) -> str:
+    if not image_hosts.get("url_ready"):
+        return "Screenshot image-host upload results are missing usable image URLs."
+    linkage = image_hosts.get("screenshot_linkage") if isinstance(image_hosts.get("screenshot_linkage"), dict) else {}
+    if linkage and linkage.get("ready") is not True:
+        if linkage.get("unverified_item_indexes"):
+            return "Screenshot image-host upload results are missing local_file/local_sha1 evidence for one or more screenshots."
+        if linkage.get("sha1_mismatches"):
+            return "Screenshot image-host upload results do not match the current local screenshot file hashes."
+        if linkage.get("missing_local_files") or linkage.get("unmatched_item_indexes"):
+            return "Screenshot image-host upload results do not match the current local screenshot files."
+    return "Screenshot image-host upload results are missing usable image URLs."
 
 
 def _image_host_item_urls(item: dict[str, Any]) -> tuple[str, str]:
@@ -1732,12 +1840,13 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
     assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
     screenshots = assets.get("screenshots") if isinstance(assets.get("screenshots"), dict) else {}
     image_hosts = assets.get("image_hosts") if isinstance(assets.get("image_hosts"), dict) else {}
+    image_host_linkage = image_hosts.get("screenshot_linkage") if isinstance(image_hosts.get("screenshot_linkage"), dict) else {}
     expected_image_urls = _mteam_expected_image_urls(materials)
     description_image_urls = _mteam_description_image_urls_from_content(content)
     missing_image_urls = [url for url in expected_image_urls if url not in description_image_urls]
     local_screenshot_count = int(screenshots.get("count", 0) or 0)
     image_host_count = int(image_hosts.get("count", 0) or 0)
-    screenshot_coverage_ready = _mteam_screenshot_coverage_ready(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls)
+    screenshot_coverage_ready = _mteam_screenshot_coverage_ready(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls, image_host_linkage)
     screenshot_coverage = {
         "ready": screenshot_coverage_ready,
         "expected_urls": expected_image_urls,
@@ -1775,6 +1884,7 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
                 local_screenshot_count=local_screenshot_count,
                 image_host_count=image_host_count,
                 image_host_urls=expected_image_urls,
+                image_host_linkage=image_host_linkage,
             ),
         },
         "materials": {
@@ -1783,6 +1893,7 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
             "screenshot_file_count": local_screenshot_count,
             "image_host_count": image_host_count,
             "image_host_urls": expected_image_urls,
+            "image_host_screenshot_linkage": image_host_linkage,
         },
         "form": {
             "name": form_fields.get("name"),
@@ -1809,6 +1920,7 @@ def _mteam_description_evidence_summary(
     local_screenshot_count: int,
     image_host_count: int,
     image_host_urls: list[str],
+    image_host_linkage: dict[str, Any],
 ) -> dict[str, Any]:
     external_id_readiness = content.get("external_id_readiness") if isinstance(content.get("external_id_readiness"), dict) else {}
     external_links = content.get("external_links") if isinstance(content.get("external_links"), dict) else {}
@@ -1863,6 +1975,7 @@ def _mteam_description_evidence_summary(
         "image_host": {
             "count": image_host_count,
             "urls": image_host_urls,
+            "screenshot_linkage": image_host_linkage,
         },
         "screenshot_coverage": {
             "ready": screenshot_coverage.get("ready"),
@@ -1874,13 +1987,26 @@ def _mteam_description_evidence_summary(
             "missing_urls": missing_urls,
         },
         "screenshot_chain": {
-            "ready": bool(local_screenshot_count > 0 and local_screenshot_count == image_host_count and image_host_count > 0 and description_count > 0 and missing_count == 0),
+            "ready": bool(
+                local_screenshot_count > 0
+                and local_screenshot_count == image_host_count
+                and image_host_count > 0
+                and description_count > 0
+                and missing_count == 0
+                and image_host_linkage.get("ready") is True
+            ),
             "local_screenshot_count": local_screenshot_count,
             "image_host_count": image_host_count,
             "description_image_count": description_count,
             "image_host_urls": image_host_urls,
             "description_urls": description_urls,
             "missing_urls": missing_urls,
+            "source_verified": image_host_linkage.get("ready") if isinstance(image_host_linkage.get("ready"), bool) else None,
+            "matched_count": image_host_linkage.get("matched_count"),
+            "unverified_item_indexes": image_host_linkage.get("unverified_item_indexes") if isinstance(image_host_linkage.get("unverified_item_indexes"), list) else [],
+            "unmatched_item_indexes": image_host_linkage.get("unmatched_item_indexes") if isinstance(image_host_linkage.get("unmatched_item_indexes"), list) else [],
+            "missing_local_files": image_host_linkage.get("missing_local_files") if isinstance(image_host_linkage.get("missing_local_files"), list) else [],
+            "sha1_mismatches": image_host_linkage.get("sha1_mismatches") if isinstance(image_host_linkage.get("sha1_mismatches"), list) else [],
         },
     }
 
@@ -1959,12 +2085,13 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
     assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
     screenshots = assets.get("screenshots") if isinstance(assets.get("screenshots"), dict) else {}
     image_hosts = assets.get("image_hosts") if isinstance(assets.get("image_hosts"), dict) else {}
+    image_host_linkage = image_hosts.get("screenshot_linkage") if isinstance(image_hosts.get("screenshot_linkage"), dict) else {}
     local_screenshot_count = int(screenshots.get("count", 0) or 0)
     image_host_count = int(image_hosts.get("count", 0) or 0)
     expected_image_urls = _mteam_expected_image_urls(materials)
     description_image_urls = _mteam_description_image_urls_from_content(content)
     missing_image_urls = [url for url in expected_image_urls if url not in description_image_urls]
-    screenshot_coverage_ready = _mteam_screenshot_coverage_ready(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls)
+    screenshot_coverage_ready = _mteam_screenshot_coverage_ready(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls, image_host_linkage)
     media_info_excerpt_matched = _mteam_description_material_excerpt_matches(description_summary, materials)
     external_links = content.get("external_links") if isinstance(content.get("external_links"), dict) else {}
     metadata_chain_items = {name: _mteam_metadata_chain_item(name, metadata, external_links, form_fields) for name in ("imdb", "tmdb", "douban")}
@@ -1976,7 +2103,7 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
         "materials.description.screenshot_coverage",
         screenshot_coverage_ready,
         "MTEAM description references every image-host screenshot URL.",
-        _mteam_screenshot_coverage_missing_message(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls),
+        _mteam_screenshot_coverage_missing_message(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls, image_host_linkage),
     )
     screenshot_coverage_check.update(
         {
@@ -1986,6 +2113,11 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
             "expected_urls": expected_image_urls,
             "description_urls": description_image_urls,
             "missing_urls": missing_image_urls,
+            "source_verified": image_host_linkage.get("ready") if isinstance(image_host_linkage.get("ready"), bool) else None,
+            "unverified_item_indexes": image_host_linkage.get("unverified_item_indexes") if isinstance(image_host_linkage.get("unverified_item_indexes"), list) else [],
+            "unmatched_item_indexes": image_host_linkage.get("unmatched_item_indexes") if isinstance(image_host_linkage.get("unmatched_item_indexes"), list) else [],
+            "missing_local_files": image_host_linkage.get("missing_local_files") if isinstance(image_host_linkage.get("missing_local_files"), list) else [],
+            "sha1_mismatches": image_host_linkage.get("sha1_mismatches") if isinstance(image_host_linkage.get("sha1_mismatches"), list) else [],
         }
     )
     material_checks.extend(
@@ -2051,23 +2183,39 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
     return material_checks
 
 
-def _mteam_screenshot_coverage_ready(local_screenshot_count: int, image_host_count: int, description_image_urls: list[str], missing_image_urls: list[str]) -> bool:
+def _mteam_screenshot_coverage_ready(
+    local_screenshot_count: int,
+    image_host_count: int,
+    description_image_urls: list[str],
+    missing_image_urls: list[str],
+    image_host_linkage: dict[str, Any] | None = None,
+) -> bool:
     if image_host_count <= 0:
         return True
     if missing_image_urls:
         return False
     if local_screenshot_count != image_host_count:
         return False
+    if local_screenshot_count > 0 and isinstance(image_host_linkage, dict) and image_host_linkage.get("ready") is not True:
+        return False
     return not (image_host_count > 0 and len(description_image_urls) <= 0)
 
 
-def _mteam_screenshot_coverage_missing_message(local_screenshot_count: int, image_host_count: int, description_image_urls: list[str], missing_image_urls: list[str]) -> str:
+def _mteam_screenshot_coverage_missing_message(
+    local_screenshot_count: int,
+    image_host_count: int,
+    description_image_urls: list[str],
+    missing_image_urls: list[str],
+    image_host_linkage: dict[str, Any] | None = None,
+) -> str:
     if local_screenshot_count != image_host_count:
         return f"MTEAM description has {image_host_count} hosted screenshot URL(s) for {local_screenshot_count} local screenshot file(s)."
     if image_host_count > 0 and len(description_image_urls) <= 0:
         return "MTEAM description is missing screenshot BBCode from image-host uploads."
     if missing_image_urls:
         return "MTEAM description is missing one or more image-host screenshot URLs."
+    if image_host_count > 0 and isinstance(image_host_linkage, dict) and image_host_linkage.get("ready") is not True:
+        return _image_host_uploads_missing_message({"url_ready": True, "screenshot_linkage": image_host_linkage})
     return "MTEAM screenshot coverage is incomplete."
 
 

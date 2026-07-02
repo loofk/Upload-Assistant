@@ -107,6 +107,7 @@ async def upload_screenshot_image_hosts(
                 "index": index,
                 "host": host,
                 "local_file": screenshot,
+                "local_sha1": await asyncio.to_thread(_local_file_sha1, screenshot),
                 "img_url": result.get("img_url"),
                 "raw_url": result.get("raw_url"),
                 "web_url": result.get("web_url"),
@@ -330,6 +331,10 @@ def _file_sha1(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _local_file_sha1(path: str) -> str:
+    return _file_sha1(Path(path).expanduser())
 
 
 def _media_duration_seconds(media_file: Path, parser: Callable[..., Any]) -> float | None:

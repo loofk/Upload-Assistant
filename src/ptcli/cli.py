@@ -1115,7 +1115,20 @@ def _description_chain_next_actions(chain_name: str, chain: Any) -> list[str]:
 _TARGET_MATERIAL_CHAIN_DETAIL_KEYS = {
     "metadata_chain": ("items",),
     "media_info_chain": ("material_source", "material_length", "description_has_excerpt", "payload_source", "payload_length"),
-    "screenshot_chain": ("local_screenshot_count", "image_host_count", "description_image_count", "image_host_urls", "description_urls", "missing_urls"),
+    "screenshot_chain": (
+        "local_screenshot_count",
+        "image_host_count",
+        "description_image_count",
+        "image_host_urls",
+        "description_urls",
+        "missing_urls",
+        "source_verified",
+        "matched_count",
+        "unverified_item_indexes",
+        "unmatched_item_indexes",
+        "missing_local_files",
+        "sha1_mismatches",
+    ),
 }
 
 
@@ -7472,12 +7485,62 @@ async def _pipeline_image_host_material_stage(
         }
     output_dir = _mteam_material_output_dir(args, source_info)
     result = await upload_screenshot_image_hosts(config, screenshot_files, str(output_dir), image_host=args.image_host)
+    enriched_payload = await asyncio.to_thread(_enrich_image_host_file_local_evidence, result.get("image_host_file"), screenshot_files)
+    if isinstance(enriched_payload, dict) and isinstance(enriched_payload.get("items"), list):
+        result = {**result, "items": enriched_payload["items"]}
     return {
         "stage": "materials-image-host",
         "ok": result.get("status") == "uploaded",
         "result": result,
         "message": "Uploaded screenshots to image host." if result.get("status") == "uploaded" else "Screenshot image-host upload failed.",
     }
+
+
+def _enrich_image_host_file_local_evidence(image_host_file: Any, screenshot_files: list[str]) -> dict[str, Any] | list[Any] | None:
+    if not image_host_file or not screenshot_files:
+        return None
+    path = Path(str(image_host_file)).expanduser()
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(payload, list):
+        items = payload
+        container: dict[str, Any] | None = None
+    elif isinstance(payload, dict):
+        raw_items = payload.get("items") or payload.get("images") or payload.get("uploaded_images")
+        if not isinstance(raw_items, list):
+            return payload
+        items = raw_items
+        container = payload
+    else:
+        return None
+    if len(items) != len(screenshot_files):
+        return payload
+    changed = False
+    for item, screenshot in zip(items, screenshot_files):
+        if not isinstance(item, dict):
+            continue
+        if not item.get("local_file"):
+            item["local_file"] = screenshot
+            changed = True
+        if not item.get("local_sha1"):
+            item["local_sha1"] = _local_file_sha1_sync(screenshot)
+            changed = True
+    if changed:
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return container if container is not None else {"items": items}
+
+
+def _local_file_sha1_sync(path_value: Any) -> str:
+    path = Path(str(path_value)).expanduser()
+    digest = hashlib.sha1()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _mteam_material_output_dir(args: argparse.Namespace, source_info: dict[str, Any] | None) -> Path:
@@ -9552,9 +9615,15 @@ def _description_evidence_recovery_missing(evidence: Any) -> list[str]:
             _append_unique_string(missing, "assets.screenshots")
         if image_host_count <= 0 or (local_screenshot_count > 0 and image_host_count != local_screenshot_count):
             _append_unique_string(missing, "assets.image_host_uploads")
+        if screenshot_chain.get("source_verified") is False:
+            _append_unique_string(missing, "assets.image_host_uploads")
         if description_image_count <= 0:
             _append_unique_string(missing, "description.screenshot_bbcode")
-        if _string_list(screenshot_chain.get("missing_urls")) or (local_screenshot_count > 0 and image_host_count > 0 and image_host_count != local_screenshot_count):
+        if (
+            _string_list(screenshot_chain.get("missing_urls"))
+            or (local_screenshot_count > 0 and image_host_count > 0 and image_host_count != local_screenshot_count)
+            or screenshot_chain.get("source_verified") is False
+        ):
             _append_unique_string(missing, "description.screenshot_coverage")
     return missing
 
@@ -11262,6 +11331,11 @@ def _screenshot_chain_detail_shell_fields(prefix: str, screenshot_chain: dict[st
         f"{prefix}_IMAGE_HOST_URLS": ",".join(_string_list(screenshot_chain.get("image_host_urls"))),
         f"{prefix}_DESCRIPTION_URLS": ",".join(_string_list(screenshot_chain.get("description_urls"))),
         f"{prefix}_MISSING_URLS": ",".join(_string_list(screenshot_chain.get("missing_urls"))),
+        f"{prefix}_SOURCE_VERIFIED": _shell_bool(screenshot_chain.get("source_verified")) if screenshot_chain.get("source_verified") is not None else None,
+        f"{prefix}_MATCHED_COUNT": screenshot_chain.get("matched_count"),
+        f"{prefix}_UNVERIFIED_ITEM_INDEXES": ",".join(str(item) for item in _string_list(screenshot_chain.get("unverified_item_indexes"))),
+        f"{prefix}_UNMATCHED_ITEM_INDEXES": ",".join(str(item) for item in _string_list(screenshot_chain.get("unmatched_item_indexes"))),
+        f"{prefix}_MISSING_LOCAL_FILES": ",".join(_string_list(screenshot_chain.get("missing_local_files"))),
     }
 
 
