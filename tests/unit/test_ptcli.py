@@ -2624,6 +2624,52 @@ def test_material_recovery_resume_command_reports_missing_flags() -> None:
     assert enriched[0]["resume_command_argv"] == []
 
 
+def test_material_recovery_reuses_source_ptgen_diagnostics() -> None:
+    resume_commands = [
+        {
+            "stage": "resume-target-package",
+            "command": "python3 ptcli.py pipeline --prepare-target",
+            "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+        }
+    ]
+    materials = ptcli_cli._run_summary_material_resume_state(
+        {
+            "source_info_diagnostics": {
+                "ptgen_description_ready": True,
+                "ptgen_description_length": 42,
+                "signal_fields": {"ptgen_description": True},
+            }
+        },
+        {
+            "target_materials_ready": False,
+            "target_preparation_ready": False,
+            "target_materials_missing": ["metadata.ptgen_description"],
+            "target_preparation_missing": ["metadata.ptgen_description"],
+        },
+        resume_commands,
+    )
+
+    hint = materials["recovery_hints"][0]
+    assert hint["key"] == "metadata.ptgen_description"
+    assert hint["reason"] == "Reuse the PTGen/Douban description already present in source-info before regenerating the MTEAM package."
+    assert hint["required_command_flags"] == ["--prepare-target"]
+    assert hint["missing_command_flags"] == []
+    assert hint["resume_command_available"] is True
+    assert hint["resume_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target"]
+    assert materials["next_actions"] == ["Reuse the PTGen/Douban description already present in source-info, then rerun resume-target-package."]
+
+    resume_state = {
+        "next_stage": "resume-target-package",
+        "next_command": "python3 ptcli.py pipeline --prepare-target",
+        "next_command_argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+        "materials": materials,
+    }
+    recovery = ptcli_cli._readiness_material_recovery_summary(resume_state)
+    assert recovery["command_coverage"]["ready"] is True
+    assert recovery["completion_command"] is None
+    assert recovery["missing_flags"] == []
+
+
 def test_run_summary_resume_state_uses_payload_review_description_completeness() -> None:
     resume_commands = [
         {

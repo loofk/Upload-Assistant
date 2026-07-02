@@ -1940,18 +1940,20 @@ def _target_preparation_missing_from_pipeline_result(pipeline_result: dict[str, 
     return missing
 
 
-def _target_preparation_missing_next_actions(missing: list[str]) -> list[str]:
+def _target_preparation_missing_next_actions(missing: list[str], source_info_diagnostics: dict[str, Any] | None = None) -> list[str]:
     actions: list[str] = []
     for item in missing:
-        action = _target_preparation_missing_next_action(item)
+        action = _target_preparation_missing_next_action(item, source_info_diagnostics=source_info_diagnostics)
         if action:
             _append_unique_string(actions, action)
     return actions
 
 
-def _target_preparation_missing_next_action(missing: str) -> str | None:
+def _target_preparation_missing_next_action(missing: str, source_info_diagnostics: dict[str, Any] | None = None) -> str | None:
     normalized = _target_preparation_missing_key(missing)
     if normalized in {"description.ptgen_description", "metadata.ptgen_description"}:
+        if _source_info_ptgen_description_ready(source_info_diagnostics):
+            return "Reuse the PTGen/Douban description already present in source-info, then rerun resume-target-package."
         return "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package."
     if normalized in {"metadata.imdb", "metadata.imdb_id", "description.external_ids.imdb", "payload.imdb"}:
         return "Fetch IMDb metadata with --enrich-metadata or supply it with --metadata-file/--imdb-id, then rerun resume-target-package."
@@ -1976,11 +1978,11 @@ def _target_preparation_missing_next_action(missing: str) -> str | None:
     return None
 
 
-def _target_preparation_recovery_hints(missing: list[str]) -> list[dict[str, Any]]:
+def _target_preparation_recovery_hints(missing: list[str], source_info_diagnostics: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     hints: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in sorted(missing, key=_material_recovery_missing_priority):
-        hint = _target_preparation_recovery_hint(item)
+        hint = _target_preparation_recovery_hint(item, source_info_diagnostics=source_info_diagnostics)
         if not hint or str(hint["key"]) in seen:
             continue
         seen.add(str(hint["key"]))
@@ -2217,9 +2219,16 @@ def _resume_command_entry_by_stage(resume_commands: list[dict[str, Any]], stage:
     return None
 
 
-def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
+def _target_preparation_recovery_hint(missing: str, source_info_diagnostics: dict[str, Any] | None = None) -> dict[str, Any] | None:
     normalized = _target_preparation_missing_key(missing)
     if normalized in {"description.ptgen_description", "metadata.ptgen_description"}:
+        if _source_info_ptgen_description_ready(source_info_diagnostics):
+            return _material_recovery_hint(
+                "metadata.ptgen_description",
+                "Reuse the PTGen/Douban description already present in source-info before regenerating the MTEAM package.",
+                ["--prepare-target"],
+                [],
+            )
         return _material_recovery_hint(
             "metadata.ptgen_description",
             "Fetch PTGen/Douban description before regenerating the MTEAM package.",
@@ -2309,6 +2318,15 @@ def _target_preparation_recovery_hint(missing: str) -> dict[str, Any] | None:
 def _target_preparation_missing_key(missing: str) -> str:
     key = str(missing).split(":", 1)[0].strip()
     return key.removeprefix("target.materials.").removeprefix("materials.")
+
+
+def _source_info_ptgen_description_ready(source_info_diagnostics: dict[str, Any] | None) -> bool:
+    if not isinstance(source_info_diagnostics, dict):
+        return False
+    if source_info_diagnostics.get("ptgen_description_ready") is True:
+        return True
+    signal_fields = source_info_diagnostics.get("signal_fields") if isinstance(source_info_diagnostics.get("signal_fields"), dict) else {}
+    return signal_fields.get("ptgen_description") is True
 
 
 def _material_recovery_hint(key: str, reason: str, command_flags: list[str], existing_file_options: list[str]) -> dict[str, Any]:
@@ -8842,9 +8860,10 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
 def _run_summary_material_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], resume_commands: list[dict[str, Any]]) -> dict[str, Any]:
     target_materials_missing = _string_list(artifacts.get("target_materials_missing"))
     target_preparation_missing = _string_list(artifacts.get("target_preparation_missing"))
+    source_info_diagnostics = _summary_source_info_diagnostics(payload)
     material_missing = _target_package_material_recovery_missing(artifacts)
     _extend_unique_string(material_missing, _target_preflight_recovery_missing(payload.get("target_preflight_diagnostics")))
-    material_recovery_hints = _target_preparation_recovery_hints(material_missing)
+    material_recovery_hints = _target_preparation_recovery_hints(material_missing, source_info_diagnostics=source_info_diagnostics)
     material_recovery_hints = _attach_material_recovery_resume_commands(material_recovery_hints, resume_commands)
     return {
         "target_materials_ready": bool(artifacts.get("target_materials_ready")),
@@ -8853,7 +8872,7 @@ def _run_summary_material_resume_state(payload: dict[str, Any], artifacts: dict[
         "target_preparation_missing": target_preparation_missing,
         "closure": _run_summary_material_closure(artifacts, material_missing),
         "recovery_hints": material_recovery_hints,
-        "next_actions": _target_preparation_missing_next_actions(material_missing),
+        "next_actions": _target_preparation_missing_next_actions(material_missing, source_info_diagnostics=source_info_diagnostics),
     }
 
 
