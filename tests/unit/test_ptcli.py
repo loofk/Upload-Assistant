@@ -5821,6 +5821,41 @@ def test_summary_material_diagnostics_exposes_material_file_evidence(tmp_path) -
     assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_FILE_SHA1"] == image_host_evidence["sha1"]
 
 
+def test_summary_material_shell_fields_expose_image_host_upload_failure() -> None:
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "material_generation": {
+                    "image_host": {
+                        "ok": False,
+                        "skipped": False,
+                        "message": "Screenshot image-host upload failed.",
+                        "status": "blocked",
+                        "host": "ptpimg",
+                        "count": 1,
+                        "requested_count": 2,
+                        "items": [{"img_url": "https://img.example/1.png"}],
+                        "blockers": ["Screenshot 2 upload failed: Missing ptpimg API key in config DEFAULT.ptpimg_api"],
+                    }
+                }
+            }
+        }
+    )
+
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_OK"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_STATUS"] == "blocked"
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_SKIPPED"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_MESSAGE"] == "Screenshot image-host upload failed."
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_BLOCKERS"] == "Screenshot 2 upload failed: Missing ptpimg API key in config DEFAULT.ptpimg_api"
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_HOST"] == "ptpimg"
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_COUNT"] == 1
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_REQUESTED_COUNT"] == 2
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_ITEM_COUNT"] == 1
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_VALID_COUNT"] == 1
+
+
 def test_summary_material_diagnostics_marks_bdinfo_optional_for_file_content() -> None:
     diagnostics = ptcli_cli._summary_material_diagnostics(
         {
