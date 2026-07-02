@@ -398,6 +398,7 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         "next_actions": _string_list(result.get("next_actions")),
         "elapsed_seconds": round(time.time() - started_at, 3),
         "result": result,
+        "site_policy": result.get("site_policy"),
         "candidates": result.get("candidates", []),
         "count": result.get("count", 0),
         "ready_count": result.get("ready_count", 0),
@@ -459,8 +460,12 @@ def _retorrent_execute_args(request: dict[str, Any]) -> tuple[argparse.Namespace
     _append_optional(argv, "--uploaded-save-path", request.get("uploaded_save_path"))
     _append_optional(argv, "--qbit-category", request.get("qbit_category"))
     _append_optional(argv, "--qbit-tags", request.get("qbit_tags"))
+    _append_optional(argv, "--qbit-upload-limit", request.get("qbit_upload_limit"))
+    _append_optional(argv, "--qbit-download-limit", request.get("qbit_download_limit"))
     _append_optional(argv, "--uploaded-qbit-category", request.get("uploaded_qbit_category"))
     _append_optional(argv, "--uploaded-qbit-tags", request.get("uploaded_qbit_tags"))
+    _append_optional(argv, "--uploaded-qbit-upload-limit", request.get("uploaded_qbit_upload_limit"))
+    _append_optional(argv, "--uploaded-qbit-download-limit", request.get("uploaded_qbit_download_limit"))
     _append_optional(argv, "--metadata-file", request.get("metadata_file"))
     _append_optional(argv, "--ptgen-description-file", request.get("ptgen_description_file"))
     _append_optional(argv, "--mediainfo-file", request.get("mediainfo_file"))
@@ -954,6 +959,7 @@ def tools_payload() -> dict[str, Any]:
             "save_path": "/downloads",
             "uploaded_qbit_category": "MTEAM",
             "uploaded_qbit_tags": "retorrent",
+            "uploaded_qbit_upload_limit": "2MiB/s",
         },
     }
 
@@ -972,6 +978,10 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "confirm_upload": {"type": "boolean", "description": "Required before live target upload."},
             "path": {"type": "string", "description": "Existing content path on the seedbox."},
             "save_path": {"type": "string", "description": "qBittorrent save path for source torrent injection when content is not already local."},
+            "qbit_upload_limit": {"oneOf": [{"type": "string"}, {"type": "integer"}], "description": "Optional source qBittorrent upload limit, e.g. 500KiB/s or bytes/sec."},
+            "qbit_download_limit": {"oneOf": [{"type": "string"}, {"type": "integer"}], "description": "Optional source qBittorrent download limit, e.g. 20MiB/s or bytes/sec."},
+            "uploaded_qbit_upload_limit": {"oneOf": [{"type": "string"}, {"type": "integer"}], "description": "Optional uploaded target torrent qBittorrent upload limit."},
+            "uploaded_qbit_download_limit": {"oneOf": [{"type": "string"}, {"type": "integer"}], "description": "Optional uploaded target torrent qBittorrent download limit."},
             "client": {"type": "string", "default": "default"},
             "config": {"type": "string", "description": "Path to data/config.py inside the container."},
             "metadata_file": {"type": "string"},
@@ -1034,6 +1044,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "request": {"type": "object"},
             "count": {"type": "integer"},
             "ready_count": {"type": "integer"},
+            "site_policy": {"type": "object"},
             "candidates": {"type": "array", "items": {"type": "object"}},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},

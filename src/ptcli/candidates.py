@@ -13,6 +13,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list, unsupported_trackers
+from src.ptcli.policies import build_site_policy, build_site_policy_report, qbit_limits_for_tracker
 from src.ptcli.rules import build_rule_check
 from src.ptcli.source import (
     GENERIC_DETAILS_BASE_URLS,
@@ -69,6 +70,7 @@ async def build_daily_candidates(
         return _blocked_payload(source, targets, limit, ["Source tracker cannot also be a target tracker."])
 
     rule_check = build_rule_check(source, targets, accept_rules=accept_rules)
+    site_policy = build_site_policy_report(config, [source, *targets], accept_rules=accept_rules)
     source_capability = _source_candidate_capability(source)
     candidates: list[dict[str, Any]] = []
     blockers: list[str] = []
@@ -93,6 +95,8 @@ async def build_daily_candidates(
     payload_blockers = list(blockers)
     if not rule_check.get("ready"):
         payload_blockers.extend(f"rule-check: {blocker}" for blocker in _rule_blockers(rule_check))
+    if not site_policy.get("ready"):
+        payload_blockers.extend(f"site-policy: {blocker}" for blocker in _string_list(site_policy.get("blockers")))
     return {
         "kind": "ptcli.daily_candidates",
         "status": status,
@@ -104,6 +108,7 @@ async def build_daily_candidates(
         "ready_count": ready_count,
         "source_capability": source_capability,
         "rule_check": rule_check,
+        "site_policy": site_policy,
         "candidates": candidates,
         "blockers": payload_blockers,
         "next_actions": next_actions,
@@ -172,8 +177,10 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
     except Exception as exc:
         source_info_error = str(exc)
     duplicate_check = await _candidate_duplicate_check(config, source_info_payload, targets, check_dupes=check_dupes)
-    blockers = _candidate_blockers(seed, source_info_payload, source_info_error, duplicate_check)
-    execute_request = _candidate_execute_request(seed, targets, accept_rules=accept_rules)
+    source_policy = build_site_policy(config, seed.tracker).to_dict()
+    target_policies = [build_site_policy(config, target).to_dict() for target in targets]
+    blockers = _candidate_blockers(seed, source_info_payload, source_info_error, duplicate_check, source_policy, target_policies, accept_rules=accept_rules)
+    execute_request = _candidate_execute_request(config, seed, targets, accept_rules=accept_rules)
     status = "ready" if not blockers else "blocked"
     return {
         "status": status,
@@ -181,6 +188,8 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "source_info": source_info_payload,
         "source_info_error": source_info_error,
         "duplicate_check": duplicate_check,
+        "source_policy": source_policy,
+        "target_policies": target_policies,
         "recommendation": _candidate_recommendation(seed, source_info_payload, duplicate_check, blockers),
         "blockers": blockers,
         "risk_flags": blockers,
@@ -204,8 +213,31 @@ async def _candidate_duplicate_check(config: dict[str, Any], source_info: dict[s
     }
 
 
-def _candidate_blockers(seed: CandidateSeed, source_info: dict[str, Any] | None, source_info_error: str | None, duplicate_check: dict[str, Any]) -> list[str]:
+def _candidate_blockers(
+    seed: CandidateSeed,
+    source_info: dict[str, Any] | None,
+    source_info_error: str | None,
+    duplicate_check: dict[str, Any],
+    source_policy: dict[str, Any],
+    target_policies: list[dict[str, Any]],
+    *,
+    accept_rules: bool,
+) -> list[str]:
     blockers: list[str] = []
+    if (source_policy.get("manual_review_required") is True or any(policy.get("manual_review_required") is True for policy in target_policies)) and not accept_rules:
+        blockers.append("site-policy: manual source/target rule review must be acknowledged before execution.")
+    if source_policy.get("allow_auto_download") is not True:
+        blockers.append(f"{seed.tracker} policy: automatic source download is not enabled.")
+    if source_policy.get("allow_retorrent") is not True:
+        blockers.append(f"{seed.tracker} policy: retorrent automation is not enabled.")
+    for target_policy in target_policies:
+        target = str(target_policy.get("tracker") or "target")
+        if target_policy.get("allow_auto_upload") is not True:
+            blockers.append(f"{target} policy: automatic target upload is not enabled.")
+        if target_policy.get("allow_retorrent") is not True:
+            blockers.append(f"{target} policy: retorrent automation is not enabled.")
+        if target_policy.get("freeleech_required") is True and not _promotion_is_free(seed.promotion):
+            blockers.append(f"{target} policy: freeleech source candidate is required.")
     if not source_download_adapter(seed.tracker):
         blockers.append(f"{seed.tracker} source download adapter is not enabled.")
     if source_info_error:
@@ -221,8 +253,8 @@ def _candidate_blockers(seed: CandidateSeed, source_info: dict[str, Any] | None,
     return blockers
 
 
-def _candidate_execute_request(seed: CandidateSeed, targets: list[str], *, accept_rules: bool) -> dict[str, Any]:
-    return {
+def _candidate_execute_request(config: dict[str, Any], seed: CandidateSeed, targets: list[str], *, accept_rules: bool) -> dict[str, Any]:
+    request = {
         "source": seed.details_url or seed.torrent_id,
         "source_tracker": seed.tracker,
         "target": ",".join(targets),
@@ -230,6 +262,18 @@ def _candidate_execute_request(seed: CandidateSeed, targets: list[str], *, accep
         "accept_rules": bool(accept_rules),
         "confirm_upload": False,
     }
+    source_limits = qbit_limits_for_tracker(config, seed.tracker, role="source")
+    if source_limits.get("upload_limit") is not None:
+        request["qbit_upload_limit"] = source_limits["upload_limit"]
+    if source_limits.get("download_limit") is not None:
+        request["qbit_download_limit"] = source_limits["download_limit"]
+    if targets:
+        target_limits = qbit_limits_for_tracker(config, targets[0], role="target")
+        if target_limits.get("upload_limit") is not None:
+            request["uploaded_qbit_upload_limit"] = target_limits["upload_limit"]
+        if target_limits.get("download_limit") is not None:
+            request["uploaded_qbit_download_limit"] = target_limits["download_limit"]
+    return request
 
 
 def _candidate_recommendation(seed: CandidateSeed, source_info: dict[str, Any] | None, duplicate_check: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
@@ -286,6 +330,16 @@ def _rule_blockers(rule_check: dict[str, Any]) -> list[str]:
     if not isinstance(checks, list):
         return []
     return [str(check.get("message") or check.get("name")) for check in checks if isinstance(check, dict) and not check.get("ok")]
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _promotion_is_free(promotion: str | None) -> bool:
+    return bool(promotion and re.search(r"\b(free|2x|50%|免费|免費|限免|freeleech)\b", promotion, flags=re.IGNORECASE))
 
 
 def _cookie_path(tracker: str, base_dir: str | None) -> str:

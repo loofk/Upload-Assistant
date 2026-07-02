@@ -28,6 +28,7 @@ from src.ptcli.flows import MTEAM_SOURCE_FLOW_TRACKERS, flow_profiles_to_dicts, 
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
 from src.ptcli.materials import generate_bdinfo_material, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
 from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, load_ptgen_description_override, normalize_metadata_overrides
+from src.ptcli.policies import build_site_policy_report, merge_qbit_limits, qbit_limits_for_tracker
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import build_rule_check, get_rule_profiles, rule_profiles_to_dicts
 from src.ptcli.source import (
@@ -156,6 +157,8 @@ def build_parser() -> argparse.ArgumentParser:
     source_download.add_argument("--save-path", help="qBittorrent save path for the generated source injection handoff.")
     source_download.add_argument("--qbit-category", help="Optional qBittorrent category for the generated source injection handoff.")
     source_download.add_argument("--qbit-tags", help="Optional qBittorrent tags for the generated source injection handoff.")
+    source_download.add_argument("--qbit-upload-limit", help="Optional qBittorrent upload limit for the generated source injection handoff, e.g. 500KiB/s.")
+    source_download.add_argument("--qbit-download-limit", help="Optional qBittorrent download limit for the generated source injection handoff, e.g. 20MiB/s.")
     source_download.add_argument("--paused", action="store_true", help="Mark the generated source injection handoff as paused.")
     source_download.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds for the generated source completion wait handoff.")
     source_download.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds for the generated source completion wait handoff.")
@@ -189,6 +192,8 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--save-path", help="qBittorrent save path for source torrent injection when pipeline-live needs source download.")
     doctor.add_argument("--qbit-category", help="Optional qBittorrent category for source torrent injection.")
     doctor.add_argument("--qbit-tags", help="Optional qBittorrent tags for source torrent injection.")
+    doctor.add_argument("--qbit-upload-limit", help="Optional qBittorrent upload limit for source torrent injection, e.g. 500KiB/s.")
+    doctor.add_argument("--qbit-download-limit", help="Optional qBittorrent download limit for source torrent injection, e.g. 20MiB/s.")
     doctor.add_argument("--paused", action="store_true", help="Add injected source torrent paused.")
     doctor.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait for source torrent completion in pipeline-live.")
     doctor.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds for source torrent completion in pipeline-live.")
@@ -204,6 +209,8 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
     doctor.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for uploaded target torrent injection.")
     doctor.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for uploaded target torrent injection.")
+    doctor.add_argument("--uploaded-qbit-upload-limit", help="Optional qBittorrent upload limit for uploaded target torrent injection, e.g. 2MiB/s.")
+    doctor.add_argument("--uploaded-qbit-download-limit", help="Optional qBittorrent download limit for uploaded target torrent injection, e.g. 20MiB/s.")
     doctor.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent to qBittorrent paused.")
     doctor.add_argument("--wait-uploaded-complete", action="store_true", help="Check qBittorrent completion wait after uploaded target torrent injection.")
     doctor.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait with --wait-uploaded-complete.")
@@ -251,6 +258,8 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--save-path", help="qBittorrent save path required by --inject-source.")
     pipeline.add_argument("--qbit-category", help="Optional qBittorrent category for --inject-source.")
     pipeline.add_argument("--qbit-tags", help="Optional qBittorrent tags for --inject-source.")
+    pipeline.add_argument("--qbit-upload-limit", help="Optional qBittorrent upload limit for --inject-source, e.g. 500KiB/s.")
+    pipeline.add_argument("--qbit-download-limit", help="Optional qBittorrent download limit for --inject-source, e.g. 20MiB/s.")
     pipeline.add_argument("--paused", action="store_true", help="Add injected source torrent paused.")
     pipeline.add_argument("--wait-complete", action="store_true", help="Wait for qBittorrent task completion after injection or by --path.")
     pipeline.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait with --wait-complete.")
@@ -302,6 +311,8 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--uploaded-save-path", help="qBittorrent save path required by --inject-uploaded-torrent.")
     pipeline.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for --inject-uploaded-torrent.")
     pipeline.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for --inject-uploaded-torrent.")
+    pipeline.add_argument("--uploaded-qbit-upload-limit", help="Optional qBittorrent upload limit for --inject-uploaded-torrent, e.g. 2MiB/s.")
+    pipeline.add_argument("--uploaded-qbit-download-limit", help="Optional qBittorrent download limit for --inject-uploaded-torrent, e.g. 20MiB/s.")
     pipeline.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent to qBittorrent paused.")
     pipeline.add_argument("--wait-uploaded-complete", action="store_true", help="Wait for the injected target torrent to become complete in qBittorrent.")
     pipeline.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait with --wait-uploaded-complete.")
@@ -326,6 +337,8 @@ def build_parser() -> argparse.ArgumentParser:
     target_upload.add_argument("--uploaded-save-path", help="qBittorrent save path for --inject-uploaded-torrent; defaults to the package content path when available.")
     target_upload.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for --inject-uploaded-torrent.")
     target_upload.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for --inject-uploaded-torrent.")
+    target_upload.add_argument("--uploaded-qbit-upload-limit", help="Optional qBittorrent upload limit for --inject-uploaded-torrent, e.g. 2MiB/s.")
+    target_upload.add_argument("--uploaded-qbit-download-limit", help="Optional qBittorrent download limit for --inject-uploaded-torrent, e.g. 20MiB/s.")
     target_upload.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent to qBittorrent paused.")
     target_upload.add_argument("--wait-uploaded-complete", action="store_true", help="Wait for the injected target torrent to become complete in qBittorrent.")
     target_upload.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait with --wait-uploaded-complete.")
@@ -351,6 +364,8 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--save-path", help="qBittorrent save path for source injection. Required for --execute without --path.")
     retorrent.add_argument("--qbit-category", help="Optional qBittorrent category for source injection.")
     retorrent.add_argument("--qbit-tags", help="Optional qBittorrent tags for source injection.")
+    retorrent.add_argument("--qbit-upload-limit", help="Optional qBittorrent upload limit for source injection, e.g. 500KiB/s.")
+    retorrent.add_argument("--qbit-download-limit", help="Optional qBittorrent download limit for source injection, e.g. 20MiB/s.")
     retorrent.add_argument("--paused", action="store_true", help="Add injected source torrent paused.")
     retorrent.add_argument("--wait-timeout", type=float, default=3600.0, help="Seconds to wait for qBittorrent completion during --execute.")
     retorrent.add_argument("--wait-interval", type=float, default=30.0, help="Polling interval seconds during --execute.")
@@ -396,6 +411,8 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--uploaded-save-path", help="qBittorrent save path for uploaded target torrent injection.")
     retorrent.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for uploaded target torrent injection.")
     retorrent.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for uploaded target torrent injection.")
+    retorrent.add_argument("--uploaded-qbit-upload-limit", help="Optional qBittorrent upload limit for uploaded target torrent injection, e.g. 2MiB/s.")
+    retorrent.add_argument("--uploaded-qbit-download-limit", help="Optional qBittorrent download limit for uploaded target torrent injection, e.g. 20MiB/s.")
     retorrent.add_argument("--uploaded-paused", action="store_true", help="Add uploaded target torrent paused.")
     retorrent.add_argument("--uploaded-wait-timeout", type=float, default=600.0, help="Seconds to wait for the uploaded target torrent to become complete during --execute; uploaded completion wait is enabled automatically.")
     retorrent.add_argument("--uploaded-wait-interval", type=float, default=15.0, help="Polling interval seconds for uploaded target torrent completion during --execute; uploaded completion wait is enabled automatically.")
@@ -699,6 +716,8 @@ def _source_download_qbit_handoff(args: argparse.Namespace, source_torrent_file:
     _append_optional_command_arg(command_args, "--base-dir", args.base_dir)
     _append_optional_command_arg(command_args, "--qbit-category", args.qbit_category)
     _append_optional_command_arg(command_args, "--qbit-tags", args.qbit_tags)
+    _append_optional_command_arg(command_args, "--qbit-upload-limit", args.qbit_upload_limit)
+    _append_optional_command_arg(command_args, "--qbit-download-limit", args.qbit_download_limit)
     if args.paused:
         command_args.append("--paused")
     _append_float_command_arg(command_args, "--wait-timeout", args.wait_timeout, default=3600.0)
@@ -3042,6 +3061,10 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             download_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
         if args.uploaded_qbit_tags:
             download_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
+        if getattr(args, "uploaded_qbit_upload_limit", None):
+            download_args.extend(["--uploaded-qbit-upload-limit", args.uploaded_qbit_upload_limit])
+        if getattr(args, "uploaded_qbit_download_limit", None):
+            download_args.extend(["--uploaded-qbit-download-limit", args.uploaded_qbit_download_limit])
         if args.uploaded_paused:
             download_args.append("--uploaded-paused")
         _append_uploaded_wait_options(download_args, args)
@@ -3073,6 +3096,10 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
             resume_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
         if args.uploaded_qbit_tags:
             resume_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
+        if getattr(args, "uploaded_qbit_upload_limit", None):
+            resume_args.extend(["--uploaded-qbit-upload-limit", args.uploaded_qbit_upload_limit])
+        if getattr(args, "uploaded_qbit_download_limit", None):
+            resume_args.extend(["--uploaded-qbit-download-limit", args.uploaded_qbit_download_limit])
         if args.uploaded_paused:
             resume_args.append("--uploaded-paused")
         _append_uploaded_wait_options(resume_args, args)
@@ -3199,6 +3226,10 @@ def _target_upload_retorrent_resume_args(
         retorrent_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
     if args.uploaded_qbit_tags:
         retorrent_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
+    if getattr(args, "uploaded_qbit_upload_limit", None):
+        retorrent_args.extend(["--uploaded-qbit-upload-limit", args.uploaded_qbit_upload_limit])
+    if getattr(args, "uploaded_qbit_download_limit", None):
+        retorrent_args.extend(["--uploaded-qbit-download-limit", args.uploaded_qbit_download_limit])
     if args.uploaded_paused:
         retorrent_args.append("--uploaded-paused")
     _append_uploaded_wait_options(retorrent_args, args)
@@ -3450,6 +3481,8 @@ def _target_upload_retry_args(args: argparse.Namespace) -> list[str]:
         ("--uploaded-save-path", args.uploaded_save_path),
         ("--uploaded-qbit-category", args.uploaded_qbit_category),
         ("--uploaded-qbit-tags", args.uploaded_qbit_tags),
+        ("--uploaded-qbit-upload-limit", getattr(args, "uploaded_qbit_upload_limit", None)),
+        ("--uploaded-qbit-download-limit", getattr(args, "uploaded_qbit_download_limit", None)),
         ("--uploaded-wait-timeout", _format_number_arg(args.uploaded_wait_timeout) if args.wait_uploaded_complete and args.uploaded_wait_timeout != 600.0 else None),
         ("--uploaded-wait-interval", _format_number_arg(args.uploaded_wait_interval) if args.wait_uploaded_complete and args.uploaded_wait_interval != 15.0 else None),
         ("--summary-output-dir", args.summary_output_dir),
@@ -6241,6 +6274,8 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
     _append_option(pipeline_args, "--save-path", getattr(args, "save_path", None))
     _append_option(pipeline_args, "--qbit-category", getattr(args, "qbit_category", None))
     _append_option(pipeline_args, "--qbit-tags", getattr(args, "qbit_tags", None))
+    _append_option(pipeline_args, "--qbit-upload-limit", getattr(args, "qbit_upload_limit", None))
+    _append_option(pipeline_args, "--qbit-download-limit", getattr(args, "qbit_download_limit", None))
     if getattr(args, "paused", False):
         pipeline_args.append("--paused")
     _append_wait_options(
@@ -6260,6 +6295,10 @@ def _doctor_recommended_commands(payload: dict[str, Any], args: argparse.Namespa
         pipeline_args.extend(["--uploaded-qbit-category", args.uploaded_qbit_category])
     if args.uploaded_qbit_tags:
         pipeline_args.extend(["--uploaded-qbit-tags", args.uploaded_qbit_tags])
+    if getattr(args, "uploaded_qbit_upload_limit", None):
+        pipeline_args.extend(["--uploaded-qbit-upload-limit", args.uploaded_qbit_upload_limit])
+    if getattr(args, "uploaded_qbit_download_limit", None):
+        pipeline_args.extend(["--uploaded-qbit-download-limit", args.uploaded_qbit_download_limit])
     if args.uploaded_paused:
         pipeline_args.append("--uploaded-paused")
     _append_uploaded_wait_options(pipeline_args, args)
@@ -6339,6 +6378,8 @@ def _doctor_retry_args(args: argparse.Namespace, *, force_probes: bool = False) 
         ("--save-path", getattr(args, "save_path", None)),
         ("--qbit-category", getattr(args, "qbit_category", None)),
         ("--qbit-tags", getattr(args, "qbit_tags", None)),
+        ("--qbit-upload-limit", getattr(args, "qbit_upload_limit", None)),
+        ("--qbit-download-limit", getattr(args, "qbit_download_limit", None)),
         ("--package-dir", args.package_dir),
         ("--target-torrent-file", args.target_torrent_file),
         ("--uploaded-torrent-id", args.uploaded_torrent_id),
@@ -6346,6 +6387,8 @@ def _doctor_retry_args(args: argparse.Namespace, *, force_probes: bool = False) 
         ("--uploaded-save-path", args.uploaded_save_path),
         ("--uploaded-qbit-category", args.uploaded_qbit_category),
         ("--uploaded-qbit-tags", args.uploaded_qbit_tags),
+        ("--uploaded-qbit-upload-limit", getattr(args, "uploaded_qbit_upload_limit", None)),
+        ("--uploaded-qbit-download-limit", getattr(args, "uploaded_qbit_download_limit", None)),
     ):
         if value:
             retry_args.extend([option, value])
@@ -6767,9 +6810,11 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
     effective_source_torrent_hash = _source_torrent_hash_from_stage(source_info_result)
     rule_check_result = build_rule_check(source_tracker, target_trackers, accept_rules=args.accept_rules)
     stages.append({"stage": "rule-check", "ok": True, "result": rule_check_result})
+    site_policy_result = build_site_policy_report(config, [source_tracker, *target_trackers], accept_rules=args.accept_rules)
+    stages.append({"stage": "site-policy", "ok": True, "result": site_policy_result})
 
     if args.source_torrent_file:
-        if _runtime_check_ready(stages) and _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages):
+        if _runtime_check_ready(stages) and _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages) and _site_policy_ready(stages):
             source_download_result = await _pipeline_stage(
                 "source-download",
                 lambda: _existing_source_torrent_payload(args.source_torrent_file),
@@ -6786,11 +6831,11 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                     "stage": "source-download",
                     "ok": False,
                     "skipped": True,
-                    "message": "Skipped because runtime-check, flow-check, source-info, or executable rule-check did not pass.",
+                "message": "Skipped because runtime-check, flow-check, source-info, executable rule-check, or site-policy did not pass.",
                 }
             )
     elif source_download_requested:
-        if _runtime_check_ready(stages) and _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages):
+        if _runtime_check_ready(stages) and _required_stages_ok(stages, {"flow-check", "source-info"}) and _rule_check_ready(stages) and _site_policy_ready(stages):
             source_download_result = await _pipeline_stage(
                 "source-download",
                 lambda: download_source_torrent(config, source_tracker, source_torrent_id, args.output_dir, base_dir=args.base_dir),
@@ -6807,7 +6852,7 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
                     "stage": "source-download",
                     "ok": False,
                     "skipped": True,
-                    "message": "Skipped because runtime-check, flow-check, source-info, or executable rule-check did not pass.",
+                "message": "Skipped because runtime-check, flow-check, source-info, executable rule-check, or site-policy did not pass.",
                 }
             )
     else:
@@ -6826,7 +6871,19 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             torrent_path = str(source_download_stage.get("result", {}).get("path", ""))
             inject_result = await _pipeline_stage(
                 "inject-source",
-                lambda: _inject_source_with_config(config, args.client, torrent_path, args.save_path, args.qbit_category, args.qbit_tags, args.paused),
+                lambda: _inject_source_with_config(
+                    config,
+                    args.client,
+                    torrent_path,
+                    args.save_path,
+                    args.qbit_category,
+                    args.qbit_tags,
+                    args.paused,
+                    tracker=source_tracker,
+                    role="source",
+                    upload_limit=getattr(args, "qbit_upload_limit", None),
+                    download_limit=getattr(args, "qbit_download_limit", None),
+                ),
                 lambda payload: payload,
                 validate=_injected_torrent_verified,
                 invalid_message="qBittorrent source torrent injection was not verified.",
@@ -7042,6 +7099,8 @@ async def pipeline_payload(args: argparse.Namespace) -> dict[str, Any]:
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because current pipeline run did not complete a clean MTEAM duplicate check before live target upload."})
         elif args.target_execute and not _runtime_check_ready(stages):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because focused ptcli runtime dependencies are not ready for live target upload."})
+        elif args.target_execute and not _site_policy_ready(stages):
+            stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because site policy gates are not ready for live target upload."})
         elif args.target_execute and not _material_prerequisite_check_ready(stages):
             stages.append({"stage": "target-upload", "ok": False, "skipped": True, "message": "Skipped because metadata/material prerequisites are not ready for live target upload."})
         elif args.target_execute and not _live_material_gate_ready(stages):
@@ -7160,6 +7219,16 @@ def _required_stages_ok(stages: list[dict[str, Any]], required_stage_names: set[
 def _rule_check_ready(stages: list[dict[str, Any]]) -> bool:
     stage = _find_stage(stages, "rule-check")
     if not stage or not stage.get("ok"):
+        return False
+    result = stage.get("result")
+    return isinstance(result, dict) and bool(result.get("ready"))
+
+
+def _site_policy_ready(stages: list[dict[str, Any]]) -> bool:
+    stage = _find_stage(stages, "site-policy")
+    if stage is None:
+        return True
+    if not stage.get("ok"):
         return False
     result = stage.get("result")
     return isinstance(result, dict) and bool(result.get("ready"))
@@ -10808,19 +10877,30 @@ async def _inject_source_with_config(
     category: str | None,
     tags: str | None,
     paused: bool,
+    *,
+    tracker: str | None = None,
+    role: str = "source",
+    upload_limit: Any = None,
+    download_limit: Any = None,
 ) -> dict[str, Any]:
     resolved_client_name, client_config = resolve_client_config(config, client_name)
     service = QbitReadOnlyService(client_config)
+    policy_limits = qbit_limits_for_tracker(config, tracker, role=role) if tracker else {"upload_limit": None, "download_limit": None}
+    qbit_limits = merge_qbit_limits(policy_limits, upload_limit=upload_limit, download_limit=download_limit)
     result = await service.add_torrent_file(
         torrent_path=torrent_path,
         save_path=save_path,
         category=category,
         tags=tags,
+        upload_limit=qbit_limits.get("upload_limit"),
+        download_limit=qbit_limits.get("download_limit"),
         paused=paused,
         skip_checking=False,
     )
     return {
         "client": resolved_client_name,
+        "site_policy": qbit_limits.get("policy"),
+        "qbit_limits": qbit_limits,
         **result,
     }
 
@@ -10894,6 +10974,10 @@ async def _apply_uploaded_torrent_followup(config: dict[str, Any], args: argpars
             args.uploaded_qbit_category,
             args.uploaded_qbit_tags,
             args.uploaded_paused,
+            tracker="MTEAM",
+            role="target",
+            upload_limit=getattr(args, "uploaded_qbit_upload_limit", None),
+            download_limit=getattr(args, "uploaded_qbit_download_limit", None),
         )
         injected_payload = _with_uploaded_injection(result, inject_result)
         injected_payload = _verify_uploaded_injection_hash(injected_payload)

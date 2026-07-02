@@ -81,7 +81,7 @@ curl -X POST http://127.0.0.1:8080/v1/retorrent \
 # 任务式 API：提交后返回 job_id，适合下载/截图/上传这类长任务
 curl -X POST http://127.0.0.1:8080/v1/jobs/retorrent \
   -H "Content-Type: application/json" \
-  -d '{"source":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM","execute":true,"accept_rules":true,"confirm_upload":true,"save_path":"/downloads","uploaded_qbit_category":"MTEAM","uploaded_qbit_tags":"retorrent"}'
+  -d '{"source":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM","execute":true,"accept_rules":true,"confirm_upload":true,"save_path":"/downloads","uploaded_qbit_category":"MTEAM","uploaded_qbit_tags":"retorrent","uploaded_qbit_upload_limit":"2MiB/s"}'
 
 # 轮询状态、读取 summary、按生成的 allowlisted next_command_argv 续跑
 curl http://127.0.0.1:8080/v1/jobs/<job_id>
@@ -106,6 +106,29 @@ curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/daily \
 - qBittorrent client 配置沿用 `data/config.py`。
 - 源站 cookie 放在 `data/cookies/<TRACKER>.txt` 或对应适配器要求的位置。
 - MTEAM 需要 `TRACKERS.MTEAM.api_key`。
+- 站点自动化策略可写在 `config["PTCLI"]["SITE_POLICIES"]` 或顶层 `config["SITE_POLICIES"]`。默认只启用当前参考闭环的保守自动化能力；限速、做种要求和人工审查指纹建议按站点规则自行维护，例如：
+  ```python
+  config["PTCLI"] = {
+      "SITE_POLICIES": {
+          "U2": {
+              "allow_auto_download": True,
+              "allow_retorrent": True,
+              "download_rate_limit": "20MiB/s",
+              "upload_rate_limit": "500KiB/s",
+              "min_seed_time_hours": 72,
+              "rule_review_fingerprint": "manual-review-2026-07",
+          },
+          "MTEAM": {
+              "allow_auto_upload": True,
+              "allow_retorrent": True,
+              "upload_rate_limit": "2MiB/s",
+              "min_ratio": 1.0,
+              "rule_review_fingerprint": "manual-review-2026-07",
+          },
+      }
+  }
+  ```
+  CLI/API 显式传入的 `qbit_upload_limit`、`qbit_download_limit`、`uploaded_qbit_upload_limit`、`uploaded_qbit_download_limit` 会覆盖站点策略默认值。
 - 任务式 API 默认把 job 文件写入 `PTCLI_JOB_DIR`，未设置时写入 `TMPDIR/ptcli-jobs`；Docker Compose 默认设置为 `/Upload-Assistant/tmp/ptcli-jobs`。
 - `Dockerfile.ptcli` 是 focused CLI 镜像，只安装 `requirements-ptcli.txt` 和 ptcli 需要的系统依赖；旧 `Dockerfile` 保留给 legacy/full UA 入口。
 - 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；release 工作流会额外发布 `*-legacy-webui` 标签给旧 Web UI 镜像。

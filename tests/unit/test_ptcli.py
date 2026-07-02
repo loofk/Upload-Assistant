@@ -23,6 +23,7 @@ from src.ptcli.doctor import build_doctor_check
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list
 from src.ptcli.materials import find_primary_media_file, generate_bdinfo_material, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
 from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, load_ptgen_description_override, normalize_metadata_overrides
+from src.ptcli.policies import build_site_policy, build_site_policy_report, parse_rate_limit
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summarize_torrent
 from src.ptcli.rules import build_rule_check
 from src.ptcli.source import create_source_meta, extract_torrent_id, infer_tracker_from_url, resolve_source_reference, source_info_from_tuple
@@ -49,6 +50,8 @@ class FakeQbitClient:
     def __init__(self) -> None:
         self.logged_in = False
         self.added_kwargs = None
+        self.upload_limit_calls = []
+        self.download_limit_calls = []
 
     def auth_log_in(self) -> None:
         self.logged_in = True
@@ -63,6 +66,12 @@ class FakeQbitClient:
 
     def torrents_add(self, **kwargs):
         self.added_kwargs = kwargs
+
+    def torrents_set_upload_limit(self, **kwargs):
+        self.upload_limit_calls.append(kwargs)
+
+    def torrents_set_download_limit(self, **kwargs):
+        self.download_limit_calls.append(kwargs)
 
 
 class TaggedQbitClient(FakeQbitClient):
@@ -360,6 +369,32 @@ def test_serve_parser_accepts_api_options() -> None:
     assert args.port == 18080
     assert args.api_token == "secret"
     assert args.job_dir == "/tmp/jobs"
+
+
+def test_site_policy_overrides_parse_rate_limits() -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "MTEAM": {
+                    "upload_rate_limit": "2 MiB/s",
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "min_ratio": 1.5,
+                }
+            }
+        }
+    }
+
+    policy = build_site_policy(config, "MTEAM")
+    report = build_site_policy_report(config, ["U2", "MTEAM"], accept_rules=True)
+
+    assert parse_rate_limit("500 KiB/s") == 500 * 1024
+    assert policy.upload_rate_limit == 2 * 1024 * 1024
+    assert policy.download_rate_limit == 20 * 1024 * 1024
+    assert policy.min_seed_time_hours == 72
+    assert policy.min_ratio == 1.5
+    assert report["ready"] is True
+    assert report["qbit_limits"]["MTEAM"]["upload_limit"] == 2 * 1024 * 1024
 
 
 def test_pipeline_help_describes_live_closure_defaults() -> None:
@@ -12208,8 +12243,10 @@ def test_service_execute_builds_retorrent_args_with_live_confirmations() -> None
             "accept_rules": True,
             "confirm_upload": True,
             "save_path": "/downloads",
+            "qbit_download_limit": "20MiB/s",
             "uploaded_qbit_category": "MTEAM",
             "uploaded_qbit_tags": "retorrent",
+            "uploaded_qbit_upload_limit": "2MiB/s",
             "tmdb_type": "movie",
         }
     )
@@ -12221,11 +12258,15 @@ def test_service_execute_builds_retorrent_args_with_live_confirmations() -> None
     assert args.accept_rules is True
     assert args.confirm_upload is True
     assert args.save_path == "/downloads"
+    assert args.qbit_download_limit == "20MiB/s"
     assert args.uploaded_qbit_category == "MTEAM"
     assert args.uploaded_qbit_tags == "retorrent"
+    assert args.uploaded_qbit_upload_limit == "2MiB/s"
     assert args.tmdb_type == "movie"
     assert normalized["execute"] is True
     assert "--confirm-upload" in argv
+    assert "--qbit-download-limit" in argv
+    assert "--uploaded-qbit-upload-limit" in argv
 
 
 def test_service_duplicate_check_summary_marks_existing_target_seed() -> None:
@@ -12419,7 +12460,11 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     monkeypatch.setattr(ptcli_candidates, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_candidates, "search_mteam_duplicates", fake_search_mteam_duplicates)
 
-    result = await ptcli_candidates.build_daily_candidates({"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, "U2", "MTEAM", limit=1, accept_rules=True)
+    config = {
+        "TRACKERS": {"MTEAM": {"api_key": "fake"}},
+        "PTCLI": {"SITE_POLICIES": {"MTEAM": {"upload_rate_limit": "2MiB/s"}, "U2": {"download_rate_limit": "20MiB/s"}}},
+    }
+    result = await ptcli_candidates.build_daily_candidates(config, "U2", "MTEAM", limit=1, accept_rules=True)
 
     assert result["status"] == "ok"
     assert result["count"] == 1
@@ -12427,7 +12472,11 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     candidate = result["candidates"][0]
     assert candidate["status"] == "ready"
     assert candidate["duplicate_check"]["status"] == "not_found"
+    assert candidate["source_policy"]["tracker"] == "U2"
+    assert candidate["target_policies"][0]["tracker"] == "MTEAM"
     assert candidate["execute_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert candidate["execute_request"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert candidate["execute_request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert candidate["execute_job_endpoint"] == "/v1/jobs/retorrent"
 
 
@@ -14738,7 +14787,7 @@ async def test_pipeline_inject_source_runs_after_download(monkeypatch, tmp_path)
         _ = (tracker, source_id, output_dir, base_dir)
         return source_torrent
 
-    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (config, client_name)
         return {
             "client": "qbittorrent",
@@ -14811,7 +14860,7 @@ async def test_pipeline_inject_source_reuses_existing_source_torrent(monkeypatch
     async def fake_download_source_torrent(*_args, **_kwargs):
         raise AssertionError("source download must not run when --source-torrent-file is provided")
 
-    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (config, client_name, category, tags, paused)
         return {"client": "qbittorrent", "torrent_path": torrent_path, "save_path": save_path, "hash": source_hash, "visible_in_client": True, "verified_in_client": True}
 
@@ -14879,7 +14928,7 @@ async def test_pipeline_inject_source_requires_client_verification(monkeypatch, 
         _ = (tracker, source_id, output_dir, base_dir)
         return source_torrent
 
-    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (config, client_name, torrent_path, save_path, category, tags, paused)
         return {"client": "qbittorrent", "hash": source_hash, "verified_in_client": False}
 
@@ -14938,7 +14987,7 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
         _ = (tracker, source_id, output_dir, base_dir)
         return source_torrent
 
-    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (config, client_name, torrent_path, category, tags, paused)
         return {"client": "qbittorrent", "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
@@ -15014,7 +15063,7 @@ async def test_pipeline_wait_complete_requires_matched_source_evidence(monkeypat
         _ = (tracker, source_id, output_dir, base_dir)
         return source_torrent
 
-    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (config, client_name, torrent_path, category, tags, paused)
         return {"client": "qbittorrent", "save_path": save_path, "hash": source_hash, "visible_in_client": True, "verified_in_client": True}
 
@@ -15094,7 +15143,7 @@ async def test_pipeline_wait_complete_prefers_injected_hash(monkeypatch, tmp_pat
         _ = (tracker, source_id, output_dir, base_dir)
         return source_torrent
 
-    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (config, client_name, torrent_path, category, tags, paused)
         return {"client": "qbittorrent", "save_path": save_path, "hash": injected_hash, "visible_in_client": True, "verified_in_client": True}
 
@@ -15164,7 +15213,7 @@ async def test_pipeline_wait_complete_uses_hash_from_real_injected_torrent(monke
         torrent.write(str(torrent_path), overwrite=True)
         return torrent_path
 
-    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (config, client_name)
         service = QbitReadOnlyService({}, qbit_client=fake_client)
         return await service.add_torrent_file(torrent_path, save_path, category=category, tags=tags, paused=paused)
@@ -15381,7 +15430,7 @@ async def test_pipeline_blocks_source_injection_hash_mismatch(monkeypatch, tmp_p
         source_hash = str(torrent.infohash)
         return torrent_path
 
-    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (torrent_path, category, tags, paused)
         wrong_hash = "f" * 40 if source_hash != "f" * 40 else "e" * 40
         return {"client": client_name, "hash": wrong_hash, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
@@ -15451,7 +15500,7 @@ async def test_pipeline_infers_content_path_from_completed_qbit_match(monkeypatc
         _ = (tracker, source_id, output_dir, base_dir)
         return source_torrent
 
-    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (config, client_name, torrent_path, category, tags, paused)
         return {"client": "qbittorrent", "save_path": save_path, "hash": source_hash, "visible_in_client": True, "verified_in_client": True}
 
@@ -16882,7 +16931,7 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
             "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)},
         }
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         injected_hash = uploaded_hash if "MTEAM" in str(torrent_path) and uploaded_hash else "a" * 40
         return {
             "hash": injected_hash,
@@ -17016,7 +17065,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         _ = (tracker, source_id, output_dir, base_dir)
         return source_torrent
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         return {"hash": source_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "visible_in_client": True, "verified_in_client": True}
 
     wait_calls = []
@@ -17038,17 +17087,17 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         uploaded_hash = write_valid_torrent(uploaded_path, tmp_path / "uploaded-content" / "MTEAM-999.mkv")
         return {"status": "uploaded", "uploaded_torrent_hash": uploaded_hash, "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)}}
 
-    async def fake_inject_uploaded_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_uploaded_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         assert uploaded_hash is not None
         return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "visible_in_client": True, "verified_in_client": True}
 
     calls = {"inject": 0}
 
-    async def fake_inject_router(*args):
+    async def fake_inject_router(*args, **kwargs):
         calls["inject"] += 1
         if calls["inject"] == 1:
-            return await fake_inject_source_with_config(*args)
-        return await fake_inject_uploaded_with_config(*args)
+            return await fake_inject_source_with_config(*args, **kwargs)
+        return await fake_inject_uploaded_with_config(*args, **kwargs)
 
     monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_cli, "enrich_source_metadata", fake_enrich_source_metadata)
@@ -17532,7 +17581,7 @@ async def test_pipeline_closure_complete_for_chd_to_mteam_nexus_flow(monkeypatch
 
     calls = {"inject": 0}
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         calls["inject"] += 1
         injected_hash = uploaded_hash if calls["inject"] > 1 and uploaded_hash is not None else source_hash
         return {
@@ -17791,7 +17840,7 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
         _ = (tracker, source_id, output_dir, base_dir)
         return source_torrent
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         injected_hash = uploaded_hash if "MTEAM" in str(torrent_path) and uploaded_hash else source_hash
         return {
             "hash": injected_hash,
@@ -17918,7 +17967,7 @@ async def test_pipeline_exports_matched_torrent_for_target_upload(monkeypatch, t
     async def fake_upload_mteam_from_package(_config, _package_dir, torrent_file, **_kwargs):
         return {"status": "uploaded", "torrent_file": torrent_file, "uploaded_torrent_hash": uploaded_hash, "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)}}
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (torrent_path, category, tags, paused)
         return {"hash": uploaded_hash, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
@@ -18080,7 +18129,7 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
     async def fake_match_with_config(_config, _client_name, content_path):
         return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
@@ -18188,7 +18237,7 @@ async def test_pipeline_uploaded_torrent_file_resume_auto_waits_when_inject_requ
     async def fake_match_with_config(_config, _client_name, content_path):
         return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
@@ -18276,7 +18325,7 @@ async def test_pipeline_reuses_uploaded_torrent_id_for_target_injection(monkeypa
     async def fake_match_with_config(_config, _client_name, content_path):
         return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         return {"hash": uploaded_hash, "torrent_path": torrent_path, "save_path": save_path, "category": category, "tags": tags, "paused": paused, "visible_in_client": True, "verified_in_client": True}
 
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
@@ -18384,7 +18433,7 @@ async def test_pipeline_target_execute_enables_uploaded_torrent_followup(monkeyp
         assert kwargs["download_uploaded"] is True
         return {"status": "uploaded", "torrent_file": torrent_file_arg, "uploaded_torrent_hash": uploaded_hash, "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_torrent)}}
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (torrent_path, category, tags, paused)
         return {"hash": uploaded_hash, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
@@ -19029,7 +19078,7 @@ async def test_pipeline_sanitizes_manual_target_torrent_for_upload(monkeypatch, 
     async def fake_upload_mteam_from_package(_config, _package_dir, torrent_file, **_kwargs):
         return {"status": "uploaded", "torrent_file": torrent_file, "uploaded_torrent_hash": uploaded_hash, "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_path)}}
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (torrent_path, category, tags, paused)
         return {"hash": uploaded_hash, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
@@ -19133,7 +19182,7 @@ async def test_pipeline_target_execute_auto_exports_and_sanitizes_target_torrent
         assert torrent_file == str(sanitized_torrent)
         return {"status": "uploaded", "torrent_file": torrent_file, "uploaded_torrent_hash": uploaded_hash, "downloaded_torrent": {"torrent_id": "999", "path": str(uploaded_torrent)}}
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (torrent_path, category, tags, paused)
         return {"hash": uploaded_hash, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
 
@@ -19222,7 +19271,7 @@ async def test_pipeline_target_execute_auto_downloads_injects_and_waits_source(m
         _ = (tracker, source_id, output_dir, base_dir)
         return source_torrent
 
-    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, _client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         _ = (category, tags, paused)
         if torrent_path == str(source_torrent):
             return {"hash": source_hash, "torrent_path": torrent_path, "save_path": save_path, "visible_in_client": True, "verified_in_client": True}
@@ -23083,7 +23132,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
         assert source_info["content_path"] == "/downloads/Example"
         return {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
 
-    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         return {
             "client": client_name,
             "hash": uploaded_hash,
@@ -24233,7 +24282,7 @@ async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_p
         assert output_dir == "uploaded"
         return {"status": "uploaded", "uploaded_torrent_id": torrent_id, "uploaded_torrent_hash": uploaded_hash, "downloaded_torrent": {"torrent_id": torrent_id, "path": str(uploaded_path)}}
 
-    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         return {
             "client": client_name,
             "hash": uploaded_hash,
@@ -24483,7 +24532,7 @@ async def test_target_upload_reuses_uploaded_torrent_file(monkeypatch, tmp_path)
     async def fake_upload_mteam_from_package(*_args, **_kwargs):
         raise AssertionError("live upload must not run when --uploaded-torrent-file is provided")
 
-    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         return {
             "client": client_name,
             "hash": uploaded_hash,
@@ -24574,7 +24623,7 @@ async def test_target_upload_blocks_uploaded_torrent_injection_hash_mismatch(mon
     injected_hash = "f" * 40 if downloaded_hash != "f" * 40 else "e" * 40
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
 
-    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         return {
             "client": client_name,
             "hash": injected_hash,
@@ -24693,7 +24742,7 @@ async def test_target_upload_wait_uses_hash_from_reused_uploaded_torrent_file(mo
     expected_hash = Torrent.read(str(uploaded_torrent), validate=False).infohash
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
 
-    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused):
+    async def fake_inject_source_with_config(_config, client_name, torrent_path, save_path, category, tags, paused, **_kwargs):
         return {
             "client": client_name,
             "torrent_path": torrent_path,
@@ -24880,6 +24929,32 @@ async def test_qbit_service_adds_torrent_file_with_fake_client(tmp_path) -> None
     assert fake_client.added_kwargs["category"] == "pt"
     assert fake_client.added_kwargs["tags"] == "U2"
     assert fake_client.added_kwargs["paused"] is True
+
+
+@pytest.mark.asyncio
+async def test_qbit_service_applies_torrent_rate_limits(tmp_path) -> None:
+    fake_client = FakeQbitClient()
+    content = tmp_path / "source.mkv"
+    content.write_bytes(b"content")
+    torrent_path = tmp_path / "source.torrent"
+    torrent = Torrent(path=str(content), trackers=["https://source.example/announce"])
+    torrent.generate()
+    torrent.write(str(torrent_path), overwrite=True)
+    service = QbitReadOnlyService({}, qbit_client=fake_client)
+
+    result = await service.add_torrent_file(
+        torrent_path=str(torrent_path),
+        save_path="/downloads",
+        upload_limit=2048,
+        download_limit=4096,
+        verify_timeout=0,
+    )
+
+    assert result["upload_limit"] == 2048
+    assert result["download_limit"] == 4096
+    assert result["rate_limits"]["applied"] is True
+    assert fake_client.upload_limit_calls == [{"torrent_hashes": torrent.infohash, "limit": 2048}]
+    assert fake_client.download_limit_calls == [{"torrent_hashes": torrent.infohash, "limit": 4096}]
 
 
 @pytest.mark.asyncio

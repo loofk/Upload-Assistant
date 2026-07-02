@@ -26,6 +26,12 @@ class QbitClientProtocol(Protocol):
     def torrents_add(self, **kwargs: Any) -> Any:
         ...
 
+    def torrents_set_upload_limit(self, **kwargs: Any) -> Any:
+        ...
+
+    def torrents_set_download_limit(self, **kwargs: Any) -> Any:
+        ...
+
 
 @dataclass(frozen=True)
 class QbitTorrentSummary:
@@ -144,6 +150,8 @@ class QbitReadOnlyService:
         save_path: str,
         category: str | None = None,
         tags: str | None = None,
+        upload_limit: int | None = None,
+        download_limit: int | None = None,
         paused: bool = False,
         skip_checking: bool = False,
         verify_timeout: float = 5.0,
@@ -153,6 +161,10 @@ class QbitReadOnlyService:
             raise ValueError("verify_timeout must be >= 0.")
         if verify_interval <= 0:
             raise ValueError("verify_interval must be > 0.")
+        if upload_limit is not None and upload_limit < 0:
+            raise ValueError("upload_limit must be >= 0.")
+        if download_limit is not None and download_limit < 0:
+            raise ValueError("download_limit must be >= 0.")
 
         client = await self.connect()
         resolved_torrent_path, torrent_bytes, torrent_hash = await asyncio.to_thread(_read_torrent_payload, torrent_path)
@@ -179,6 +191,7 @@ class QbitReadOnlyService:
             timeout=verify_timeout,
             interval=verify_interval,
         )
+        limit_result = await self._apply_torrent_limits(torrent_hash, upload_limit=upload_limit, download_limit=download_limit)
         client_verification = _added_torrent_client_verification(client_matches, torrent_hash=torrent_hash, save_path=save_path, category=category, tags=tags)
         return {
             "torrent_path": str(resolved_torrent_path),
@@ -186,6 +199,9 @@ class QbitReadOnlyService:
             "save_path": save_path,
             "category": category,
             "tags": tags,
+            "upload_limit": upload_limit,
+            "download_limit": download_limit,
+            "rate_limits": limit_result,
             "paused": paused,
             "skip_checking": skip_checking,
             "verification_attempts": verification_attempts,
@@ -214,6 +230,21 @@ class QbitReadOnlyService:
             if _added_torrent_verification_ready(verification) or asyncio.get_running_loop().time() >= deadline:
                 return matches, attempts
             await asyncio.sleep(interval)
+
+    async def _apply_torrent_limits(self, torrent_hash: str, *, upload_limit: int | None, download_limit: int | None) -> dict[str, Any]:
+        requested = {"upload_limit": upload_limit, "download_limit": download_limit}
+        if upload_limit is None and download_limit is None:
+            return {"requested": requested, "applied": False, "skipped": True, "calls": [], "message": "No qBittorrent rate limits requested."}
+
+        client = await self.connect()
+        calls: list[dict[str, Any]] = []
+        if upload_limit is not None:
+            await asyncio.to_thread(client.torrents_set_upload_limit, torrent_hashes=torrent_hash, limit=upload_limit)
+            calls.append({"method": "torrents_set_upload_limit", "torrent_hashes": torrent_hash, "limit": upload_limit})
+        if download_limit is not None:
+            await asyncio.to_thread(client.torrents_set_download_limit, torrent_hashes=torrent_hash, limit=download_limit)
+            calls.append({"method": "torrents_set_download_limit", "torrent_hashes": torrent_hash, "limit": download_limit})
+        return {"requested": requested, "applied": True, "skipped": False, "calls": calls}
 
     async def wait_for_completion(
         self,
