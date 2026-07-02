@@ -5155,11 +5155,12 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
         "resume_state": resume_state,
         **diagnostics,
     })
+    target_upload_missing = _target_upload_summary_missing_items(target_upload_diagnostics, missing_audit)
     next_command = _summary_next_command(
         payload,
         resume_state,
         (
-            *_target_upload_summary_preferred_stages(missing_audit),
+            *_target_upload_summary_preferred_stages(target_upload_missing),
             *_readiness_summary_preferred_stages(readiness_summary, kind=str(payload.get("kind") or "")),
             *_completion_matrix_preferred_stages(diagnostics.get("completion_matrix"), kind=str(payload.get("kind") or "")),
         ),
@@ -5208,6 +5209,15 @@ def _target_upload_summary_completion_blockers(target_upload_diagnostics: dict[s
     if not missing:
         return ["target upload follow-up is incomplete."]
     return [f"target upload follow-up incomplete: {', '.join(missing)}."]
+
+
+def _target_upload_summary_missing_items(target_upload_diagnostics: dict[str, Any], missing_audit: list[str]) -> list[str]:
+    missing = list(missing_audit)
+    completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
+    uploaded_followup = target_upload_diagnostics.get("uploaded_followup") if isinstance(target_upload_diagnostics.get("uploaded_followup"), dict) else {}
+    _extend_unique_string(missing, _string_list(completion.get("missing")))
+    _extend_unique_string(missing, _string_list(uploaded_followup.get("missing")))
+    return missing
 
 
 def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
@@ -5548,13 +5558,43 @@ def _summary_closure_audit_status(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _target_upload_summary_preferred_stages(missing_audit: list[str]) -> tuple[str, ...]:
     preferred: list[str] = []
-    if "target_preparation_ready" in missing_audit:
+    if any(name in missing_audit for name in ("target_preparation_ready", "target.prepared", "target_preparation_audit")):
         preferred.append("resume-target-package")
-    if any(name in missing_audit for name in ("uploaded_torrent_file", "uploaded_torrent_hash")):
+    if any(name in missing_audit for name in ("downloaded", "target.downloaded", "uploaded_torrent_file", "uploaded_torrent_hash", "target.uploaded_torrent_hash")):
         preferred.append("resume-uploaded-torrent-download")
-    if any(name in missing_audit for name in ("injection_visible_in_client", "injection_verified", "uploaded_wait_evidence", "target_hash_consistent")):
+    if any(
+        name in missing_audit
+        for name in (
+            "injected_torrent_hash",
+            "injection_visible_in_client",
+            "injection_verified",
+            "uploaded_wait_evidence",
+            "uploaded_wait_complete",
+            "target.injected",
+            "target.injected_torrent_hash",
+            "target.injection_visible_in_client",
+            "target.injection_verified",
+            "target.seeding",
+            "target.uploaded_wait_evidence",
+        )
+    ):
         preferred.extend(["resume-uploaded-torrent", "resume-uploaded-torrent-download"])
-    if "target_duplicate_clean" in missing_audit or "target_rule_obligations" in missing_audit:
+    if any(
+        name in missing_audit
+        for name in (
+            "uploaded",
+            "uploaded_torrent_id",
+            "hash_consistent",
+            "target_hash_consistent",
+            "target.hash_consistent",
+            "duplicate_clean",
+            "target_duplicate_clean",
+            "target.duplicate_clean",
+            "rule_obligations_ready",
+            "target_rule_obligations",
+            "target.rule_obligations",
+        )
+    ):
         preferred.append("target-upload-retry")
     preferred.extend(["resume-target-package", "resume-uploaded-torrent", "resume-uploaded-torrent-download", "target-upload-retry"])
     return tuple(dict.fromkeys(preferred))

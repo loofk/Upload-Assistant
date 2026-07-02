@@ -9356,6 +9356,88 @@ def test_summary_check_blocks_incomplete_target_upload_followup(tmp_path, capsys
     assert payload["blockers"] == ["target upload follow-up incomplete: uploaded_torrent_file, injection_verified, uploaded_wait_complete."]
 
 
+def test_summary_check_uses_target_upload_completion_missing_for_legacy_summary(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "ptcli-target-upload-summary.json"
+    download_argv = [
+        "python3",
+        "ptcli.py",
+        "target-upload",
+        "--uploaded-torrent-id",
+        "999",
+        "--download-uploaded-torrent",
+        "--inject-uploaded-torrent",
+    ]
+    resume_argv = [
+        "python3",
+        "ptcli.py",
+        "target-upload",
+        "--uploaded-torrent-file",
+        "/tmp/MTEAM-999.torrent",
+        "--inject-uploaded-torrent",
+    ]
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.target_upload.summary",
+                "summary": {
+                    "ready": True,
+                    "uploaded": True,
+                    "blockers": [],
+                    "completion_review": {
+                        "complete": False,
+                        "missing": ["uploaded_torrent_file", "uploaded_torrent_hash", "injection_verified", "uploaded_wait_complete"],
+                        "checks": {
+                            "uploaded": True,
+                            "uploaded_torrent_id": True,
+                            "uploaded_torrent_file": False,
+                            "uploaded_torrent_hash": False,
+                            "injection_verified": False,
+                            "uploaded_wait_complete": False,
+                        },
+                        "uploaded_torrent_id": "999",
+                    },
+                },
+                "recommended_commands": [
+                    {
+                        "stage": "target-upload-retry",
+                        "command": "python3 ptcli.py target-upload --execute --confirm-upload",
+                        "argv": ["python3", "ptcli.py", "target-upload", "--execute", "--confirm-upload"],
+                    },
+                    {
+                        "stage": "resume-uploaded-torrent",
+                        "command": shlex.join(resume_argv),
+                        "argv": resume_argv,
+                    },
+                    {
+                        "stage": "resume-uploaded-torrent-download",
+                        "command": shlex.join(download_argv),
+                        "argv": download_argv,
+                    },
+                ],
+                "resume_state": {"next_stage": None, "next_command": None, "artifacts": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["next_stage"] == "resume-uploaded-torrent-download"
+    assert payload["next_command_argv"] == download_argv
+    assert payload["automation_action"] == "run_next_command"
+    assert payload["should_execute_next_command"] is True
+    assert payload["candidate_commands"][1]["stage"] == "resume-uploaded-torrent"
+    assert payload["candidate_commands"][2]["stage"] == "resume-uploaded-torrent-download"
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--print-next-argv"])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out) == download_argv
+
+
 def test_summary_check_prefers_uploaded_resume_for_target_upload_wait_artifact(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-target-upload-summary.json"
     summary_file.write_text(
