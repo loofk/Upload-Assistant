@@ -10674,6 +10674,23 @@ def test_wait_result_completed_rejects_request_mismatch() -> None:
     ) is False
 
 
+def test_wait_result_completed_accepts_completion_verification_without_matches() -> None:
+    wait_result = {
+        "complete": True,
+        "completion_verification": {
+            "matched_count": 1,
+            "complete_count": 1,
+            "any_complete": True,
+            "requested_hash_matched": True,
+            "requested_content_path_matched": True,
+            "observed_content_paths": ["/downloads/Name"],
+        },
+    }
+
+    assert ptcli_cli._wait_result_completed(wait_result) is True
+    assert ptcli_cli._content_path_from_stage({"ok": True, "result": wait_result}) == "/downloads/Name"
+
+
 def test_wait_complete_blockers_report_request_mismatch() -> None:
     blockers = ptcli_cli._wait_complete_result_blockers(
         {
@@ -18578,7 +18595,20 @@ async def test_pipeline_target_execute_auto_downloads_injects_and_waits_source(m
     async def fake_wait_complete_with_config(_config, client_name, content_path, torrent_hash, timeout, interval):
         _ = (timeout, interval)
         if torrent_hash == source_hash:
-            return {"client": client_name, "complete": True, "query": {"torrent_hash": torrent_hash, "content_path": content_path}, "matches": [{"hash": torrent_hash, "content_path": "/downloads/Name"}]}
+            return {
+                "client": client_name,
+                "complete": True,
+                "query": {"torrent_hash": torrent_hash, "content_path": content_path},
+                "completion_verification": {
+                    "matched_count": 1,
+                    "complete_count": 1,
+                    "any_complete": True,
+                    "requested_hash_matched": True,
+                    "requested_content_path_matched": True,
+                    "observed_hashes": [torrent_hash],
+                    "observed_content_paths": ["/downloads/Name"],
+                },
+            }
         return {"client": client_name, "complete": True, "query": {"torrent_hash": torrent_hash, "content_path": content_path}, "matches": [{"hash": torrent_hash, "content_path": content_path}]}
 
     async def fake_search_mteam_duplicates(_config, source_info):
@@ -18654,6 +18684,7 @@ async def test_pipeline_target_execute_auto_downloads_injects_and_waits_source(m
     assert inject_source["ok"] is True
     assert inject_source["result"]["save_path"] == "/downloads"
     assert wait_complete["ok"] is True
+    assert wait_complete["result"]["completion_verification"]["observed_content_paths"] == ["/downloads/Name"]
     assert payload["path"] == "/downloads/Name"
     assert upload_stage["ok"] is True
     assert upload_stage["result"]["injected_torrent"]["save_path"] == "/downloads/Name"

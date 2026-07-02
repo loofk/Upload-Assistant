@@ -10528,6 +10528,13 @@ def _wait_result_completed(wait_result: Any) -> bool:
             return int(matched_count) > 0
         except (TypeError, ValueError):
             return False
+    if isinstance(verification, dict):
+        verification_matched_count = verification.get("matched_count")
+        if verification_matched_count is not None:
+            try:
+                return int(verification_matched_count) > 0
+            except (TypeError, ValueError):
+                return False
     return False
 
 
@@ -10631,11 +10638,17 @@ def _content_path_from_stage(stage: dict[str, Any]) -> str | None:
     if not isinstance(result, dict):
         return None
     matches = result.get("matches")
-    if not isinstance(matches, list):
-        return None
-    for match in matches:
-        if isinstance(match, dict) and match.get("content_path"):
-            return str(match["content_path"])
+    if isinstance(matches, list):
+        for match in matches:
+            if isinstance(match, dict) and match.get("content_path"):
+                return str(match["content_path"])
+    verification = result.get("completion_verification")
+    if isinstance(verification, dict):
+        observed_paths = verification.get("observed_content_paths")
+        if isinstance(observed_paths, list):
+            for observed_path in observed_paths:
+                if isinstance(observed_path, str) and observed_path.strip():
+                    return observed_path.strip()
     return None
 
 
