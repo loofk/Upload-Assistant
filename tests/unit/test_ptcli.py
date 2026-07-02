@@ -4256,6 +4256,9 @@ def test_source_info_reports_missing_cookie_diagnostics(monkeypatch, capsys, tmp
     assert diagnostics["source_info_adapter"] == "generic_details_cookie"
     assert diagnostics["source_download_adapter"] == "nexusphp_passkey"
     assert diagnostics["has_signal"] is False
+    assert diagnostics["ptgen_description_ready"] is False
+    assert diagnostics["ptgen_description_length"] == 0
+    assert "source_info.ptgen_description" in diagnostics["missing"]
     assert diagnostics["credential_ready"] is False
     assert diagnostics["credential_checks"][0]["path"] == str(cookie_path)
     assert diagnostics["credential_checks"][0]["ok"] is False
@@ -4267,6 +4270,30 @@ def test_source_info_reports_missing_cookie_diagnostics(monkeypatch, capsys, tmp
         "Create data/cookies/U2.txt from a logged-in browser session, then rerun source-info or source-download.",
         "Verify the source torrent id/details URL and tracker session, then rerun source-info before downloading.",
     ]
+
+
+def test_source_info_diagnostics_exposes_ptgen_description_signal(tmp_path) -> None:
+    ptgen_description = "◎译　　名　源站示例\n◎片　　名　Source Example\n◎简　　介　源站已有简介。"
+    source = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "name": "Name",
+        "torrenthash": "a" * 40,
+        "description_length": len(ptgen_description),
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "ptgen_description": ptgen_description,
+    }
+
+    diagnostics = ptcli_cli._source_info_diagnostics({}, "U2", "60635", str(tmp_path), source)
+
+    assert diagnostics["has_signal"] is True
+    assert diagnostics["signal_fields"]["ptgen_description"] is True
+    assert diagnostics["ptgen_description_ready"] is True
+    assert diagnostics["ptgen_description_length"] == len(ptgen_description)
+    assert "source_info.ptgen_description" not in diagnostics["missing"]
 
 
 def test_source_download_requires_rule_ack(monkeypatch, capsys) -> None:
@@ -7510,8 +7537,18 @@ def test_summary_check_exposes_source_info_diagnostics(tmp_path, capsys) -> None
         "source_info_adapter": "generic_details_cookie",
         "source_download_adapter": "nexusphp_passkey",
         "has_signal": False,
-        "signal_fields": {"imdb_id": False, "tmdb_id": False, "name": False, "torrenthash": False, "description": False, "douban": False},
-        "missing": ["source_info.imdb_id", "source_info.tmdb_id", "source_info.name", "source_info.torrenthash", "source_info.description", "source_info.douban"],
+        "signal_fields": {"imdb_id": False, "tmdb_id": False, "name": False, "torrenthash": False, "description": False, "ptgen_description": False, "douban": False},
+        "ptgen_description_ready": False,
+        "ptgen_description_length": 0,
+        "missing": [
+            "source_info.imdb_id",
+            "source_info.tmdb_id",
+            "source_info.name",
+            "source_info.torrenthash",
+            "source_info.description",
+            "source_info.ptgen_description",
+            "source_info.douban",
+        ],
         "credential_ready": False,
         "credential_checks": [{"name": "U2.cookie_file", "type": "cookie_file", "ok": False, "path": "data/cookies/U2.txt"}],
         "blockers": [
@@ -7553,6 +7590,8 @@ def test_summary_check_exposes_source_info_diagnostics(tmp_path, capsys) -> None
     assert shell_fields["PTCLI_SOURCE_INFO_PRESENT"] == "1"
     assert shell_fields["PTCLI_SOURCE_INFO_TRACKER"] == "U2"
     assert shell_fields["PTCLI_SOURCE_INFO_HAS_SIGNAL"] == "0"
+    assert shell_fields["PTCLI_SOURCE_INFO_PTGEN_READY"] == "0"
+    assert shell_fields["PTCLI_SOURCE_INFO_PTGEN_LENGTH"] == 0
     assert shell_fields["PTCLI_SOURCE_INFO_CREDENTIAL_READY"] == "0"
     assert shell_fields["PTCLI_SOURCE_INFO_FIRST_CREDENTIAL_PATH"] == "data/cookies/U2.txt"
 
@@ -7563,6 +7602,8 @@ def test_summary_check_exposes_source_info_diagnostics(tmp_path, capsys) -> None
     assert "export PTCLI_SOURCE_INFO_PRESENT=1\n" in out
     assert "export PTCLI_SOURCE_INFO_TRACKER=U2\n" in out
     assert "export PTCLI_SOURCE_INFO_HAS_SIGNAL=0\n" in out
+    assert "export PTCLI_SOURCE_INFO_PTGEN_READY=0\n" in out
+    assert "export PTCLI_SOURCE_INFO_PTGEN_LENGTH=0\n" in out
     assert "export PTCLI_SOURCE_INFO_CREDENTIAL_READY=0\n" in out
     assert "export PTCLI_SOURCE_INFO_FIRST_CREDENTIAL_PATH=data/cookies/U2.txt\n" in out
 

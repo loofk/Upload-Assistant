@@ -455,6 +455,7 @@ def _source_info_diagnostics(config: dict[str, Any], tracker: str, source_id: st
         "name": bool(source.get("name")),
         "torrenthash": bool(source.get("torrenthash")),
         "description": int(source.get("description_length", 0) or 0) > 0,
+        "ptgen_description": bool(source.get("ptgen_description")),
         "douban": bool(source.get("douban_id") or source.get("douban_url")),
     }
     has_signal = any(signal_fields.values())
@@ -473,6 +474,8 @@ def _source_info_diagnostics(config: dict[str, Any], tracker: str, source_id: st
         "source_download_adapter": source_download_adapter(source_tracker),
         "has_signal": has_signal,
         "signal_fields": signal_fields,
+        "ptgen_description_ready": signal_fields["ptgen_description"],
+        "ptgen_description_length": len(str(source.get("ptgen_description") or "")),
         "missing": missing,
         "credential_ready": credential_ready,
         "credential_checks": credential_checks,
@@ -11252,6 +11255,8 @@ def _summary_check_source_info_shell_fields(source_info_diagnostics: dict[str, A
         "PTCLI_SOURCE_INFO_ADAPTER": source_info_diagnostics.get("source_info_adapter"),
         "PTCLI_SOURCE_DOWNLOAD_ADAPTER": source_info_diagnostics.get("source_download_adapter"),
         "PTCLI_SOURCE_INFO_HAS_SIGNAL": _shell_bool(source_info_diagnostics.get("has_signal")) if source_info_diagnostics.get("has_signal") is not None else None,
+        "PTCLI_SOURCE_INFO_PTGEN_READY": _shell_bool(source_info_diagnostics.get("ptgen_description_ready")) if source_info_diagnostics.get("ptgen_description_ready") is not None else None,
+        "PTCLI_SOURCE_INFO_PTGEN_LENGTH": source_info_diagnostics.get("ptgen_description_length"),
         "PTCLI_SOURCE_INFO_SIGNAL_FIELDS": json.dumps(signal_fields, ensure_ascii=False) if signal_fields else None,
         "PTCLI_SOURCE_INFO_MISSING": ",".join(_string_list(source_info_diagnostics.get("missing"))),
         "PTCLI_SOURCE_INFO_CREDENTIAL_READY": _shell_bool(source_info_diagnostics.get("credential_ready")) if source_info_diagnostics.get("credential_ready") is not None else None,
