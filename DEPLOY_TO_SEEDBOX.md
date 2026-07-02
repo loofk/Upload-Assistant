@@ -147,6 +147,7 @@ docker pull ghcr.io/loofk/upload-assistant:latest
 # 启动本地 AI/API 服务（建议仅绑定 127.0.0.1；跨机器暴露时设置 PTCLI_API_TOKEN）
 docker run -d --name ptcli-api --restart unless-stopped --network=host \
   -e PTCLI_API_TOKEN=change-me \
+  -e PTCLI_PUBLIC_BASE_URL=http://127.0.0.1:8080 \
   -e PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs \
   -v /path/to/config.py:/Upload-Assistant/data/config.py \
   -v /path/to/cookies:/Upload-Assistant/data/cookies \
@@ -158,6 +159,9 @@ docker run -d --name ptcli-api --restart unless-stopped --network=host \
 # 健康检查和 AI 工具描述
 curl http://127.0.0.1:8080/health
 curl http://127.0.0.1:8080/v1/tools
+curl http://127.0.0.1:8080/.well-known/ptcli-agent.json
+curl http://127.0.0.1:8080/v1/openclaw/skill.json
+curl http://127.0.0.1:8080/v1/hermes/skill.json
 
 # 只判断目标站是否已有种子，不上传
 curl -X POST http://127.0.0.1:8080/v1/retorrent/check \

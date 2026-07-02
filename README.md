@@ -64,9 +64,12 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 # 本机启动，仅监听 localhost
 python3 ptcli.py serve --host 127.0.0.1 --port 8080
 
-# 查看 AI 可用工具和 OpenAPI
+# 查看 AI 可用工具、OpenAPI 和 OpenClaw/Hermes 友好 manifest
 curl http://127.0.0.1:8080/v1/tools
 curl http://127.0.0.1:8080/openapi.json
+curl http://127.0.0.1:8080/.well-known/ptcli-agent.json
+curl http://127.0.0.1:8080/v1/openclaw/skill.json
+curl http://127.0.0.1:8080/v1/hermes/skill.json
 
 # 只查源站信息和目标站是否已有种子，不上传
 curl -X POST http://127.0.0.1:8080/v1/retorrent/check \
@@ -100,6 +103,8 @@ curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/daily \
 ```
 
 若需要把 API 暴露给其他容器或局域网工具，建议设置 `PTCLI_API_TOKEN`，调用时添加 `Authorization: Bearer <token>`。服务端点不会绕过站点规则；live 下载/上传仍依赖现有 rule gate、dupe gate 和 `confirm_upload`。
+
+OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/openclaw/skill.json`、`/v1/hermes/skill.json`，其中包含 OpenAPI 地址、工具列表、鉴权方式和 live 上传安全边界。反向代理或容器内外地址不一致时，设置 `PTCLI_PUBLIC_BASE_URL=https://your-host.example` 让 manifest 输出外部可访问地址；仓库内也提供 `ai/openclaw/ptcli.skill.json` 和 `ai/hermes/ptcli.skill.json` 作为离线模板。
 
 ## 配置要求
 

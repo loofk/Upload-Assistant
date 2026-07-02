@@ -12384,8 +12384,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/candidates/daily" in paths
     assert "/v1/jobs/{job_id}" in paths
     assert "/v1/jobs/{job_id}/resume" in paths
+    assert "/.well-known/ptcli-agent.json" in paths
 
     openapi = ptcli_service.openapi_payload(require_auth=True)
+    assert "/.well-known/ptcli-agent.json" in openapi["paths"]
+    assert "/v1/agent-manifest" in openapi["paths"]
+    assert "/v1/openclaw/skill.json" in openapi["paths"]
+    assert "/v1/hermes/skill.json" in openapi["paths"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent" in openapi["paths"]
     assert "/v1/candidates/daily" in openapi["paths"]
@@ -12394,6 +12399,29 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/{job_id}/summary" in openapi["paths"]
     assert "/v1/jobs/{job_id}/resume" in openapi["paths"]
     assert openapi["paths"]["/v1/jobs/retorrent"]["post"]["security"] == [{"bearerAuth": []}]
+
+
+def test_agent_manifest_exposes_ai_safe_workflows() -> None:
+    manifest = ptcli_service.agent_manifest_payload(base_url="http://ptcli.local:8080")
+
+    assert manifest["schema_version"] == "ptcli.agent_manifest.v1"
+    assert manifest["base_url"] == "http://ptcli.local:8080"
+    assert manifest["discovery"]["openapi"] == "http://ptcli.local:8080/openapi.json"
+    assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
+    assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
+    assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
+    assert {tool["name"] for tool in manifest["tools"]} >= {"retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+    assert manifest["openclaw"]["manifest_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
+    assert manifest["hermes"]["manifest_url"] == "http://ptcli.local:8080/v1/hermes/skill.json"
+
+
+def test_static_agent_skill_templates_are_valid_json() -> None:
+    for relative_path in ("ai/openclaw/ptcli.skill.json", "ai/hermes/ptcli.skill.json"):
+        payload = json.loads(Path(relative_path).read_text(encoding="utf-8"))
+        assert payload["schema_version"] == "ptcli.agent_manifest.v1"
+        assert payload["auth"]["env"] == "PTCLI_API_TOKEN"
+        assert payload["discovery"]["openapi"].endswith("/openapi.json")
+        assert {tool["name"] for tool in payload["tools"]} >= {"retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
 
 
 def test_parse_recent_candidate_seeds_from_nexusphp_html() -> None:

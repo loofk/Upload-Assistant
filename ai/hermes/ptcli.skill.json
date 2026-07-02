@@ -1,0 +1,78 @@
+{
+  "schema_version": "ptcli.agent_manifest.v1",
+  "name": "ptcli-retorrent",
+  "display_name": "PTCLI Retorrent Assistant",
+  "description": "AI-callable Chinese PT retorrent, upload, qBittorrent, and daily-candidate automation service.",
+  "audience": [
+    "Hermes",
+    "OpenAPI-compatible agents"
+  ],
+  "base_url": "http://127.0.0.1:8080",
+  "auth": {
+    "type": "bearer",
+    "header": "Authorization",
+    "format": "Bearer <PTCLI_API_TOKEN>",
+    "env": "PTCLI_API_TOKEN"
+  },
+  "discovery": {
+    "health": "http://127.0.0.1:8080/health",
+    "openapi": "http://127.0.0.1:8080/openapi.json",
+    "tools": "http://127.0.0.1:8080/v1/tools",
+    "manifest": "http://127.0.0.1:8080/.well-known/ptcli-agent.json"
+  },
+  "safety": {
+    "live_upload_requires": [
+      "accept_rules=true",
+      "confirm_upload=true"
+    ],
+    "never_skip": [
+      "site rule gates",
+      "target duplicate check",
+      "uploaded torrent injection/seeding evidence"
+    ],
+    "blocked_contract": "When rules, duplicate checks, qBittorrent evidence, or required confirmations are missing, APIs return status=blocked with blockers and next_actions."
+  },
+  "workflows": [
+    {
+      "name": "manual_retorrent",
+      "tool": "retorrent_job",
+      "required_fields": [
+        "source",
+        "target"
+      ],
+      "poll": "get_job_status",
+      "resume": "resume_job"
+    },
+    {
+      "name": "daily_candidates",
+      "tool": "daily_candidates_job",
+      "required_fields": [
+        "source_tracker",
+        "target"
+      ],
+      "poll": "get_job_status"
+    }
+  ],
+  "tools": [
+    {
+      "name": "retorrent_job",
+      "method": "POST",
+      "path": "/v1/jobs/retorrent"
+    },
+    {
+      "name": "daily_candidates_job",
+      "method": "POST",
+      "path": "/v1/jobs/candidates/daily"
+    },
+    {
+      "name": "get_job_status",
+      "method": "GET",
+      "path": "/v1/jobs/{job_id}"
+    },
+    {
+      "name": "resume_job",
+      "method": "POST",
+      "path": "/v1/jobs/{job_id}/resume"
+    }
+  ]
+}
