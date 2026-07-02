@@ -257,6 +257,10 @@
           "recommendation",
           "duplicate_check",
           "blockers",
+          "agent_workflow",
+          "submit_request",
+          "submit_job_endpoint",
+          "submit_tool",
           "execute_request"
         ]
       },

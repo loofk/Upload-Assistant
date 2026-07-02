@@ -28,6 +28,7 @@ from src.ptcli.target import search_mteam_duplicates
 
 DEFAULT_CANDIDATE_LIMIT = 10
 MAX_CANDIDATE_SCAN = 50
+MANUAL_RETORRENT_JOB_ENDPOINT = "/v1/jobs/retorrent/submit"
 RECENT_PATHS: dict[str, str] = {
     "HDS": "/index.php?page=torrents",
     "TTG": "/browse.php",
@@ -205,8 +206,12 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "recommendation": _candidate_recommendation(seed, source_info_payload, duplicate_check, blockers, ranking),
         "blockers": blockers,
         "risk_flags": blockers,
+        "agent_workflow": _candidate_agent_workflow(status, blockers),
+        "submit_request": execute_request,
+        "submit_job_endpoint": MANUAL_RETORRENT_JOB_ENDPOINT,
+        "submit_tool": "manual_retorrent_job",
         "execute_request": execute_request,
-        "execute_job_endpoint": "/v1/jobs/retorrent",
+        "execute_job_endpoint": MANUAL_RETORRENT_JOB_ENDPOINT,
     }
 
 
@@ -270,7 +275,7 @@ def _candidate_execute_request(config: dict[str, Any], seed: CandidateSeed, targ
         "source": seed.details_url or seed.torrent_id,
         "source_tracker": seed.tracker,
         "target": ",".join(targets),
-        "execute": True,
+        "execute_if_no_duplicate": True,
         "accept_rules": bool(accept_rules),
         "confirm_upload": False,
     }
@@ -286,6 +291,25 @@ def _candidate_execute_request(config: dict[str, Any], seed: CandidateSeed, targ
         if target_limits.get("download_limit") is not None:
             request["uploaded_qbit_download_limit"] = target_limits["download_limit"]
     return request
+
+
+def _candidate_agent_workflow(status: str, blockers: list[str]) -> dict[str, Any]:
+    if status == "ready":
+        decision = "submit_when_confirmed"
+        recommended_action = "Review site rules, set confirm_upload=true with a save_path or path, then submit submit_request to manual_retorrent_job."
+    elif any("target-duplicate" in blocker for blocker in blockers):
+        decision = "stop_or_review_duplicate"
+        recommended_action = "Inspect duplicate_check.dupes before taking any upload action."
+    else:
+        decision = "resolve_blockers"
+        recommended_action = "Resolve blockers before submitting this candidate to the manual retorrent job."
+    return {
+        "tool": "manual_retorrent_job",
+        "endpoint": MANUAL_RETORRENT_JOB_ENDPOINT,
+        "decision": decision,
+        "recommended_action": recommended_action,
+        "requires": ["accept_rules=true", "confirm_upload=true", "save_path or path"],
+    }
 
 
 def _candidate_ranking(seed: CandidateSeed, source_info: dict[str, Any] | None, duplicate_check: dict[str, Any], blockers: list[str]) -> dict[str, Any]:

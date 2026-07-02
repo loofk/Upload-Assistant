@@ -12560,6 +12560,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
+    assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "submit_job_endpoint" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "response_contract" in tool_by_name["get_job_status"]
 
     openapi = ptcli_service.openapi_payload(require_auth=True)
@@ -12612,6 +12614,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert set(tools_by_name) >= {"manual_retorrent_job", "retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert tools_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
         assert "response_contract" in tools_by_name["retorrent_job"]
         assert "safety" in tools_by_name["resume_job"]
@@ -12702,10 +12705,17 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["duplicate_check"]["status"] == "not_found"
     assert candidate["source_policy"]["tracker"] == "U2"
     assert candidate["target_policies"][0]["tracker"] == "MTEAM"
+    assert candidate["agent_workflow"]["tool"] == "manual_retorrent_job"
+    assert candidate["agent_workflow"]["decision"] == "submit_when_confirmed"
+    assert candidate["submit_tool"] == "manual_retorrent_job"
+    assert candidate["submit_job_endpoint"] == "/v1/jobs/retorrent/submit"
+    assert candidate["submit_request"] == candidate["execute_request"]
     assert candidate["execute_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert candidate["execute_request"]["execute_if_no_duplicate"] is True
+    assert "execute" not in candidate["execute_request"]
     assert candidate["execute_request"]["qbit_download_limit"] == 20 * 1024 * 1024
     assert candidate["execute_request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
-    assert candidate["execute_job_endpoint"] == "/v1/jobs/retorrent"
+    assert candidate["execute_job_endpoint"] == "/v1/jobs/retorrent/submit"
 
 
 async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers(monkeypatch) -> None:
