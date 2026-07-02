@@ -165,6 +165,18 @@ def write_valid_torrent(torrent_path: Path, content_path: Path) -> str:
     return str(torrent.infohash)
 
 
+def source_torrent_verify_stage(source_hash: str = "a" * 40) -> dict:
+    return {
+        "stage": "source-torrent-verify",
+        "ok": True,
+        "result": {
+            "verified": True,
+            "expected_hash": source_hash,
+            "actual_hash": source_hash,
+        },
+    }
+
+
 def mteam_ready_stages() -> list[dict]:
     return [
         {"stage": "rule-check", "ok": True, "result": build_rule_check("U2", ["MTEAM"], accept_rules=True)},
@@ -687,6 +699,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                 "source": {
                     "ready": True,
                     "mode": "downloaded",
+                    "torrent_verified": True,
                     "torrent_hash": "a" * 40,
                     "source_torrent_path": "/tmp/U2-60635.torrent",
                     "torrent_file_evidence": True,
@@ -976,6 +989,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "source_torrent_hash": "a" * 40,
         "source_torrent_file": "/tmp/U2-60635.torrent",
         "source_torrent_file_evidence": True,
+        "source_torrent_verified": True,
         "source_save_path": "/downloads",
         "source_qbit_category": "SOURCE",
         "source_qbit_tags": "source-tag",
@@ -3497,6 +3511,7 @@ def test_retorrent_execute_blockers_require_source_injection_artifacts_for_downl
         {
             "source_wait_evidence": True,
             "source_torrent_file_evidence": True,
+            "source_torrent_verified": True,
             "uploaded_wait_evidence": True,
             "uploaded_torrent_file_evidence": True,
             "uploaded_torrent_hash": "b" * 40,
@@ -3520,6 +3535,7 @@ def test_retorrent_execute_blockers_require_torrent_file_evidence() -> None:
         {
             "source_wait_evidence": True,
             "source_torrent_hash": "a" * 40,
+            "source_torrent_verified": True,
             "source_injected_torrent_hash": "a" * 40,
             "source_injection_visible_in_client": True,
             "source_injection_verified": True,
@@ -3532,6 +3548,33 @@ def test_retorrent_execute_blockers_require_torrent_file_evidence() -> None:
     )
 
     assert blockers == ["source.torrent_file_evidence", "target.uploaded_torrent_file_evidence"]
+
+
+def test_retorrent_execute_blockers_require_source_torrent_verification_artifact() -> None:
+    pipeline_result = {"status": "ok", "ready": True, "summary": {"blockers": []}, "evidence": {"source": {"mode": "downloaded"}}}
+    closure = {"complete": True, "blockers": []}
+
+    blockers = ptcli_cli._retorrent_execute_blockers(
+        pipeline_result,
+        closure,
+        True,
+        {
+            "source_wait_evidence": True,
+            "source_torrent_file_evidence": True,
+            "source_torrent_hash": "a" * 40,
+            "source_injected_torrent_hash": "a" * 40,
+            "source_injection_visible_in_client": True,
+            "source_injection_verified": True,
+            "uploaded_wait_evidence": True,
+            "uploaded_torrent_file_evidence": True,
+            "uploaded_torrent_hash": "b" * 40,
+            "injected_torrent_hash": "b" * 40,
+            "injection_visible_in_client": True,
+            "injection_verified": True,
+        },
+    )
+
+    assert blockers == ["source.torrent_verified"]
 
 
 def test_retorrent_execute_blockers_require_material_live_gate_when_preflight_requires_materials() -> None:
@@ -5050,6 +5093,7 @@ def test_completion_matrix_derives_source_ready_from_followup_evidence() -> None
         closure_status={
             "source": {
                 "mode": "downloaded",
+                "torrent_verified": True,
                 "hash_consistent": True,
                 "wait_evidence": True,
                 "injection_visible_in_client": True,
@@ -5066,6 +5110,31 @@ def test_completion_matrix_derives_source_ready_from_followup_evidence() -> None
     assert "source" not in matrix["missing_domains"]
 
 
+def test_completion_matrix_requires_source_torrent_verification_for_downloaded_mode() -> None:
+    matrix = ptcli_cli._summary_completion_matrix(
+        flow_diagnostics={},
+        material_diagnostics={},
+        target_upload_diagnostics={},
+        closure_review={},
+        closure_status={
+            "source": {
+                "mode": "downloaded",
+                "hash_consistent": True,
+                "wait_evidence": True,
+                "injection_visible_in_client": True,
+                "injection_verified": True,
+            }
+        },
+        qbit_wait_mismatches=[],
+    )
+
+    source = matrix["domains"]["source"]
+    assert source["ready"] is False
+    assert source["missing"] == ["torrent_verified"]
+    assert source["evidence"]["torrent_verified"] is None
+    assert "source" in matrix["missing_domains"]
+
+
 def test_completion_matrix_requires_source_torrent_visible_in_client() -> None:
     matrix = ptcli_cli._summary_completion_matrix(
         flow_diagnostics={},
@@ -5075,6 +5144,7 @@ def test_completion_matrix_requires_source_torrent_visible_in_client() -> None:
         closure_status={
             "source": {
                 "mode": "downloaded",
+                "torrent_verified": True,
                 "hash_consistent": True,
                 "wait_evidence": True,
                 "injection_visible_in_client": False,
@@ -10735,6 +10805,51 @@ def test_pipeline_closure_accepts_existing_qbit_match_as_source_ready() -> None:
     assert closure["source"]["matched"] is True
 
 
+def test_source_live_ready_requires_source_torrent_verify_for_downloaded_flow() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent", "torrent_hash": "a" * 40}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True, "matches": [{"hash": "a" * 40}]}},
+    ]
+
+    assert ptcli_cli._source_ready_for_live_target_upload(stages) is False
+
+    stages.insert(1, source_torrent_verify_stage())
+
+    assert ptcli_cli._source_ready_for_live_target_upload(stages) is True
+
+
+def test_pipeline_closure_blocks_downloaded_source_without_torrent_verify() -> None:
+    stages = [
+        {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent", "exists": True, "size_bytes": 128, "metadata_readable": True, "torrent_hash": "a" * 40}},
+        {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
+        {"stage": "wait-complete", "ok": True, "result": {"complete": True, "matches": [{"hash": "a" * 40, "content_path": "/downloads/Name"}]}},
+        {"stage": "match", "ok": True, "result": {"matches": []}},
+        {"stage": "target-prepare", "ok": True, "result": {"rule_review": mteam_clean_rule_review()}},
+        {
+            "stage": "target-upload",
+            "ok": True,
+            "result": {
+                "status": "uploaded",
+                "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
+                "uploaded_torrent_hash": "b" * 40,
+                "downloaded_torrent": {"path": "/tmp/MTEAM-999.torrent"},
+                "injected_torrent": {"hash": "b" * 40, "visible_in_client": True, "verified_in_client": True},
+                "uploaded_wait": {"complete": True, "matches": [{"hash": "b" * 40}]},
+            },
+        },
+    ]
+
+    closure = ptcli_cli._pipeline_closure(stages, "/downloads/Name", "a" * 40, "/tmp/target.torrent")
+    evidence = ptcli_cli._pipeline_evidence(closure)
+
+    assert closure["complete"] is False
+    assert closure["source"]["ready"] is False
+    assert closure["source"]["torrent_verified"] is False
+    assert "source.torrent_verified" in closure["blockers"]
+    assert evidence["source"]["torrent_verified"] is False
+
+
 def test_pipeline_closure_uses_downloaded_uploaded_torrent_hash_when_followup_incomplete() -> None:
     uploaded_hash = "b" * 40
     stages = [
@@ -11325,6 +11440,7 @@ def test_pipeline_closure_requires_target_preparation_when_materials_exist() -> 
 def test_pipeline_closure_requires_source_injection_client_verification() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"torrent_path": "/tmp/U2-60635.torrent"}},
+        source_torrent_verify_stage(),
         {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "verified_in_client": False}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
@@ -11386,6 +11502,7 @@ def test_pipeline_closure_reports_source_hash_inconsistency() -> None:
 def test_pipeline_closure_requires_source_wait_completion() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"torrent_path": "/tmp/U2-60635.torrent"}},
+        source_torrent_verify_stage(),
         {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": False, "matches": []}},
         {"stage": "match", "ok": True, "result": {"matches": []}},
@@ -11534,6 +11651,7 @@ def test_pipeline_closure_audit_requires_injection_visibility() -> None:
 def test_pipeline_evidence_reports_resume_sources() -> None:
     stages = [
         {"stage": "source-download", "ok": True, "result": {"path": "/tmp/U2-60635.torrent", "reused": True}},
+        source_torrent_verify_stage(),
         {"stage": "inject-source", "ok": True, "result": {"hash": "a" * 40, "visible_in_client": True, "verified_in_client": True}},
         {"stage": "wait-complete", "ok": True, "result": {"complete": True, "matches": [{"hash": "a" * 40, "content_path": "/downloads/Name"}]}},
         {"stage": "match", "ok": True, "result": {"matches": []}},

@@ -1274,6 +1274,7 @@ def _readiness_source_followup_summary(resume_state: dict[str, Any]) -> dict[str
         "blockers": _string_list(followup.get("blockers")),
         "next_actions": _string_list(followup.get("next_actions")),
         "source_torrent_hash": followup.get("source_torrent_hash"),
+        "source_torrent_verified": followup.get("source_torrent_verified") if isinstance(followup.get("source_torrent_verified"), bool) else None,
         "source_torrent_file": followup.get("source_torrent_file"),
         "source_torrent_file_ready": _first_bool_value(followup.get("source_torrent_file_ready"), gates.get("source_torrent_file"), _torrent_file_evidence_ready(torrent_evidence)),
         "source_torrent_file_evidence": torrent_evidence,
@@ -1352,6 +1353,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         "source_torrent_hash",
         "source_torrent_file",
         "source_torrent_file_evidence",
+        "source_torrent_verified",
         "source_save_path",
         "source_qbit_category",
         "source_qbit_tags",
@@ -1458,6 +1460,7 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "source_torrent_file": bool(artifacts.get("source_torrent_file")),
             "source_torrent_file_evidence": bool(artifacts.get("source_torrent_file_evidence")),
             "source_torrent_hash": bool(artifacts.get("source_torrent_hash")),
+            "source_torrent_verified": bool(artifacts.get("source_torrent_verified")),
             "source_save_path": bool(artifacts.get("source_save_path")),
             "source_qbit_category": bool(artifacts.get("source_qbit_category")),
             "source_qbit_tags": bool(artifacts.get("source_qbit_tags")),
@@ -1511,6 +1514,7 @@ def _retorrent_source_followup_closure(pipeline_result: dict[str, Any], artifact
         "source_torrent_file": bool(artifacts.get("source_torrent_file") or source_torrent_file_evidence.get("path")),
         "source_torrent_file_evidence": _torrent_file_evidence_ready(source_torrent_file_evidence),
         "source_torrent_hash": bool(source_torrent_hash),
+        "source_torrent_verified": bool(artifacts.get("source_torrent_verified")),
         "injected_torrent_hash": bool(artifacts.get("source_injected_torrent_hash")),
         "injection_visible_in_client": bool(artifacts.get("source_injection_visible_in_client")),
         "injection_verified": bool(artifacts.get("source_injection_verified")),
@@ -1526,6 +1530,7 @@ def _retorrent_source_followup_closure(pipeline_result: dict[str, Any], artifact
         "blockers": _retorrent_source_followup_blockers(missing),
         "missing": missing,
         "source_torrent_hash": source_torrent_hash,
+        "source_torrent_verified": artifacts.get("source_torrent_verified") if isinstance(artifacts.get("source_torrent_verified"), bool) else None,
         "source_torrent_file": artifacts.get("source_torrent_file") or source_torrent_file_evidence.get("path"),
         "source_torrent_file_evidence": {
             "path": source_torrent_file_evidence.get("path"),
@@ -1584,6 +1589,7 @@ def _retorrent_source_followup_blockers(missing: list[str]) -> list[str]:
         "source_torrent_file": "source torrent file has not been downloaded or provided",
         "source_torrent_file_evidence": "source torrent file evidence is incomplete or unreadable",
         "source_torrent_hash": "source torrent hash evidence is missing",
+        "source_torrent_verified": "source torrent file has not passed source-torrent-verify",
         "injected_torrent_hash": "source torrent has not been injected into qBittorrent",
         "injection_visible_in_client": "source torrent is not visible in qBittorrent after injection",
         "injection_verified": "source torrent injection is not verified in qBittorrent",
@@ -1595,8 +1601,8 @@ def _retorrent_source_followup_blockers(missing: list[str]) -> list[str]:
 
 def _retorrent_source_followup_next_actions(missing: list[str]) -> list[str]:
     actions: list[str] = []
-    if any(item in missing for item in ("source_torrent_file", "source_torrent_file_evidence", "source_torrent_hash")):
-        actions.append("Download or provide the source torrent, then resume source torrent injection.")
+    if any(item in missing for item in ("source_torrent_file", "source_torrent_file_evidence", "source_torrent_hash", "source_torrent_verified")):
+        actions.append("Download or provide the source torrent, verify it, then resume source torrent injection.")
     if any(item in missing for item in ("injected_torrent_hash", "injection_visible_in_client", "injection_verified")):
         actions.append("Inject the source torrent into qBittorrent with the correct save path.")
     if "source_wait_evidence" in missing:
@@ -1756,6 +1762,8 @@ def _retorrent_execute_blockers(
                 blockers.append("source.torrent_file_evidence")
             if artifact_values.get("source_torrent_hash") is None:
                 blockers.append("source.torrent_hash")
+            if artifact_values.get("source_torrent_verified") is not True:
+                blockers.append("source.torrent_verified")
             if artifact_values.get("source_injected_torrent_hash") is None:
                 blockers.append("source.injected_torrent_hash")
             if artifact_values.get("source_injection_visible_in_client") is not True:
@@ -1813,6 +1821,7 @@ def _source_artifact_evidence_key(artifact_key: str) -> str:
         "source_torrent_hash": "torrent_hash",
         "source_torrent_file": "source_torrent_path",
         "source_torrent_file_evidence": "torrent_file_evidence",
+        "source_torrent_verified": "torrent_verified",
         "source_qbit_category": "source_qbit_category",
         "source_qbit_tags": "source_qbit_tags",
         "source_paused": "source_paused",
@@ -3603,6 +3612,7 @@ def _summary_completion_matrix(
             _source_matrix_missing(closure_source),
             {
                 "mode": closure_source.get("mode"),
+                "torrent_verified": closure_source.get("torrent_verified"),
                 "hash_consistent": closure_source.get("hash_consistent"),
                 "wait_evidence": closure_source.get("wait_evidence"),
                 "injection_visible_in_client": closure_source.get("injection_visible_in_client"),
@@ -3679,21 +3689,32 @@ def _material_matrix_ready(material_diagnostics: dict[str, Any], review_target: 
 def _source_matrix_ready(closure_source: dict[str, Any]) -> bool | None:
     if not _source_matrix_has_evidence(closure_source):
         return None
+    torrent_verified = _source_matrix_torrent_verified(closure_source)
     if isinstance(closure_source.get("ready"), bool):
-        return closure_source["ready"]
-    return bool(closure_source.get("hash_consistent") and closure_source.get("wait_evidence") and closure_source.get("injection_visible_in_client") and closure_source.get("injection_verified"))
+        return bool(closure_source["ready"] and torrent_verified)
+    return bool(torrent_verified and closure_source.get("hash_consistent") and closure_source.get("wait_evidence") and closure_source.get("injection_visible_in_client") and closure_source.get("injection_verified"))
 
 
 def _source_matrix_missing(closure_source: dict[str, Any]) -> list[str]:
     if not _source_matrix_has_evidence(closure_source):
         return []
-    if closure_source.get("ready") is False:
-        return _false_keys(closure_source, ("ready", "hash_consistent", "wait_evidence", "injection_visible_in_client", "injection_verified"))
-    return _false_keys(closure_source, ("hash_consistent", "wait_evidence", "injection_visible_in_client", "injection_verified"))
+    required_keys = ("torrent_verified", "hash_consistent", "wait_evidence", "injection_visible_in_client", "injection_verified")
+    missing = _false_keys(closure_source, ("ready", *required_keys)) if closure_source.get("ready") is False else _false_keys(closure_source, required_keys)
+    if not _source_matrix_torrent_verified(closure_source):
+        _append_unique_string(missing, "torrent_verified")
+    return missing
 
 
 def _source_matrix_has_evidence(closure_source: dict[str, Any]) -> bool:
-    return bool(closure_source.get("mode")) or any(isinstance(closure_source.get(key), bool) and closure_source.get(key) is True for key in ("hash_consistent", "wait_evidence", "injection_visible_in_client", "injection_verified"))
+    return bool(closure_source.get("mode")) or any(isinstance(closure_source.get(key), bool) and closure_source.get(key) is True for key in ("torrent_verified", "hash_consistent", "wait_evidence", "injection_visible_in_client", "injection_verified"))
+
+
+def _source_matrix_torrent_verified(closure_source: dict[str, Any]) -> bool:
+    if closure_source.get("mode") in {"downloaded", "resumed_torrent"}:
+        return closure_source.get("torrent_verified") is True
+    if isinstance(closure_source.get("torrent_verified"), bool):
+        return closure_source["torrent_verified"]
+    return True
 
 
 def _material_matrix_missing(material_diagnostics: dict[str, Any], review_target: dict[str, Any]) -> list[str]:
@@ -4666,6 +4687,7 @@ def _closure_status_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "source": {
             "ready": bool(closure_source.get("ready") or evidence_source.get("ready")),
             "mode": evidence_source.get("mode"),
+            "torrent_verified": _first_bool_value(closure_source.get("torrent_verified"), evidence_source.get("torrent_verified")),
             "hash_consistent": bool(closure_source.get("hash_consistent") or evidence_source.get("hash_consistent")),
             "wait_evidence": _wait_result_completed(closure_source.get("source_wait")) or bool(evidence_source.get("source_wait_evidence")),
             "injection_visible_in_client": _summary_qbit_injection_visible(closure_source, evidence_source),
@@ -4730,6 +4752,7 @@ def _pipeline_closure_review(payload: dict[str, Any], artifacts: dict[str, Any] 
         "source": {
             "mode": closure_status.get("source", {}).get("mode") if isinstance(closure_status.get("source"), dict) else None,
             "ready": closure_status.get("source", {}).get("ready") if isinstance(closure_status.get("source"), dict) else None,
+            "torrent_verified": closure_status.get("source", {}).get("torrent_verified") if isinstance(closure_status.get("source"), dict) else None,
             "hash_consistent": closure_status.get("source", {}).get("hash_consistent") if isinstance(closure_status.get("source"), dict) else None,
             "wait_evidence": closure_status.get("source", {}).get("wait_evidence") if isinstance(closure_status.get("source"), dict) else None,
             "injection_verified": closure_status.get("source", {}).get("injection_verified") if isinstance(closure_status.get("source"), dict) else None,
@@ -7208,11 +7231,12 @@ def _pipeline_image_host_prerequisite_checks(config: dict[str, Any], image_host:
 
 def _source_ready_for_live_target_upload(stages: list[dict[str, Any]]) -> bool:
     source_download = _find_stage(stages, "source-download")
+    source_torrent_verify = _find_stage(stages, "source-torrent-verify")
     inject_source = _find_stage(stages, "inject-source")
     wait_complete = _find_stage(stages, "wait-complete")
     match = _find_stage(stages, "match")
     source_content_verify = _find_stage(stages, "source-content-verify")
-    source_downloaded_flow_ready = _stage_completed(source_download) and _source_injection_verified(inject_source) and _source_wait_completed(wait_complete)
+    source_downloaded_flow_ready = _stage_completed(source_download) and _stage_completed(source_torrent_verify) and _source_injection_verified(inject_source) and _source_wait_completed(wait_complete)
     existing_content_ready = _match_stage_has_match(match) and _source_content_verified(source_content_verify) and not _wait_stage_attempt_failed(wait_complete)
     return source_downloaded_flow_ready or existing_content_ready
 
@@ -8386,6 +8410,8 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         artifacts["qbit_wait_retry_hints"] = qbit_wait_fields["qbit_wait_retry_hints"]
     if _artifact_value_present(evidence_source.get("hash_consistent")):
         artifacts["source_hash_consistent"] = evidence_source.get("hash_consistent")
+    if _artifact_value_present(evidence_source.get("torrent_verified")):
+        artifacts["source_torrent_verified"] = evidence_source.get("torrent_verified")
     if _artifact_value_present(evidence_source.get("injected_torrent_hash")):
         artifacts["source_injected_torrent_hash"] = evidence_source.get("injected_torrent_hash")
     if _artifact_value_present(evidence_source.get("injection_verified")):
@@ -9625,6 +9651,8 @@ def _pipeline_stage_blocker_next_action(blocker: str) -> str:
         return "Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description, then rerun target preparation."
     if blocker.startswith("source-download:"):
         return "Fix source torrent download prerequisites, then re-run with --download-source after runtime-check, flow-check, source-info, and rule-check pass."
+    if blocker.startswith("source-torrent-verify:"):
+        return "Re-download the source torrent or provide the original --source-torrent-file, then rerun source injection only after source-torrent-verify succeeds."
     if blocker.startswith("inject-source: --save-path"):
         return "Provide a qBittorrent save path with --save-path when using --inject-source."
     if blocker.startswith("inject-source:"):
@@ -9657,6 +9685,7 @@ def _pipeline_closure_next_action(blocker: str) -> str:
         "target.downloaded": "Download the generated target torrent with --download-uploaded-torrent after live upload succeeds, or provide it with --uploaded-torrent-file.",
         "target.injected": "Inject the generated target torrent into qBittorrent with --inject-uploaded-torrent and a valid uploaded save path, or resume from --uploaded-torrent-file.",
         "target.seeding": "Wait for the injected target torrent to become complete in qBittorrent with --wait-uploaded-complete; if the torrent file is already local, resume with --uploaded-torrent-file.",
+        "source.torrent_verified": "Re-run the source side with --download-source or --source-torrent-file so source-torrent-verify records readable source torrent evidence before target upload.",
         "source.hash_consistent": "Re-verify the source torrent evidence: use the original --source-torrent-file, re-run source injection/wait, and stop if qBittorrent reports a different source hash.",
         "target.hash_consistent": "Re-verify the uploaded MTEAM torrent evidence: download or provide the generated target torrent again, inject that exact file, and stop if qBittorrent reports a different uploaded hash.",
         "target.duplicate_clean": "Re-run a fresh MTEAM duplicate check immediately before upload, and stop if MTEAM reports an existing torrent.",
@@ -9678,6 +9707,7 @@ def _latest_source_info_stage(stages: list[dict[str, Any]]) -> dict[str, Any] | 
 
 def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, source_torrent_hash: str | None, target_torrent_file: str | None) -> dict[str, Any]:
     source_download = _find_stage(stages, "source-download")
+    source_torrent_verify = _find_stage(stages, "source-torrent-verify")
     inject_source = _find_stage(stages, "inject-source")
     wait_complete = _find_stage(stages, "wait-complete")
     match = _find_stage(stages, "match")
@@ -9702,6 +9732,7 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     target_preparation_audit = _target_preparation_audit(target_prepare_result, target_torrent_file)
     target_payload_review = target_preparation_audit.get("payload_review") if isinstance(target_preparation_audit.get("payload_review"), dict) else {}
     source_downloaded = _stage_completed(source_download) and _torrent_file_present(source_download_result)
+    source_torrent_verified = _stage_completed(source_torrent_verify)
     source_injected = _source_injection_verified(inject_source)
     source_complete = _source_wait_completed(wait_complete)
     source_matched = _match_stage_has_match(match)
@@ -9713,10 +9744,13 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     injected_target_hash = _torrent_hash_from_result(injected_torrent)
     uploaded_target_hash = target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None
     downloaded_target_hash = _torrent_hash_from_result(downloaded_torrent)
+    source_downloaded_ready = source_downloaded and source_torrent_verified and source_injected and source_complete
     existing_source_ready = source_matched and source_content_verified and not _wait_stage_attempt_failed(wait_complete)
     source = {
-        "ready": (source_downloaded and source_injected and source_complete) or existing_source_ready,
+        "ready": source_downloaded_ready or existing_source_ready,
         "downloaded": source_downloaded,
+        "torrent_verified": source_torrent_verified,
+        "source_torrent_verification": source_torrent_verify.get("result") if source_torrent_verify and isinstance(source_torrent_verify.get("result"), dict) else None,
         "injected": source_injected,
         "injection_verified": source_injected,
         "injected_torrent": inject_source.get("result") if inject_source and isinstance(inject_source.get("result"), dict) else None,
@@ -9784,6 +9818,8 @@ def _closure_blockers(source: dict[str, Any], target: dict[str, Any]) -> list[st
         ("target.injected", target.get("injected")),
     ]
     blockers = [name for name, ok in checks if not ok]
+    if source.get("downloaded") and not source.get("torrent_verified"):
+        blockers.append("source.torrent_verified")
     if target.get("injected") and not target.get("seeding"):
         blockers.append("target.seeding")
     if source.get("ready") and not source.get("hash_consistent"):
@@ -10063,6 +10099,8 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
         "source": {
             "ready": bool(source.get("ready")),
             "downloaded": bool(source.get("downloaded")),
+            "torrent_verified": bool(source.get("torrent_verified")),
+            "source_torrent_verification": source.get("source_torrent_verification"),
             "torrent_file_evidence": _torrent_file_evidence_complete(source.get("source_torrent")),
             "injected": bool(source.get("injected")),
             "complete": bool(source.get("complete")),
@@ -10148,6 +10186,7 @@ def _pipeline_closure_audit(closure: dict[str, Any] | None, evidence: dict[str, 
     add("source.hash_consistent", closure_source.get("hash_consistent") or evidence_source.get("hash_consistent"), scope="source", evidence_keys=["closure.source.hash_consistent", "evidence.source.hash_consistent"])
     add("source.wait_evidence", _wait_result_completed(closure_source.get("source_wait")) or bool(evidence_source.get("source_wait_evidence")), scope="source", evidence_keys=["closure.source.source_wait", "evidence.source.source_wait_evidence"])
     if source_injection_required:
+        add("source.torrent_verified", closure_source.get("torrent_verified") or evidence_source.get("torrent_verified"), scope="source", evidence_keys=["closure.source.torrent_verified", "evidence.source.torrent_verified"])
         add("source.torrent_hash", closure_source.get("torrent_hash") or evidence_source.get("torrent_hash"), scope="source", evidence_keys=["closure.source.torrent_hash", "evidence.source.torrent_hash"])
         add(
             "source.injected_torrent_hash",
