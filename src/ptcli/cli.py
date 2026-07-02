@@ -11186,6 +11186,9 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
     source_followup_planned = source_followup.get("planned") if isinstance(source_followup.get("planned"), dict) else {}
     source_wait_query = source_followup.get("source_wait_query") if isinstance(source_followup.get("source_wait_query"), dict) else {}
     source_wait_retry = source_followup.get("wait_retry") if isinstance(source_followup.get("wait_retry"), dict) else {}
+    source_torrent_evidence = source_followup.get("source_torrent_file_evidence") if isinstance(source_followup.get("source_torrent_file_evidence"), dict) else {}
+    source_followup_gates = source_followup.get("gates") if isinstance(source_followup.get("gates"), dict) else {}
+    source_followup_next_actions = _string_list(source_followup.get("next_actions"))
     source_command_recovery = readiness_summary.get("source_command_recovery") if isinstance(readiness_summary.get("source_command_recovery"), dict) else {}
     uploaded_followup = readiness_summary.get("uploaded_followup") if isinstance(readiness_summary.get("uploaded_followup"), dict) else {}
     uploaded_wait_query = uploaded_followup.get("uploaded_wait_query") if isinstance(uploaded_followup.get("uploaded_wait_query"), dict) else {}
@@ -11301,12 +11304,15 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_SOURCE_FOLLOWUP_READY_FOR_SEEDING": _shell_bool(source_followup.get("ready_for_source_seeding")) if source_followup.get("ready_for_source_seeding") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_MODE": source_followup.get("mode"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_SCOPE": source_followup.get("scope"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_GATES": json.dumps(source_followup_gates, ensure_ascii=False) if source_followup_gates else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_PLANNED_DOWNLOAD": _shell_bool(source_followup_planned.get("download_source")) if source_followup_planned.get("download_source") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_PLANNED_INJECT": _shell_bool(source_followup_planned.get("inject_source")) if source_followup_planned.get("inject_source") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_PLANNED_WAIT": _shell_bool(source_followup_planned.get("wait_complete")) if source_followup_planned.get("wait_complete") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_MISSING": ",".join(_string_list(source_followup.get("missing"))),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_BLOCKERS": "|".join(_string_list(source_followup.get("blockers"))),
-        "PTCLI_READINESS_SOURCE_FOLLOWUP_NEXT_ACTIONS": " | ".join(_string_list(source_followup.get("next_actions"))),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_NEXT_ACTION_COUNT": len(source_followup_next_actions),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_FIRST_NEXT_ACTION": source_followup_next_actions[0] if source_followup_next_actions else None,
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_NEXT_ACTIONS": " | ".join(source_followup_next_actions),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_HASH": source_followup.get("source_torrent_hash"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_FILE_READY": _shell_bool(source_followup.get("source_torrent_file_ready"))
         if source_followup.get("source_torrent_file_ready") is not None
@@ -11320,6 +11326,15 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_EVIDENCE": _shell_bool(source_followup.get("source_wait_evidence")) if source_followup.get("source_wait_evidence") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_CONSISTENT": _shell_bool(source_followup.get("hash_consistent")) if source_followup.get("hash_consistent") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_FILE": source_followup.get("source_torrent_file"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_EXISTS": _shell_bool(source_torrent_evidence.get("exists")) if source_torrent_evidence.get("exists") is not None else None,
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_IS_FILE": _shell_bool(source_torrent_evidence.get("is_file")) if source_torrent_evidence.get("is_file") is not None else None,
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_SIZE_BYTES": source_torrent_evidence.get("size_bytes"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_SHA1": source_torrent_evidence.get("sha1"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_INFOHASH": source_torrent_evidence.get("torrent_hash"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_METADATA_READABLE": _shell_bool(source_torrent_evidence.get("metadata_readable"))
+        if source_torrent_evidence.get("metadata_readable") is not None
+        else None,
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_REUSED": _shell_bool(source_torrent_evidence.get("reused")) if source_torrent_evidence.get("reused") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_SAVE_PATH": source_followup.get("source_save_path"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_QBIT_CATEGORY": source_followup.get("source_qbit_category"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_QBIT_TAGS": source_followup.get("source_qbit_tags"),
@@ -11335,6 +11350,7 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_SUGGESTED_HASH": source_wait_retry.get("suggested_torrent_hash"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH": source_wait_retry.get("suggested_content_path"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH": source_wait_retry.get("suggested_save_path"),
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_RETRY_REASON": source_wait_retry.get("reason"),
         "PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_PRESENT": _shell_bool(source_command_recovery.get("present")) if "present" in source_command_recovery else None,
         "PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_MISSING": ",".join(_string_list(source_command_recovery.get("missing"))),
         "PTCLI_READINESS_SOURCE_COMMAND_RECOVERY_REQUIRED_FLAGS": ",".join(_string_list(source_command_recovery.get("required_flags"))),
