@@ -57,22 +57,189 @@
     {
       "name": "retorrent_job",
       "method": "POST",
-      "path": "/v1/jobs/retorrent"
+      "path": "/v1/jobs/retorrent",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Source tracker details URL or torrent id."
+          },
+          "source_tracker": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "execute": {
+            "type": "boolean"
+          },
+          "accept_rules": {
+            "type": "boolean"
+          },
+          "confirm_upload": {
+            "type": "boolean"
+          },
+          "save_path": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "blockers",
+          "next_actions",
+          "summary_file",
+          "resume_state"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete"
+        ]
+      },
+      "safety": {
+        "live_upload": true,
+        "requires_confirmation": [
+          "accept_rules=true",
+          "confirm_upload=true"
+        ]
+      }
     },
     {
       "name": "daily_candidates_job",
       "method": "POST",
-      "path": "/v1/jobs/candidates/daily"
+      "path": "/v1/jobs/candidates/daily",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "source_tracker",
+          "target"
+        ],
+        "properties": {
+          "source_tracker": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "default": 10,
+            "maximum": 10
+          },
+          "accept_rules": {
+            "type": "boolean"
+          },
+          "check_dupes": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "blockers",
+          "next_actions"
+        ]
+      },
+      "safety": {
+        "live_upload": false
+      }
     },
     {
       "name": "get_job_status",
       "method": "GET",
-      "path": "/v1/jobs/{job_id}"
+      "path": "/v1/jobs/{job_id}",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "blockers",
+          "next_actions",
+          "summary_file",
+          "resume_state"
+        ]
+      },
+      "safety": {
+        "live_upload": false
+      }
     },
     {
       "name": "resume_job",
       "method": "POST",
-      "path": "/v1/jobs/{job_id}/resume"
+      "path": "/v1/jobs/{job_id}/resume",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "blockers",
+          "next_actions"
+        ]
+      },
+      "safety": {
+        "live_upload": "inherits_from_resume_command",
+        "requires_confirmation": [
+          "existing allowlisted next_command_argv"
+        ]
+      }
     }
   ]
 }

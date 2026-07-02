@@ -12385,6 +12385,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/{job_id}" in paths
     assert "/v1/jobs/{job_id}/resume" in paths
     assert "/.well-known/ptcli-agent.json" in paths
+    tool_by_name = {tool["name"]: tool for tool in tools["tools"]}
+    assert tool_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
+    assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
+    assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
+    assert "response_contract" in tool_by_name["get_job_status"]
 
     openapi = ptcli_service.openapi_payload(require_auth=True)
     assert "/.well-known/ptcli-agent.json" in openapi["paths"]
@@ -12411,6 +12416,11 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
     assert {tool["name"] for tool in manifest["tools"]} >= {"retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+    retorrent_tool = next(tool for tool in manifest["tools"] if tool["name"] == "retorrent_job")
+    assert retorrent_tool["input_schema"]["required"] == ["source", "target"]
+    assert "uploaded_qbit_upload_limit" in retorrent_tool["input_schema"]["properties"]
+    assert "resume_state" in retorrent_tool["response_contract"]["required_fields"]
+    assert "confirm_upload=true" in retorrent_tool["safety"]["requires_confirmation"]
     assert manifest["openclaw"]["manifest_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
     assert manifest["hermes"]["manifest_url"] == "http://ptcli.local:8080/v1/hermes/skill.json"
 
@@ -12421,7 +12431,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["schema_version"] == "ptcli.agent_manifest.v1"
         assert payload["auth"]["env"] == "PTCLI_API_TOKEN"
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
-        assert {tool["name"] for tool in payload["tools"]} >= {"retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+        tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
+        assert set(tools_by_name) >= {"retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+        assert tools_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
+        assert "response_contract" in tools_by_name["retorrent_job"]
+        assert "safety" in tools_by_name["resume_job"]
 
 
 def test_parse_recent_candidate_seeds_from_nexusphp_html() -> None:
