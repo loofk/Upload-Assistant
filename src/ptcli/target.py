@@ -647,6 +647,7 @@ def build_mteam_prepare_preview(source_info: dict[str, Any] | None, target_track
         "douban_id": source_info.get("douban_id") if source_info else None,
         "douban_url": source_info.get("douban_url") if source_info else None,
         "torrenthash": source_info.get("torrenthash") if source_info else None,
+        "details_url": source_info.get("details_url") if source_info else None,
         "description_length": source_info.get("description_length") if source_info else 0,
         "ptgen_description_length": len(str(source_info.get("ptgen_description") or "")) if source_info else 0,
     }
@@ -700,6 +701,7 @@ def build_mteam_description_draft(meta_draft: dict[str, Any], source_info: dict[
         "[b]Source evidence[/b]",
         f"Source tracker: {source_info.get('tracker') if source_info else ''}",
         f"Source torrent id: {source_info.get('torrent_id') if source_info else ''}",
+        f"Source details: {source_info.get('details_url') if source_info else ''}",
         f"Source torrent hash: {source_info.get('torrenthash') if source_info else ''}",
         f"Local content path: {meta_draft.get('content_path') or ''}",
         "",
@@ -841,6 +843,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "tracker": source_info.get("tracker") if isinstance(source_info, dict) else None,
             "torrent_id": source_info.get("torrent_id") if isinstance(source_info, dict) else None,
             "name": source_info.get("name") if isinstance(source_info, dict) else None,
+            "details_url": source_info.get("details_url") if isinstance(source_info, dict) else None,
             "description_length": source_description_length,
         },
         "metadata": {

@@ -42,6 +42,7 @@ from src.ptcli.source import (
     extract_torrent_id,
     fetch_source_info,
     source_credential_requirements,
+    source_details_url,
     source_download_adapter,
     source_info_adapter,
     source_info_has_signal,
@@ -443,6 +444,8 @@ async def export_qbit(args: argparse.Namespace) -> dict[str, Any]:
 
 def _source_info_payload(config: dict[str, Any], tracker: str, source_id: str, base_dir: str | None, info: Any) -> dict[str, Any]:
     source = info.to_dict()
+    if not source.get("details_url"):
+        source["details_url"] = source_details_url(tracker, extract_torrent_id(source_id))
     source["source_info_diagnostics"] = _source_info_diagnostics(config, tracker, source_id, base_dir, source)
     return source
 
@@ -462,6 +465,7 @@ def _source_info_diagnostics(config: dict[str, Any], tracker: str, source_id: st
     has_signal = any(signal_fields.values())
     credential_checks = _source_info_credential_checks(config, source_tracker, base_dir)
     credential_ready = all(bool(check.get("ok")) for check in credential_checks) if credential_checks else None
+    details_url = source.get("details_url") or source_details_url(source_tracker, source_torrent_id)
     missing = [f"source_info.{name}" for name, ready in signal_fields.items() if not ready]
     blockers = []
     if not has_signal:
@@ -473,6 +477,7 @@ def _source_info_diagnostics(config: dict[str, Any], tracker: str, source_id: st
         "source_torrent_id": source_torrent_id,
         "source_info_adapter": source_info_adapter(source_tracker),
         "source_download_adapter": source_download_adapter(source_tracker),
+        "details_url": details_url,
         "has_signal": has_signal,
         "signal_fields": signal_fields,
         "ptgen_description_ready": signal_fields["ptgen_description"],
@@ -11823,6 +11828,7 @@ def _summary_check_source_info_shell_fields(source_info_diagnostics: dict[str, A
         "PTCLI_SOURCE_INFO_TORRENT_ID": source_info_diagnostics.get("source_torrent_id"),
         "PTCLI_SOURCE_INFO_ADAPTER": source_info_diagnostics.get("source_info_adapter"),
         "PTCLI_SOURCE_DOWNLOAD_ADAPTER": source_info_diagnostics.get("source_download_adapter"),
+        "PTCLI_SOURCE_INFO_DETAILS_URL": source_info_diagnostics.get("details_url"),
         "PTCLI_SOURCE_INFO_HAS_SIGNAL": _shell_bool(source_info_diagnostics.get("has_signal")) if source_info_diagnostics.get("has_signal") is not None else None,
         "PTCLI_SOURCE_INFO_PTGEN_READY": _shell_bool(source_info_diagnostics.get("ptgen_description_ready")) if source_info_diagnostics.get("ptgen_description_ready") is not None else None,
         "PTCLI_SOURCE_INFO_PTGEN_LENGTH": source_info_diagnostics.get("ptgen_description_length"),

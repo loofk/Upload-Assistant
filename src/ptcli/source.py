@@ -121,6 +121,7 @@ class SourceTorrentInfo:
     douban_id: str | None
     douban_url: str | None
     ptgen_description: str | None = None
+    details_url: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -174,6 +175,7 @@ def source_info_from_tuple(tracker: str, torrent_id: str, result: tuple[Any, ...
         douban_id=_optional_str(meta.get("douban_id")) or douban_id,
         douban_url=_optional_str(meta.get("douban_url")) or douban_url,
         ptgen_description=ptgen_description,
+        details_url=source_details_url(tracker, torrent_id),
     )
 
 
@@ -268,6 +270,7 @@ def _mteam_source_info_from_detail(tracker: str, torrent_id: str, data: Any) -> 
         douban_id=douban_id,
         douban_url=douban_url,
         ptgen_description=_extract_ptgen_description(description or ""),
+        details_url=source_details_url(tracker, torrent_id),
     )
 
 
@@ -279,6 +282,7 @@ async def _download_mteam_source_torrent(config: dict[str, Any], torrent_id: str
 async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torrent_id: str, meta: dict[str, Any]) -> SourceTorrentInfo:
     _ = config
     cookiefile = os.path.join(meta["base_dir"], "data", "cookies", f"{tracker}.txt")
+    details_url = source_details_url(tracker, torrent_id)
     cookie_exists = await asyncio.to_thread(os.path.exists, cookiefile)
     if not cookie_exists:
         return SourceTorrentInfo(
@@ -292,11 +296,12 @@ async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torre
             description_length=0,
             douban_id=None,
             douban_url=None,
+            details_url=details_url,
         )
 
     cookies = await _load_cookie_file(cookiefile)
     async with httpx.AsyncClient(cookies=cookies, timeout=30.0, follow_redirects=True) as client:
-        response = await client.get(_generic_details_url(tracker, torrent_id))
+        response = await client.get(details_url or _generic_details_url(tracker, torrent_id))
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "lxml")
@@ -316,7 +321,17 @@ async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torre
         douban_id=douban_id,
         douban_url=douban_url,
         ptgen_description=_extract_ptgen_description(description),
+        details_url=details_url,
     )
+
+
+def source_details_url(tracker: str, torrent_id: str) -> str | None:
+    source_tracker = normalize_tracker(tracker)
+    if source_tracker in MTEAM_API_TRACKERS:
+        return f"{MTEAM_API_TRACKERS[source_tracker]}/api/torrent/detail"
+    if source_tracker in GENERIC_DETAILS_BASE_URLS:
+        return _generic_details_url(source_tracker, torrent_id)
+    return None
 
 
 def _generic_details_url(tracker: str, torrent_id: str) -> str:

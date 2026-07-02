@@ -4132,6 +4132,8 @@ def test_source_info_exposes_normalized_source_id(monkeypatch, capsys) -> None:
     assert payload["input_source_id"] == source_url
     assert payload["source_torrent_id"] == "60635"
     assert payload["source"]["torrent_id"] == "60635"
+    assert payload["source"]["details_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert payload["source_info_diagnostics"]["details_url"] == "https://u2.dmhy.org/details.php?id=60635"
 
 
 def test_source_info_uses_enabled_chinese_source_adapter(monkeypatch, capsys) -> None:
@@ -4167,6 +4169,36 @@ def test_source_module_registers_enabled_chinese_source_adapters() -> None:
     assert ptcli_source.source_download_adapter("MTEAM") == "mteam_api"
     assert ptcli_source.source_download_adapter("unsupported") is None
     assert ptcli_source.source_credential_requirements("HDS") == ["data/cookies/HDS.txt"]
+
+
+def test_source_details_url_is_auditable_for_reference_flows() -> None:
+    assert ptcli_source.source_details_url("U2", "60635") == "https://u2.dmhy.org/details.php?id=60635"
+    assert ptcli_source.source_details_url("CHD", "2468") == "https://ptchdbits.co/details.php?id=2468"
+    assert ptcli_source.source_details_url("HDS", "1357") == "https://hd-space.org/index.php?page=torrent-details&id=1357"
+    assert ptcli_source.source_details_url("MTEAM", "999") == "https://api.m-team.cc/api/torrent/detail"
+
+
+def test_mteam_package_preserves_source_details_url(tmp_path) -> None:
+    source_info = {
+        "tracker": "CHD",
+        "torrent_id": "2468",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "b" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+        "details_url": "https://ptchdbits.co/details.php?id=2468",
+    }
+
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    description = Path(package["files"]["description_draft"]).read_text(encoding="utf-8")
+
+    assert package["metadata"]["details_url"] == "https://ptchdbits.co/details.php?id=2468"
+    assert package["materials"]["source"]["details_url"] == "https://ptchdbits.co/details.php?id=2468"
+    assert "Source details: https://ptchdbits.co/details.php?id=2468" in description
 
 
 @pytest.mark.asyncio
@@ -4653,6 +4685,7 @@ def test_source_info_reports_missing_cookie_diagnostics(monkeypatch, capsys, tmp
     assert payload["source"]["source_info_diagnostics"] == diagnostics
     assert diagnostics["source_info_adapter"] == "generic_details_cookie"
     assert diagnostics["source_download_adapter"] == "nexusphp_passkey"
+    assert diagnostics["details_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert diagnostics["has_signal"] is False
     assert diagnostics["ptgen_description_ready"] is False
     assert diagnostics["ptgen_description_length"] == 0
@@ -4692,6 +4725,8 @@ def test_source_info_diagnostics_exposes_ptgen_description_signal(tmp_path) -> N
     assert diagnostics["ptgen_description_ready"] is True
     assert diagnostics["ptgen_description_length"] == len(ptgen_description)
     assert "source_info.ptgen_description" not in diagnostics["missing"]
+    shell_fields = ptcli_cli._summary_check_source_info_shell_fields(diagnostics)
+    assert shell_fields["PTCLI_SOURCE_INFO_DETAILS_URL"] == "https://u2.dmhy.org/details.php?id=60635"
 
 
 def test_source_download_requires_rule_ack(monkeypatch, capsys) -> None:
