@@ -8046,6 +8046,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
                             },
                             "imdb_id": 1234567,
                             "tmdb_id": 999,
+                            "tmdb_type": "movie",
                             "douban_id": "1291546",
                             "douban_url": "https://movie.douban.com/subject/1291546/",
                             "ptgen_description_length": 42,
@@ -8168,6 +8169,7 @@ def test_summary_check_print_shell_exports_automation_state(tmp_path, capsys) ->
     assert "export PTCLI_MATERIAL_METADATA_READINESS_BLOCKER_COUNT=0\n" in out
     assert "export PTCLI_MATERIAL_METADATA_IMDB_ID=1234567\n" in out
     assert "export PTCLI_MATERIAL_METADATA_TMDB_ID=999\n" in out
+    assert "export PTCLI_MATERIAL_METADATA_TMDB_TYPE=movie\n" in out
     assert "export PTCLI_MATERIAL_METADATA_DOUBAN_ID=1291546\n" in out
     assert "export PTCLI_MATERIAL_METADATA_DOUBAN_URL=https://movie.douban.com/subject/1291546/\n" in out
     assert "export PTCLI_MATERIAL_PTGEN_DESCRIPTION_LENGTH=42\n" in out
@@ -16056,7 +16058,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     monkeypatch.setattr(ptcli_cli, "search_mteam_duplicates", fake_search_mteam_duplicates)
     monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
     metadata_file = tmp_path / "metadata.json"
-    await asyncio.to_thread(metadata_file.write_text, json.dumps({"tmdb_id": 999, "douban_id": "1291546"}), encoding="utf-8")
+    await asyncio.to_thread(metadata_file.write_text, json.dumps({"tmdb_id": 999, "tmdb_type": "movie", "douban_id": "1291546"}), encoding="utf-8")
     mediainfo = tmp_path / "MI_FULL_00.txt"
     await asyncio.to_thread(mediainfo.write_text, "General\nComplete name : Name.mkv\n", encoding="utf-8")
     bdinfo = tmp_path / "BD_FULL_00.txt"
@@ -16162,6 +16164,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert material_generation["prerequisites"]["ok"] is True
     assert material_generation["metadata"]["ok"] is True
     assert material_generation["metadata"]["missing"] == []
+    assert material_generation["metadata"]["tmdb_type"] == "movie"
     assert material_generation["metadata"]["ptgen_description_length"] == 0
     assert material_generation["metadata"]["readiness"]["imdb_id"] == {"ready": True, "required": True, "source": "source"}
     assert material_generation["metadata"]["readiness"]["tmdb_id"] == {"ready": True, "required": True, "source": "source"}
@@ -16284,6 +16287,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     assert "ptgen_description" in out
     assert "export PTCLI_RESUME_MATERIAL_METADATA_IMDB_ID=1234567\n" in out
     assert "export PTCLI_RESUME_MATERIAL_METADATA_TMDB_ID=2\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_METADATA_TMDB_TYPE=movie\n" in out
     assert "export PTCLI_RESUME_MATERIAL_METADATA_DOUBAN_ID=1291546\n" in out
     assert "export PTCLI_RESUME_MATERIAL_PTGEN_DESCRIPTION_LENGTH=0\n" in out
     assert f"export PTCLI_RESUME_MATERIAL_MEDIAINFO_FILE={mediainfo}\n" in out
