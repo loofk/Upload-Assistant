@@ -3246,7 +3246,7 @@ def _target_upload_followup_next_actions(missing: list[str]) -> list[str]:
     actions: list[str] = []
     if any(item in missing for item in ("downloaded", "uploaded_torrent_hash")):
         actions.append("Download or provide the uploaded MTEAM torrent, then resume uploaded torrent injection.")
-    if any(item in missing for item in ("injected_torrent_hash", "injection_verified")):
+    if any(item in missing for item in ("injected_torrent_hash", "injection_visible_in_client", "injection_verified")):
         actions.append("Inject the uploaded MTEAM torrent into qBittorrent with the correct save path.")
     if "uploaded_wait_evidence" in missing:
         actions.append("Wait for qBittorrent to report the uploaded MTEAM torrent as matched and complete.")

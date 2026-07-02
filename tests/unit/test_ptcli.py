@@ -21759,6 +21759,7 @@ def test_target_upload_followup_requires_uploaded_torrent_visible_in_client(tmp_
     assert followup["gates"]["uploaded_wait_evidence"] is True
     assert followup["missing"] == ["injection_visible_in_client"]
     assert followup["blockers"] == ["uploaded MTEAM torrent is not visible in qBittorrent after injection"]
+    assert followup["next_actions"] == ["Inject the uploaded MTEAM torrent into qBittorrent with the correct save path."]
 
 
 @pytest.mark.asyncio
