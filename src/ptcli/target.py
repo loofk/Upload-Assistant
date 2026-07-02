@@ -1746,6 +1746,7 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
     }
     media_info_source = _mteam_material_mediainfo_source(materials)
     media_info_length = _mteam_material_mediainfo_length(materials)
+    media_info_excerpt_matched = _mteam_description_material_excerpt_matches(description_summary, materials)
     payload_media_info = form_fields.get("mediainfo") if isinstance(form_fields.get("mediainfo"), dict) else {}
     return {
         "description": {
@@ -1769,6 +1770,7 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
                 media_info_length=media_info_length,
                 payload_media_info_source=payload_media_info.get("source"),
                 payload_media_info_length=payload_media_info.get("length"),
+                media_info_excerpt_matched=media_info_excerpt_matched,
                 screenshot_coverage=screenshot_coverage,
                 local_screenshot_count=local_screenshot_count,
                 image_host_count=image_host_count,
@@ -1802,6 +1804,7 @@ def _mteam_description_evidence_summary(
     media_info_length: int,
     payload_media_info_source: Any,
     payload_media_info_length: Any,
+    media_info_excerpt_matched: bool,
     screenshot_coverage: dict[str, Any],
     local_screenshot_count: int,
     image_host_count: int,
@@ -1832,13 +1835,14 @@ def _mteam_description_evidence_summary(
             "items": {name: _mteam_metadata_chain_item(name, metadata, external_links, form_fields) for name in ("imdb", "tmdb", "douban")},
         },
         "mediainfo_or_bdinfo": {
-            "ready": bool(content.get("has_mediainfo_or_bdinfo")),
+            "ready": bool(content.get("has_mediainfo_or_bdinfo") and media_info_excerpt_matched),
             "source": media_info_source,
             "length": media_info_length,
+            "description_excerpt_matched": media_info_excerpt_matched,
         },
         "media_info_chain": {
             "ready": bool(
-                content.get("has_mediainfo_or_bdinfo")
+                media_info_excerpt_matched
                 and media_info_source
                 and media_info_length > 0
                 and payload_media_info_source == media_info_source
@@ -1847,6 +1851,7 @@ def _mteam_description_evidence_summary(
             "material_source": media_info_source,
             "material_length": media_info_length,
             "description_has_excerpt": bool(content.get("has_mediainfo_or_bdinfo")),
+            "description_excerpt_matched": media_info_excerpt_matched,
             "payload_source": payload_media_info_source,
             "payload_length": payload_media_info_length,
         },
@@ -1960,6 +1965,7 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
     description_image_urls = _mteam_description_image_urls_from_content(content)
     missing_image_urls = [url for url in expected_image_urls if url not in description_image_urls]
     screenshot_coverage_ready = _mteam_screenshot_coverage_ready(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls)
+    media_info_excerpt_matched = _mteam_description_material_excerpt_matches(description_summary, materials)
     external_links = content.get("external_links") if isinstance(content.get("external_links"), dict) else {}
     metadata_chain_items = {name: _mteam_metadata_chain_item(name, metadata, external_links, form_fields) for name in ("imdb", "tmdb", "douban")}
     external_id_checks = {
@@ -2016,9 +2022,9 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
             ),
             _payload_field_check(
                 "materials.description.mediainfo_or_bdinfo",
-                bool(content.get("has_mediainfo_or_bdinfo")),
+                bool(content.get("has_mediainfo_or_bdinfo") and media_info_excerpt_matched),
                 "MTEAM description includes MediaInfo/BDInfo excerpt.",
-                "MTEAM description is missing a MediaInfo/BDInfo excerpt.",
+                _mteam_description_media_info_missing_message(content, materials, media_info_excerpt_matched),
             ),
             _payload_field_check(
                 "materials.description.screenshot_bbcode",
@@ -2063,6 +2069,40 @@ def _mteam_screenshot_coverage_missing_message(local_screenshot_count: int, imag
     if missing_image_urls:
         return "MTEAM description is missing one or more image-host screenshot URLs."
     return "MTEAM screenshot coverage is incomplete."
+
+
+def _mteam_description_material_excerpt_matches(description_summary: dict[str, Any], materials: dict[str, Any]) -> bool:
+    source = _mteam_material_mediainfo_source(materials)
+    if not source:
+        return False
+    expected_excerpt = _read_material_text_excerpt(source)
+    if not expected_excerpt:
+        return False
+    description_text = _read_description_summary_text(description_summary)
+    if not description_text:
+        return False
+    return expected_excerpt in description_text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _read_description_summary_text(description_summary: dict[str, Any]) -> str:
+    path = description_summary.get("path")
+    if not path:
+        return ""
+    try:
+        return Path(str(path)).expanduser().read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _mteam_description_media_info_missing_message(content: dict[str, Any], materials: dict[str, Any], excerpt_matched: bool) -> str:
+    if not content.get("has_mediainfo_or_bdinfo"):
+        return "MTEAM description is missing a MediaInfo/BDInfo excerpt."
+    if excerpt_matched:
+        return "MTEAM description MediaInfo/BDInfo excerpt is not verified."
+    source = _mteam_material_mediainfo_source(materials)
+    if not source:
+        return "MTEAM MediaInfo/BDInfo material file is missing, so the description excerpt cannot be verified."
+    return f"MTEAM description MediaInfo/BDInfo excerpt does not match current material file: {source}."
 
 
 def _mteam_description_metadata_link_missing_message(name: str, item: dict[str, Any], content: dict[str, Any]) -> str:

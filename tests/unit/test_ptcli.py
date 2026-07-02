@@ -21173,12 +21173,13 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
                 },
             },
         },
-        "mediainfo_or_bdinfo": {"ready": True, "source": str(mediainfo), "length": len(mediainfo.read_text(encoding="utf-8"))},
+        "mediainfo_or_bdinfo": {"ready": True, "source": str(mediainfo), "length": len(mediainfo.read_text(encoding="utf-8")), "description_excerpt_matched": True},
         "media_info_chain": {
             "ready": True,
             "material_source": str(mediainfo),
             "material_length": len(mediainfo.read_text(encoding="utf-8")),
             "description_has_excerpt": True,
+            "description_excerpt_matched": True,
             "payload_source": str(mediainfo),
             "payload_length": len(mediainfo.read_text(encoding="utf-8")),
         },
@@ -21225,6 +21226,68 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
     }
     assert audit["description"]["evidence"]["screenshot_coverage"]["ready"] is True
     assert audit["payload_review"]["description"]["evidence"]["mediainfo_or_bdinfo"]["source"] == str(mediainfo)
+
+
+def test_mteam_upload_preflight_blocks_stale_mediainfo_excerpt(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Current.mkv\nDuration : 01:23:45\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(json.dumps({"items": [{"raw_url": "https://img.example/raw.png", "img_url": "https://img.example/thumb.png", "web_url": "https://img.example/page"}]}), encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+    }
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        "/downloads/Example",
+        str(tmp_path),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_host_file)},
+    )
+    description_path = Path(package["files"]["description_draft"])
+    description = description_path.read_text(encoding="utf-8")
+    current_excerpt = mediainfo.read_text(encoding="utf-8").strip()
+    description_path.write_text(description.replace(current_excerpt, "General\nComplete name : Stale.mkv\nDuration : 00:00:01"), encoding="utf-8")
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    blockers = preflight["upload_payload"]["blockers"]
+    assert any("materials.description.mediainfo_or_bdinfo" in blocker and str(mediainfo) in blocker for blocker in blockers)
+    assert "description.mediainfo_or_bdinfo" in preflight["upload_payload"]["recovery_missing"]
+    review = preflight["upload_payload"]["review"]
+    assert review["description"]["has_mediainfo_or_bdinfo"] is True
+    assert review["description"]["evidence"]["mediainfo_or_bdinfo"] == {
+        "ready": False,
+        "source": str(mediainfo),
+        "length": len(mediainfo.read_text(encoding="utf-8")),
+        "description_excerpt_matched": False,
+    }
+    assert review["description"]["evidence"]["media_info_chain"] == {
+        "ready": False,
+        "material_source": str(mediainfo),
+        "material_length": len(mediainfo.read_text(encoding="utf-8")),
+        "description_has_excerpt": True,
+        "description_excerpt_matched": False,
+        "payload_source": str(mediainfo),
+        "payload_length": len(mediainfo.read_text(encoding="utf-8")),
+    }
+    audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
+    assert audit["description_ready"] is False
+    assert "materials.description.mediainfo_or_bdinfo" in audit["description"]["missing"]
 
 
 def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_description(tmp_path) -> None:
@@ -21873,6 +21936,7 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
         "material_source": payload_media_source,
         "material_length": payload_media_length,
         "description_has_excerpt": True,
+        "description_excerpt_matched": True,
         "payload_source": payload_media_source,
         "payload_length": payload_media_length,
     }

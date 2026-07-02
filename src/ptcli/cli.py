@@ -9531,7 +9531,7 @@ def _description_evidence_recovery_missing(evidence: Any) -> list[str]:
     if media_info_chain.get("ready") is False:
         if not media_info_chain.get("material_source") or int(media_info_chain.get("material_length", 0) or 0) <= 0:
             _append_unique_string(missing, "assets.mediainfo_or_bdinfo")
-        if media_info_chain.get("description_has_excerpt") is False:
+        if media_info_chain.get("description_has_excerpt") is False or media_info_chain.get("description_excerpt_matched") is False:
             _append_unique_string(missing, "description.mediainfo_or_bdinfo")
         if not media_info_chain.get("payload_source") or int(media_info_chain.get("payload_length", 0) or 0) <= 0:
             _append_unique_string(missing, "payload.mediainfo")
@@ -11248,6 +11248,7 @@ def _media_info_chain_detail_shell_fields(prefix: str, media_info_chain: dict[st
         f"{prefix}_SOURCE": media_info_chain.get("material_source"),
         f"{prefix}_LENGTH": media_info_chain.get("material_length"),
         f"{prefix}_DESCRIPTION_HAS_EXCERPT": _shell_bool(media_info_chain.get("description_has_excerpt")) if media_info_chain.get("description_has_excerpt") is not None else None,
+        f"{prefix}_DESCRIPTION_EXCERPT_MATCHED": _shell_bool(media_info_chain.get("description_excerpt_matched")) if media_info_chain.get("description_excerpt_matched") is not None else None,
         f"{prefix}_PAYLOAD_SOURCE": media_info_chain.get("payload_source"),
         f"{prefix}_PAYLOAD_LENGTH": media_info_chain.get("payload_length"),
     }
