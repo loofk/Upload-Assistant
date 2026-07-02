@@ -5916,6 +5916,44 @@ def test_summary_material_shell_fields_expose_media_generation_failures() -> Non
     assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_DURATION_SECONDS"] == 7200.0
 
 
+def test_summary_material_shell_fields_expose_prerequisite_checks() -> None:
+    checks = [
+        {"name": "assets.ffmpeg", "ok": True, "message": "ffmpeg binary is available: /usr/bin/ffmpeg"},
+        {"name": "assets.image_host", "ok": True, "message": "Image host is configured: ptpimg"},
+        {"name": "assets.image_host.credentials", "ok": False, "message": "Image host ptpimg is missing DEFAULT field(s): ptpimg_api."},
+    ]
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "material_generation": {
+                    "prerequisites": {
+                        "ok": False,
+                        "skipped": False,
+                        "message": "Material prerequisites have blockers.",
+                        "checks": checks,
+                        "blockers": ["Image host ptpimg is missing DEFAULT field(s): ptpimg_api."],
+                    }
+                }
+            }
+        }
+    )
+
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITES_OK"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITES_SKIPPED"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITES_MESSAGE"] == "Material prerequisites have blockers."
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITES_BLOCKERS"] == "Image host ptpimg is missing DEFAULT field(s): ptpimg_api."
+    assert json.loads(shell_fields["PTCLI_MATERIAL_PREREQUISITES_CHECKS"]) == checks
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITE_FFMPEG_READY"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITE_FFMPEG_MESSAGE"] == "ffmpeg binary is available: /usr/bin/ffmpeg"
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_READY"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_MESSAGE"] == "Image host is configured: ptpimg"
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_CREDENTIALS_READY"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_CREDENTIALS_MESSAGE"] == "Image host ptpimg is missing DEFAULT field(s): ptpimg_api."
+    assert shell_fields["PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_SUPPORTED_READY"] is None
+
+
 def test_summary_material_diagnostics_marks_bdinfo_optional_for_file_content() -> None:
     diagnostics = ptcli_cli._summary_material_diagnostics(
         {

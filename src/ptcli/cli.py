@@ -11811,6 +11811,11 @@ def _summary_check_bool_field(checks: dict[str, Any], key: str) -> str | None:
 def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -> dict[str, Any]:
     sections = material_diagnostics.get("sections") if isinstance(material_diagnostics.get("sections"), dict) else {}
     prerequisites = sections.get("prerequisites") if isinstance(sections.get("prerequisites"), dict) else {}
+    prerequisite_checks = prerequisites.get("checks") if isinstance(prerequisites.get("checks"), list) else []
+    prerequisite_ffmpeg = _material_named_check(prerequisite_checks, "assets.ffmpeg")
+    prerequisite_image_host = _material_named_check(prerequisite_checks, "assets.image_host")
+    prerequisite_image_host_credentials = _material_named_check(prerequisite_checks, "assets.image_host.credentials")
+    prerequisite_image_host_supported = _material_named_check(prerequisite_checks, "assets.image_host.supported")
     metadata = sections.get("metadata") if isinstance(sections.get("metadata"), dict) else {}
     metadata_readiness = metadata.get("readiness") if isinstance(metadata.get("readiness"), dict) else {}
     metadata_field_evidence = metadata.get("field_evidence") if isinstance(metadata.get("field_evidence"), dict) else {}
@@ -11895,6 +11900,18 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_BDINFO_REQUIRED": _shell_bool(material_diagnostics.get("bdinfo_required")) if material_diagnostics.get("bdinfo_required") is not None else None,
         "PTCLI_MATERIAL_MEDIA_INFO_REQUIREMENT": material_diagnostics.get("media_info_requirement"),
         "PTCLI_MATERIAL_PREREQUISITES_OK": _summary_material_section_shell_bool(prerequisites),
+        "PTCLI_MATERIAL_PREREQUISITES_SKIPPED": _shell_bool(prerequisites.get("skipped")) if prerequisites.get("skipped") is not None else None,
+        "PTCLI_MATERIAL_PREREQUISITES_MESSAGE": prerequisites.get("message"),
+        "PTCLI_MATERIAL_PREREQUISITES_BLOCKERS": "|".join(_string_list(prerequisites.get("blockers"))),
+        "PTCLI_MATERIAL_PREREQUISITES_CHECKS": json.dumps(prerequisite_checks, ensure_ascii=False) if prerequisite_checks else None,
+        "PTCLI_MATERIAL_PREREQUISITE_FFMPEG_READY": _material_named_check_shell_bool(prerequisite_ffmpeg),
+        "PTCLI_MATERIAL_PREREQUISITE_FFMPEG_MESSAGE": prerequisite_ffmpeg.get("message"),
+        "PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_READY": _material_named_check_shell_bool(prerequisite_image_host),
+        "PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_MESSAGE": prerequisite_image_host.get("message"),
+        "PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_CREDENTIALS_READY": _material_named_check_shell_bool(prerequisite_image_host_credentials),
+        "PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_CREDENTIALS_MESSAGE": prerequisite_image_host_credentials.get("message"),
+        "PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_SUPPORTED_READY": _material_named_check_shell_bool(prerequisite_image_host_supported),
+        "PTCLI_MATERIAL_PREREQUISITE_IMAGE_HOST_SUPPORTED_MESSAGE": prerequisite_image_host_supported.get("message"),
         "PTCLI_MATERIAL_METADATA_OK": _summary_material_section_shell_bool(metadata),
         "PTCLI_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
         "PTCLI_MATERIAL_METADATA_READINESS": json.dumps(metadata_readiness, ensure_ascii=False) if metadata_readiness else None,
@@ -12029,6 +12046,17 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
 
 def _summary_material_section_shell_bool(section: dict[str, Any]) -> str | None:
     return _shell_bool(section.get("ok")) if "ok" in section and section.get("ok") is not None else None
+
+
+def _material_named_check(checks: list[Any], name: str) -> dict[str, Any]:
+    for check in checks:
+        if isinstance(check, dict) and check.get("name") == name:
+            return check
+    return {}
+
+
+def _material_named_check_shell_bool(check: dict[str, Any]) -> str | None:
+    return _shell_bool(check.get("ok")) if "ok" in check and check.get("ok") is not None else None
 
 
 def _material_evidence_items(evidence: Any) -> list[dict[str, Any]]:
