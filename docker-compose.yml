@@ -12,6 +12,7 @@ services:
     environment:
       # Optional but recommended when exposing the API outside localhost.
       - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
       - /path/to/torrents/:/downloads/:rw # map this to qBittorrent download location with matching container paths
       - /mnt/user/appdata/Upload-Assistant/data/config.py:/Upload-Assistant/data/config.py:rw

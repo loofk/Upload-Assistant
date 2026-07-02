@@ -147,6 +147,7 @@ docker pull ghcr.io/loofk/upload-assistant:latest
 # 启动本地 AI/API 服务（建议仅绑定 127.0.0.1；跨机器暴露时设置 PTCLI_API_TOKEN）
 docker run -d --name ptcli-api --restart unless-stopped --network=host \
   -e PTCLI_API_TOKEN=change-me \
+  -e PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs \
   -v /path/to/config.py:/Upload-Assistant/data/config.py \
   -v /path/to/cookies:/Upload-Assistant/data/cookies \
   -v /path/to/downloads:/downloads \
@@ -163,6 +164,22 @@ curl -X POST http://127.0.0.1:8080/v1/retorrent/check \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
   -d '{"source":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM"}'
+
+# 任务式一键转种：先返回 job_id，再轮询状态和 summary
+curl -X POST http://127.0.0.1:8080/v1/jobs/retorrent \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"source":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM","execute":true,"accept_rules":true,"confirm_upload":true,"save_path":"/downloads","uploaded_qbit_category":"MTEAM","uploaded_qbit_tags":"retorrent"}'
+
+curl -H "Authorization: Bearer change-me" http://127.0.0.1:8080/v1/jobs/<job_id>
+curl -H "Authorization: Bearer change-me" http://127.0.0.1:8080/v1/jobs/<job_id>/summary
+curl -X POST -H "Authorization: Bearer change-me" http://127.0.0.1:8080/v1/jobs/<job_id>/resume
+
+# 每日候选推荐：指定源站和目标站，返回最多 10 条候选
+curl -X POST http://127.0.0.1:8080/v1/candidates/daily \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"source_tracker":"U2","target":"MTEAM","limit":10}'
 
 # 运行 PT 转种闭环
 docker run --rm -it --network=host \

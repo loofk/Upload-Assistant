@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from torf import Torrent
 
+import src.ptcli.candidates as ptcli_candidates
 import src.ptcli.cli as ptcli_cli
 import src.ptcli.doctor as ptcli_doctor
 import src.ptcli.metadata as ptcli_metadata
@@ -352,12 +353,13 @@ def test_help_points_to_capability_matrix() -> None:
 
 
 def test_serve_parser_accepts_api_options() -> None:
-    args = build_parser().parse_args(["serve", "--host", "0.0.0.0", "--port", "18080", "--api-token", "secret"])
+    args = build_parser().parse_args(["serve", "--host", "0.0.0.0", "--port", "18080", "--api-token", "secret", "--job-dir", "/tmp/jobs"])
 
     assert args.command == "serve"
     assert args.host == "0.0.0.0"
     assert args.port == 18080
     assert args.api_token == "secret"
+    assert args.job_dir == "/tmp/jobs"
 
 
 def test_pipeline_help_describes_live_closure_defaults() -> None:
@@ -12243,6 +12245,190 @@ def test_service_duplicate_check_summary_marks_existing_target_seed() -> None:
     assert summary["exists"] is True
     assert summary["status"] == "exists"
     assert summary["count"] == 1
+
+
+def test_service_result_exposes_ai_shortcuts() -> None:
+    payload = ptcli_service._service_result(
+        "ptcli.service.retorrent",
+        {"target_trackers": "MTEAM"},
+        ["retorrent", "--json"],
+        {
+            "status": "blocked",
+            "blockers": ["target material missing"],
+            "next_actions": ["provide screenshots"],
+            "summary_file": "/tmp/summary.json",
+            "resume_state": {"next_stage": "resume-target-package", "next_command_argv": ["python3", "ptcli.py", "pipeline", "--json"]},
+            "next_command_argv": ["python3", "ptcli.py", "pipeline", "--json"],
+        },
+        100.0,
+    )
+
+    assert payload["status"] == "blocked"
+    assert payload["ok"] is False
+    assert payload["summary_file"] == "/tmp/summary.json"
+    assert payload["resume_state"]["next_stage"] == "resume-target-package"
+    assert payload["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--json"]
+    assert payload["blockers"] == ["target material missing"]
+
+
+def test_job_store_runs_inline_and_persists_status(tmp_path) -> None:
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    job = store.create(
+        "ptcli.test",
+        {"source": "u2"},
+        ["ptcli", "sites", "--json"],
+        lambda: {"status": "ok", "summary_file": str(tmp_path / "summary.json"), "next_actions": ["done"]},
+    )
+
+    assert job["status"] == "complete"
+    assert job["ok"] is True
+    assert job["summary_file"] == str(tmp_path / "summary.json")
+    assert job["next_actions"] == ["done"]
+    assert (tmp_path / f"{job['job_id']}.json").is_file()
+
+
+def test_job_store_marks_blocked_results(tmp_path) -> None:
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    job = store.create(
+        "ptcli.test",
+        {"source": "u2"},
+        ["ptcli", "retorrent", "--json"],
+        lambda: {"status": "blocked", "blockers": ["rules missing"], "next_actions": ["accept rules"]},
+    )
+
+    assert job["status"] == "blocked"
+    assert job["ok"] is False
+    assert job["blockers"] == ["rules missing"]
+    assert job["next_actions"] == ["accept rules"]
+
+
+def test_job_store_resume_blocks_without_next_command(tmp_path) -> None:
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    parent = store.create("ptcli.test", {}, ["ptcli", "retorrent"], lambda: {"status": "blocked", "blockers": ["missing"]})
+
+    resume = store.resume(parent["job_id"])
+
+    assert resume["kind"] == "ptcli.resume"
+    assert resume["status"] == "blocked"
+    assert resume["blockers"] == ["No executable resume command is available for this job."]
+
+
+def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> None:
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    parent = store.create(
+        "ptcli.test",
+        {},
+        ["ptcli", "retorrent"],
+        lambda: {"status": "blocked", "next_command_argv": ["python3", "ptcli.py", "doctor", "--json"]},
+    )
+
+    def fake_run_resume_command(argv, *, parent_job_id):
+        return {"status": "ok", "parent_job_id": parent_job_id, "command_argv": argv}
+
+    monkeypatch.setattr(ptcli_service, "_run_resume_command", fake_run_resume_command)
+
+    resume = store.resume(parent["job_id"])
+
+    assert resume["status"] == "complete"
+    assert resume["result_status"] == "ok"
+    assert resume["command_argv"] == ["python3", "ptcli.py", "doctor", "--json"]
+
+
+def test_service_tools_and_openapi_include_job_endpoints() -> None:
+    tools = ptcli_service.tools_payload()
+    paths = {tool["path"] for tool in tools["tools"]}
+    assert "/v1/jobs/retorrent/check" in paths
+    assert "/v1/jobs/retorrent" in paths
+    assert "/v1/candidates/daily" in paths
+    assert "/v1/jobs/candidates/daily" in paths
+    assert "/v1/jobs/{job_id}" in paths
+    assert "/v1/jobs/{job_id}/resume" in paths
+
+    openapi = ptcli_service.openapi_payload(require_auth=True)
+    assert "/v1/jobs/retorrent/check" in openapi["paths"]
+    assert "/v1/jobs/retorrent" in openapi["paths"]
+    assert "/v1/candidates/daily" in openapi["paths"]
+    assert "/v1/jobs/candidates/daily" in openapi["paths"]
+    assert "/v1/jobs/{job_id}" in openapi["paths"]
+    assert "/v1/jobs/{job_id}/summary" in openapi["paths"]
+    assert "/v1/jobs/{job_id}/resume" in openapi["paths"]
+    assert openapi["paths"]["/v1/jobs/retorrent"]["post"]["security"] == [{"bearerAuth": []}]
+
+
+def test_parse_recent_candidate_seeds_from_nexusphp_html() -> None:
+    html = """
+    <table>
+      <tr>
+        <td><a href="details.php?id=60635" title="Example.Release.2024.1080p">Example</a></td>
+        <td>42.5 GiB</td><td>2026-07-02 10:00</td><td>Free 2X</td><td>Seeders 12</td><td>Leechers 3</td>
+      </tr>
+      <tr><td><a href="/details.php?id=60636">Second.Release.2024</a></td><td>12 GB</td></tr>
+    </table>
+    """
+
+    seeds = ptcli_candidates.parse_recent_candidate_seeds("U2", html, base_url="https://u2.dmhy.org", limit=10)
+
+    assert len(seeds) == 2
+    assert seeds[0].tracker == "U2"
+    assert seeds[0].torrent_id == "60635"
+    assert seeds[0].title == "Example.Release.2024.1080p"
+    assert seeds[0].details_url == "https://u2.dmhy.org/details.php?id=60635"
+    assert seeds[0].size == "42.5 GiB"
+    assert seeds[0].published_at == "2026-07-02 10:00"
+    assert seeds[0].promotion == "free,2x"
+
+
+def test_candidate_request_context_caps_limit_and_defaults() -> None:
+    context = ptcli_service._candidate_request_context({"source_tracker": "U2", "target": "MTEAM", "limit": 99})
+
+    assert context["source_tracker"] == "U2"
+    assert context["target_trackers"] == "MTEAM"
+    assert context["limit"] == 10
+    assert context["check_dupes"] is True
+
+
+async def test_daily_candidates_reports_missing_cookie_blocker(tmp_path) -> None:
+    result = await ptcli_candidates.build_daily_candidates(
+        {"TRACKERS": {"MTEAM": {"api_key": "fake"}}},
+        "U2",
+        "MTEAM",
+        limit=10,
+        base_dir=str(tmp_path),
+        accept_rules=False,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["count"] == 0
+    assert any("cookie file is required" in blocker for blocker in result["blockers"])
+    assert any("rules" in blocker.lower() or "acknowledge" in blocker.lower() for blocker in result["blockers"])
+
+
+async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
+    seed = ptcli_candidates.CandidateSeed("U2", "60635", "Example.Release", "https://u2.dmhy.org/details.php?id=60635", size="42 GiB", promotion="free")
+
+    async def fake_fetch_recent_candidate_seeds(*_args, **_kwargs):
+        return [seed]
+
+    async def fake_fetch_source_info(*_args, **_kwargs):
+        return source_info_from_tuple("U2", "60635", (1234567, 999, "Example.Release", "a" * 40, "desc"), {})
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        return {"searched": True, "count": 0, "dupes": [], "query": {"imdb": f"tt{source_info['imdb_id']}"}}
+
+    monkeypatch.setattr(ptcli_candidates, "fetch_recent_candidate_seeds", fake_fetch_recent_candidate_seeds)
+    monkeypatch.setattr(ptcli_candidates, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_candidates, "search_mteam_duplicates", fake_search_mteam_duplicates)
+
+    result = await ptcli_candidates.build_daily_candidates({"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, "U2", "MTEAM", limit=1, accept_rules=True)
+
+    assert result["status"] == "ok"
+    assert result["count"] == 1
+    assert result["ready_count"] == 1
+    candidate = result["candidates"][0]
+    assert candidate["status"] == "ready"
+    assert candidate["duplicate_check"]["status"] == "not_found"
+    assert candidate["execute_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert candidate["execute_job_endpoint"] == "/v1/jobs/retorrent"
 
 
 def test_source_info_from_tuple_includes_meta_side_effects() -> None:

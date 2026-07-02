@@ -44,7 +44,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 ## AI 友好输出
 
 - 关键命令支持 `--json`。
-- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、`/v1/retorrent/check` 和 `/v1/retorrent`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
+- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
 - `sites --json` 暴露每个站点的 `source_info`、`source_info_adapter`、`source_download`、`source_download_adapter`、`credential_requirements`、`target_upload`、`full_live_closure_to_mteam` 能力。
 - `rule-check --json` 暴露 `rule_obligations[].review_scope.required_confirmations`，供 agent 在 live 前逐项提示人工确认。
 - `flow-check --json` 暴露 `source_capability`、`target_capabilities` 和去重后的 `credential_requirements`，供盒子脚本在 live 前检查配置缺口。
@@ -77,6 +77,26 @@ curl -X POST http://127.0.0.1:8080/v1/retorrent/check \
 curl -X POST http://127.0.0.1:8080/v1/retorrent \
   -H "Content-Type: application/json" \
   -d '{"source":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM","execute":true,"accept_rules":true,"confirm_upload":true,"save_path":"/downloads","uploaded_qbit_category":"MTEAM","uploaded_qbit_tags":"retorrent"}'
+
+# 任务式 API：提交后返回 job_id，适合下载/截图/上传这类长任务
+curl -X POST http://127.0.0.1:8080/v1/jobs/retorrent \
+  -H "Content-Type: application/json" \
+  -d '{"source":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM","execute":true,"accept_rules":true,"confirm_upload":true,"save_path":"/downloads","uploaded_qbit_category":"MTEAM","uploaded_qbit_tags":"retorrent"}'
+
+# 轮询状态、读取 summary、按生成的 allowlisted next_command_argv 续跑
+curl http://127.0.0.1:8080/v1/jobs/<job_id>
+curl http://127.0.0.1:8080/v1/jobs/<job_id>/summary
+curl -X POST http://127.0.0.1:8080/v1/jobs/<job_id>/resume
+
+# 每日候选推荐：指定源站和目标站，返回最多 10 条可转种候选
+curl -X POST http://127.0.0.1:8080/v1/candidates/daily \
+  -H "Content-Type: application/json" \
+  -d '{"source_tracker":"U2","target":"MTEAM","limit":10}'
+
+# 长耗时/真实环境下也可用任务式候选接口
+curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/daily \
+  -H "Content-Type: application/json" \
+  -d '{"source_tracker":"U2","target":"MTEAM","limit":10}'
 ```
 
 若需要把 API 暴露给其他容器或局域网工具，建议设置 `PTCLI_API_TOKEN`，调用时添加 `Authorization: Bearer <token>`。服务端点不会绕过站点规则；live 下载/上传仍依赖现有 rule gate、dupe gate 和 `confirm_upload`。
@@ -86,6 +106,7 @@ curl -X POST http://127.0.0.1:8080/v1/retorrent \
 - qBittorrent client 配置沿用 `data/config.py`。
 - 源站 cookie 放在 `data/cookies/<TRACKER>.txt` 或对应适配器要求的位置。
 - MTEAM 需要 `TRACKERS.MTEAM.api_key`。
+- 任务式 API 默认把 job 文件写入 `PTCLI_JOB_DIR`，未设置时写入 `TMPDIR/ptcli-jobs`；Docker Compose 默认设置为 `/Upload-Assistant/tmp/ptcli-jobs`。
 - `Dockerfile.ptcli` 是 focused CLI 镜像，只安装 `requirements-ptcli.txt` 和 ptcli 需要的系统依赖；旧 `Dockerfile` 保留给 legacy/full UA 入口。
 - 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；release 工作流会额外发布 `*-legacy-webui` 标签给旧 Web UI 镜像。
 - 旧 `upload.py` 需要显式覆盖 entrypoint、使用 legacy Dockerfile，或拉取 `*-legacy-webui` 标签才会运行。
