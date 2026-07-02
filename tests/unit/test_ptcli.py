@@ -4052,6 +4052,52 @@ async def test_reference_source_info_parses_plain_external_ids(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
+async def test_reference_source_info_preserves_ptgen_description(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "CHD.txt").write_text("uid=1;", encoding="utf-8")
+    ptgen_description = "Torrent hash: 1234567890ABCDEF1234567890ABCDEF12345678\n◎译　　名　CHD 示例\n◎片　　名　CHD Example\n◎简　　介　来自 CHD 的简介。"
+    html = f"""
+    <html>
+      <head><title>CHD Reference</title></head>
+      <body>
+        <h1>CHD.Reference.2024.1080p.BluRay-GROUP</h1>
+        <a href="https://www.imdb.com/title/tt7654321/">IMDb</a>
+        <a href="https://movie.douban.com/subject/3541415/">Douban</a>
+        <div class="torrent-description">{ptgen_description}</div>
+      </body>
+    </html>
+    """
+
+    class FakeResponse:
+        text = html
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url):
+            assert url == "https://ptchdbits.co/details.php?id=2468"
+            return FakeResponse()
+
+    monkeypatch.setattr(ptcli_source.httpx, "AsyncClient", FakeClient)
+
+    info = await ptcli_source.fetch_source_info({}, "CHD", "2468", base_dir=str(tmp_path))
+
+    assert info.ptgen_description == ptgen_description
+    assert info.torrenthash == "1234567890abcdef1234567890abcdef12345678"
+
+
+@pytest.mark.asyncio
 async def test_enabled_nexus_source_info_uses_ptcli_generic_details(monkeypatch, tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -10982,6 +11028,7 @@ def test_source_info_from_tuple_includes_meta_side_effects() -> None:
     assert info.name == "Release Name"
     assert info.description_length == 4
     assert info.douban_id == "1291546"
+    assert info.ptgen_description is None
 
 
 def test_source_info_from_tuple_extracts_external_ids_from_description() -> None:
@@ -10999,9 +11046,19 @@ def test_source_info_from_tuple_extracts_external_ids_from_description() -> None
     assert info.douban_url == "https://movie.douban.com/subject/3541415/"
 
 
+def test_source_info_from_tuple_extracts_ptgen_description_from_description() -> None:
+    description = "◎译　　名　示例电影\n◎片　　名　Example Movie\n◎简　　介　这是一段简介。"
+
+    info = source_info_from_tuple("U2", "60635", (None, None, "Release Name", "a" * 40, description), {})
+
+    assert info.description_length == len(description)
+    assert info.ptgen_description == description
+
+
 @pytest.mark.asyncio
 async def test_mteam_source_info_uses_ptcli_api_client(monkeypatch) -> None:
     closed = {"value": False}
+    ptgen_description = "◎译　　名　MTEAM 示例\n◎片　　名　MTEAM Example\n◎简　　介　来自 MTEAM 的简介。"
 
     class FakeMTeamApiClient:
         def __init__(self, config):
@@ -11021,7 +11078,7 @@ async def test_mteam_source_info_uses_ptcli_api_client(monkeypatch) -> None:
                 "douban": "https://movie.douban.com/subject/1291546/",
                 "name": "MTEAM.Name.2024",
                 "hash": "a" * 40,
-                "descr": "desc",
+                "descr": ptgen_description,
             }
 
     monkeypatch.setattr(ptcli_source, "MTeamApiClient", FakeMTeamApiClient)
@@ -11032,7 +11089,8 @@ async def test_mteam_source_info_uses_ptcli_api_client(monkeypatch) -> None:
     assert info.imdb_id == 1234567
     assert info.tmdb_id == 76543
     assert info.douban_id == "1291546"
-    assert info.description_length == 4
+    assert info.description_length == len(ptgen_description)
+    assert info.ptgen_description == ptgen_description
     assert closed["value"] is True
 
 
@@ -18530,6 +18588,32 @@ async def test_enrich_source_metadata_accepts_ptgen_description_override_when_re
     assert result["sources"] == ["overrides"]
     assert result["readiness"]["ptgen_description"] == {"ready": True, "required": True, "source": "overrides"}
     assert result["field_evidence"]["ptgen_description"] == {"ready": True, "required": True, "source": "overrides", "length": len("◎译　　名　示例电影")}
+
+
+@pytest.mark.asyncio
+async def test_enrich_source_metadata_uses_source_ptgen_description_when_required() -> None:
+    ptgen_description = "◎译　　名　源站示例\n◎片　　名　Source Example\n◎简　　介　源站已有简介。"
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "name": "Name",
+        "torrenthash": "a" * 40,
+        "description_length": len(ptgen_description),
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "ptgen_description": ptgen_description,
+    }
+
+    result = await enrich_source_metadata({}, source_info, fetch_ptgen=True)
+
+    assert result["ready"] is True
+    assert result["status"] == "unchanged"
+    assert result["source_info"]["ptgen_description"] == ptgen_description
+    assert result["blockers"] == []
+    assert result["readiness"]["ptgen_description"] == {"ready": True, "required": True, "source": "source"}
+    assert result["field_evidence"]["ptgen_description"] == {"ready": True, "required": True, "source": "source", "length": len(ptgen_description)}
 
 
 @pytest.mark.asyncio

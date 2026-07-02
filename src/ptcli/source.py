@@ -117,6 +117,7 @@ class SourceTorrentInfo:
     description_length: int
     douban_id: str | None
     douban_url: str | None
+    ptgen_description: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -156,6 +157,7 @@ def source_info_from_tuple(tracker: str, torrent_id: str, result: tuple[Any, ...
     description = _optional_str(result[4] if len(result) > 4 else None)
     metadata_text = "\n".join(_optional_str(value) or "" for value in (description, meta.get("description"), meta.get("bdinfo"), meta.get("mediainfo")))
     douban_id, douban_url = _extract_douban(metadata_text, metadata_text)
+    ptgen_description = _optional_str(meta.get("ptgen_description")) or _extract_ptgen_description(metadata_text)
     return SourceTorrentInfo(
         tracker=tracker,
         torrent_id=torrent_id,
@@ -166,6 +168,7 @@ def source_info_from_tuple(tracker: str, torrent_id: str, result: tuple[Any, ...
         description_length=len(description or ""),
         douban_id=_optional_str(meta.get("douban_id")) or douban_id,
         douban_url=_optional_str(meta.get("douban_url")) or douban_url,
+        ptgen_description=ptgen_description,
     )
 
 
@@ -246,6 +249,7 @@ async def _fetch_mteam_source_info(config: dict[str, Any], tracker: str, torrent
 def _mteam_source_info_from_detail(tracker: str, torrent_id: str, data: Any) -> SourceTorrentInfo:
     detail = data if isinstance(data, dict) else {}
     douban_id, douban_url = _extract_douban_from_value(detail.get("douban"))
+    description = _optional_str(detail.get("descr") or detail.get("description"))
     return SourceTorrentInfo(
         tracker=tracker,
         torrent_id=torrent_id,
@@ -253,9 +257,10 @@ def _mteam_source_info_from_detail(tracker: str, torrent_id: str, data: Any) -> 
         tmdb_id=_extract_id_from_url(detail.get("tmdb"), r"/(?:movie|tv)/(\d+)"),
         name=_optional_str(detail.get("name") or detail.get("title")),
         torrenthash=_optional_str(detail.get("hash") or detail.get("infoHash")),
-        description_length=len(_optional_str(detail.get("descr") or detail.get("description")) or ""),
+        description_length=len(description or ""),
         douban_id=douban_id,
         douban_url=douban_url,
+        ptgen_description=_extract_ptgen_description(description or ""),
     )
 
 
@@ -288,6 +293,7 @@ async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torre
 
     soup = BeautifulSoup(response.text, "lxml")
     page_text = soup.get_text("\n", strip=True)
+    description = _extract_generic_description(soup, page_text)
     douban_id, douban_url = _extract_douban(page_text, response.text)
     return SourceTorrentInfo(
         tracker=tracker,
@@ -296,9 +302,10 @@ async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torre
         tmdb_id=_extract_tmdb_id(response.text, page_text),
         name=_extract_generic_name(soup, page_text),
         torrenthash=_extract_torrent_hash(page_text),
-        description_length=len(_extract_generic_description(soup, page_text)),
+        description_length=len(description),
         douban_id=douban_id,
         douban_url=douban_url,
+        ptgen_description=_extract_ptgen_description(description),
     )
 
 
@@ -401,6 +408,32 @@ def _extract_generic_description(soup: BeautifulSoup, page_text: str) -> str:
         if node is not None:
             return node.get_text("\n", strip=True)
     return page_text
+
+
+def _extract_ptgen_description(text: str) -> str | None:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return None
+    markers = (
+        "◎译",
+        "◎片",
+        "◎年",
+        "◎产",
+        "◎类",
+        "◎语",
+        "◎上映",
+        "◎IMDb",
+        "◎豆瓣",
+        "◎导",
+        "◎主",
+        "◎简",
+    )
+    marker_count = sum(1 for marker in markers if marker in normalized)
+    if marker_count >= 2:
+        return normalized
+    if "◎" in normalized and re.search(r"(?:豆瓣|IMDb|简介|片\s*名|译\s*名)", normalized, flags=re.IGNORECASE):
+        return normalized
+    return None
 
 
 async def _close_tracker_session(tracker_instance: Any) -> None:
