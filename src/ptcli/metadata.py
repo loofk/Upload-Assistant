@@ -25,7 +25,7 @@ async def enrich_source_metadata(
 ) -> dict[str, Any]:
     base = dict(source_info)
     applied: dict[str, Any] = {}
-    blockers: list[str] = []
+    blocker_records: list[tuple[str | None, str]] = []
     sources: list[str] = []
     ptgen_evidence: dict[str, Any] = {}
     field_sources = _initial_metadata_field_sources(base)
@@ -46,7 +46,7 @@ async def enrich_source_metadata(
             field_sources["tmdb_id"] = "tmdb_api"
             sources.append("tmdb_api")
         elif tmdb_result.get("blocker"):
-            blockers.append(str(tmdb_result["blocker"]))
+            blocker_records.append(("tmdb_id", str(tmdb_result["blocker"])))
 
     if base.get("tmdb_id") and not base.get("imdb_id"):
         imdb_result = await _imdb_from_tmdb(config, base.get("tmdb_id"))
@@ -56,7 +56,7 @@ async def enrich_source_metadata(
             field_sources["imdb_id"] = "tmdb_api"
             sources.append("tmdb_api")
         elif imdb_result.get("blocker"):
-            blockers.append(str(imdb_result["blocker"]))
+            blocker_records.append(("imdb_id", str(imdb_result["blocker"])))
 
     if base.get("douban_id") and not base.get("douban_url"):
         base["douban_url"] = f"https://movie.douban.com/subject/{base['douban_id']}/"
@@ -80,6 +80,11 @@ async def enrich_source_metadata(
             ptgen_evidence = ptgen_result["evidence"]
         if ptgen_result.get("ptgen"):
             base["ptgen"] = ptgen_result["ptgen"]
+        for key in ("imdb_id", "tmdb_id"):
+            if ptgen_result.get(key) and not base.get(key):
+                base[key] = ptgen_result[key]
+                applied[key] = ptgen_result[key]
+                field_sources[key] = "ptgen"
         if ptgen_result.get("douban_id") and not base.get("douban_id"):
             base["douban_id"] = ptgen_result["douban_id"]
             applied["douban_id"] = ptgen_result["douban_id"]
@@ -89,9 +94,10 @@ async def enrich_source_metadata(
             applied["douban_url"] = ptgen_result["douban_url"]
             field_sources["douban_url"] = "ptgen"
         if ptgen_result.get("blocker"):
-            blockers.append(str(ptgen_result["blocker"]))
+            blocker_records.append(("ptgen_description", str(ptgen_result["blocker"])))
 
     missing = [key for key in METADATA_KEYS if not base.get(key)]
+    blockers = _unresolved_metadata_blockers(blocker_records, base)
     return {
         "status": "enriched" if applied else "unchanged",
         "ready": not missing and (not fetch_ptgen or bool(base.get("ptgen_description"))),
@@ -104,6 +110,16 @@ async def enrich_source_metadata(
         "ptgen_evidence": ptgen_evidence,
         "blockers": blockers,
     }
+
+
+def _unresolved_metadata_blockers(blocker_records: list[tuple[str | None, str]], source_info: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    for field_name, message in blocker_records:
+        if field_name and source_info.get(field_name):
+            continue
+        if message not in blockers:
+            blockers.append(message)
+    return blockers
 
 
 def _initial_metadata_field_sources(source_info: dict[str, Any]) -> dict[str, str]:
@@ -334,21 +350,31 @@ async def _ptgen_from_metadata(config: dict[str, Any], source_info: dict[str, An
         return {"blocker": "PTGen enrichment returned no description text."}
 
     description_text = str(description).strip()
+    description_ids = _metadata_overrides_from_text(description_text)
     douban_id, douban_source = _douban_id_from_ptgen_result(meta, description_text, douban_url)
     douban_url_value = _normalize_douban_url(meta.get("douban_url")) or _normalize_douban_url(douban_id)
     ptgen_payload = meta.get("ptgen") if isinstance(meta.get("ptgen"), dict) else None
+    evidence: dict[str, Any] = {
+        "description_length": len(description_text),
+        "douban_id": douban_id,
+        "douban_url": douban_url_value,
+        "douban_source": douban_source,
+        "payload_keys": sorted(ptgen_payload.keys()) if isinstance(ptgen_payload, dict) else [],
+    }
+    if description_ids.get("imdb_id"):
+        evidence["imdb_id"] = description_ids["imdb_id"]
+        evidence["imdb_source"] = "description"
+    if description_ids.get("tmdb_id"):
+        evidence["tmdb_id"] = description_ids["tmdb_id"]
+        evidence["tmdb_source"] = "description"
     return {
         "description": description,
         "ptgen": ptgen_payload,
+        "imdb_id": description_ids.get("imdb_id"),
+        "tmdb_id": description_ids.get("tmdb_id"),
         "douban_id": douban_id,
         "douban_url": douban_url_value,
-        "evidence": {
-            "description_length": len(description_text),
-            "douban_id": douban_id,
-            "douban_url": douban_url_value,
-            "douban_source": douban_source,
-            "payload_keys": sorted(ptgen_payload.keys()) if isinstance(ptgen_payload, dict) else [],
-        },
+        "evidence": evidence,
     }
 
 

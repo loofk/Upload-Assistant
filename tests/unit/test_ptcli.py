@@ -19733,6 +19733,58 @@ async def test_enrich_source_metadata_backfills_douban_from_ptgen_description(mo
 
 
 @pytest.mark.asyncio
+async def test_enrich_source_metadata_backfills_tmdb_from_ptgen_description_after_tmdb_api_blocker(monkeypatch, tmp_path) -> None:
+    ptgen_description = "\n".join(
+        [
+            "IMDb: https://www.imdb.com/title/tt1234567/",
+            "TMDb: https://www.themoviedb.org/movie/999",
+            "Douban: https://movie.douban.com/subject/1291546/",
+            "◎译　　名　PTGen 示例",
+            "◎简　　介　PTGen 补齐外部 ID。",
+        ]
+    )
+    source_info = {
+        "tracker": "CHD",
+        "torrent_id": "12345",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "name": "Name",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "douban_id": None,
+        "douban_url": None,
+    }
+
+    async def fake_ptgen(_self, _meta, _ptgen_site="", _ptgen_retry=3):
+        return ptgen_description
+
+    monkeypatch.setattr("src.trackers.COMMON.COMMON.ptgen", fake_ptgen)
+
+    result = await enrich_source_metadata({"TRACKERS": {"MTEAM": {}}}, source_info, fetch_ptgen=True, base_dir=str(tmp_path))
+
+    assert result["ready"] is True
+    assert result["missing"] == []
+    assert result["blockers"] == []
+    assert result["source_info"]["imdb_id"] == 1234567
+    assert result["source_info"]["tmdb_id"] == 999
+    assert result["source_info"]["douban_id"] == "1291546"
+    assert result["source_info"]["douban_url"] == "https://movie.douban.com/subject/1291546/"
+    assert result["source_info"]["ptgen_description"] == ptgen_description
+    assert result["applied"]["tmdb_id"] == 999
+    assert result["applied"]["douban_id"] == "1291546"
+    assert result["applied"]["douban_url"] == "https://movie.douban.com/subject/1291546/"
+    assert result["sources"] == ["ptgen"]
+    assert result["readiness"]["imdb_id"] == {"ready": True, "required": True, "source": "source"}
+    assert result["readiness"]["tmdb_id"] == {"ready": True, "required": True, "source": "ptgen"}
+    assert result["readiness"]["douban_id"] == {"ready": True, "required": True, "source": "ptgen"}
+    assert result["field_evidence"]["tmdb_id"] == {"ready": True, "required": True, "source": "ptgen", "value": 999}
+    assert result["ptgen_evidence"]["imdb_id"] == 1234567
+    assert result["ptgen_evidence"]["imdb_source"] == "description"
+    assert result["ptgen_evidence"]["tmdb_id"] == 999
+    assert result["ptgen_evidence"]["tmdb_source"] == "description"
+
+
+@pytest.mark.asyncio
 async def test_enrich_source_metadata_derives_douban_id_from_existing_url() -> None:
     source_info = {
         "tracker": "U2",
