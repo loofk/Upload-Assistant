@@ -11810,6 +11810,9 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
     payload_description = payload_review.get("description") if isinstance(payload_review.get("description"), dict) else {}
     payload_materials = payload_review.get("materials") if isinstance(payload_review.get("materials"), dict) else {}
     payload_description_evidence = payload_description.get("evidence") if isinstance(payload_description.get("evidence"), dict) else {}
+    metadata_chain = payload_description_evidence.get("metadata_chain") if isinstance(payload_description_evidence.get("metadata_chain"), dict) else {}
+    media_info_chain = payload_description_evidence.get("media_info_chain") if isinstance(payload_description_evidence.get("media_info_chain"), dict) else {}
+    screenshot_chain = payload_description_evidence.get("screenshot_chain") if isinstance(payload_description_evidence.get("screenshot_chain"), dict) else {}
     external_id_readiness = payload_description.get("external_id_readiness") if isinstance(payload_description.get("external_id_readiness"), dict) else {}
     external_links = payload_description.get("external_links") if isinstance(payload_description.get("external_links"), dict) else {}
     payload_description_completeness = payload_description.get("completeness") if isinstance(payload_description.get("completeness"), dict) else {}
@@ -11871,6 +11874,17 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
         "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS": " | ".join(_string_list(payload_description_completeness.get("next_actions"))),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_CHECKS": json.dumps(payload_description_completeness.get("checks"), ensure_ascii=False) if isinstance(payload_description_completeness.get("checks"), list) else None,
         "PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_EVIDENCE": json.dumps(payload_description_evidence, ensure_ascii=False) if payload_description_evidence else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_METADATA_CHAIN_READY": _shell_bool(metadata_chain.get("ready")) if metadata_chain.get("ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_METADATA_CHAIN_MISSING": ",".join(_description_chain_recovery_missing("metadata_chain", metadata_chain)),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_METADATA_CHAIN_NEXT_ACTIONS": " | ".join(_description_chain_next_actions("metadata_chain", metadata_chain)),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_READY": _shell_bool(media_info_chain.get("ready")) if media_info_chain.get("ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_MISSING": ",".join(_description_chain_recovery_missing("media_info_chain", media_info_chain)),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_NEXT_ACTIONS": " | ".join(_description_chain_next_actions("media_info_chain", media_info_chain)),
+        **_media_info_chain_detail_shell_fields("PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN", media_info_chain),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_READY": _shell_bool(screenshot_chain.get("ready")) if screenshot_chain.get("ready") is not None else None,
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_MISSING": ",".join(_description_chain_recovery_missing("screenshot_chain", screenshot_chain)),
+        "PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_NEXT_ACTIONS": " | ".join(_description_chain_next_actions("screenshot_chain", screenshot_chain)),
+        **_screenshot_chain_detail_shell_fields("PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN", screenshot_chain),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_PTGEN": _shell_bool(payload_description.get("has_ptgen_description")) if payload_description.get("has_ptgen_description") is not None else None,
         "PTCLI_TARGET_UPLOAD_PAYLOAD_PTGEN_LENGTH": payload_description.get("ptgen_description_length"),
         "PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_EXTERNAL_IDS": _shell_bool(all(external_id_readiness.get(name) is True for name in ("imdb", "tmdb", "douban"))) if external_id_readiness else None,

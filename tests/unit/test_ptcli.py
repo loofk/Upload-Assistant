@@ -20389,6 +20389,24 @@ def test_target_upload_summary_diagnostics_expose_blocked_preflight(tmp_path) ->
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_RECOVERY_MISSING"] == "description.ptgen_description,description.external_ids"
     assert "Fetch PTGen/Douban description" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS"]
     assert "IMDb/TMDb/Douban metadata" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_NEXT_ACTIONS"]
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_METADATA_CHAIN_READY"] == "0"
+    assert "metadata.tmdb" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_METADATA_CHAIN_MISSING"]
+    assert "Fetch TMDb metadata" in shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_METADATA_CHAIN_NEXT_ACTIONS"]
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_READY"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_MISSING"] == ""
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_SOURCE"] == str(mediainfo)
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_LENGTH"] > 0
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_DESCRIPTION_HAS_EXCERPT"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_PAYLOAD_SOURCE"] == str(mediainfo)
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_PAYLOAD_LENGTH"] > 0
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_READY"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_MISSING"] == ""
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_LOCAL_COUNT"] == 1
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_IMAGE_HOST_COUNT"] == 1
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_DESCRIPTION_COUNT"] == 1
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_IMAGE_HOST_URLS"] == "https://img.example/screen-1.png"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_DESCRIPTION_URLS"] == "https://img.example/screen-1.png"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_MISSING_URLS"] == ""
     readiness = ptcli_cli._summary_check_readiness_summary(
         {
             "status": "blocked",
@@ -21280,6 +21298,24 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_IMDB"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_TMDB"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_HAS_DOUBAN"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_METADATA_CHAIN_READY"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_METADATA_CHAIN_MISSING"] == ""
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_METADATA_CHAIN_NEXT_ACTIONS"] == ""
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_READY"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_MISSING"] == ""
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_SOURCE"] == payload_media_source
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_LENGTH"] == payload_media_length
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_DESCRIPTION_HAS_EXCERPT"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_PAYLOAD_SOURCE"] == payload_media_source
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_MEDIA_INFO_CHAIN_PAYLOAD_LENGTH"] == payload_media_length
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_READY"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_MISSING"] == ""
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_LOCAL_COUNT"] == 1
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_IMAGE_HOST_COUNT"] == 1
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_DESCRIPTION_COUNT"] == 1
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_IMAGE_HOST_URLS"] == "https://img.example/thumb.png"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_DESCRIPTION_URLS"] == "https://img.example/thumb.png"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_CHAIN_MISSING_URLS"] == ""
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_IMAGE_URLS"] == "https://img.example/thumb.png"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_IMAGE_HOST_URLS"] == "https://img.example/thumb.png"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_SCREENSHOT_COVERAGE_READY"] == "1"
