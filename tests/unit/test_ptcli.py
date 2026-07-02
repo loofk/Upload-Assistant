@@ -2970,6 +2970,12 @@ def test_readiness_source_followup_summary_exposes_source_seeding_state() -> Non
             "injection_verified": False,
             "source_wait_evidence": False,
             "hash_consistent": True,
+            "hash_evidence": {
+                "source_metadata": source_hash,
+                "source_torrent": source_hash,
+                "source_wait_query": source_hash,
+            },
+            "hash_consistency_blockers": [],
             "source_wait_query": {"torrent_hash": source_hash, "save_path": "/downloads", "timeout": 42.0, "interval": 3.0},
             "qbit_wait_mismatch": True,
             "qbit_wait_mismatches": ["source.requested_hash"],
@@ -3005,6 +3011,12 @@ def test_readiness_source_followup_summary_exposes_source_seeding_state() -> Non
     assert followup["injection_verified"] is False
     assert followup["source_wait_evidence"] is False
     assert followup["hash_consistent"] is True
+    assert followup["hash_evidence"] == {
+        "source_metadata": source_hash,
+        "source_torrent": source_hash,
+        "source_wait_query": source_hash,
+    }
+    assert followup["hash_consistency_blockers"] == []
     assert followup["source_wait_query"] == {"torrent_hash": source_hash, "save_path": "/downloads", "timeout": 42.0, "interval": 3.0}
     assert followup["qbit_wait_mismatch"] is True
     assert followup["qbit_wait_mismatches"] == ["source.requested_hash"]
@@ -3177,6 +3189,12 @@ def test_readiness_shell_fields_export_source_followup_state() -> None:
                 "injection_verified": False,
                 "source_wait_evidence": False,
                 "hash_consistent": True,
+                "hash_evidence": {
+                    "source_metadata": source_hash,
+                    "source_torrent": source_hash,
+                    "source_wait_query": source_hash,
+                },
+                "hash_consistency_blockers": [],
                 "source_wait_query": {"torrent_hash": source_hash, "content_path": "/downloads/Example", "save_path": "/downloads", "timeout": 42.0, "interval": 3.0},
                 "qbit_wait_mismatch": True,
                 "qbit_wait_mismatches": ["source.requested_hash"],
@@ -3219,6 +3237,12 @@ def test_readiness_shell_fields_export_source_followup_state() -> None:
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_INJECTION_VERIFIED"] == "0"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_EVIDENCE"] == "0"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_CONSISTENT"] == "1"
+    assert json.loads(fields["PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_EVIDENCE"]) == {
+        "source_metadata": source_hash,
+        "source_torrent": source_hash,
+        "source_wait_query": source_hash,
+    }
+    assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_BLOCKERS"] == ""
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_FILE"] == "/tmp/U2-60635.torrent"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_EXISTS"] == "1"
     assert fields["PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_IS_FILE"] == "1"
@@ -16301,7 +16325,15 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert payload["closure"]["source"]["downloaded"] is True
     assert payload["closure"]["source"]["injected"] is True
     assert payload["closure"]["source"]["complete"] is True
+    assert payload["closure"]["source"]["hash_evidence"]["source_metadata"] == source_hash
+    assert payload["closure"]["source"]["hash_evidence"]["source_torrent"] == source_hash
+    assert payload["closure"]["source"]["hash_evidence"]["injected_torrent"] == source_hash
+    assert payload["closure"]["source"]["hash_evidence"]["source_wait_match"] == source_hash
+    assert payload["closure"]["source"]["hash_evidence"]["content_match"] == source_hash
+    assert payload["closure"]["source"]["hash_consistency_blockers"] == []
     assert payload["evidence"]["source"]["torrent_file_evidence"] is True
+    assert payload["evidence"]["source"]["hash_evidence"] == payload["closure"]["source"]["hash_evidence"]
+    assert payload["evidence"]["source"]["hash_consistency_blockers"] == []
     assert payload["evidence"]["target"]["uploaded_torrent_file_evidence"] is True
     assert payload["evidence"]["target"]["materials_ready"] is True
     assert payload["evidence"]["target"]["materials"]["assets"]["image_hosts"]["count"] == 1
@@ -16345,6 +16377,12 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["closure_status"]["pipeline_blockers"] == summary_payload["blockers"]
     assert summary_payload["closure_status"]["source"]["ready"] is True
     assert summary_payload["closure_status"]["source"]["hash_consistent"] is True
+    assert summary_payload["evidence"]["source"]["hash_evidence"]["source_metadata"] == source_hash
+    assert summary_payload["evidence"]["source"]["hash_evidence"]["source_torrent"] == source_hash
+    assert summary_payload["evidence"]["source"]["hash_evidence"]["injected_torrent"] == source_hash
+    assert summary_payload["evidence"]["source"]["hash_evidence"]["source_wait_match"] == source_hash
+    assert summary_payload["evidence"]["source"]["hash_evidence"]["content_match"] == source_hash
+    assert summary_payload["evidence"]["source"]["hash_consistency_blockers"] == []
     assert summary_payload["closure_status"]["target"]["ready"] is True
     assert summary_payload["closure_status"]["target"]["rule_obligations_ready"] is True
     assert summary_payload["closure_status"]["target"]["uploaded_wait_evidence"] is True
@@ -16445,6 +16483,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["source_torrent_file_artifact"]["torrent_hash"] == source_hash
     assert summary_payload["artifacts"]["source_torrent_file_artifact"]["metadata_readable"] is True
     assert summary_payload["artifacts"]["source_torrent_hash"] == source_hash
+    assert summary_payload["artifacts"]["source_hash_evidence"] == summary_payload["evidence"]["source"]["hash_evidence"]
+    assert summary_payload["artifacts"]["source_hash_consistency_blockers"] == []
     assert summary_payload["artifacts"]["source_save_path"] == "/downloads"
     assert summary_payload["artifacts"]["source_qbit_category"] == "SOURCE"
     assert summary_payload["artifacts"]["source_qbit_tags"] == "source-tag"
@@ -16570,6 +16610,13 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "target_rule_obligations": True,
         "target_preparation_ready": True,
     }
+    source_followup = summary_payload["resume_state"]["source_followup"]
+    assert source_followup["hash_evidence"] == summary_payload["evidence"]["source"]["hash_evidence"]
+    assert source_followup["hash_consistency_blockers"] == []
+    summary_check = ptcli_cli._pipeline_summary_check(summary_payload, str(payload["summary_file"]))
+    readiness_fields = ptcli_cli._summary_check_readiness_shell_fields(summary_check["readiness_summary"])
+    assert json.loads(readiness_fields["PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_EVIDENCE"]) == summary_payload["evidence"]["source"]["hash_evidence"]
+    assert readiness_fields["PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_BLOCKERS"] == ""
     assert summary_payload["artifacts"]["source_torrent_file"] in resume_commands["resume-source-torrent"]
     assert resume_argv["resume-source-torrent"][:3] == ["python3", "ptcli.py", "pipeline"]
     assert "--source-torrent-file" in resume_argv["resume-source-torrent"]

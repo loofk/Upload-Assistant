@@ -1277,6 +1277,7 @@ def _material_recovery_key_domain(key: str | None) -> str | None:
 def _readiness_source_followup_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
     followup = resume_state.get("source_followup") if isinstance(resume_state.get("source_followup"), dict) else {}
     torrent_evidence = followup.get("source_torrent_file_evidence") if isinstance(followup.get("source_torrent_file_evidence"), dict) else {}
+    hash_evidence = followup.get("hash_evidence") if isinstance(followup.get("hash_evidence"), dict) else {}
     wait_query = followup.get("source_wait_query") if isinstance(followup.get("source_wait_query"), dict) else {}
     wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
     gates = followup.get("gates") if isinstance(followup.get("gates"), dict) else {}
@@ -1306,6 +1307,8 @@ def _readiness_source_followup_summary(resume_state: dict[str, Any]) -> dict[str
         "injection_verified": followup.get("injection_verified") if isinstance(followup.get("injection_verified"), bool) else None,
         "source_wait_evidence": followup.get("source_wait_evidence") if isinstance(followup.get("source_wait_evidence"), bool) else None,
         "hash_consistent": followup.get("hash_consistent") if isinstance(followup.get("hash_consistent"), bool) else None,
+        "hash_evidence": hash_evidence,
+        "hash_consistency_blockers": _string_list(followup.get("hash_consistency_blockers")),
         "source_wait_query": wait_query,
         "qbit_wait_mismatch": followup.get("qbit_wait_mismatch") if isinstance(followup.get("qbit_wait_mismatch"), bool) else None,
         "qbit_wait_mismatches": _string_list(followup.get("qbit_wait_mismatches")),
@@ -1531,6 +1534,8 @@ def _retorrent_source_followup_closure(pipeline_result: dict[str, Any], artifact
     source_retry_hint = qbit_retry_hints.get("source") if isinstance(qbit_retry_hints.get("source"), dict) else {}
     qbit_wait_mismatches = [mismatch for mismatch in _string_list(qbit_wait_fields.get("qbit_wait_mismatches")) if mismatch.startswith("source.")]
     source_torrent_hash = artifacts.get("source_torrent_hash") or source_torrent_file_evidence.get("torrent_hash") or source_torrent_file_evidence.get("hash") or source_torrent_file_evidence.get("infohash")
+    hash_evidence = artifacts.get("source_hash_evidence") if isinstance(artifacts.get("source_hash_evidence"), dict) else {}
+    hash_blockers = _string_list(artifacts.get("source_hash_consistency_blockers"))
     checks = {
         "source_torrent_file": bool(artifacts.get("source_torrent_file") or source_torrent_file_evidence.get("path")),
         "source_torrent_file_evidence": _torrent_file_evidence_ready(source_torrent_file_evidence),
@@ -1572,6 +1577,8 @@ def _retorrent_source_followup_closure(pipeline_result: dict[str, Any], artifact
         "injection_verified": artifacts.get("source_injection_verified") if isinstance(artifacts.get("source_injection_verified"), bool) else None,
         "source_wait_evidence": artifacts.get("source_wait_evidence") if isinstance(artifacts.get("source_wait_evidence"), bool) else None,
         "hash_consistent": artifacts.get("source_hash_consistent") if isinstance(artifacts.get("source_hash_consistent"), bool) else None,
+        "hash_evidence": hash_evidence,
+        "hash_consistency_blockers": hash_blockers,
         "source_wait_query": source_wait_query,
         "qbit_wait_mismatch": bool(qbit_wait_mismatches),
         "qbit_wait_mismatches": qbit_wait_mismatches,
@@ -8053,26 +8060,7 @@ def _uploaded_torrent_hash_evidence(result: dict[str, Any]) -> dict[str, str]:
 
 
 def _uploaded_wait_hash_evidence(uploaded_wait: dict[str, Any]) -> dict[str, str]:
-    hashes: list[str] = []
-    matches = uploaded_wait.get("matches")
-    if isinstance(matches, list):
-        for match in matches:
-            if isinstance(match, dict):
-                torrent_hash = _normalize_torrent_hash(match.get("hash") or match.get("torrent_hash") or match.get("torrenthash"))
-                if torrent_hash:
-                    hashes.append(torrent_hash)
-    verification = uploaded_wait.get("completion_verification")
-    if isinstance(verification, dict):
-        observed_hashes = verification.get("observed_hashes")
-        if isinstance(observed_hashes, list):
-            for value in observed_hashes:
-                torrent_hash = _normalize_torrent_hash(value)
-                if torrent_hash:
-                    hashes.append(torrent_hash)
-    unique_hashes = list(dict.fromkeys(hashes))
-    if len(unique_hashes) == 1:
-        return {"uploaded_wait_match": unique_hashes[0]}
-    return {f"uploaded_wait_match_{index}": torrent_hash for index, torrent_hash in enumerate(unique_hashes, start=1)}
+    return _labeled_hash_evidence("uploaded_wait_match", _wait_result_hashes(uploaded_wait))
 
 
 def _string_list(value: Any) -> list[str]:
@@ -8503,6 +8491,10 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         artifacts["qbit_wait_retry_hints"] = qbit_wait_fields["qbit_wait_retry_hints"]
     if _artifact_value_present(evidence_source.get("hash_consistent")):
         artifacts["source_hash_consistent"] = evidence_source.get("hash_consistent")
+    if _artifact_value_present(evidence_source.get("hash_evidence")):
+        artifacts["source_hash_evidence"] = evidence_source.get("hash_evidence")
+    if _artifact_value_present(evidence_source.get("hash_consistency_blockers")):
+        artifacts["source_hash_consistency_blockers"] = evidence_source.get("hash_consistency_blockers")
     if _artifact_value_present(evidence_source.get("torrent_verified")):
         artifacts["source_torrent_verified"] = evidence_source.get("torrent_verified")
     if _artifact_value_present(evidence_source.get("injected_torrent_hash")):
@@ -9085,6 +9077,7 @@ def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any]
             "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
         },
         "materials": materials,
+        "source_followup": _retorrent_source_followup_closure(payload, artifacts),
         "blockers": blockers,
     }
 
@@ -9843,6 +9836,8 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_matched = _match_stage_has_match(match)
     source_content_verified = _source_content_verified(source_content_verify)
     source_hash_consistent = _source_hash_consistent(source_torrent_hash, source_download, inject_source, wait_complete, source_content_verify)
+    source_hash_evidence = _source_torrent_hash_evidence(source_torrent_hash, source_download, inject_source, wait_complete, source_content_verify)
+    source_hash_blockers = _source_torrent_hash_consistency_blockers(source_torrent_hash, source_download, inject_source, wait_complete, source_content_verify)
     target_injected = _injected_torrent_verified(injected_torrent)
     target_seeding = target_injected and _wait_result_completed(uploaded_wait)
     target_hash_consistent = not _uploaded_torrent_hash_consistency_blockers(target_upload_result)
@@ -9868,6 +9863,8 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "matched": source_matched,
         "content_verified": source_content_verified,
         "hash_consistent": source_hash_consistent,
+        "hash_evidence": source_hash_evidence,
+        "hash_consistency_blockers": source_hash_blockers,
         "content_verification": source_content_verify.get("result") if source_content_verify and isinstance(source_content_verify.get("result"), dict) else None,
         "torrent_hash": source_torrent_hash,
         "content_path": content_path,
@@ -10162,17 +10159,97 @@ def _source_hash_consistent(
     wait_complete: dict[str, Any] | None,
     source_content_verify: dict[str, Any] | None,
 ) -> bool:
-    hashes = {_normalize_torrent_hash(source_torrent_hash)}
-    hashes.add(_torrent_hash_from_stage(source_download))
-    hashes.add(_torrent_hash_from_stage(inject_source))
-    hashes.add(_torrent_hash_from_stage(wait_complete))
+    return not _source_torrent_hash_consistency_blockers(source_torrent_hash, source_download, inject_source, wait_complete, source_content_verify)
+
+
+def _source_torrent_hash_consistency_blockers(
+    source_torrent_hash: str | None,
+    source_download: dict[str, Any] | None,
+    inject_source: dict[str, Any] | None,
+    wait_complete: dict[str, Any] | None,
+    source_content_verify: dict[str, Any] | None,
+) -> list[str]:
+    hashes = _source_torrent_hash_evidence(source_torrent_hash, source_download, inject_source, wait_complete, source_content_verify)
+    if len(set(hashes.values())) <= 1:
+        return []
+    evidence = ", ".join(f"{label}={torrent_hash}" for label, torrent_hash in hashes.items())
+    return [f"source_torrent_hash: inconsistent source torrent hashes ({evidence})"]
+
+
+def _source_torrent_hash_evidence(
+    source_torrent_hash: str | None,
+    source_download: dict[str, Any] | None,
+    inject_source: dict[str, Any] | None,
+    wait_complete: dict[str, Any] | None,
+    source_content_verify: dict[str, Any] | None,
+) -> dict[str, str]:
+    evidence: dict[str, str] = {}
+    expected_hash = _normalize_torrent_hash(source_torrent_hash)
+    if expected_hash:
+        evidence["source_metadata"] = expected_hash
+    downloaded_hash = _torrent_hash_from_stage(source_download)
+    if downloaded_hash:
+        evidence["source_torrent"] = downloaded_hash
+    injected_hash = _torrent_hash_from_stage(inject_source)
+    if injected_hash:
+        evidence["injected_torrent"] = injected_hash
+    wait_result = _stage_result(wait_complete)
+    if wait_result:
+        query = wait_result.get("query")
+        if isinstance(query, dict):
+            wait_hash = _normalize_torrent_hash(query.get("torrent_hash"))
+            if wait_hash:
+                evidence["source_wait_query"] = wait_hash
+        evidence.update(_source_wait_hash_evidence(wait_result))
     result = source_content_verify.get("result") if isinstance(source_content_verify, dict) else None
     if isinstance(result, dict):
         matched_hashes = result.get("matched_hashes")
         if isinstance(matched_hashes, list):
-            hashes.update(_normalize_torrent_hash(hash_value) for hash_value in matched_hashes)
-    concrete_hashes = {hash_value for hash_value in hashes if hash_value}
-    return len(concrete_hashes) <= 1
+            evidence.update(_source_content_hash_evidence(matched_hashes))
+    return evidence
+
+
+def _stage_result(stage: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(stage, dict):
+        return {}
+    result = stage.get("result")
+    return result if isinstance(result, dict) else {}
+
+
+def _source_wait_hash_evidence(wait_result: dict[str, Any]) -> dict[str, str]:
+    return _labeled_hash_evidence("source_wait_match", _wait_result_hashes(wait_result))
+
+
+def _source_content_hash_evidence(hash_values: list[Any]) -> dict[str, str]:
+    hashes = [_normalize_torrent_hash(value) for value in hash_values]
+    return _labeled_hash_evidence("content_match", [value for value in hashes if value])
+
+
+def _wait_result_hashes(wait_result: dict[str, Any]) -> list[str]:
+    hashes: list[str] = []
+    matches = wait_result.get("matches")
+    if isinstance(matches, list):
+        for match in matches:
+            if isinstance(match, dict):
+                torrent_hash = _normalize_torrent_hash(match.get("hash") or match.get("torrent_hash") or match.get("torrenthash"))
+                if torrent_hash:
+                    hashes.append(torrent_hash)
+    verification = wait_result.get("completion_verification")
+    if isinstance(verification, dict):
+        observed_hashes = verification.get("observed_hashes")
+        if isinstance(observed_hashes, list):
+            for value in observed_hashes:
+                torrent_hash = _normalize_torrent_hash(value)
+                if torrent_hash:
+                    hashes.append(torrent_hash)
+    return hashes
+
+
+def _labeled_hash_evidence(label: str, hashes: list[str]) -> dict[str, str]:
+    unique_hashes = list(dict.fromkeys(hashes))
+    if len(unique_hashes) == 1:
+        return {label: unique_hashes[0]}
+    return {f"{label}_{index}": torrent_hash for index, torrent_hash in enumerate(unique_hashes, start=1)}
 
 
 def _target_evidence_mode(target: dict[str, Any]) -> str:
@@ -10216,6 +10293,8 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "injection_verified": bool(source.get("injection_verified")),
             "content_verified": bool(source.get("content_verified")),
             "hash_consistent": bool(source.get("hash_consistent")),
+            "hash_evidence": source.get("hash_evidence") if isinstance(source.get("hash_evidence"), dict) else {},
+            "hash_consistency_blockers": _string_list(source.get("hash_consistency_blockers")),
             "content_verification": source.get("content_verification"),
             "content_path": source.get("content_path"),
             "source_torrent": source.get("source_torrent"),
@@ -11386,6 +11465,7 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
     source_wait_query = source_followup.get("source_wait_query") if isinstance(source_followup.get("source_wait_query"), dict) else {}
     source_wait_retry = source_followup.get("wait_retry") if isinstance(source_followup.get("wait_retry"), dict) else {}
     source_torrent_evidence = source_followup.get("source_torrent_file_evidence") if isinstance(source_followup.get("source_torrent_file_evidence"), dict) else {}
+    source_hash_evidence = source_followup.get("hash_evidence") if isinstance(source_followup.get("hash_evidence"), dict) else {}
     source_followup_gates = source_followup.get("gates") if isinstance(source_followup.get("gates"), dict) else {}
     source_followup_next_actions = _string_list(source_followup.get("next_actions"))
     source_command_recovery = readiness_summary.get("source_command_recovery") if isinstance(readiness_summary.get("source_command_recovery"), dict) else {}
@@ -11525,6 +11605,8 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_SOURCE_FOLLOWUP_INJECTION_VERIFIED": _shell_bool(source_followup.get("injection_verified")) if source_followup.get("injection_verified") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_WAIT_EVIDENCE": _shell_bool(source_followup.get("source_wait_evidence")) if source_followup.get("source_wait_evidence") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_CONSISTENT": _shell_bool(source_followup.get("hash_consistent")) if source_followup.get("hash_consistent") is not None else None,
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_EVIDENCE": json.dumps(source_hash_evidence, ensure_ascii=False) if source_hash_evidence else None,
+        "PTCLI_READINESS_SOURCE_FOLLOWUP_HASH_BLOCKERS": "|".join(_string_list(source_followup.get("hash_consistency_blockers"))),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_FILE": source_followup.get("source_torrent_file"),
         "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_EXISTS": _shell_bool(source_torrent_evidence.get("exists")) if source_torrent_evidence.get("exists") is not None else None,
         "PTCLI_READINESS_SOURCE_FOLLOWUP_TORRENT_IS_FILE": _shell_bool(source_torrent_evidence.get("is_file")) if source_torrent_evidence.get("is_file") is not None else None,
