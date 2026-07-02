@@ -72,7 +72,7 @@ async def build_daily_candidates(
     rule_check = build_rule_check(source, targets, accept_rules=accept_rules)
     site_policy = build_site_policy_report(config, [source, *targets], accept_rules=accept_rules)
     source_capability = _source_candidate_capability(source)
-    candidates: list[dict[str, Any]] = []
+    scored_candidates: list[dict[str, Any]] = []
     blockers: list[str] = []
     next_actions: list[str] = []
     try:
@@ -82,11 +82,15 @@ async def build_daily_candidates(
         blockers.append(str(exc))
         next_actions.extend(_source_fetch_next_actions(source, base_dir))
 
-    for seed in seeds:
-        if len(candidates) >= limit:
-            break
-        candidates.append(await _candidate_from_seed(config, seed, targets, check_dupes=check_dupes, base_dir=base_dir, accept_rules=accept_rules))
+    for index, seed in enumerate(seeds):
+        candidate = await _candidate_from_seed(config, seed, targets, check_dupes=check_dupes, base_dir=base_dir, accept_rules=accept_rules)
+        candidate["_source_order"] = index
+        scored_candidates.append(candidate)
 
+    scored_candidates.sort(key=_candidate_sort_key, reverse=True)
+    candidates = scored_candidates[:limit]
+    for candidate in candidates:
+        candidate.pop("_source_order", None)
     ready_count = sum(1 for candidate in candidates if candidate.get("status") == "ready")
     partial = bool(blockers or len(candidates) < limit)
     status = "ok" if candidates and not partial else "blocked" if not candidates else "partial"
@@ -109,6 +113,12 @@ async def build_daily_candidates(
         "source_capability": source_capability,
         "rule_check": rule_check,
         "site_policy": site_policy,
+        "ranking": {
+            "strategy": "ready-first, then descending score, then source listing order",
+            "score_range": "0-100",
+            "scan_count": len(seeds),
+            "selected_count": len(candidates),
+        },
         "candidates": candidates,
         "blockers": payload_blockers,
         "next_actions": next_actions,
@@ -182,6 +192,7 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
     blockers = _candidate_blockers(seed, source_info_payload, source_info_error, duplicate_check, source_policy, target_policies, accept_rules=accept_rules)
     execute_request = _candidate_execute_request(config, seed, targets, accept_rules=accept_rules)
     status = "ready" if not blockers else "blocked"
+    ranking = _candidate_ranking(seed, source_info_payload, duplicate_check, blockers)
     return {
         "status": status,
         "source": seed.to_dict(),
@@ -190,7 +201,8 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "duplicate_check": duplicate_check,
         "source_policy": source_policy,
         "target_policies": target_policies,
-        "recommendation": _candidate_recommendation(seed, source_info_payload, duplicate_check, blockers),
+        "ranking": ranking,
+        "recommendation": _candidate_recommendation(seed, source_info_payload, duplicate_check, blockers, ranking),
         "blockers": blockers,
         "risk_flags": blockers,
         "execute_request": execute_request,
@@ -276,7 +288,92 @@ def _candidate_execute_request(config: dict[str, Any], seed: CandidateSeed, targ
     return request
 
 
-def _candidate_recommendation(seed: CandidateSeed, source_info: dict[str, Any] | None, duplicate_check: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+def _candidate_ranking(seed: CandidateSeed, source_info: dict[str, Any] | None, duplicate_check: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    score = 50
+    reasons: list[str] = []
+    penalties: list[str] = []
+    metadata_keys = [key for key in ("imdb_id", "tmdb_id", "douban_id", "douban_url", "name") if source_info and source_info.get(key)]
+    metadata_ready = bool(metadata_keys)
+    duplicate_status = str(duplicate_check.get("status") or "unknown")
+    freeleech_like = _promotion_is_free(seed.promotion)
+
+    if blockers:
+        penalty = min(30, len(blockers) * 8)
+        score -= penalty
+        penalties.append(f"{len(blockers)} blocker(s) reduce executable confidence by {penalty}.")
+    else:
+        score += 25
+        reasons.append("All current policy, metadata, duplicate, and adapter gates are ready.")
+
+    if duplicate_status == "not_found":
+        score += 15
+        reasons.append("Target duplicate search found no existing torrent.")
+    elif duplicate_status == "exists":
+        score -= 35
+        penalties.append("Target duplicate search found possible existing torrents.")
+    elif duplicate_status in {"skipped", "unsupported", "unknown"}:
+        score -= 10
+        penalties.append(f"Target duplicate confidence is limited: {duplicate_status}.")
+
+    if metadata_ready:
+        score += 10
+        reasons.append(f"Source metadata signal is available: {', '.join(metadata_keys)}.")
+    else:
+        score -= 20
+        penalties.append("Source metadata is missing IMDb/TMDb/Douban/name signals.")
+
+    if freeleech_like:
+        score += 5
+        reasons.append("Source promotion appears freeleech-like.")
+    elif seed.promotion:
+        score += 2
+        reasons.append(f"Source promotion detected: {seed.promotion}.")
+
+    if seed.seeders is not None:
+        if seed.seeders > 0:
+            bonus = min(5, max(1, seed.seeders // 5))
+            score += bonus
+            reasons.append(f"Source has {seed.seeders} seeder(s).")
+        else:
+            score -= 5
+            penalties.append("Source currently reports no seeders.")
+    if seed.leechers is not None and seed.leechers > 0:
+        bonus = min(5, max(1, seed.leechers // 10))
+        score += bonus
+        reasons.append(f"Source has {seed.leechers} leecher(s), suggesting active demand.")
+
+    score = max(0, min(100, score))
+    if not blockers:
+        tier = "ready"
+    elif duplicate_check.get("exists") is True or not source_info:
+        tier = "blocked"
+    else:
+        tier = "review"
+    return {
+        "score": score,
+        "tier": tier,
+        "reasons": reasons or ["Candidate is from the source tracker recent listing."],
+        "penalties": penalties,
+        "signals": {
+            "duplicate_status": duplicate_status,
+            "metadata_ready": metadata_ready,
+            "metadata_keys": metadata_keys,
+            "promotion": seed.promotion,
+            "freeleech_like": freeleech_like,
+            "seeders": seed.seeders,
+            "leechers": seed.leechers,
+            "blocker_count": len(blockers),
+        },
+    }
+
+
+def _candidate_recommendation(
+    seed: CandidateSeed,
+    source_info: dict[str, Any] | None,
+    duplicate_check: dict[str, Any],
+    blockers: list[str],
+    ranking: dict[str, Any],
+) -> dict[str, Any]:
     reasons: list[str] = []
     if seed.promotion:
         reasons.append(f"source promotion detected: {seed.promotion}")
@@ -288,9 +385,19 @@ def _candidate_recommendation(seed: CandidateSeed, source_info: dict[str, Any] |
         reasons.append("Candidate is from the source tracker recent listing.")
     return {
         "recommended": not blockers,
+        "score": ranking.get("score"),
+        "tier": ranking.get("tier"),
         "reason": "; ".join(reasons),
         "requires": ["accept_rules", "confirm_upload", "save_path or path"],
     }
+
+
+def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, int, int]:
+    ranking = candidate.get("ranking") if isinstance(candidate.get("ranking"), dict) else {}
+    score = int(ranking.get("score", 0) or 0)
+    source_order = int(candidate.get("_source_order", 0) or 0)
+    ready = 1 if candidate.get("status") == "ready" else 0
+    return ready, score, -source_order
 
 
 def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list[str]) -> dict[str, Any]:
@@ -303,6 +410,12 @@ def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list
         "limit": limit,
         "count": 0,
         "ready_count": 0,
+        "ranking": {
+            "strategy": "ready-first, then descending score, then source listing order",
+            "score_range": "0-100",
+            "scan_count": 0,
+            "selected_count": 0,
+        },
         "candidates": [],
         "blockers": blockers,
         "next_actions": [],

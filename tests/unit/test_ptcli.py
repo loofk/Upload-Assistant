@@ -12577,8 +12577,15 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["status"] == "ok"
     assert result["count"] == 1
     assert result["ready_count"] == 1
+    assert result["ranking"]["scan_count"] == 1
+    assert result["ranking"]["selected_count"] == 1
     candidate = result["candidates"][0]
     assert candidate["status"] == "ready"
+    assert candidate["ranking"]["tier"] == "ready"
+    assert candidate["ranking"]["score"] >= 90
+    assert candidate["ranking"]["signals"]["duplicate_status"] == "not_found"
+    assert candidate["ranking"]["signals"]["metadata_ready"] is True
+    assert candidate["recommendation"]["score"] == candidate["ranking"]["score"]
     assert candidate["duplicate_check"]["status"] == "not_found"
     assert candidate["source_policy"]["tracker"] == "U2"
     assert candidate["target_policies"][0]["tracker"] == "MTEAM"
@@ -12586,6 +12593,36 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["execute_request"]["qbit_download_limit"] == 20 * 1024 * 1024
     assert candidate["execute_request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert candidate["execute_job_endpoint"] == "/v1/jobs/retorrent"
+
+
+async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers(monkeypatch) -> None:
+    duplicate_seed = ptcli_candidates.CandidateSeed("U2", "60635", "Duplicate.Release", "https://u2.dmhy.org/details.php?id=60635", size="42 GiB")
+    ready_seed = ptcli_candidates.CandidateSeed("U2", "60636", "Ready.Release", "https://u2.dmhy.org/details.php?id=60636", size="24 GiB", promotion="free", seeders=20)
+
+    async def fake_fetch_recent_candidate_seeds(*_args, **_kwargs):
+        return [duplicate_seed, ready_seed]
+
+    async def fake_fetch_source_info(_config, tracker, torrent_id, **_kwargs):
+        imdb_id = 1234567 if torrent_id == "60635" else 7654321
+        return source_info_from_tuple(tracker, torrent_id, (imdb_id, 999, f"{torrent_id}.Release", "a" * 40, "desc"), {})
+
+    async def fake_search_mteam_duplicates(_config, source_info):
+        if source_info["torrent_id"] == "60635":
+            return {"searched": True, "count": 1, "dupes": [{"name": "Duplicate.Release"}]}
+        return {"searched": True, "count": 0, "dupes": []}
+
+    monkeypatch.setattr(ptcli_candidates, "fetch_recent_candidate_seeds", fake_fetch_recent_candidate_seeds)
+    monkeypatch.setattr(ptcli_candidates, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_candidates, "search_mteam_duplicates", fake_search_mteam_duplicates)
+
+    result = await ptcli_candidates.build_daily_candidates({"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, "U2", "MTEAM", limit=2, accept_rules=True)
+
+    assert result["count"] == 2
+    assert [candidate["source"]["torrent_id"] for candidate in result["candidates"]] == ["60636", "60635"]
+    assert result["candidates"][0]["status"] == "ready"
+    assert result["candidates"][0]["ranking"]["score"] > result["candidates"][1]["ranking"]["score"]
+    assert result["candidates"][1]["ranking"]["tier"] == "blocked"
+    assert result["candidates"][1]["duplicate_check"]["status"] == "exists"
 
 
 def test_source_info_from_tuple_includes_meta_side_effects() -> None:

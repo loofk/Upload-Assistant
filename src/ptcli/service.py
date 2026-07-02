@@ -419,6 +419,7 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         "elapsed_seconds": round(time.time() - started_at, 3),
         "result": result,
         "site_policy": result.get("site_policy"),
+        "ranking": result.get("ranking"),
         "candidates": result.get("candidates", []),
         "count": result.get("count", 0),
         "ready_count": result.get("ready_count", 0),
@@ -1138,7 +1139,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "name": "daily_candidates",
             "method": "POST",
             "path": "/v1/candidates/daily",
-            "description": "Return up to 10 source/target retorrent candidates with metadata availability, duplicate status, policy blockers, and an executable retorrent request template.",
+            "description": "Return up to 10 ranked source/target retorrent candidates with metadata availability, duplicate status, policy blockers, risk signals, and an executable retorrent request template.",
             "input_schema": candidate_request_schema,
             "response_contract": _candidate_response_contract(),
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
@@ -1277,8 +1278,21 @@ def _job_response_contract() -> dict[str, Any]:
 
 def _candidate_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "count", "ready_count", "site_policy", "candidates", "blockers", "next_actions"],
-        "candidate_fields": ["status", "source", "source_info", "duplicate_check", "source_policy", "target_policies", "recommendation", "blockers", "execute_request", "execute_job_endpoint"],
+        "required_fields": ["status", "ok", "count", "ready_count", "site_policy", "ranking", "candidates", "blockers", "next_actions"],
+        "candidate_fields": [
+            "status",
+            "source",
+            "source_info",
+            "duplicate_check",
+            "source_policy",
+            "target_policies",
+            "ranking",
+            "recommendation",
+            "blockers",
+            "execute_request",
+            "execute_job_endpoint",
+        ],
+        "ranking": {"score_range": "0-100", "tiers": ["ready", "review", "blocked"], "sort": "ready-first, then descending score"},
     }
 
 
@@ -1330,7 +1344,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             {
                 "name": "daily_candidates",
                 "tool": "daily_candidates_job",
-                "description": "Find up to 10 source/target retorrent candidates with duplicate checks, policy blockers, and executable request templates.",
+                "description": "Find up to 10 ranked source/target retorrent candidates with duplicate checks, policy blockers, risk signals, and executable request templates.",
                 "required_fields": ["source_tracker", "target"],
             },
             {
@@ -1437,6 +1451,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "count": {"type": "integer"},
             "ready_count": {"type": "integer"},
             "site_policy": {"type": "object"},
+            "ranking": {"type": "object"},
             "candidates": {"type": "array", "items": {"type": "object"}},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},

@@ -120,7 +120,7 @@
       "name": "daily_candidates_job",
       "method": "POST",
       "path": "/v1/jobs/candidates/daily",
-      "description": "Create an asynchronous daily-candidate discovery job and return a job_id for polling.",
+      "description": "Create an asynchronous ranked daily-candidate discovery job and return a job_id for polling.",
       "input_schema": {
         "type": "object",
         "required": [
@@ -158,6 +158,18 @@
           "job_id",
           "blockers",
           "next_actions"
+        ],
+        "result_fields": [
+          "ranking",
+          "candidates",
+          "ready_count"
+        ],
+        "candidate_fields": [
+          "ranking",
+          "recommendation",
+          "duplicate_check",
+          "blockers",
+          "execute_request"
         ]
       },
       "safety": {
