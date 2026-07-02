@@ -1383,6 +1383,8 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         "source_qbit_tags",
         "source_paused",
         "source_hash_consistent",
+        "source_hash_evidence",
+        "source_hash_consistency_blockers",
         "source_injected_torrent_hash",
         "source_injection_visible_in_client",
         "source_injection_verified",
@@ -1391,7 +1393,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         if key in merged and _artifact_value_present(merged.get(key)):
             continue
         source_key = _source_artifact_evidence_key(key)
-        value = evidence_source.get(source_key) or closure_source.get(source_key) or summary_source.get(source_key)
+        value = _first_artifact_value(evidence_source.get(source_key), closure_source.get(source_key), summary_source.get(source_key))
         if _artifact_value_present(value):
             merged[key] = value
     if "source_injection_visible_in_client" not in merged:
@@ -1413,6 +1415,8 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         "uploaded_wait_evidence",
         "fresh_duplicate_check",
         "target_hash_consistent",
+        "target_hash_evidence",
+        "target_hash_consistency_blockers",
         "target_duplicate_clean",
         "target_rule_obligations",
         "target_preparation_audit",
@@ -1424,7 +1428,7 @@ def _retorrent_execute_artifacts(pipeline_result: dict[str, Any], evidence: dict
         if key in merged and _artifact_value_present(merged.get(key)):
             continue
         target_key = _target_artifact_evidence_key(key)
-        value = evidence_target.get(target_key) or closure_target.get(target_key) or summary_target.get(target_key)
+        value = _first_artifact_value(evidence_target.get(target_key), closure_target.get(target_key), summary_target.get(target_key))
         if _artifact_value_present(value):
             merged[key] = value
     preparation_audit = merged.get("target_preparation_audit")
@@ -1490,6 +1494,8 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "source_qbit_tags": bool(artifacts.get("source_qbit_tags")),
             "source_paused": "source_paused" in artifacts,
             "source_hash_consistent": bool(artifacts.get("source_hash_consistent")),
+            "source_hash_evidence": bool(artifacts.get("source_hash_evidence")),
+            "source_hash_consistency_blockers": "source_hash_consistency_blockers" in artifacts,
             "source_injected_torrent_hash": bool(artifacts.get("source_injected_torrent_hash")),
             "source_injection_visible_in_client": bool(artifacts.get("source_injection_visible_in_client")),
             "source_injection_verified": bool(artifacts.get("source_injection_verified")),
@@ -1509,6 +1515,8 @@ def _retorrent_execute_resume_state(pipeline_result: dict[str, Any], artifacts: 
             "uploaded_paused": "uploaded_paused" in artifacts,
             "uploaded_wait_evidence": bool(artifacts.get("uploaded_wait_evidence")),
             "target_hash_consistent": bool(artifacts.get("target_hash_consistent")),
+            "target_hash_evidence": bool(artifacts.get("target_hash_evidence")),
+            "target_hash_consistency_blockers": "target_hash_consistency_blockers" in artifacts,
             "target_duplicate_clean": bool(artifacts.get("target_duplicate_clean")),
             "target_rule_obligations": _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations")),
             "target_preparation_ready": bool(artifacts.get("target_preparation_ready")),
@@ -1854,6 +1862,8 @@ def _source_artifact_evidence_key(artifact_key: str) -> str:
         "source_qbit_tags": "source_qbit_tags",
         "source_paused": "source_paused",
         "source_hash_consistent": "hash_consistent",
+        "source_hash_evidence": "hash_evidence",
+        "source_hash_consistency_blockers": "hash_consistency_blockers",
         "source_injected_torrent_hash": "injected_torrent_hash",
         "source_injection_visible_in_client": "source_injection_visible_in_client",
         "source_injection_verified": "injection_verified",
@@ -1876,6 +1886,8 @@ def _target_artifact_evidence_key(artifact_key: str) -> str:
         "uploaded_qbit_tags": "uploaded_qbit_tags",
         "uploaded_paused": "uploaded_paused",
         "target_hash_consistent": "hash_consistent",
+        "target_hash_evidence": "hash_evidence",
+        "target_hash_consistency_blockers": "hash_consistency_blockers",
         "target_duplicate_clean": "duplicate_clean",
         "target_rule_obligations": "rule_obligations",
         "target_preparation_audit": "preparation_audit",
@@ -1887,6 +1899,13 @@ def _target_artifact_evidence_key(artifact_key: str) -> str:
 
 def _artifact_value_present(value: Any) -> bool:
     return value is not None and value != ""
+
+
+def _first_artifact_value(*values: Any) -> Any:
+    for value in values:
+        if _artifact_value_present(value):
+            return value
+    return None
 
 
 def _retorrent_execute_next_actions(pipeline_result: dict[str, Any], blockers: list[str]) -> list[str]:

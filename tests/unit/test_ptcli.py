@@ -717,6 +717,13 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "source_qbit_tags": "source-tag",
                     "source_paused": True,
                     "hash_consistent": True,
+                    "hash_evidence": {
+                        "source_metadata": "a" * 40,
+                        "source_torrent": "a" * 40,
+                        "injected_torrent": "a" * 40,
+                        "source_wait_match": "a" * 40,
+                    },
+                    "hash_consistency_blockers": [],
                     "injected_torrent_hash": "a" * 40,
                     "qbit_closure": {"injection": {"visible_in_client": True}},
                     "injection_verified": True,
@@ -744,6 +751,13 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
                     "uploaded_paused": True,
                     "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
                     "hash_consistent": True,
+                    "hash_evidence": {
+                        "upload_response": "b" * 40,
+                        "downloaded_torrent": "b" * 40,
+                        "injected_torrent": "b" * 40,
+                        "uploaded_wait_match": "b" * 40,
+                    },
+                    "hash_consistency_blockers": [],
                     "duplicate_clean": True,
                     "rule_obligations": rule_obligations,
                     "payload_review": payload_review,
@@ -939,9 +953,23 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["closure_audit"]["ready"] is True
     assert payload["closure_audit"]["missing"] == []
     assert payload["evidence"]["source"]["mode"] == "downloaded"
+    assert payload["evidence"]["source"]["hash_evidence"]["source_metadata"] == "a" * 40
+    assert payload["evidence"]["source"]["hash_evidence"]["source_torrent"] == "a" * 40
+    assert payload["evidence"]["source"]["hash_evidence"]["injected_torrent"] == "a" * 40
+    assert payload["evidence"]["source"]["hash_evidence"]["source_wait_match"] == "a" * 40
+    assert payload["evidence"]["source"]["hash_consistency_blockers"] == []
     assert payload["evidence"]["target"]["uploaded_torrent_hash"] == "b" * 40
+    assert payload["evidence"]["target"]["hash_evidence"]["upload_response"] == "b" * 40
+    assert payload["evidence"]["target"]["hash_evidence"]["downloaded_torrent"] == "b" * 40
+    assert payload["evidence"]["target"]["hash_evidence"]["injected_torrent"] == "b" * 40
+    assert payload["evidence"]["target"]["hash_evidence"]["uploaded_wait_match"] == "b" * 40
+    assert payload["evidence"]["target"]["hash_consistency_blockers"] == []
     assert payload["evidence"]["target"]["target_material_chain"]["ready"] is True
     assert payload["evidence"]["target"]["target_material_chain"]["chains"]["metadata_chain"]["ready"] is True
+    assert payload["artifacts"]["source_hash_evidence"] == payload["evidence"]["source"]["hash_evidence"]
+    assert payload["artifacts"]["source_hash_consistency_blockers"] == []
+    assert payload["artifacts"]["target_hash_evidence"] == payload["evidence"]["target"]["hash_evidence"]
+    assert payload["artifacts"]["target_hash_consistency_blockers"] == []
     assert payload["artifacts"]["target_material_chain"]["ready"] is True
     assert payload["artifacts"]["target_material_chain"]["chains"]["screenshot_chain"]["ready"] is True
     assert payload["summary"]["status"] == "complete"
@@ -1004,6 +1032,13 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "source_qbit_tags": "source-tag",
         "source_paused": True,
         "source_hash_consistent": True,
+        "source_hash_evidence": {
+            "source_metadata": "a" * 40,
+            "source_torrent": "a" * 40,
+            "injected_torrent": "a" * 40,
+            "source_wait_match": "a" * 40,
+        },
+        "source_hash_consistency_blockers": [],
         "source_injected_torrent_hash": "a" * 40,
         "source_injection_visible_in_client": True,
         "source_injection_verified": True,
@@ -1023,6 +1058,13 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
         "uploaded_wait_evidence": True,
         "fresh_duplicate_check": {"searched": True, "count": 0, "dupes": []},
         "target_hash_consistent": True,
+        "target_hash_evidence": {
+            "upload_response": "b" * 40,
+            "downloaded_torrent": "b" * 40,
+            "injected_torrent": "b" * 40,
+            "uploaded_wait_match": "b" * 40,
+        },
+        "target_hash_consistency_blockers": [],
         "target_duplicate_clean": True,
         "target_rule_obligations": {"ready": True, "count": 2, "missing": []},
         "target_preparation_audit": {
@@ -1109,6 +1151,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["source_qbit_tags"] is True
     assert payload["resume_state"]["artifacts"]["source_paused"] is True
     assert payload["resume_state"]["artifacts"]["source_hash_consistent"] is True
+    assert payload["resume_state"]["artifacts"]["source_hash_evidence"] is True
+    assert payload["resume_state"]["artifacts"]["source_hash_consistency_blockers"] is True
     assert payload["resume_state"]["artifacts"]["source_injected_torrent_hash"] is True
     assert payload["resume_state"]["artifacts"]["source_injection_visible_in_client"] is True
     assert payload["resume_state"]["artifacts"]["source_injection_verified"] is True
@@ -1126,6 +1170,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert payload["resume_state"]["artifacts"]["uploaded_paused"] is True
     assert payload["resume_state"]["artifacts"]["uploaded_wait_evidence"] is True
     assert payload["resume_state"]["artifacts"]["target_hash_consistent"] is True
+    assert payload["resume_state"]["artifacts"]["target_hash_evidence"] is True
+    assert payload["resume_state"]["artifacts"]["target_hash_consistency_blockers"] is True
     assert payload["resume_state"]["artifacts"]["target_duplicate_clean"] is True
     assert payload["resume_state"]["artifacts"]["target_rule_obligations"] is True
     assert payload["resume_state"]["artifacts"]["target_preparation_ready"] is True
