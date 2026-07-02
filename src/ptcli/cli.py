@@ -47,6 +47,7 @@ from src.ptcli.source import (
     source_info_has_signal,
 )
 from src.ptcli.target import (
+    _image_host_item_urls,
     build_mteam_upload_preflight,
     create_mteam_upload_torrent_candidate,
     download_mteam_uploaded_torrent,
@@ -2210,11 +2211,7 @@ def _read_recovery_text_file(path_value: str, limit: int = 65536) -> str:
 
 
 def _image_host_recovery_item_has_url(item: dict[str, Any]) -> bool:
-    return any(_is_http_url(item.get(key)) for key in ("raw_url", "url", "img_url", "web_url"))
-
-
-def _is_http_url(value: Any) -> bool:
-    return bool(re.match(r"^https?://", str(value or "").strip(), flags=re.IGNORECASE))
+    return all(_image_host_item_urls(item))
 
 
 def _screenshot_file_looks_like_image(path_value: str) -> bool:

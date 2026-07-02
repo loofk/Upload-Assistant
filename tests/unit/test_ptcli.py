@@ -8393,6 +8393,46 @@ def test_summary_check_treats_existing_material_files_as_recovery_coverage(tmp_p
     assert all(hint["existing_file_option_present"] is True for hint in recovery["hints"])
 
 
+def test_summary_check_accepts_image_host_alias_urls_as_recovery_coverage(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    image_host_file = tmp_path / "image-host.json"
+    image_host_file.write_text(json.dumps({"items": [{"thumb": "https://img.example/thumb.png", "link": "https://img.example/page"}]}), encoding="utf-8")
+    resume_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target", "--image-host-file", str(image_host_file)]
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "artifacts": {
+                    "target_materials_missing": ["assets.image_host_uploads"],
+                    "target_materials_ready": False,
+                    "target_preparation_ready": False,
+                },
+                "resume_commands": [{"stage": "resume-target-package", "command": shlex.join(resume_argv), "argv": resume_argv}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    recovery = payload["readiness_summary"]["material_recovery"]
+    assert payload["next_command_run_allowed"] is True
+    assert payload["next_command_run_blocker"] is None
+    assert payload["automation_action"] == "run_next_command"
+    assert recovery["command_coverage"]["ready"] is True
+    assert recovery["missing_flags"] == []
+    assert recovery["invalid_existing_option_values"] == {}
+    assert recovery["hints"][0]["existing_file_option_present"] is True
+
+
 def test_summary_check_requires_metadata_file_to_cover_recovery_key(tmp_path, capsys) -> None:
     summary_file = tmp_path / "summary.json"
     metadata_file = tmp_path / "metadata.json"
