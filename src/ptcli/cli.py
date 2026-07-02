@@ -962,6 +962,7 @@ def _retorrent_readiness_summary(
     ptgen_evidence = material_description_evidence.get("ptgen_description") if isinstance(material_description_evidence.get("ptgen_description"), dict) else {}
     mediainfo_evidence = material_description_evidence.get("mediainfo_or_bdinfo") if isinstance(material_description_evidence.get("mediainfo_or_bdinfo"), dict) else {}
     screenshots_evidence = material_description_evidence.get("screenshots") if isinstance(material_description_evidence.get("screenshots"), dict) else {}
+    ptgen_chain_evidence = material_description_evidence.get("ptgen_chain") if isinstance(material_description_evidence.get("ptgen_chain"), dict) else {}
     metadata_chain_evidence = material_description_evidence.get("metadata_chain") if isinstance(material_description_evidence.get("metadata_chain"), dict) else {}
     media_info_chain_evidence = material_description_evidence.get("media_info_chain") if isinstance(material_description_evidence.get("media_info_chain"), dict) else {}
     screenshot_chain_evidence = material_description_evidence.get("screenshot_chain") if isinstance(material_description_evidence.get("screenshot_chain"), dict) else {}
@@ -1002,6 +1003,9 @@ def _retorrent_readiness_summary(
         "material_live_gate_next_actions": _string_list(live_gate.get("next_actions")),
         "material_description_evidence": material_description_evidence,
         "material_description_ptgen_ready": ptgen_evidence.get("ready") if isinstance(ptgen_evidence.get("ready"), bool) else None,
+        "material_description_ptgen_chain_ready": ptgen_chain_evidence.get("ready") if isinstance(ptgen_chain_evidence.get("ready"), bool) else None,
+        "material_description_ptgen_chain_missing": _description_chain_recovery_missing("ptgen_chain", ptgen_chain_evidence),
+        "material_description_ptgen_chain_next_actions": _description_chain_next_actions("ptgen_chain", ptgen_chain_evidence),
         "material_description_external_ids_ready": external_id_evidence.get("ready") if isinstance(external_id_evidence.get("ready"), bool) else None,
         "material_description_external_id_missing": _string_list(external_id_evidence.get("missing")),
         "material_description_mediainfo_ready": mediainfo_evidence.get("ready") if isinstance(mediainfo_evidence.get("ready"), bool) else None,
@@ -1114,6 +1118,7 @@ def _description_chain_next_actions(chain_name: str, chain: Any) -> list[str]:
 
 _TARGET_MATERIAL_CHAIN_DETAIL_KEYS = {
     "metadata_chain": ("items",),
+    "ptgen_chain": ("source_length", "source_sha1", "description_has_ptgen", "description_matched"),
     "media_info_chain": ("material_source", "material_length", "description_has_excerpt", "payload_source", "payload_length"),
     "screenshot_chain": (
         "local_screenshot_count",
@@ -9564,6 +9569,12 @@ def _description_evidence_recovery_missing(evidence: Any) -> list[str]:
     ptgen = evidence.get("ptgen_description") if isinstance(evidence.get("ptgen_description"), dict) else {}
     if ptgen.get("ready") is False:
         missing.append("description.ptgen_description")
+    ptgen_chain = evidence.get("ptgen_chain") if isinstance(evidence.get("ptgen_chain"), dict) else {}
+    if ptgen_chain.get("ready") is False:
+        if int(ptgen_chain.get("source_length", 0) or 0) <= 0:
+            _append_unique_string(missing, "metadata.ptgen_description")
+        if ptgen_chain.get("description_has_ptgen") is False or ptgen_chain.get("description_matched") is False:
+            _append_unique_string(missing, "description.ptgen_description")
     external_ids = evidence.get("external_ids") if isinstance(evidence.get("external_ids"), dict) else {}
     external_missing = _string_list(external_ids.get("missing"))
     if external_ids.get("ready") is False:

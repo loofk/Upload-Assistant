@@ -806,7 +806,8 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
     image_host_linkage = _image_host_screenshot_linkage(screenshots, image_hosts)
     image_hosts = {**image_hosts, "url_ready": image_hosts.get("ready"), "ready": bool(image_hosts.get("ready") and image_host_linkage.get("ready")), "screenshot_linkage": image_host_linkage}
     disc_structure = _disc_structure_asset(content_path)
-    ptgen_description_length = len(str(source_info.get("ptgen_description") or "")) if isinstance(source_info, dict) else 0
+    ptgen_description_text = _normalize_ptgen_description_text(str(source_info.get("ptgen_description") or "")) if isinstance(source_info, dict) else ""
+    ptgen_description_length = len(ptgen_description_text)
     if not metadata_field_evidence:
         metadata_field_evidence = _mteam_material_metadata_field_evidence(meta_draft, source_info, ptgen_description_length)
     if not metadata_readiness:
@@ -850,6 +851,8 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "douban_url": meta_draft.get("douban_url"),
             "source_description_available": source_description_length > 0,
             "ptgen_description_length": ptgen_description_length,
+            "ptgen_description_text": ptgen_description_text,
+            "ptgen_description_sha1": hashlib.sha1(ptgen_description_text.encode("utf-8")).hexdigest() if ptgen_description_text else None,
             "enrichment_status": metadata_enrichment.get("status"),
             "enrichment_ready": metadata_enrichment.get("ready") if isinstance(metadata_enrichment.get("ready"), bool) else None,
             "sources": metadata_sources,
@@ -1856,6 +1859,7 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
     media_info_source = _mteam_material_mediainfo_source(materials)
     media_info_length = _mteam_material_mediainfo_length(materials)
     media_info_excerpt_matched = _mteam_description_material_excerpt_matches(description_summary, materials)
+    ptgen_description_matched = _mteam_description_ptgen_matches(description_summary, materials)
     payload_media_info = form_fields.get("mediainfo") if isinstance(form_fields.get("mediainfo"), dict) else {}
     return {
         "description": {
@@ -1880,6 +1884,7 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
                 payload_media_info_source=payload_media_info.get("source"),
                 payload_media_info_length=payload_media_info.get("length"),
                 media_info_excerpt_matched=media_info_excerpt_matched,
+                ptgen_description_matched=ptgen_description_matched,
                 screenshot_coverage=screenshot_coverage,
                 local_screenshot_count=local_screenshot_count,
                 image_host_count=image_host_count,
@@ -1916,6 +1921,7 @@ def _mteam_description_evidence_summary(
     payload_media_info_source: Any,
     payload_media_info_length: Any,
     media_info_excerpt_matched: bool,
+    ptgen_description_matched: bool,
     screenshot_coverage: dict[str, Any],
     local_screenshot_count: int,
     image_host_count: int,
@@ -1932,9 +1938,18 @@ def _mteam_description_evidence_summary(
     missing_count = len(missing_urls)
     return {
         "ptgen_description": {
-            "ready": bool(content.get("has_ptgen_description")),
+            "ready": bool(content.get("has_ptgen_description") and ptgen_description_matched),
             "length": metadata.get("ptgen_description_length"),
-            "source": "metadata.ptgen_description" if content.get("has_ptgen_description") else None,
+            "source": "metadata.ptgen_description" if metadata.get("ptgen_description_length") else None,
+            "sha1": metadata.get("ptgen_description_sha1"),
+            "description_matched": ptgen_description_matched,
+        },
+        "ptgen_chain": {
+            "ready": bool(content.get("has_ptgen_description") and ptgen_description_matched and int(metadata.get("ptgen_description_length", 0) or 0) > 0),
+            "source_length": metadata.get("ptgen_description_length"),
+            "source_sha1": metadata.get("ptgen_description_sha1"),
+            "description_has_ptgen": bool(content.get("has_ptgen_description")),
+            "description_matched": ptgen_description_matched,
         },
         "external_ids": {
             "ready": all(external_id_readiness.get(name) is True for name in ("imdb", "tmdb", "douban")),
@@ -2093,6 +2108,7 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
     missing_image_urls = [url for url in expected_image_urls if url not in description_image_urls]
     screenshot_coverage_ready = _mteam_screenshot_coverage_ready(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls, image_host_linkage)
     media_info_excerpt_matched = _mteam_description_material_excerpt_matches(description_summary, materials)
+    ptgen_description_matched = _mteam_description_ptgen_matches(description_summary, materials)
     external_links = content.get("external_links") if isinstance(content.get("external_links"), dict) else {}
     metadata_chain_items = {name: _mteam_metadata_chain_item(name, metadata, external_links, form_fields) for name in ("imdb", "tmdb", "douban")}
     external_id_checks = {
@@ -2124,9 +2140,9 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
         [
             _payload_field_check(
                 "materials.description.ptgen_description",
-                bool(content.get("has_ptgen_description")),
+                bool(content.get("has_ptgen_description") and ptgen_description_matched),
                 "MTEAM description includes PTGen/Douban description text.",
-                "MTEAM description is missing PTGen/Douban description text.",
+                _mteam_description_ptgen_missing_message(content, materials, ptgen_description_matched),
             ),
             _payload_field_check(
                 "materials.description.external_ids",
@@ -2232,6 +2248,21 @@ def _mteam_description_material_excerpt_matches(description_summary: dict[str, A
     return expected_excerpt in description_text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _mteam_description_ptgen_matches(description_summary: dict[str, Any], materials: dict[str, Any]) -> bool:
+    expected = _mteam_material_ptgen_description_text(materials)
+    if not expected:
+        return False
+    description_text = _read_description_summary_text(description_summary)
+    if not description_text:
+        return False
+    return expected in description_text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _mteam_material_ptgen_description_text(materials: dict[str, Any]) -> str:
+    metadata = materials.get("metadata") if isinstance(materials.get("metadata"), dict) else {}
+    return _normalize_ptgen_description_text(str(metadata.get("ptgen_description_text") or ""))
+
+
 def _read_description_summary_text(description_summary: dict[str, Any]) -> str:
     path = description_summary.get("path")
     if not path:
@@ -2251,6 +2282,16 @@ def _mteam_description_media_info_missing_message(content: dict[str, Any], mater
     if not source:
         return "MTEAM MediaInfo/BDInfo material file is missing, so the description excerpt cannot be verified."
     return f"MTEAM description MediaInfo/BDInfo excerpt does not match current material file: {source}."
+
+
+def _mteam_description_ptgen_missing_message(content: dict[str, Any], materials: dict[str, Any], description_matched: bool) -> str:
+    if not content.get("has_ptgen_description"):
+        return "MTEAM description is missing PTGen/Douban description text."
+    if description_matched:
+        return "MTEAM description PTGen/Douban text is not verified."
+    if not _mteam_material_ptgen_description_text(materials):
+        return "MTEAM metadata.ptgen_description is missing, so the description text cannot be verified."
+    return "MTEAM description PTGen/Douban text does not match current metadata.ptgen_description."
 
 
 def _mteam_description_metadata_link_missing_message(name: str, item: dict[str, Any], content: dict[str, Any]) -> str:

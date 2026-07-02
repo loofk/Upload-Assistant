@@ -21177,8 +21177,16 @@ def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> Non
         "description_urls": ["https://img.example/thumb.png"],
         "missing_urls": [],
     }
+    ptgen_sha1 = hashlib.sha1(source_info["ptgen_description"].encode("utf-8")).hexdigest()
     assert review["description"]["evidence"] == {
-        "ptgen_description": {"ready": True, "length": len(source_info["ptgen_description"]), "source": "metadata.ptgen_description"},
+        "ptgen_description": {"ready": True, "length": len(source_info["ptgen_description"]), "source": "metadata.ptgen_description", "sha1": ptgen_sha1, "description_matched": True},
+        "ptgen_chain": {
+            "ready": True,
+            "source_length": len(source_info["ptgen_description"]),
+            "source_sha1": ptgen_sha1,
+            "description_has_ptgen": True,
+            "description_matched": True,
+        },
         "external_ids": {
             "ready": True,
             "readiness": {"imdb": True, "tmdb": True, "douban": True},
@@ -21342,6 +21350,58 @@ def test_mteam_upload_preflight_blocks_stale_mediainfo_excerpt(tmp_path) -> None
     audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
     assert audit["description_ready"] is False
     assert "materials.description.mediainfo_or_bdinfo" in audit["description"]["missing"]
+
+
+def test_mteam_upload_preflight_blocks_stale_ptgen_description(tmp_path) -> None:
+    package = write_material_ready_mteam_package(
+        {
+            "tracker": "U2",
+            "torrent_id": "60635",
+            "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+            "imdb_id": 1234567,
+            "tmdb_id": 999,
+            "douban_id": "1291546",
+            "douban_url": "https://movie.douban.com/subject/1291546/",
+            "torrenthash": "a" * 40,
+            "description_length": 100,
+            "ptgen_description": "◎译　　名　当前标题\n◎简　　介　当前简介",
+        },
+        tmp_path,
+    )
+    description_path = Path(package["files"]["description_draft"])
+    description = description_path.read_text(encoding="utf-8")
+    current_ptgen = package["materials"]["metadata"]["ptgen_description_text"]
+    description_path.write_text(description.replace(current_ptgen, "◎译　　名　旧标题\n◎简　　介　旧简介"), encoding="utf-8")
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    blockers = preflight["upload_payload"]["blockers"]
+    assert any("materials.description.ptgen_description" in blocker and "does not match current metadata.ptgen_description" in blocker for blocker in blockers)
+    assert "description.ptgen_description" in preflight["upload_payload"]["recovery_missing"]
+    assert "metadata.ptgen_description" not in preflight["upload_payload"]["recovery_missing"]
+    review = preflight["upload_payload"]["review"]
+    expected_sha1 = hashlib.sha1(current_ptgen.encode("utf-8")).hexdigest()
+    assert review["description"]["has_ptgen_description"] is True
+    assert review["description"]["evidence"]["ptgen_description"] == {
+        "ready": False,
+        "length": len(current_ptgen),
+        "source": "metadata.ptgen_description",
+        "sha1": expected_sha1,
+        "description_matched": False,
+    }
+    assert review["description"]["evidence"]["ptgen_chain"] == {
+        "ready": False,
+        "source_length": len(current_ptgen),
+        "source_sha1": expected_sha1,
+        "description_has_ptgen": True,
+        "description_matched": False,
+    }
+    assert ptcli_cli._description_chain_recovery_missing("ptgen_chain", review["description"]["evidence"]["ptgen_chain"]) == ["description.ptgen_description"]
+    audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
+    assert audit["description_ready"] is False
+    assert "materials.description.ptgen_description" in audit["description"]["missing"]
 
 
 def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_description(tmp_path) -> None:
