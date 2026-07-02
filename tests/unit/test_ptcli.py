@@ -11049,8 +11049,46 @@ def test_pipeline_closure_uses_downloaded_uploaded_torrent_hash_when_followup_in
     assert "target.injected" in closure["blockers"]
     assert closure["target"]["downloaded"] is True
     assert closure["target"]["uploaded_torrent_hash"] == uploaded_hash
+    assert closure["target"]["hash_evidence"] == {"downloaded_torrent": uploaded_hash}
+    assert closure["target"]["hash_consistency_blockers"] == []
     assert evidence["target"]["uploaded_torrent_hash"] == uploaded_hash
+    assert evidence["target"]["hash_evidence"] == {"downloaded_torrent": uploaded_hash}
+    assert evidence["target"]["hash_consistency_blockers"] == []
     assert "target.uploaded_torrent_hash" not in audit["missing"]
+
+
+def test_run_summary_promotes_target_hash_evidence_from_pipeline_evidence(tmp_path) -> None:
+    hash_evidence = {
+        "upload_response": "b" * 40,
+        "downloaded_torrent": "b" * 40,
+        "injected_torrent": "c" * 40,
+    }
+    hash_blockers = ["uploaded_torrent_hash: inconsistent target torrent hashes"]
+    summary_file = ptcli_cli._write_run_summary(
+        {
+            "status": "blocked",
+            "ready": False,
+            "complete": False,
+            "blockers": ["target.hash_consistent"],
+            "evidence": {
+                "target": {
+                    "hash_consistent": False,
+                    "hash_evidence": hash_evidence,
+                    "hash_consistency_blockers": hash_blockers,
+                }
+            },
+            "stages": [],
+        },
+        str(tmp_path),
+    )
+
+    summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+
+    assert summary_payload["evidence"]["target"]["hash_evidence"] == hash_evidence
+    assert summary_payload["evidence"]["target"]["hash_consistency_blockers"] == hash_blockers
+    assert summary_payload["artifacts"]["target_hash_consistent"] is False
+    assert summary_payload["artifacts"]["target_hash_evidence"] == hash_evidence
+    assert summary_payload["artifacts"]["target_hash_consistency_blockers"] == hash_blockers
 
 
 def test_pipeline_closure_rejects_unverified_existing_qbit_match() -> None:
@@ -16471,6 +16509,13 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert audit_items["source.injected_torrent_hash"]["ok"] is True
     assert audit_items["target.uploaded_wait_evidence"]["ok"] is True
     assert payload["closure"]["target"]["uploaded_torrent_hash"] == uploaded_hash
+    assert payload["closure"]["target"]["hash_evidence"] == {
+        "upload_response": uploaded_hash,
+        "downloaded_torrent": uploaded_hash,
+        "injected_torrent": uploaded_hash,
+        "uploaded_wait_match": uploaded_hash,
+    }
+    assert payload["closure"]["target"]["hash_consistency_blockers"] == []
     assert payload["closure"]["target"]["seeding"] is True
     assert payload["closure"]["target"]["uploaded_wait"]["complete"] is True
     assert wait_calls[0]["timeout"] == 7200.0
@@ -16500,6 +16545,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["closure_status"]["target"]["ready"] is True
     assert summary_payload["closure_status"]["target"]["rule_obligations_ready"] is True
     assert summary_payload["closure_status"]["target"]["uploaded_wait_evidence"] is True
+    assert summary_payload["evidence"]["target"]["hash_evidence"] == payload["closure"]["target"]["hash_evidence"]
+    assert summary_payload["evidence"]["target"]["hash_consistency_blockers"] == []
     assert summary_payload["closure_review"]["complete"] is True
     assert summary_payload["closure_review"]["missing"] == []
     assert summary_payload["closure_review"]["source"]["torrent_hash"] == source_hash
@@ -16681,6 +16728,8 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
     assert summary_payload["artifacts"]["uploaded_paused"] is True
     assert summary_payload["artifacts"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
     assert summary_payload["artifacts"]["target_hash_consistent"] is True
+    assert summary_payload["artifacts"]["target_hash_evidence"] == payload["closure"]["target"]["hash_evidence"]
+    assert summary_payload["artifacts"]["target_hash_consistency_blockers"] == []
     assert summary_payload["artifacts"]["target_duplicate_clean"] is True
     assert summary_payload["artifacts"]["target_rule_obligations"]["ready"] is True
     resume_commands = {command["stage"]: command["command"] for command in summary_payload["resume_commands"]}

@@ -8534,6 +8534,10 @@ def _run_summary_artifacts(payload: dict[str, Any], summary_file: str) -> dict[s
         artifacts["source_wait_evidence"] = True
     if _artifact_value_present(evidence_target.get("hash_consistent")):
         artifacts["target_hash_consistent"] = evidence_target.get("hash_consistent")
+    if _artifact_value_present(evidence_target.get("hash_evidence")):
+        artifacts["target_hash_evidence"] = evidence_target.get("hash_evidence")
+    if _artifact_value_present(evidence_target.get("hash_consistency_blockers")):
+        artifacts["target_hash_consistency_blockers"] = evidence_target.get("hash_consistency_blockers")
     if _artifact_value_present(evidence_target.get("duplicate_clean")):
         artifacts["target_duplicate_clean"] = evidence_target.get("duplicate_clean")
     if _artifact_value_present(evidence_target.get("rule_obligations")):
@@ -9866,7 +9870,9 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
     source_hash_blockers = _source_torrent_hash_consistency_blockers(source_torrent_hash, source_download, inject_source, wait_complete, source_content_verify)
     target_injected = _injected_torrent_verified(injected_torrent)
     target_seeding = target_injected and _wait_result_completed(uploaded_wait)
-    target_hash_consistent = not _uploaded_torrent_hash_consistency_blockers(target_upload_result)
+    target_hash_evidence = _uploaded_torrent_hash_evidence(target_upload_result)
+    target_hash_blockers = _uploaded_torrent_hash_consistency_blockers(target_upload_result)
+    target_hash_consistent = not target_hash_blockers
     injected_target_hash = _torrent_hash_from_result(injected_torrent)
     uploaded_target_hash = target_upload_result.get("uploaded_torrent_hash") if isinstance(target_upload_result, dict) else None
     downloaded_target_hash = _torrent_hash_from_result(downloaded_torrent)
@@ -9906,6 +9912,8 @@ def _pipeline_closure(stages: list[dict[str, Any]], content_path: str | None, so
         "injected": target_injected,
         "injection_verified": target_injected,
         "hash_consistent": target_hash_consistent,
+        "hash_evidence": target_hash_evidence,
+        "hash_consistency_blockers": target_hash_blockers,
         "injected_torrent": injected_torrent if isinstance(injected_torrent, dict) else None,
         "seeding": target_seeding,
         "uploaded_wait": uploaded_wait if isinstance(uploaded_wait, dict) else None,
@@ -10347,6 +10355,8 @@ def _pipeline_evidence(closure: dict[str, Any]) -> dict[str, Any]:
             "injected": bool(target.get("injected")),
             "seeding": target_seeding,
             "hash_consistent": bool(target.get("hash_consistent")),
+            "hash_evidence": target.get("hash_evidence") if isinstance(target.get("hash_evidence"), dict) else {},
+            "hash_consistency_blockers": _string_list(target.get("hash_consistency_blockers")),
             "duplicate_clean": bool(target.get("duplicate_clean")),
             "rule_obligations": target.get("rule_obligations"),
             "materials": target.get("materials"),
