@@ -5856,6 +5856,66 @@ def test_summary_material_shell_fields_expose_image_host_upload_failure() -> Non
     assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_VALID_COUNT"] == 1
 
 
+def test_summary_material_shell_fields_expose_media_generation_failures() -> None:
+    diagnostics = ptcli_cli._summary_material_diagnostics(
+        {
+            "artifacts": {
+                "material_generation": {
+                    "bdinfo": {
+                        "ok": False,
+                        "skipped": True,
+                        "message": "BDInfo generation skipped because no BDMV structure was detected.",
+                        "status": "skipped",
+                        "blockers": ["No BDMV directory was found for BDInfo generation."],
+                    },
+                    "mediainfo": {
+                        "ok": False,
+                        "skipped": False,
+                        "message": "MediaInfo material generation failed.",
+                        "status": "blocked",
+                        "media_file": "/downloads/Example.mkv",
+                        "blockers": ["MediaInfo generation failed: parser exploded"],
+                    },
+                    "screenshots": {
+                        "ok": False,
+                        "skipped": False,
+                        "message": "Screenshot material generation failed.",
+                        "status": "blocked",
+                        "media_file": "/downloads/Example.mkv",
+                        "count": 1,
+                        "requested_count": 3,
+                        "duration_seconds": 7200.0,
+                        "blockers": ["Screenshot 2 failed at 3600.000s: ffmpeg exited 1"],
+                    },
+                }
+            }
+        }
+    )
+
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+
+    assert shell_fields["PTCLI_MATERIAL_BDINFO_OK"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_BDINFO_STATUS"] == "skipped"
+    assert shell_fields["PTCLI_MATERIAL_BDINFO_SKIPPED"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_BDINFO_MESSAGE"] == "BDInfo generation skipped because no BDMV structure was detected."
+    assert shell_fields["PTCLI_MATERIAL_BDINFO_BLOCKERS"] == "No BDMV directory was found for BDInfo generation."
+    assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_OK"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_STATUS"] == "blocked"
+    assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_SKIPPED"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_MESSAGE"] == "MediaInfo material generation failed."
+    assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_BLOCKERS"] == "MediaInfo generation failed: parser exploded"
+    assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_MEDIA_FILE"] == "/downloads/Example.mkv"
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_OK"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_STATUS"] == "blocked"
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_SKIPPED"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_MESSAGE"] == "Screenshot material generation failed."
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_BLOCKERS"] == "Screenshot 2 failed at 3600.000s: ffmpeg exited 1"
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_MEDIA_FILE"] == "/downloads/Example.mkv"
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_COUNT"] == 1
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_REQUESTED_COUNT"] == 3
+    assert shell_fields["PTCLI_MATERIAL_SCREENSHOTS_DURATION_SECONDS"] == 7200.0
+
+
 def test_summary_material_diagnostics_marks_bdinfo_optional_for_file_content() -> None:
     diagnostics = ptcli_cli._summary_material_diagnostics(
         {

@@ -4294,12 +4294,14 @@ def _summary_material_section(section: Any) -> dict[str, Any]:
         "mediainfo_summary_file_evidence",
         "mediainfo_json_file",
         "mediainfo_json_file_evidence",
+        "media_file",
         "screenshot_files",
         "screenshot_files_evidence",
         "image_host_file",
         "image_host_file_evidence",
         "count",
         "requested_count",
+        "duration_seconds",
         "host",
         "items",
         "checks",
@@ -8462,6 +8464,8 @@ def _append_material_file_stage_artifact(artifacts: dict[str, Any], stages: list
         payload["count"] = result.get("count")
     if "requested_count" in result:
         payload["requested_count"] = result.get("requested_count")
+    if "duration_seconds" in result:
+        payload["duration_seconds"] = result.get("duration_seconds")
     if "host" in result:
         payload["host"] = result.get("host")
     if "items" in result and isinstance(result.get("items"), list):
@@ -11918,15 +11922,32 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_METADATA_PTGEN_REQUIRED": _shell_bool(ptgen_field.get("required")) if ptgen_field.get("required") is not None else None,
         "PTCLI_MATERIAL_METADATA_PTGEN_SOURCE": ptgen_field.get("source"),
         "PTCLI_MATERIAL_BDINFO_OK": _summary_material_section_shell_bool(bdinfo),
+        "PTCLI_MATERIAL_BDINFO_STATUS": bdinfo.get("status"),
+        "PTCLI_MATERIAL_BDINFO_SKIPPED": _shell_bool(bdinfo.get("skipped")) if bdinfo.get("skipped") is not None else None,
+        "PTCLI_MATERIAL_BDINFO_MESSAGE": bdinfo.get("message"),
+        "PTCLI_MATERIAL_BDINFO_BLOCKERS": "|".join(_string_list(bdinfo.get("blockers"))),
+        "PTCLI_MATERIAL_BDINFO_MEDIA_FILE": bdinfo.get("media_file"),
         "PTCLI_MATERIAL_BDINFO_FILE": bdinfo.get("bdinfo_file"),
         "PTCLI_MATERIAL_BDINFO_FILE_EXISTS": _shell_bool(_material_evidence_all_files_exist(bdinfo_evidence)) if _material_evidence_all_files_exist(bdinfo_evidence) is not None else None,
         "PTCLI_MATERIAL_BDINFO_FILE_SHA1": _material_evidence_first_sha1(bdinfo_evidence),
         "PTCLI_MATERIAL_MEDIAINFO_OK": _summary_material_section_shell_bool(mediainfo),
+        "PTCLI_MATERIAL_MEDIAINFO_STATUS": mediainfo.get("status"),
+        "PTCLI_MATERIAL_MEDIAINFO_SKIPPED": _shell_bool(mediainfo.get("skipped")) if mediainfo.get("skipped") is not None else None,
+        "PTCLI_MATERIAL_MEDIAINFO_MESSAGE": mediainfo.get("message"),
+        "PTCLI_MATERIAL_MEDIAINFO_BLOCKERS": "|".join(_string_list(mediainfo.get("blockers"))),
+        "PTCLI_MATERIAL_MEDIAINFO_MEDIA_FILE": mediainfo.get("media_file"),
         "PTCLI_MATERIAL_MEDIAINFO_FILE": mediainfo.get("mediainfo_file"),
         "PTCLI_MATERIAL_MEDIAINFO_FILE_EXISTS": _shell_bool(_material_evidence_all_files_exist(mediainfo_evidence)) if _material_evidence_all_files_exist(mediainfo_evidence) is not None else None,
         "PTCLI_MATERIAL_MEDIAINFO_FILE_SHA1": _material_evidence_first_sha1(mediainfo_evidence),
         "PTCLI_MATERIAL_SCREENSHOTS_OK": _summary_material_section_shell_bool(screenshots),
+        "PTCLI_MATERIAL_SCREENSHOTS_STATUS": screenshots.get("status"),
+        "PTCLI_MATERIAL_SCREENSHOTS_SKIPPED": _shell_bool(screenshots.get("skipped")) if screenshots.get("skipped") is not None else None,
+        "PTCLI_MATERIAL_SCREENSHOTS_MESSAGE": screenshots.get("message"),
+        "PTCLI_MATERIAL_SCREENSHOTS_BLOCKERS": "|".join(_string_list(screenshots.get("blockers"))),
+        "PTCLI_MATERIAL_SCREENSHOTS_MEDIA_FILE": screenshots.get("media_file"),
         "PTCLI_MATERIAL_SCREENSHOTS_COUNT": screenshots.get("count"),
+        "PTCLI_MATERIAL_SCREENSHOTS_REQUESTED_COUNT": screenshots.get("requested_count"),
+        "PTCLI_MATERIAL_SCREENSHOTS_DURATION_SECONDS": screenshots.get("duration_seconds"),
         "PTCLI_MATERIAL_SCREENSHOTS_FILES_EXIST": _shell_bool(_material_evidence_all_files_exist(screenshot_evidence)) if _material_evidence_all_files_exist(screenshot_evidence) is not None else None,
         "PTCLI_MATERIAL_SCREENSHOTS_SHA1S": ",".join(_material_evidence_sha1s(screenshot_evidence)),
         "PTCLI_MATERIAL_IMAGE_HOST_OK": _summary_material_section_shell_bool(image_host),
