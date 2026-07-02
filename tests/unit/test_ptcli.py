@@ -2899,6 +2899,70 @@ def test_summary_candidate_commands_include_material_recovery_completion() -> No
     assert candidates[1]["argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen"]
 
 
+def test_readiness_material_recovery_completion_uses_base_target_command_when_next_stage_differs() -> None:
+    target_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target"]
+    resume_state = {
+        "next_stage": "resume-source-torrent",
+        "next_command": "python3 ptcli.py pipeline --source-torrent-file /tmp/U2-60635.torrent --inject-source --save-path /downloads",
+        "next_command_argv": ["python3", "ptcli.py", "pipeline", "--source-torrent-file", "/tmp/U2-60635.torrent", "--inject-source", "--save-path", "/downloads"],
+        "materials": {
+            "recovery_hints": [
+                {
+                    "key": "metadata.ptgen_description",
+                    "required_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                    "missing_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                    "resume_command_available": False,
+                    "base_resume_command_stage": "resume-target-package",
+                    "base_resume_command": shlex.join(target_argv),
+                    "base_resume_command_argv": target_argv,
+                }
+            ]
+        },
+    }
+
+    recovery = ptcli_cli._readiness_material_recovery_summary(resume_state)
+
+    assert recovery["command_coverage"]["ready"] is False
+    assert recovery["completion_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen"]
+    assert recovery["completion_command"] == "python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen"
+
+
+def test_summary_candidate_commands_keep_source_resume_before_advisory_material_completion() -> None:
+    source_argv = ["python3", "ptcli.py", "pipeline", "--source-torrent-file", "/tmp/U2-60635.torrent", "--inject-source", "--save-path", "/downloads", "--wait-complete"]
+    target_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target"]
+    resume_commands = [
+        {"stage": "resume-source-torrent", "command": shlex.join(source_argv), "argv": source_argv},
+        {"stage": "resume-target-package", "command": shlex.join(target_argv), "argv": target_argv},
+    ]
+    resume_state = {
+        "next_stage": "resume-source-torrent",
+        "next_command": shlex.join(source_argv),
+        "next_command_argv": source_argv,
+        "materials": {
+            "recovery_hints": [
+                {
+                    "key": "metadata.ptgen_description",
+                    "required_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                    "missing_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                    "resume_command_available": False,
+                    "base_resume_command_stage": "resume-target-package",
+                    "base_resume_command": shlex.join(target_argv),
+                    "base_resume_command_argv": target_argv,
+                }
+            ]
+        },
+    }
+
+    candidates = ptcli_cli._summary_candidate_commands({"resume_commands": resume_commands, "resume_state": resume_state})
+    audit = ptcli_cli._resume_command_audit_fields(resume_commands, resume_state["next_command"], resume_state["next_command_argv"], resume_state=resume_state)
+    recovery = ptcli_cli._readiness_material_recovery_summary(resume_state)
+
+    assert all(command["source"] != "material_recovery_completion" for command in candidates)
+    assert audit["first_runnable_stage"] == "resume-source-torrent"
+    assert audit["first_runnable_command_source"] == "resume_commands"
+    assert recovery["completion_command_argv"] == ["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen"]
+
+
 def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> None:
     uploaded_hash = "a" * 40
     retry_hash = "b" * 40

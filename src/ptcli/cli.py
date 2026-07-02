@@ -2115,6 +2115,9 @@ def _attach_material_recovery_resume_commands(hints: list[dict[str, Any]], resum
                 "existing_file_values": existing_file_values,
                 "missing_existing_file_paths": missing_existing_file_paths,
                 "invalid_existing_option_values": invalid_existing_option_values,
+                "base_resume_command_stage": command_entry.get("stage") if command_entry else None,
+                "base_resume_command": command if command_entry else None,
+                "base_resume_command_argv": argv if command_entry else [],
                 "resume_command_available": command_covers_hint,
                 "resume_command_stage": command_entry.get("stage") if command_entry else None,
                 "resume_command": command if command_covers_hint else None,
@@ -5489,7 +5492,11 @@ def _summary_material_recovery_completion_command_entry(payload: dict[str, Any])
                 "argv": argv,
                 "_summary_command_source": "material_recovery_completion",
             }
+    if payload.get("next_stage") and payload.get("next_stage") != "resume-target-package":
+        return None
     resume_state = _summary_resume_state_with_material_recovery(payload)
+    if resume_state.get("next_stage") and resume_state.get("next_stage") != "resume-target-package":
+        return None
     material_recovery = _readiness_material_recovery_summary(resume_state)
     command = material_recovery.get("completion_command")
     argv = _argv_list(material_recovery.get("completion_command_argv"))
@@ -12081,9 +12088,9 @@ def _material_recovery_command_coverage(recovery_hints: list[Any]) -> dict[str, 
 def _material_recovery_completion_command(resume_state: dict[str, Any], recovery_hints: list[Any], command_coverage: dict[str, Any]) -> dict[str, Any]:
     if command_coverage.get("ready") is True or not command_coverage.get("hint_count"):
         return {"command": None, "argv": []}
-    if resume_state.get("next_stage") != "resume-target-package":
-        return {"command": None, "argv": []}
-    argv = _argv_list(resume_state.get("next_command_argv"))
+    argv = _argv_list(resume_state.get("next_command_argv")) if resume_state.get("next_stage") == "resume-target-package" else []
+    if not argv:
+        argv = _first_material_recovery_base_command(recovery_hints).get("argv") or []
     if not argv:
         return {"command": None, "argv": []}
     completed_argv = list(argv)
@@ -12096,6 +12103,16 @@ def _material_recovery_completion_command(resume_state: dict[str, Any], recovery
     if completed_argv == argv:
         return {"command": None, "argv": []}
     return {"command": shlex.join(completed_argv), "argv": completed_argv}
+
+
+def _first_material_recovery_base_command(recovery_hints: list[Any]) -> dict[str, Any]:
+    for hint in recovery_hints:
+        if not isinstance(hint, dict):
+            continue
+        argv = _argv_list(hint.get("base_resume_command_argv")) or _argv_list(hint.get("resume_command_argv"))
+        if argv:
+            return {"command": hint.get("base_resume_command") or hint.get("resume_command") or shlex.join(argv), "argv": argv}
+    return {"command": None, "argv": []}
 
 
 def _merge_material_recovery_resume_argv(target_argv: list[str], source_argv: list[str] | None) -> None:
