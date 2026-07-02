@@ -2928,7 +2928,7 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
     if target_package_resume:
         commands.append(target_package_resume)
     commands.append(_ptcli_command_entry("target-upload-retry", retry_args))
-    if isinstance(package_artifact, dict) and uploaded_torrent_id and not (isinstance(uploaded_torrent_artifact, dict) and uploaded_torrent_artifact.get("path")):
+    if isinstance(package_artifact, dict) and uploaded_torrent_id and not _path_artifact_exists(uploaded_torrent_artifact):
         download_args = [
             "target-upload",
             "--package-dir",
@@ -2962,7 +2962,7 @@ def _target_upload_recommended_commands(summary: dict[str, Any], args: argparse.
         retorrent_args = _target_upload_retorrent_resume_args(args, str(package_artifact.get("path") or args.package_dir), uploaded_torrent_id=str(uploaded_torrent_id), uploaded_save_path_artifact=retry_save_path_artifact)
         if retorrent_args:
             commands.append(_ptcli_command_entry("retorrent-resume-uploaded-torrent-download", retorrent_args))
-    if isinstance(package_artifact, dict) and isinstance(uploaded_torrent_artifact, dict) and uploaded_torrent_artifact.get("path"):
+    if isinstance(package_artifact, dict) and _path_artifact_exists(uploaded_torrent_artifact):
         resume_args = [
             "target-upload",
             "--package-dir",
@@ -7593,6 +7593,8 @@ def _torrent_file_evidence(torrent_file: str | Path, *, require_metadata: bool =
             payload["metadata_readable"] = True
         elif require_metadata:
             payload["metadata_readable"] = False
+    elif require_metadata:
+        payload["metadata_readable"] = False
     return payload
 
 
@@ -10533,6 +10535,17 @@ async def _fresh_mteam_dupe_check_for_target_package(config: dict[str, Any], pac
 async def _apply_uploaded_torrent_followup(config: dict[str, Any], args: argparse.Namespace, result: dict[str, Any], uploaded_save_path: str | None) -> dict[str, Any]:
     result = _with_downloaded_torrent_file_evidence(result)
     if args.inject_uploaded_torrent and result.get("status") == "uploaded" and isinstance(result.get("downloaded_torrent"), dict):
+        downloaded_blockers = _downloaded_torrent_file_blockers(result.get("downloaded_torrent"))
+        if downloaded_blockers:
+            return {
+                **result,
+                "status": "blocked",
+                "blockers": [*_string_list(result.get("blockers")), *downloaded_blockers],
+                "injected_torrent": {
+                    "status": "blocked",
+                    "blockers": ["qBittorrent injection skipped because the uploaded MTEAM torrent file is not ready."],
+                },
+            }
         downloaded_path = str(result["downloaded_torrent"]["path"])
         if not uploaded_save_path:
             return {**result, "injected_torrent": {"status": "blocked", "blockers": ["uploaded save path could not be inferred."]}}

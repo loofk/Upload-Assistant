@@ -22603,6 +22603,77 @@ async def test_target_upload_downloads_uploaded_torrent_by_id(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_target_upload_blocks_missing_downloaded_uploaded_torrent_before_injection(monkeypatch, tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path), accept_rules=True)
+    missing_uploaded_path = tmp_path / "uploaded" / "MTEAM-999.torrent"
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: {"TRACKERS": {"MTEAM": {"api_key": "fake"}}})
+    monkeypatch.setattr(ptcli_cli, "build_runtime_dependency_check", lambda: {"ok": True, "message": "runtime ok", "checks": []})
+
+    async def fake_download_mteam_uploaded_torrent(_config, torrent_id, output_dir):
+        assert torrent_id == "999"
+        assert output_dir == "uploaded"
+        return {"status": "uploaded", "uploaded_torrent_id": torrent_id, "downloaded_torrent": {"torrent_id": torrent_id, "path": str(missing_uploaded_path)}}
+
+    async def fake_inject_source_with_config(*_args, **_kwargs):
+        raise AssertionError("missing uploaded torrent file should block before qBittorrent injection")
+
+    monkeypatch.setattr(ptcli_cli, "download_mteam_uploaded_torrent", fake_download_mteam_uploaded_torrent)
+    monkeypatch.setattr(ptcli_cli, "_inject_source_with_config", fake_inject_source_with_config)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "target-upload",
+            "--config",
+            "config.py",
+            "--package-dir",
+            package["package_dir"],
+            "--uploaded-torrent-id",
+            "999",
+            "--download-uploaded-torrent",
+            "--uploaded-output-dir",
+            "uploaded",
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            "/downloads/Example",
+            "--wait-uploaded-complete",
+            "--write-summary",
+            "--json",
+        ]
+    )
+
+    result = await ptcli_cli.target_upload_payload(args)
+
+    assert result["status"] == "blocked"
+    assert result["downloaded_torrent"]["path"] == str(missing_uploaded_path)
+    assert result["downloaded_torrent"]["exists"] is False
+    assert result["downloaded_torrent"]["metadata_readable"] is False
+    assert "downloaded_torrent: target torrent file does not exist on disk." in result["blockers"]
+    assert result["injected_torrent"] == {
+        "status": "blocked",
+        "blockers": ["qBittorrent injection skipped because the uploaded MTEAM torrent file is not ready."],
+    }
+    summary_payload = json.loads((Path(package["package_dir"]) / "ptcli-target-upload-summary.json").read_text(encoding="utf-8"))
+    assert summary_payload["summary"]["ready"] is False
+    assert summary_payload["summary"]["completion_review"]["checks"]["uploaded_torrent_file"] is False
+    assert summary_payload["resume_state"]["next_stage"] == "resume-uploaded-torrent-download"
+    commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
+    assert "--uploaded-torrent-id 999" in commands["resume-uploaded-torrent-download"]
+    assert "--download-uploaded-torrent" in commands["resume-uploaded-torrent-download"]
+    assert "resume-uploaded-torrent" not in commands
+
+
+@pytest.mark.asyncio
 async def test_target_upload_download_only_records_uploaded_torrent_file_evidence(monkeypatch, tmp_path, capsys) -> None:
     source_info = {
         "tracker": "U2",
