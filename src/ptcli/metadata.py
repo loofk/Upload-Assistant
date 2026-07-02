@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 METADATA_KEYS = ("imdb_id", "tmdb_id", "douban_id", "douban_url")
+TMDB_ID_KEYS = ("tmdb_id", "tmdb", "tmdb_url", "themoviedb", "themoviedb_url")
 TMDB_TYPE_KEYS = ("tmdb_type", "tmdb_media_type", "tmdb_kind")
 PTGEN_DESCRIPTION_KEYS = ("ptgen_description", "ptgen", "douban_description", "description")
 
@@ -191,7 +192,9 @@ def load_metadata_overrides(path: str | None) -> dict[str, Any]:
 def normalize_metadata_overrides(payload: dict[str, Any]) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     imdb_id = _normalize_int(payload.get("imdb_id") or payload.get("imdb") or payload.get("imdbID"))
-    tmdb_id = _normalize_int(payload.get("tmdb_id") or payload.get("tmdb"))
+    tmdb_value = _first_payload_value(payload, TMDB_ID_KEYS)
+    tmdb_id, tmdb_type_from_value = _extract_tmdb_ref_from_text(str(tmdb_value or ""))
+    tmdb_id = tmdb_id or _normalize_int(tmdb_value)
     douban_id = _normalize_douban_id(payload.get("douban_id") or payload.get("douban"))
     douban_url = _normalize_douban_url(payload.get("douban_url") or payload.get("douban"))
     if not douban_id and douban_url:
@@ -200,7 +203,7 @@ def normalize_metadata_overrides(payload: dict[str, Any]) -> dict[str, Any]:
         overrides["imdb_id"] = imdb_id
     if tmdb_id:
         overrides["tmdb_id"] = tmdb_id
-    tmdb_type = _normalize_tmdb_type(next((payload.get(key) for key in TMDB_TYPE_KEYS if payload.get(key)), None))
+    tmdb_type = _normalize_tmdb_type(_first_payload_value(payload, TMDB_TYPE_KEYS)) or tmdb_type_from_value
     if tmdb_type:
         overrides["tmdb_type"] = tmdb_type
     if douban_id:
@@ -219,6 +222,10 @@ def normalize_metadata_overrides(payload: dict[str, Any]) -> dict[str, Any]:
             overrides["douban_url"] = f"https://movie.douban.com/subject/{overrides['douban_id']}/"
         overrides["ptgen_description"] = ptgen_description
     return overrides
+
+
+def _first_payload_value(payload: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    return next((payload.get(key) for key in keys if payload.get(key)), None)
 
 
 def _normalize_ptgen_description(payload: dict[str, Any]) -> str | None:

@@ -252,9 +252,10 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--no-enrich-metadata", dest="enrich_metadata", action="store_false", help="Skip metadata enrichment during --target-execute.")
     pipeline.add_argument("--fetch-ptgen", dest="fetch_ptgen", action="store_true", default=None, help="Fetch PTGen/Douban movie information during metadata enrichment for the MTEAM description draft. Enabled by default for --target-execute.")
     pipeline.add_argument("--no-fetch-ptgen", dest="fetch_ptgen", action="store_false", help="Skip PTGen/Douban description fetching during --target-execute.")
-    pipeline.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, douban_id, douban_url, or ptgen_description overrides for --enrich-metadata.")
+    pipeline.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, tmdb_type, douban_id, douban_url, or ptgen_description overrides for --enrich-metadata.")
     pipeline.add_argument("--imdb-id", help="IMDb id override for --enrich-metadata.")
     pipeline.add_argument("--tmdb-id", help="TMDb id override for --enrich-metadata.")
+    pipeline.add_argument("--tmdb-type", choices=("movie", "tv"), help="TMDb media type override for --enrich-metadata.")
     pipeline.add_argument("--douban-id", help="Douban id override for --enrich-metadata.")
     pipeline.add_argument("--douban-url", help="Douban URL override for --enrich-metadata.")
     pipeline.add_argument("--prepare-target", action="store_true", help="Build a dry-run target preparation preview after prior stages.")
@@ -349,9 +350,10 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--no-enrich-metadata", dest="enrich_metadata", action="store_false", help="Skip metadata enrichment during --execute.")
     retorrent.add_argument("--fetch-ptgen", dest="fetch_ptgen", action="store_true", default=None, help="Fetch PTGen/Douban movie information during --execute target preparation. Enabled by default for --execute.")
     retorrent.add_argument("--no-fetch-ptgen", dest="fetch_ptgen", action="store_false", help="Skip PTGen/Douban description fetching during --execute.")
-    retorrent.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, douban_id, douban_url, or ptgen_description overrides during --execute.")
+    retorrent.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, tmdb_type, douban_id, douban_url, or ptgen_description overrides during --execute.")
     retorrent.add_argument("--imdb-id", help="IMDb id override during --execute metadata enrichment.")
     retorrent.add_argument("--tmdb-id", help="TMDb id override during --execute metadata enrichment.")
+    retorrent.add_argument("--tmdb-type", choices=("movie", "tv"), help="TMDb media type override during --execute metadata enrichment.")
     retorrent.add_argument("--douban-id", help="Douban id override during --execute metadata enrichment.")
     retorrent.add_argument("--douban-url", help="Douban URL override during --execute metadata enrichment.")
     retorrent.add_argument("--package-dir", help="Reuse an existing MTEAM package during --execute instead of preparing a new one.")
@@ -2470,6 +2472,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         metadata_file=args.metadata_file,
         imdb_id=args.imdb_id,
         tmdb_id=args.tmdb_id,
+        tmdb_type=getattr(args, "tmdb_type", None),
         douban_id=args.douban_id,
         douban_url=args.douban_url,
         prepare_target=not bool(args.package_dir),
@@ -7411,6 +7414,7 @@ async def _pipeline_metadata_enrichment_stage(config: dict[str, Any], args: argp
         {
             "imdb_id": getattr(args, "imdb_id", None),
             "tmdb_id": getattr(args, "tmdb_id", None),
+            "tmdb_type": getattr(args, "tmdb_type", None),
             "douban_id": getattr(args, "douban_id", None),
             "douban_url": getattr(args, "douban_url", None),
         }
@@ -8285,6 +8289,7 @@ def _pipeline_material_options(args: argparse.Namespace) -> dict[str, Any]:
         "metadata_file": getattr(args, "metadata_file", None),
         "imdb_id": getattr(args, "imdb_id", None),
         "tmdb_id": getattr(args, "tmdb_id", None),
+        "tmdb_type": getattr(args, "tmdb_type", None),
         "douban_id": getattr(args, "douban_id", None),
         "douban_url": getattr(args, "douban_url", None),
         "mediainfo_file": getattr(args, "mediainfo_file", None),
@@ -9475,6 +9480,7 @@ def _target_package_material_resume_args(requested_actions: dict[str, Any], effe
         _append_option(args, "--metadata-file", material_options.get("metadata_file"))
         _append_option(args, "--imdb-id", material_options.get("imdb_id") or artifact_options.get("imdb_id"))
         _append_option(args, "--tmdb-id", material_options.get("tmdb_id") or artifact_options.get("tmdb_id"))
+        _append_option(args, "--tmdb-type", material_options.get("tmdb_type") or artifact_options.get("tmdb_type"))
         _append_option(args, "--douban-id", material_options.get("douban_id") or artifact_options.get("douban_id"))
         _append_option(args, "--douban-url", material_options.get("douban_url") or artifact_options.get("douban_url"))
     _append_option(args, "--mediainfo-file", material_options.get("mediainfo_file") or artifact_options.get("mediainfo_file"))
@@ -9598,6 +9604,7 @@ def _target_material_recovery_plan_flags(artifacts: dict[str, Any] | None) -> se
     flags.discard("--metadata-file")
     flags.discard("--imdb-id")
     flags.discard("--tmdb-id")
+    flags.discard("--tmdb-type")
     flags.discard("--douban-id")
     flags.discard("--douban-url")
     flags.discard("--mediainfo-file")
@@ -9736,6 +9743,7 @@ def _target_package_material_artifact_options(artifacts: dict[str, Any] | None) 
     return {
         "imdb_id": metadata.get("imdb_id") or target_metadata.get("imdb_id"),
         "tmdb_id": metadata.get("tmdb_id") or target_metadata.get("tmdb_id"),
+        "tmdb_type": metadata.get("tmdb_type") or target_metadata.get("tmdb_type"),
         "douban_id": metadata.get("douban_id") or target_metadata.get("douban_id"),
         "douban_url": metadata.get("douban_url") or target_metadata.get("douban_url"),
         "bdinfo_file": bdinfo.get("bdinfo_file") or target_bdinfo.get("path"),

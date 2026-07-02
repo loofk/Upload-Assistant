@@ -358,6 +358,13 @@ def test_pipeline_help_describes_live_closure_defaults() -> None:
     assert "uploaded MTEAM torrent download/inject/wait" in help_text
 
 
+def test_pipeline_parser_accepts_tmdb_type_override() -> None:
+    args = build_parser().parse_args(["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--tmdb-id", "999", "--tmdb-type", "tv"])
+
+    assert args.tmdb_id == "999"
+    assert args.tmdb_type == "tv"
+
+
 def test_retorrent_plan_requires_supported_trackers() -> None:
     parser = build_parser()
     args = parser.parse_args(["retorrent", "--from", "PTP", "--source-id", "123", "--to", "MTEAM", "--dry-run"])
@@ -867,6 +874,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "--fetch-ptgen",
             "--tmdb-id",
             "999",
+            "--tmdb-type",
+            "tv",
             "--douban-id",
             "1291546",
             "--target-torrent-file",
@@ -1203,6 +1212,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.enrich_metadata is True
     assert pipeline_args.fetch_ptgen is True
     assert pipeline_args.tmdb_id == "999"
+    assert pipeline_args.tmdb_type == "tv"
     assert pipeline_args.douban_id == "1291546"
     assert pipeline_args.uploaded_wait_timeout == 900.0
     assert pipeline_args.uploaded_wait_interval == 20.0
@@ -5419,6 +5429,7 @@ def test_target_package_resume_args_reuse_generated_metadata_ids() -> None:
                 "metadata": {
                     "imdb_id": 1234567,
                     "tmdb_id": 999,
+                    "tmdb_type": "tv",
                     "douban_id": "1291546",
                     "douban_url": "https://movie.douban.com/subject/1291546/",
                 }
@@ -5431,6 +5442,8 @@ def test_target_package_resume_args_reuse_generated_metadata_ids() -> None:
     assert "1234567" in args
     assert "--tmdb-id" in args
     assert "999" in args
+    assert "--tmdb-type" in args
+    assert "tv" in args
     assert "--douban-id" in args
     assert "1291546" in args
     assert "--douban-url" in args
@@ -5441,12 +5454,13 @@ def test_target_package_resume_args_reuse_package_metadata_ids() -> None:
     args = ptcli_cli._target_package_material_resume_args(
         {},
         {"fetch_ptgen": True},
-        {"tmdb_id": "111"},
+        {"tmdb_id": "111", "tmdb_type": "movie"},
         {
             "target_materials": {
                 "metadata": {
                     "imdb_id": 7654321,
                     "tmdb_id": 999,
+                    "tmdb_type": "tv",
                     "douban_id": "3541415",
                     "douban_url": "https://movie.douban.com/subject/3541415/",
                 }
@@ -5457,6 +5471,7 @@ def test_target_package_resume_args_reuse_package_metadata_ids() -> None:
     assert "--fetch-ptgen" in args
     assert args[args.index("--imdb-id") + 1] == "7654321"
     assert args[args.index("--tmdb-id") + 1] == "111"
+    assert args[args.index("--tmdb-type") + 1] == "movie"
     assert args[args.index("--douban-id") + 1] == "3541415"
     assert args[args.index("--douban-url") + 1] == "https://movie.douban.com/subject/3541415/"
 
@@ -19881,6 +19896,14 @@ def test_normalize_metadata_overrides_accepts_urls_ids_and_ptgen_description(tmp
     assert normalize_metadata_overrides({"ptgen": {"description": "◎片　　名　嵌套示例"}})["ptgen_description"] == "◎片　　名　嵌套示例"
 
 
+def test_normalize_metadata_overrides_infers_tmdb_type_from_top_level_tmdb_url() -> None:
+    overrides = normalize_metadata_overrides({"tmdb_url": "https://www.themoviedb.org/tv/999"})
+
+    assert overrides["tmdb_id"] == 999
+    assert overrides["tmdb_type"] == "tv"
+    assert normalize_metadata_overrides({"tmdb": "https://www.themoviedb.org/movie/999", "tmdb_type": "tv"})["tmdb_type"] == "tv"
+
+
 def test_normalize_metadata_overrides_extracts_ids_from_ptgen_description() -> None:
     overrides = normalize_metadata_overrides(
         {
@@ -20390,6 +20413,72 @@ async def test_pipeline_metadata_enrichment_stage_blocks_missing_ready_metadata(
     assert "Missing metadata after enrichment" in enrichment["readiness_blockers"][0]
     assert "PTGen/Douban description is missing" in enrichment["readiness_blockers"][1]
     assert "tmdb_id" in enrichment["missing"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_metadata_enrichment_stage_passes_tmdb_type_override(monkeypatch) -> None:
+    args = argparse.Namespace(
+        metadata_file=None,
+        imdb_id=None,
+        tmdb_id="999",
+        tmdb_type="tv",
+        douban_id="1291546",
+        douban_url=None,
+        fetch_ptgen=False,
+        base_dir="/tmp/base",
+    )
+    source_stage = {
+        "stage": "source-info",
+        "ok": True,
+        "result": {
+            "tracker": "CHD",
+            "torrent_id": "2468",
+            "imdb_id": None,
+            "tmdb_id": None,
+            "douban_id": None,
+            "douban_url": None,
+            "name": "Series Name",
+            "torrenthash": "b" * 40,
+        },
+    }
+    captured = {}
+
+    async def fake_enrich_source_metadata(_config, source_info, *, overrides=None, fetch_ptgen=False, base_dir=None):
+        captured["overrides"] = overrides
+        captured["fetch_ptgen"] = fetch_ptgen
+        captured["base_dir"] = base_dir
+        enriched = {
+            **source_info,
+            "imdb_id": 7654321,
+            "tmdb_id": 999,
+            "tmdb_type": "tv",
+            "douban_id": "1291546",
+            "douban_url": "https://movie.douban.com/subject/1291546/",
+        }
+        return {
+            "status": "enriched",
+            "ready": True,
+            "source_info": enriched,
+            "applied": {"imdb_id": 7654321, "tmdb_id": 999, "tmdb_type": "tv", "douban_id": "1291546", "douban_url": "https://movie.douban.com/subject/1291546/"},
+            "missing": [],
+            "readiness": {"tmdb_id": {"ready": True, "required": True, "source": "overrides"}},
+            "field_evidence": {"tmdb_id": {"ready": True, "required": True, "source": "overrides", "value": 999}},
+            "sources": ["overrides"],
+            "ptgen_evidence": {},
+            "blockers": [],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "enrich_source_metadata", fake_enrich_source_metadata)
+
+    stage = await ptcli_cli._pipeline_metadata_enrichment_stage({}, args, source_stage)
+
+    assert stage["ok"] is True
+    assert captured == {
+        "overrides": {"tmdb_id": 999, "tmdb_type": "tv", "douban_id": "1291546", "douban_url": "https://movie.douban.com/subject/1291546/"},
+        "fetch_ptgen": False,
+        "base_dir": "/tmp/base",
+    }
+    assert stage["result"]["tmdb_type"] == "tv"
 
 
 @pytest.mark.asyncio
