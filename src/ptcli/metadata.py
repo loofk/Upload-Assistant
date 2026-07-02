@@ -189,6 +189,16 @@ def load_metadata_overrides(path: str | None) -> dict[str, Any]:
     return normalize_metadata_overrides(payload)
 
 
+def load_ptgen_description_override(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    text = Path(path).expanduser().read_text(encoding="utf-8")
+    overrides = normalize_metadata_overrides({"ptgen_description": text})
+    if not overrides.get("ptgen_description"):
+        raise ValueError("PTGen description file is empty")
+    return overrides
+
+
 def normalize_metadata_overrides(payload: dict[str, Any]) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     imdb_id = _normalize_int(payload.get("imdb_id") or payload.get("imdb") or payload.get("imdbID"))

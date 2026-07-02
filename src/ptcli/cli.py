@@ -27,7 +27,7 @@ from src.ptcli.doctor import build_doctor_check, build_runtime_dependency_check,
 from src.ptcli.flows import MTEAM_SOURCE_FLOW_TRACKERS, flow_profiles_to_dicts, get_flow_profiles
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, normalize_tracker, parse_tracker_list, unsupported_trackers
 from src.ptcli.materials import generate_bdinfo_material, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
-from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, normalize_metadata_overrides
+from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, load_ptgen_description_override, normalize_metadata_overrides
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.rules import build_rule_check, get_rule_profiles, rule_profiles_to_dicts
 from src.ptcli.source import (
@@ -253,6 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--fetch-ptgen", dest="fetch_ptgen", action="store_true", default=None, help="Fetch PTGen/Douban movie information during metadata enrichment for the MTEAM description draft. Enabled by default for --target-execute.")
     pipeline.add_argument("--no-fetch-ptgen", dest="fetch_ptgen", action="store_false", help="Skip PTGen/Douban description fetching during --target-execute.")
     pipeline.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, tmdb_type, douban_id, douban_url, or ptgen_description overrides for --enrich-metadata.")
+    pipeline.add_argument("--ptgen-description-file", help="Plain text PTGen/Douban description override for --enrich-metadata.")
     pipeline.add_argument("--imdb-id", help="IMDb id override for --enrich-metadata.")
     pipeline.add_argument("--tmdb-id", help="TMDb id override for --enrich-metadata.")
     pipeline.add_argument("--tmdb-type", choices=("movie", "tv"), help="TMDb media type override for --enrich-metadata.")
@@ -351,6 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
     retorrent.add_argument("--fetch-ptgen", dest="fetch_ptgen", action="store_true", default=None, help="Fetch PTGen/Douban movie information during --execute target preparation. Enabled by default for --execute.")
     retorrent.add_argument("--no-fetch-ptgen", dest="fetch_ptgen", action="store_false", help="Skip PTGen/Douban description fetching during --execute.")
     retorrent.add_argument("--metadata-file", help="JSON object with imdb_id, tmdb_id, tmdb_type, douban_id, douban_url, or ptgen_description overrides during --execute.")
+    retorrent.add_argument("--ptgen-description-file", help="Plain text PTGen/Douban description override during --execute metadata enrichment.")
     retorrent.add_argument("--imdb-id", help="IMDb id override during --execute metadata enrichment.")
     retorrent.add_argument("--tmdb-id", help="TMDb id override during --execute metadata enrichment.")
     retorrent.add_argument("--tmdb-type", choices=("movie", "tv"), help="TMDb media type override during --execute metadata enrichment.")
@@ -2046,7 +2048,7 @@ def _target_preparation_missing_next_action(missing: str, source_info_diagnostic
     if normalized in {"description.ptgen_description", "metadata.ptgen_description"}:
         if _source_info_ptgen_description_ready(source_info_diagnostics):
             return "Reuse the PTGen/Douban description already present in source-info, then rerun resume-target-package."
-        return "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package."
+        return "Fetch PTGen/Douban description with --fetch-ptgen or supply it with --ptgen-description-file/--metadata-file, then rerun resume-target-package."
     if normalized in {"metadata.imdb", "metadata.imdb_id", "description.external_ids.imdb", "payload.imdb"}:
         return "Fetch IMDb metadata with --enrich-metadata or supply it with --metadata-file/--imdb-id, then rerun resume-target-package."
     if normalized in {"metadata.tmdb", "metadata.tmdb_id", "description.external_ids.tmdb"}:
@@ -2214,6 +2216,12 @@ def _material_option_value_covers_recovery_key(option: str, value: str, recovery
         return key not in {"assets.image_host_uploads", "description.screenshot_coverage"} or _image_host_file_has_usable_urls(value)
     if option == "--screenshot-file":
         return key != "assets.screenshots" or _screenshot_file_looks_like_image(value)
+    if option == "--ptgen-description-file":
+        try:
+            overrides = load_ptgen_description_override(value)
+        except (OSError, ValueError):
+            return False
+        return key != "metadata.ptgen_description" or bool(overrides.get("ptgen_description"))
     if option != "--metadata-file":
         return True
     try:
@@ -2329,7 +2337,7 @@ def _target_preparation_recovery_hint(missing: str, source_info_diagnostics: dic
             "metadata.ptgen_description",
             "Fetch PTGen/Douban description before regenerating the MTEAM package.",
             ["--enrich-metadata", "--fetch-ptgen"],
-            ["--metadata-file"],
+            ["--metadata-file", "--ptgen-description-file"],
         )
     if normalized in {"metadata.imdb", "metadata.imdb_id", "description.external_ids.imdb", "payload.imdb"}:
         return _material_recovery_hint(
@@ -2470,6 +2478,7 @@ def _pipeline_args_from_retorrent(args: argparse.Namespace) -> argparse.Namespac
         enrich_metadata=enrich_metadata or fetch_ptgen,
         fetch_ptgen=fetch_ptgen,
         metadata_file=args.metadata_file,
+        ptgen_description_file=getattr(args, "ptgen_description_file", None),
         imdb_id=args.imdb_id,
         tmdb_id=args.tmdb_id,
         tmdb_type=getattr(args, "tmdb_type", None),
@@ -7405,6 +7414,7 @@ async def _pipeline_metadata_enrichment_stage(config: dict[str, Any], args: argp
         }
     try:
         file_overrides = load_metadata_overrides(getattr(args, "metadata_file", None))
+        ptgen_file_overrides = load_ptgen_description_override(getattr(args, "ptgen_description_file", None))
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return {
             "stage": "metadata-enrich",
@@ -7424,7 +7434,7 @@ async def _pipeline_metadata_enrichment_stage(config: dict[str, Any], args: argp
     result = await enrich_source_metadata(
         config,
         source_info,
-        overrides={**file_overrides, **cli_overrides},
+        overrides={**file_overrides, **ptgen_file_overrides, **cli_overrides},
         fetch_ptgen=bool(getattr(args, "fetch_ptgen", False)),
         base_dir=getattr(args, "base_dir", None),
     )
@@ -7654,13 +7664,16 @@ def _package_upload_resume_requested(args: argparse.Namespace) -> bool:
 
 
 def _apply_pipeline_live_metadata_defaults(args: argparse.Namespace, *, live_target_upload: bool, package_upload_resume: bool) -> None:
+    has_ptgen_description_file = bool(getattr(args, "ptgen_description_file", None))
     if live_target_upload and args.prepare_target and not package_upload_resume:
         args.enrich_metadata = _pipeline_live_material_default(args.enrich_metadata, True)
+        if has_ptgen_description_file:
+            args.enrich_metadata = True
         args.fetch_ptgen = _pipeline_live_material_default(args.fetch_ptgen, bool(args.enrich_metadata))
         if args.fetch_ptgen:
             args.enrich_metadata = True
         return
-    args.enrich_metadata = bool(getattr(args, "enrich_metadata", False))
+    args.enrich_metadata = bool(getattr(args, "enrich_metadata", False) or has_ptgen_description_file)
     args.fetch_ptgen = bool(getattr(args, "fetch_ptgen", False))
 
 
@@ -8289,6 +8302,7 @@ def _pipeline_wait_options(args: argparse.Namespace) -> dict[str, Any]:
 def _pipeline_material_options(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "metadata_file": getattr(args, "metadata_file", None),
+        "ptgen_description_file": getattr(args, "ptgen_description_file", None),
         "imdb_id": getattr(args, "imdb_id", None),
         "tmdb_id": getattr(args, "tmdb_id", None),
         "tmdb_type": getattr(args, "tmdb_type", None),
@@ -9482,6 +9496,7 @@ def _target_package_material_resume_args(requested_actions: dict[str, Any], effe
         args.append("--fetch-ptgen")
     if include_metadata:
         _append_option(args, "--metadata-file", material_options.get("metadata_file"))
+        _append_option(args, "--ptgen-description-file", material_options.get("ptgen_description_file"))
         _append_option(args, "--imdb-id", material_options.get("imdb_id") or artifact_options.get("imdb_id"))
         _append_option(args, "--tmdb-id", material_options.get("tmdb_id") or artifact_options.get("tmdb_id"))
         _append_option(args, "--tmdb-type", material_options.get("tmdb_type") or artifact_options.get("tmdb_type"))
@@ -9606,6 +9621,7 @@ def _target_material_recovery_plan_flags(artifacts: dict[str, Any] | None) -> se
         if isinstance(domain, dict) and domain.get("ready") is not True:
             flags.update(_string_list(domain.get("flags")))
     flags.discard("--metadata-file")
+    flags.discard("--ptgen-description-file")
     flags.discard("--imdb-id")
     flags.discard("--tmdb-id")
     flags.discard("--tmdb-type")

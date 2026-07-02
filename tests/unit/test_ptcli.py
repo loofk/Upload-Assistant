@@ -20,7 +20,7 @@ from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_doctor_check
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list
 from src.ptcli.materials import find_primary_media_file, generate_bdinfo_material, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
-from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, normalize_metadata_overrides
+from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, load_ptgen_description_override, normalize_metadata_overrides
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summarize_torrent
 from src.ptcli.rules import build_rule_check
 from src.ptcli.source import create_source_meta, extract_torrent_id, source_info_from_tuple
@@ -684,6 +684,8 @@ def test_retorrent_execute_blocked_returns_nonzero(capsys, tmp_path) -> None:
 async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) -> None:
     torrent_file = tmp_path / "target.torrent"
     torrent_file.write_bytes(b"d4:infod")
+    ptgen_file = tmp_path / "ptgen.txt"
+    ptgen_file.write_text("◎译　　名　示例电影", encoding="utf-8")
     captured_args = {}
 
     async def fake_pipeline_payload(args):
@@ -872,6 +874,8 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
             "45",
             "--enrich-metadata",
             "--fetch-ptgen",
+            "--ptgen-description-file",
+            str(ptgen_file),
             "--tmdb-id",
             "999",
             "--tmdb-type",
@@ -1211,6 +1215,7 @@ async def test_retorrent_execute_runs_reference_pipeline(monkeypatch, tmp_path) 
     assert pipeline_args.wait_interval == 45.0
     assert pipeline_args.enrich_metadata is True
     assert pipeline_args.fetch_ptgen is True
+    assert pipeline_args.ptgen_description_file == str(ptgen_file)
     assert pipeline_args.tmdb_id == "999"
     assert pipeline_args.tmdb_type == "tv"
     assert pipeline_args.douban_id == "1291546"
@@ -2532,6 +2537,7 @@ def test_target_package_material_recovery_missing_includes_recovery_plan_domains
     assert "--generate-mediainfo" in flags
     assert "--prepare-target" in flags
     assert "--metadata-file" not in flags
+    assert "--ptgen-description-file" not in flags
     assert "--mediainfo-file" not in flags
 
 
@@ -2624,7 +2630,7 @@ def test_target_package_resume_args_use_material_recovery_plan_flags() -> None:
     args = ptcli_cli._target_package_material_resume_args(
         {},
         {},
-        {"metadata_file": "/tmp/metadata.json"},
+        {"metadata_file": "/tmp/metadata.json", "ptgen_description_file": "/tmp/ptgen.txt"},
         {
             "target_materials": {
                 "recovery_plan": {
@@ -2633,7 +2639,7 @@ def test_target_package_resume_args_use_material_recovery_plan_flags() -> None:
                             "domain": "metadata",
                             "ready": False,
                             "missing": ["metadata.imdb", "metadata.tmdb", "metadata.douban", "metadata.ptgen_description"],
-                            "flags": ["--enrich-metadata", "--fetch-ptgen", "--metadata-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"],
+                            "flags": ["--enrich-metadata", "--fetch-ptgen", "--metadata-file", "--ptgen-description-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"],
                         },
                         {
                             "domain": "screenshots",
@@ -2657,6 +2663,8 @@ def test_target_package_resume_args_use_material_recovery_plan_flags() -> None:
     assert "--fetch-ptgen" in args
     assert "--metadata-file" in args
     assert "/tmp/metadata.json" in args
+    assert "--ptgen-description-file" in args
+    assert "/tmp/ptgen.txt" in args
     assert "--generate-screenshots" in args
     assert "--upload-screenshots" in args
     assert "--screenshot-file" not in args
@@ -2778,7 +2786,7 @@ def test_run_summary_resume_state_uses_payload_review_description_completeness()
     assert recovery_by_key["metadata.ptgen_description"]["resume_command_available"] is True
     assert recovery_by_key["assets.image_host_uploads"]["resume_command_available"] is True
     assert resume_state["materials"]["next_actions"] == [
-        "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
+        "Fetch PTGen/Douban description with --fetch-ptgen or supply it with --ptgen-description-file/--metadata-file, then rerun resume-target-package.",
         "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
     ]
 
@@ -6931,7 +6939,7 @@ def test_summary_material_diagnostics_exposes_description_external_id_readiness(
         "missing": ["ptgen_description", "external_ids", "mediainfo_or_bdinfo", "screenshot_bbcode", "screenshot_coverage"],
         "recovery_missing": ["description.ptgen_description", "description.external_ids", "description.mediainfo_or_bdinfo", "description.screenshot_bbcode", "description.screenshot_coverage"],
         "next_actions": [
-            "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
+            "Fetch PTGen/Douban description with --fetch-ptgen or supply it with --ptgen-description-file/--metadata-file, then rerun resume-target-package.",
             "Fetch or supply IMDb/TMDb/Douban metadata with --enrich-metadata, --fetch-ptgen, --metadata-file, --imdb-id, --tmdb-id, or --douban-id, then rerun resume-target-package.",
             "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun resume-target-package.",
             "Regenerate the MTEAM description after screenshot and image-host materials are ready.",
@@ -8442,7 +8450,7 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
                         "target_materials_missing": ["metadata.ptgen_description", "assets.image_host_uploads"],
                         "target_preparation_missing": ["description.content"],
                         "next_actions": [
-                            "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
+                            "Fetch PTGen/Douban description with --fetch-ptgen or supply it with --ptgen-description-file/--metadata-file, then rerun resume-target-package.",
                             "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",
                         ],
                         "recovery_hints": [
@@ -8451,7 +8459,7 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
                                 "resume_stage": "resume-target-package",
                                 "reason": "Fetch PTGen/Douban description before regenerating the MTEAM package.",
                                 "command_flags": ["--enrich-metadata", "--fetch-ptgen"],
-                                "existing_file_options": ["--metadata-file"],
+                                "existing_file_options": ["--metadata-file", "--ptgen-description-file"],
                                 "required_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
                                 "missing_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
                                 "resume_command_available": False,
@@ -8504,7 +8512,7 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_RESUME_TARGET_MATERIALS_MISSING=metadata.ptgen_description,assets.image_host_uploads\n" in out
     assert "export PTCLI_RESUME_TARGET_PREPARATION_MISSING=description.content\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
-    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
+    assert "export PTCLI_RESUME_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--ptgen-description-file,--image-host-file\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_RESUME_MATERIAL_RECOVERY_COMPLETION_COMMAND='python3 ptcli.py pipeline --prepare-target --enrich-metadata --fetch-ptgen --upload-screenshots'\n" in out
     assert 'export PTCLI_RESUME_MATERIAL_RECOVERY_COMPLETION_COMMAND_ARGV=\'["python3", "ptcli.py", "pipeline", "--prepare-target", "--enrich-metadata", "--fetch-ptgen", "--upload-screenshots"]\'\n' in out
@@ -8523,7 +8531,7 @@ def test_summary_check_print_shell_exposes_resume_material_fields(tmp_path, caps
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_FIRST_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_REQUIRED_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_MISSING_FLAGS=--enrich-metadata,--fetch-ptgen,--upload-screenshots\n" in out
-    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--image-host-file\n" in out
+    assert "export PTCLI_READINESS_MATERIAL_RECOVERY_EXISTING_FILE_OPTIONS=--metadata-file,--ptgen-description-file,--image-host-file\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_READY=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_AVAILABLE=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_RECOVERY_COMMAND_COVERAGE_MISSING=2\n" in out
@@ -8637,7 +8645,7 @@ def test_summary_check_material_completion_merges_available_recovery_argv(tmp_pa
                                 "resume_stage": "resume-target-package",
                                 "reason": "Fetch PTGen/Douban description before regenerating the MTEAM package.",
                                 "command_flags": ["--enrich-metadata", "--fetch-ptgen"],
-                                "existing_file_options": ["--metadata-file"],
+                                "existing_file_options": ["--metadata-file", "--ptgen-description-file"],
                                 "required_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
                                 "missing_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
                                 "resume_command_available": False,
@@ -8836,6 +8844,44 @@ def test_summary_check_requires_metadata_file_to_cover_recovery_key(tmp_path, ca
     assert recovery["invalid_existing_option_values"] == {"--metadata-file": [str(metadata_file)]}
     assert recovery["missing_flags"] == ["--enrich-metadata", "--fetch-ptgen"]
     assert recovery["hints"][0]["existing_file_option_present"] is False
+
+
+def test_summary_check_accepts_ptgen_description_file_for_recovery_key(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    ptgen_file = tmp_path / "ptgen.txt"
+    ptgen_file.write_text("◎译　　名　示例电影\n◎简　　介　示例简介", encoding="utf-8")
+    resume_argv = ["python3", "ptcli.py", "pipeline", "--prepare-target", "--ptgen-description-file", str(ptgen_file)]
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "artifacts": {
+                    "target_materials_missing": ["metadata.ptgen_description"],
+                    "target_materials_ready": False,
+                    "target_preparation_ready": False,
+                },
+                "resume_commands": [{"stage": "resume-target-package", "command": shlex.join(resume_argv), "argv": resume_argv}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    recovery = payload["readiness_summary"]["material_recovery"]
+    assert payload["next_command_run_allowed"] is True
+    assert payload["next_command_run_blocker"] is None
+    assert recovery["existing_file_values"] == {"--ptgen-description-file": [str(ptgen_file)]}
+    assert recovery["invalid_existing_option_values"] == {}
+    assert recovery["hints"][0]["existing_file_option_present"] is True
 
 
 def test_summary_check_requires_image_host_file_to_have_usable_urls(tmp_path, capsys) -> None:
@@ -15425,6 +15471,58 @@ async def test_pipeline_enrich_metadata_before_prepare_target(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_pipeline_ptgen_description_file_enables_metadata_enrichment(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(tracker, source_id, (None, None, "Name", "a" * 40, "desc"), {})
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    ptgen_file = tmp_path / "ptgen.txt"
+    ptgen_file.write_text(
+        "\n".join(
+            [
+                "IMDb: https://www.imdb.com/title/tt1234567/",
+                "TMDb: https://www.themoviedb.org/movie/999",
+                "豆瓣: https://movie.douban.com/subject/1291546/",
+                "◎译　　名　示例电影",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    args = build_parser().parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--ptgen-description-file",
+            str(ptgen_file),
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    enrichment_stage = next(stage for stage in payload["stages"] if stage["stage"] == "metadata-enrich")
+    assert payload["effective_actions"]["enrich_metadata"] is True
+    assert enrichment_stage["ok"] is True
+    assert enrichment_stage["result"]["imdb_id"] == 1234567
+    assert enrichment_stage["result"]["tmdb_id"] == 999
+    assert enrichment_stage["result"]["douban_id"] == "1291546"
+    assert enrichment_stage["result"]["metadata_enrichment"]["field_evidence"]["ptgen_description"]["length"] > 0
+
+
+@pytest.mark.asyncio
 async def test_pipeline_generate_screenshot_materials_before_prepare_target(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -16198,7 +16296,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
     recovery_hints = summary_payload["resume_state"]["materials"]["recovery_hints"]
     recovery_by_key = {hint["key"]: hint for hint in recovery_hints}
     assert recovery_by_key["metadata.ptgen_description"]["command_flags"] == ["--enrich-metadata", "--fetch-ptgen"]
-    assert recovery_by_key["metadata.ptgen_description"]["existing_file_options"] == ["--metadata-file"]
+    assert recovery_by_key["metadata.ptgen_description"]["existing_file_options"] == ["--metadata-file", "--ptgen-description-file"]
     assert recovery_by_key["metadata.ptgen_description"]["resume_command_available"] is True
     assert recovery_by_key["metadata.ptgen_description"]["resume_command_stage"] == "resume-target-package"
     assert "--fetch-ptgen" in recovery_by_key["metadata.ptgen_description"]["resume_command_argv"]
@@ -19501,7 +19599,7 @@ def test_mteam_materials_manifest_exposes_prioritized_recovery_plan() -> None:
     assert recovery_plan["order"] == ["metadata", "media_info", "screenshots", "image_host", "description"]
     assert recovery_plan["missing_domains"] == ["metadata", "media_info", "screenshots", "image_host", "description"]
     domains = {domain["domain"]: domain for domain in recovery_plan["domains"]}
-    assert domains["metadata"]["flags"] == ["--enrich-metadata", "--fetch-ptgen", "--metadata-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"]
+    assert domains["metadata"]["flags"] == ["--enrich-metadata", "--fetch-ptgen", "--metadata-file", "--ptgen-description-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"]
     assert domains["media_info"]["missing"] == ["assets.mediainfo_or_bdinfo"]
     assert domains["screenshots"]["missing"] == ["assets.screenshots"]
     assert domains["image_host"]["missing"] == ["assets.image_host_uploads"]
@@ -19927,6 +20025,30 @@ def test_normalize_metadata_overrides_extracts_ids_from_ptgen_description() -> N
     assert overrides["douban_id"] == "1291546"
     assert overrides["douban_url"] == "https://movie.douban.com/subject/1291546/"
     assert "◎译　　名　示例电影" in overrides["ptgen_description"]
+
+
+def test_load_ptgen_description_override_accepts_plain_text_file(tmp_path) -> None:
+    description_file = tmp_path / "ptgen.txt"
+    description_file.write_text(
+        "\r\n".join(
+            [
+                "IMDb: https://www.imdb.com/title/tt1234567/",
+                "TMDb: https://www.themoviedb.org/movie/999",
+                "豆瓣: https://movie.douban.com/subject/1291546/",
+                "◎译　　名　示例电影",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    overrides = load_ptgen_description_override(str(description_file))
+
+    assert overrides["imdb_id"] == 1234567
+    assert overrides["tmdb_id"] == 999
+    assert overrides["douban_id"] == "1291546"
+    assert overrides["douban_url"] == "https://movie.douban.com/subject/1291546/"
+    assert overrides["ptgen_description"].endswith("◎译　　名　示例电影")
+    assert "\r" not in overrides["ptgen_description"]
 
 
 def test_normalize_metadata_overrides_prefers_explicit_ids_over_ptgen_text() -> None:
@@ -20486,6 +20608,74 @@ async def test_pipeline_metadata_enrichment_stage_passes_tmdb_type_override(monk
 
 
 @pytest.mark.asyncio
+async def test_pipeline_metadata_enrichment_stage_loads_ptgen_description_file(monkeypatch, tmp_path) -> None:
+    ptgen_file = tmp_path / "ptgen.txt"
+    ptgen_file.write_text(
+        "\n".join(
+            [
+                "IMDb: https://www.imdb.com/title/tt1111111/",
+                "TMDb: https://www.themoviedb.org/movie/999",
+                "豆瓣: https://movie.douban.com/subject/1291546/",
+                "◎译　　名　示例电影",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(
+        metadata_file=None,
+        ptgen_description_file=str(ptgen_file),
+        imdb_id="tt7654321",
+        tmdb_id=None,
+        tmdb_type=None,
+        douban_id=None,
+        douban_url=None,
+        fetch_ptgen=False,
+        base_dir=None,
+    )
+    source_stage = {
+        "stage": "source-info",
+        "ok": True,
+        "result": {
+            "tracker": "U2",
+            "torrent_id": "60635",
+            "imdb_id": None,
+            "tmdb_id": None,
+            "douban_id": None,
+            "douban_url": None,
+            "name": "Name",
+            "torrenthash": "a" * 40,
+        },
+    }
+    captured = {}
+
+    async def fake_enrich_source_metadata(_config, source_info, *, overrides=None, fetch_ptgen=False, base_dir=None):
+        _ = (source_info, fetch_ptgen, base_dir)
+        captured["overrides"] = overrides
+        return {
+            "status": "enriched",
+            "ready": True,
+            "source_info": {**source_info, **overrides},
+            "applied": dict(overrides or {}),
+            "missing": [],
+            "readiness": {"ptgen_description": {"ready": True, "required": False, "source": "overrides"}},
+            "field_evidence": {"ptgen_description": {"ready": True, "required": False, "source": "overrides", "length": len(overrides["ptgen_description"])}},
+            "sources": ["overrides"],
+            "ptgen_evidence": {},
+            "blockers": [],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "enrich_source_metadata", fake_enrich_source_metadata)
+
+    stage = await ptcli_cli._pipeline_metadata_enrichment_stage({}, args, source_stage)
+
+    assert stage["ok"] is True
+    assert captured["overrides"]["imdb_id"] == 7654321
+    assert captured["overrides"]["tmdb_id"] == 999
+    assert captured["overrides"]["douban_id"] == "1291546"
+    assert captured["overrides"]["ptgen_description"].endswith("◎译　　名　示例电影")
+
+
+@pytest.mark.asyncio
 async def test_pipeline_metadata_enrichment_stage_exposes_ptgen_evidence(monkeypatch) -> None:
     args = argparse.Namespace(
         metadata_file=None,
@@ -20649,7 +20839,7 @@ def test_pipeline_stage_blocker_next_action_uses_specific_material_recovery() ->
     cases = {
         "target.materials.metadata.tmdb: TMDb id is missing.": "Fetch TMDb metadata with --enrich-metadata or supply it with --metadata-file/--tmdb-id, then rerun resume-target-package.",
         "target.materials.metadata.douban: Douban id/url is missing.": "Fetch Douban metadata with --fetch-ptgen or supply it with --metadata-file/--douban-id/--douban-url, then rerun resume-target-package.",
-        "target.materials.metadata.ptgen_description: PTGen/Douban description text is missing.": "Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description, then rerun resume-target-package.",
+        "target.materials.metadata.ptgen_description: PTGen/Douban description text is missing.": "Fetch PTGen/Douban description with --fetch-ptgen or supply it with --ptgen-description-file/--metadata-file, then rerun resume-target-package.",
         "target.materials.assets.mediainfo_or_bdinfo: MediaInfo/BDInfo has not been generated.": "Generate or provide MediaInfo/BDInfo with --generate-mediainfo, --mediainfo-file, --generate-bdinfo, or --bdinfo-file, then rerun resume-target-package.",
         "target.materials.assets.screenshots: Screenshots are missing.": "Generate or provide screenshots with --generate-screenshots or --screenshot-file, then rerun resume-target-package.",
         "target.materials.assets.image_host_uploads: Image host uploads are missing.": "Upload screenshots to an image host with --upload-screenshots/--image-host or provide --image-host-file, then rerun resume-target-package.",

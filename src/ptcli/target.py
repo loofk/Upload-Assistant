@@ -49,7 +49,7 @@ MTEAM_MATERIAL_RECOVERY_ORDER = ("metadata", "media_info", "screenshots", "image
 MTEAM_MATERIAL_RECOVERY_DOMAINS = {
     "metadata": {
         "checks": ("imdb", "tmdb", "douban", "ptgen_description"),
-        "flags": ("--enrich-metadata", "--fetch-ptgen", "--metadata-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"),
+        "flags": ("--enrich-metadata", "--fetch-ptgen", "--metadata-file", "--ptgen-description-file", "--imdb-id", "--tmdb-id", "--douban-id", "--douban-url"),
         "action": "Fetch or supply IMDb/TMDb/Douban metadata and PTGen/Douban description before preparing the MTEAM package.",
     },
     "media_info": {
@@ -822,7 +822,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
         _material_check("imdb", bool(meta_draft.get("imdb") or meta_draft.get("imdb_id")), "IMDb id is present.", "IMDb id is missing; fetch or supply IMDb metadata before live upload."),
         _material_check("tmdb", bool(meta_draft.get("tmdb_id")), "TMDb id is present.", "TMDb id is missing; fetch or supply TMDb metadata before live upload."),
         _material_check("douban", bool(meta_draft.get("douban_url") or meta_draft.get("douban_id")), "Douban id/url is present.", "Douban id/url is missing; fetch or supply Douban metadata before live upload."),
-        _material_check("ptgen_description", ptgen_description_length > 0, "PTGen/Douban description text is present.", "PTGen/Douban description text is missing; run metadata enrichment with --fetch-ptgen before live upload."),
+        _material_check("ptgen_description", ptgen_description_length > 0, "PTGen/Douban description text is present.", "PTGen/Douban description text is missing; run metadata enrichment with --fetch-ptgen or provide --ptgen-description-file before live upload."),
     ]
     asset_checks = [
         _material_check("mediainfo_or_bdinfo", bool(mediainfo.get("ready") or bdinfo.get("ready")), "MediaInfo/BDInfo is present.", "MediaInfo/BDInfo has not been generated into the package yet."),
@@ -2373,7 +2373,7 @@ def _mteam_upload_recovery_next_actions(missing: list[str]) -> list[str]:
     if normalized.intersection({"metadata.douban", "description.external_ids.douban", "payload.douban"}):
         actions.append("Fetch Douban metadata with --fetch-ptgen or supply --metadata-file/--douban-id/--douban-url before live upload.")
     if normalized.intersection({"metadata.ptgen_description", "description.ptgen_description"}):
-        actions.append("Fetch PTGen/Douban description with --fetch-ptgen or supply metadata containing ptgen_description before live upload.")
+        actions.append("Fetch PTGen/Douban description with --fetch-ptgen or supply --ptgen-description-file/--metadata-file before live upload.")
     if normalized.intersection({"description.external_ids"}):
         actions.append("Fetch or supply IMDb/TMDb/Douban metadata before live upload.")
     if normalized.intersection({"assets.mediainfo_or_bdinfo", "description.mediainfo_or_bdinfo", "payload.mediainfo"}):
