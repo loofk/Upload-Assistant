@@ -1111,6 +1111,32 @@ def _description_chain_next_actions(chain_name: str, chain: Any) -> list[str]:
     return _target_preparation_missing_next_actions(_description_chain_recovery_missing(chain_name, chain))
 
 
+_TARGET_MATERIAL_CHAIN_DETAIL_KEYS = {
+    "metadata_chain": ("items",),
+    "media_info_chain": ("material_source", "material_length", "description_has_excerpt", "payload_source", "payload_length"),
+    "screenshot_chain": ("local_screenshot_count", "image_host_count", "description_image_count", "image_host_urls", "description_urls", "missing_urls"),
+}
+
+
+def _target_material_chain_item(chain_name: str, chain: dict[str, Any], missing: list[str], next_actions: list[str]) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "ready": chain.get("ready") if isinstance(chain.get("ready"), bool) else None,
+        "missing": missing,
+        "next_actions": next_actions,
+    }
+    for key in _TARGET_MATERIAL_CHAIN_DETAIL_KEYS.get(chain_name, ()):
+        if key not in chain or chain.get(key) is None:
+            continue
+        value = chain.get(key)
+        if isinstance(value, list):
+            item[key] = list(value)
+        elif isinstance(value, dict):
+            item[key] = dict(value)
+        else:
+            item[key] = value
+    return item
+
+
 def _target_material_chain_summary(payload_review: Any) -> dict[str, Any]:
     if not isinstance(payload_review, dict):
         return {}
@@ -1121,11 +1147,12 @@ def _target_material_chain_summary(payload_review: Any) -> dict[str, Any]:
         chain = evidence.get(chain_name) if isinstance(evidence.get(chain_name), dict) else {}
         if not chain:
             continue
-        chains[chain_name] = {
-            "ready": chain.get("ready") if isinstance(chain.get("ready"), bool) else None,
-            "missing": _description_chain_recovery_missing(chain_name, chain),
-            "next_actions": _description_chain_next_actions(chain_name, chain),
-        }
+        chains[chain_name] = _target_material_chain_item(
+            chain_name,
+            chain,
+            _description_chain_recovery_missing(chain_name, chain),
+            _description_chain_next_actions(chain_name, chain),
+        )
     if not chains:
         return {}
     ready_values = [chain["ready"] for chain in chains.values() if isinstance(chain.get("ready"), bool)]
@@ -1167,11 +1194,12 @@ def _target_material_chain_evidence(material_chain: Any) -> dict[str, Any]:
         chain = chains.get(chain_name) if isinstance(chains.get(chain_name), dict) else {}
         if not chain:
             continue
-        evidence[chain_name] = {
-            "ready": chain.get("ready") if isinstance(chain.get("ready"), bool) else None,
-            "missing": _string_list(chain.get("missing")),
-            "next_actions": _string_list(chain.get("next_actions")),
-        }
+        evidence[chain_name] = _target_material_chain_item(
+            chain_name,
+            chain,
+            _string_list(chain.get("missing")),
+            _string_list(chain.get("next_actions")),
+        )
     return evidence
 
 
@@ -11416,9 +11444,22 @@ def _summary_check_target_material_chain_shell_fields(target_material_chain: dic
         "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_READY": _shell_bool(media_info_chain.get("ready")) if media_info_chain.get("ready") is not None else None,
         "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_MISSING": ",".join(_string_list(media_info_chain.get("missing"))),
         "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_NEXT_ACTIONS": " | ".join(_string_list(media_info_chain.get("next_actions"))),
+        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_SOURCE": media_info_chain.get("material_source"),
+        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_LENGTH": media_info_chain.get("material_length"),
+        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_DESCRIPTION_HAS_EXCERPT": _shell_bool(media_info_chain.get("description_has_excerpt"))
+        if media_info_chain.get("description_has_excerpt") is not None
+        else None,
+        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_PAYLOAD_SOURCE": media_info_chain.get("payload_source"),
+        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_PAYLOAD_LENGTH": media_info_chain.get("payload_length"),
         "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_READY": _shell_bool(screenshot_chain.get("ready")) if screenshot_chain.get("ready") is not None else None,
         "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_MISSING": ",".join(_string_list(screenshot_chain.get("missing"))),
         "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_NEXT_ACTIONS": " | ".join(_string_list(screenshot_chain.get("next_actions"))),
+        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_LOCAL_COUNT": screenshot_chain.get("local_screenshot_count"),
+        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_IMAGE_HOST_COUNT": screenshot_chain.get("image_host_count"),
+        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_DESCRIPTION_COUNT": screenshot_chain.get("description_image_count"),
+        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_IMAGE_HOST_URLS": ",".join(_string_list(screenshot_chain.get("image_host_urls"))),
+        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_DESCRIPTION_URLS": ",".join(_string_list(screenshot_chain.get("description_urls"))),
+        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_MISSING_URLS": ",".join(_string_list(screenshot_chain.get("missing_urls"))),
     }
 
 

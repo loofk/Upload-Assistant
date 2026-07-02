@@ -3215,6 +3215,8 @@ def test_retorrent_execute_artifacts_derive_target_material_chain() -> None:
                     "local_screenshot_count": 1,
                     "image_host_count": 1,
                     "description_image_count": 1,
+                    "image_host_urls": ["https://img.example/uploaded.png"],
+                    "description_urls": ["https://img.example/uploaded.png"],
                     "missing_urls": ["https://img.example/missing.png"],
                 },
             }
@@ -3226,11 +3228,24 @@ def test_retorrent_execute_artifacts_derive_target_material_chain() -> None:
     material_chain = artifacts["target_material_chain"]
     assert material_chain["ready"] is False
     assert material_chain["chains"]["metadata_chain"]["ready"] is False
+    assert material_chain["chains"]["metadata_chain"]["items"]["tmdb"]["ready"] is False
     assert material_chain["chains"]["metadata_chain"]["missing"] == ["metadata.tmdb"]
     assert any("Fetch TMDb metadata" in action for action in material_chain["chains"]["metadata_chain"]["next_actions"])
-    assert material_chain["chains"]["media_info_chain"] == {"ready": True, "missing": [], "next_actions": []}
+    assert material_chain["chains"]["media_info_chain"]["ready"] is True
+    assert material_chain["chains"]["media_info_chain"]["missing"] == []
+    assert material_chain["chains"]["media_info_chain"]["material_source"] == "/tmp/MI.txt"
+    assert material_chain["chains"]["media_info_chain"]["material_length"] == 10
+    assert material_chain["chains"]["media_info_chain"]["description_has_excerpt"] is True
+    assert material_chain["chains"]["media_info_chain"]["payload_source"] == "/tmp/MI.txt"
+    assert material_chain["chains"]["media_info_chain"]["payload_length"] == 10
     assert material_chain["chains"]["screenshot_chain"]["ready"] is False
+    assert material_chain["chains"]["screenshot_chain"]["local_screenshot_count"] == 1
+    assert material_chain["chains"]["screenshot_chain"]["image_host_count"] == 1
+    assert material_chain["chains"]["screenshot_chain"]["description_image_count"] == 1
+    assert material_chain["chains"]["screenshot_chain"]["image_host_urls"] == ["https://img.example/uploaded.png"]
+    assert material_chain["chains"]["screenshot_chain"]["description_urls"] == ["https://img.example/uploaded.png"]
     assert material_chain["chains"]["screenshot_chain"]["missing"] == ["description.screenshot_coverage"]
+    assert material_chain["chains"]["screenshot_chain"]["missing_urls"] == ["https://img.example/missing.png"]
     assert any("Upload screenshots to an image host" in action for action in material_chain["chains"]["screenshot_chain"]["next_actions"])
 
 
@@ -5591,8 +5606,27 @@ def test_summary_check_consumes_target_material_chain_artifact(tmp_path, capsys)
         "ready": False,
         "chains": {
             "metadata_chain": {"ready": False, "missing": ["metadata.tmdb"], "next_actions": ["Use --metadata-file with the reviewed TMDb id."]},
-            "media_info_chain": {"ready": True, "missing": [], "next_actions": []},
-            "screenshot_chain": {"ready": False, "missing": ["description.screenshot_coverage"], "next_actions": ["Reuse the image-host JSON and regenerate the MTEAM package."]},
+            "media_info_chain": {
+                "ready": True,
+                "missing": [],
+                "next_actions": [],
+                "material_source": "/tmp/BDINFO.txt",
+                "material_length": 4096,
+                "description_has_excerpt": True,
+                "payload_source": "/tmp/BDINFO.txt",
+                "payload_length": 4096,
+            },
+            "screenshot_chain": {
+                "ready": False,
+                "missing": ["description.screenshot_coverage"],
+                "next_actions": ["Reuse the image-host JSON and regenerate the MTEAM package."],
+                "local_screenshot_count": 3,
+                "image_host_count": 2,
+                "description_image_count": 1,
+                "image_host_urls": ["https://img.example/1.png", "https://img.example/2.png"],
+                "description_urls": ["https://img.example/1.png"],
+                "missing_urls": ["https://img.example/2.png"],
+            },
         },
     }
     summary_file.write_text(
@@ -5634,8 +5668,19 @@ def test_summary_check_consumes_target_material_chain_artifact(tmp_path, capsys)
     assert "export PTCLI_TARGET_MATERIAL_CHAIN_METADATA_READY=0\n" in out
     assert "export PTCLI_TARGET_MATERIAL_CHAIN_METADATA_MISSING=metadata.tmdb\n" in out
     assert "export PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_READY=1\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_SOURCE=/tmp/BDINFO.txt\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_LENGTH=4096\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_DESCRIPTION_HAS_EXCERPT=1\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_PAYLOAD_SOURCE=/tmp/BDINFO.txt\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_PAYLOAD_LENGTH=4096\n" in out
     assert "export PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_READY=0\n" in out
     assert "export PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_MISSING=description.screenshot_coverage\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_LOCAL_COUNT=3\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_IMAGE_HOST_COUNT=2\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_DESCRIPTION_COUNT=1\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_IMAGE_HOST_URLS=https://img.example/1.png,https://img.example/2.png\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_DESCRIPTION_URLS=https://img.example/1.png\n" in out
+    assert "export PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_MISSING_URLS=https://img.example/2.png\n" in out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_READY=0\n" in out
     assert "export PTCLI_READINESS_MATERIAL_DESCRIPTION_METADATA_CHAIN_MISSING=metadata.tmdb\n" in out
     assert "Use --metadata-file with the reviewed TMDb id." in out
