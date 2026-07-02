@@ -3752,6 +3752,11 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
     payload_review = _target_upload_payload_review_from_summary(payload)
     resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
     uploaded_followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
+    uploaded_torrent_file_evidence = (
+        uploaded_followup.get("uploaded_torrent_file_evidence") if isinstance(uploaded_followup.get("uploaded_torrent_file_evidence"), dict) else {}
+    )
+    uploaded_wait_retry = uploaded_followup.get("wait_retry") if isinstance(uploaded_followup.get("wait_retry"), dict) else {}
+    uploaded_wait_mismatches = _string_list(uploaded_followup.get("qbit_wait_mismatches")) or _string_list(payload.get("qbit_wait_mismatches"))
     return {
         "present": bool(summary),
         "mode": summary.get("mode"),
@@ -3766,9 +3771,13 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
             "uploaded_torrent_id": completion_review.get("uploaded_torrent_id"),
             "uploaded_torrent_hash": completion_review.get("uploaded_torrent_hash"),
             "uploaded_torrent_path": completion_review.get("uploaded_torrent_path"),
+            "uploaded_torrent_file_evidence": uploaded_torrent_file_evidence,
             "injected_torrent_hash": completion_review.get("injected_torrent_hash"),
             "uploaded_save_path": completion_review.get("uploaded_save_path"),
             "uploaded_wait_query": uploaded_wait_query,
+            "qbit_wait_mismatch": _first_bool_value(uploaded_followup.get("qbit_wait_mismatch"), bool(uploaded_wait_mismatches) if uploaded_wait_mismatches else None),
+            "qbit_wait_mismatches": uploaded_wait_mismatches,
+            "wait_retry": uploaded_wait_retry,
             "preflight_status": completion_review.get("preflight_status"),
         },
         "preflight": {
@@ -11665,6 +11674,8 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
     completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
     checks = completion.get("checks") if isinstance(completion.get("checks"), dict) else {}
     wait_query = completion.get("uploaded_wait_query") if isinstance(completion.get("uploaded_wait_query"), dict) else {}
+    wait_retry = completion.get("wait_retry") if isinstance(completion.get("wait_retry"), dict) else {}
+    torrent_evidence = completion.get("uploaded_torrent_file_evidence") if isinstance(completion.get("uploaded_torrent_file_evidence"), dict) else {}
     preflight = target_upload_diagnostics.get("preflight") if isinstance(target_upload_diagnostics.get("preflight"), dict) else {}
     preflight_torrent = preflight.get("torrent_file") if isinstance(preflight.get("torrent_file"), dict) else {}
     payload_review = target_upload_diagnostics.get("payload_review") if isinstance(target_upload_diagnostics.get("payload_review"), dict) else {}
@@ -11685,12 +11696,26 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
         "PTCLI_TARGET_UPLOAD_TORRENT_ID": completion.get("uploaded_torrent_id"),
         "PTCLI_TARGET_UPLOAD_TORRENT_HASH": completion.get("uploaded_torrent_hash"),
         "PTCLI_TARGET_UPLOAD_TORRENT_PATH": completion.get("uploaded_torrent_path"),
+        "PTCLI_TARGET_UPLOAD_TORRENT_EXISTS": _shell_bool(torrent_evidence.get("exists")) if torrent_evidence.get("exists") is not None else None,
+        "PTCLI_TARGET_UPLOAD_TORRENT_IS_FILE": _shell_bool(torrent_evidence.get("is_file")) if torrent_evidence.get("is_file") is not None else None,
+        "PTCLI_TARGET_UPLOAD_TORRENT_SIZE_BYTES": torrent_evidence.get("size_bytes"),
+        "PTCLI_TARGET_UPLOAD_TORRENT_SHA1": torrent_evidence.get("sha1"),
+        "PTCLI_TARGET_UPLOAD_TORRENT_INFOHASH": torrent_evidence.get("torrent_hash") or torrent_evidence.get("hash") or torrent_evidence.get("infohash"),
+        "PTCLI_TARGET_UPLOAD_TORRENT_METADATA_READABLE": _shell_bool(torrent_evidence.get("metadata_readable")) if torrent_evidence.get("metadata_readable") is not None else None,
+        "PTCLI_TARGET_UPLOAD_TORRENT_REUSED": _shell_bool(torrent_evidence.get("reused")) if torrent_evidence.get("reused") is not None else None,
         "PTCLI_TARGET_UPLOAD_INJECTED_HASH": completion.get("injected_torrent_hash"),
         "PTCLI_TARGET_UPLOAD_SAVE_PATH": completion.get("uploaded_save_path"),
+        "PTCLI_TARGET_UPLOAD_WAIT_MISMATCH": _shell_bool(completion.get("qbit_wait_mismatch")) if completion.get("qbit_wait_mismatch") is not None else None,
+        "PTCLI_TARGET_UPLOAD_WAIT_MISMATCHES": ",".join(_string_list(completion.get("qbit_wait_mismatches"))),
         "PTCLI_TARGET_UPLOAD_WAIT_QUERY_HASH": wait_query.get("torrent_hash"),
         "PTCLI_TARGET_UPLOAD_WAIT_QUERY_CONTENT_PATH": wait_query.get("content_path"),
         "PTCLI_TARGET_UPLOAD_WAIT_QUERY_TIMEOUT": wait_query.get("timeout"),
         "PTCLI_TARGET_UPLOAD_WAIT_QUERY_INTERVAL": wait_query.get("interval"),
+        "PTCLI_TARGET_UPLOAD_WAIT_RETRY_RECOMMENDED": _shell_bool(wait_retry.get("retry_recommended")) if wait_retry.get("retry_recommended") is not None else None,
+        "PTCLI_TARGET_UPLOAD_WAIT_SUGGESTED_HASH": wait_retry.get("suggested_torrent_hash"),
+        "PTCLI_TARGET_UPLOAD_WAIT_SUGGESTED_CONTENT_PATH": wait_retry.get("suggested_content_path"),
+        "PTCLI_TARGET_UPLOAD_WAIT_SUGGESTED_SAVE_PATH": wait_retry.get("suggested_save_path"),
+        "PTCLI_TARGET_UPLOAD_WAIT_RETRY_REASON": wait_retry.get("reason"),
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_STATUS": completion.get("preflight_status"),
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_READY": _shell_bool(preflight.get("ready")) if preflight.get("ready") is not None else None,
         "PTCLI_TARGET_UPLOAD_PREFLIGHT_BLOCKERS": "|".join(_string_list(preflight.get("blockers"))),

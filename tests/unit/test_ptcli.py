@@ -20930,6 +20930,14 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert uploaded_followup["uploaded_wait_query"] == {"torrent_hash": uploaded_hash, "content_path": "/downloads/Example", "timeout": 42.0, "interval": 3.0}
     diagnostics = ptcli_cli._summary_check_diagnostics(summary_payload)
     assert diagnostics["target_upload_diagnostics"]["ready_for_uploaded_seeding"] is True
+    target_completion = diagnostics["target_upload_diagnostics"]["completion"]
+    assert target_completion["uploaded_torrent_file_evidence"]["path"] == str(tmp_path / "MTEAM-999.torrent")
+    assert target_completion["uploaded_torrent_file_evidence"]["exists"] is True
+    assert target_completion["uploaded_torrent_file_evidence"]["metadata_readable"] is True
+    assert target_completion["uploaded_torrent_file_evidence"]["torrent_hash"] == uploaded_hash
+    assert len(target_completion["uploaded_torrent_file_evidence"]["sha1"]) == 40
+    assert target_completion["qbit_wait_mismatch"] is False
+    assert target_completion["qbit_wait_mismatches"] == []
     preflight_diagnostics = diagnostics["target_upload_diagnostics"]["preflight"]
     assert preflight_diagnostics["status"] == "ready"
     assert preflight_diagnostics["ready"] is True
@@ -21008,6 +21016,14 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     }
     assert payload_review["materials"]["image_host_urls"] == ["https://img.example/thumb.png"]
     shell_fields = ptcli_cli._summary_check_target_upload_shell_fields(diagnostics["target_upload_diagnostics"])
+    assert shell_fields["PTCLI_TARGET_UPLOAD_TORRENT_EXISTS"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_TORRENT_IS_FILE"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_TORRENT_SIZE_BYTES"] > 0
+    assert len(shell_fields["PTCLI_TARGET_UPLOAD_TORRENT_SHA1"]) == 40
+    assert shell_fields["PTCLI_TARGET_UPLOAD_TORRENT_INFOHASH"] == uploaded_hash
+    assert shell_fields["PTCLI_TARGET_UPLOAD_TORRENT_METADATA_READABLE"] == "1"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_WAIT_MISMATCH"] == "0"
+    assert shell_fields["PTCLI_TARGET_UPLOAD_WAIT_MISMATCHES"] == ""
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_REVIEW_PRESENT"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETE"] == "1"
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_DESCRIPTION_COMPLETENESS_MISSING"] == ""
@@ -21614,6 +21630,14 @@ def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path, capsys) 
     assert followup["wait_retry"]["suggested_torrent_hash"] == "b" * 40
     assert followup["wait_retry"]["suggested_content_path"] == "/downloads/Other"
     assert followup["wait_retry"]["suggested_save_path"] == "/downloads"
+    summary_diagnostics = ptcli_cli._summary_check_diagnostics(summary_payload)
+    target_upload_shell = ptcli_cli._summary_check_target_upload_shell_fields(summary_diagnostics["target_upload_diagnostics"])
+    assert target_upload_shell["PTCLI_TARGET_UPLOAD_WAIT_MISMATCH"] == "1"
+    assert target_upload_shell["PTCLI_TARGET_UPLOAD_WAIT_MISMATCHES"] == "uploaded.requested_content_path"
+    assert target_upload_shell["PTCLI_TARGET_UPLOAD_WAIT_RETRY_RECOMMENDED"] == "1"
+    assert target_upload_shell["PTCLI_TARGET_UPLOAD_WAIT_SUGGESTED_HASH"] == "b" * 40
+    assert target_upload_shell["PTCLI_TARGET_UPLOAD_WAIT_SUGGESTED_CONTENT_PATH"] == "/downloads/Other"
+    assert target_upload_shell["PTCLI_TARGET_UPLOAD_WAIT_SUGGESTED_SAVE_PATH"] == "/downloads"
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     command_argv = {command["stage"]: command["argv"] for command in summary_payload["recommended_commands"]}
     assert "--uploaded-save-path /downloads/Other" in commands["resume-uploaded-torrent"]
@@ -21633,6 +21657,8 @@ def test_target_upload_summary_exposes_uploaded_wait_mismatch(tmp_path, capsys) 
     assert code == 0
     out = capsys.readouterr().out
     assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_MISMATCH=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_WAIT_MISMATCH=1\n" in out
+    assert "export PTCLI_TARGET_UPLOAD_WAIT_RETRY_RECOMMENDED=1\n" in out
     assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_MISMATCHES=uploaded.requested_content_path\n" in out
     assert f"export PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH={'b' * 40}\n" in out
     assert "export PTCLI_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH=/downloads/Other\n" in out
