@@ -12563,6 +12563,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
+    assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
+    assert "top_submit_request" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_job_endpoint" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "response_contract" in tool_by_name["get_job_status"]
@@ -12584,6 +12586,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert openapi["paths"]["/v1/jobs/retorrent"]["post"]["security"] == [{"bearerAuth": []}]
     summary_schema = openapi["paths"]["/v1/jobs/{job_id}/summary"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "agent_decision" in summary_schema["properties"]
+    candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "digest" in candidates_schema["properties"]
 
 
 def test_agent_manifest_exposes_ai_safe_workflows() -> None:
@@ -12621,6 +12625,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "digest" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
+        assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert tools_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
         assert "response_contract" in tools_by_name["retorrent_job"]
@@ -12756,6 +12762,12 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["ready_count"] == 1
     assert result["ranking"]["scan_count"] == 1
     assert result["ranking"]["selected_count"] == 1
+    assert result["digest"]["recommendation"] == "submit_top_candidate_when_confirmed"
+    assert result["digest"]["top_submit_tool"] == "manual_retorrent_job"
+    assert result["digest"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/submit"
+    assert result["digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert result["digest"]["push_items"][0]["source_id"] == "60635"
+    assert result["digest"]["push_items"][0]["decision"] == "submit_when_confirmed"
     candidate = result["candidates"][0]
     assert candidate["status"] == "ready"
     assert candidate["ranking"]["tier"] == "ready"
@@ -12807,6 +12819,9 @@ async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers
     assert result["candidates"][0]["ranking"]["score"] > result["candidates"][1]["ranking"]["score"]
     assert result["candidates"][1]["ranking"]["tier"] == "blocked"
     assert result["candidates"][1]["duplicate_check"]["status"] == "exists"
+    assert result["digest"]["top_candidate"]["source_id"] == "60636"
+    assert result["digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60636"
+    assert [item["source_id"] for item in result["digest"]["push_items"]] == ["60636", "60635"]
 
 
 def test_source_info_from_tuple_includes_meta_side_effects() -> None:

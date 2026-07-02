@@ -97,7 +97,8 @@ curl http://127.0.0.1:8080/v1/jobs/<job_id>
 curl http://127.0.0.1:8080/v1/jobs/<job_id>/summary
 curl -X POST http://127.0.0.1:8080/v1/jobs/<job_id>/resume
 
-# 每日候选推荐：指定源站和目标站，返回最多 10 条已评分排序的可转种候选
+# 每日候选推荐：指定源站和目标站，返回最多 10 条已评分排序的可转种候选；
+# 响应里的 digest.top_candidate / digest.push_items / digest.top_submit_request 适合 AI 或定时推送直接消费
 curl -X POST http://127.0.0.1:8080/v1/candidates/daily \
   -H "Content-Type: application/json" \
   -d '{"source_tracker":"U2","target":"MTEAM","limit":10}'

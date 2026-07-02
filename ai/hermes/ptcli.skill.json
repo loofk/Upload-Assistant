@@ -51,6 +51,11 @@
         "source_tracker",
         "target"
       ],
+      "read_result": [
+        "digest",
+        "candidates",
+        "ready_count"
+      ],
       "poll": "get_job_status"
     }
   ],
@@ -291,8 +296,19 @@
         ],
         "result_fields": [
           "ranking",
+          "digest",
           "candidates",
           "ready_count"
+        ],
+        "digest_fields": [
+          "recommendation",
+          "top_candidate",
+          "top_submit_request",
+          "top_submit_job_endpoint",
+          "top_submit_tool",
+          "push_items",
+          "blockers",
+          "next_actions"
         ],
         "candidate_fields": [
           "ranking",

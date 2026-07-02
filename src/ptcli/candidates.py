@@ -102,6 +102,7 @@ async def build_daily_candidates(
         payload_blockers.extend(f"rule-check: {blocker}" for blocker in _rule_blockers(rule_check))
     if not site_policy.get("ready"):
         payload_blockers.extend(f"site-policy: {blocker}" for blocker in _string_list(site_policy.get("blockers")))
+    digest = _candidate_digest(candidates, payload_blockers, next_actions, limit=limit)
     return {
         "kind": "ptcli.daily_candidates",
         "status": status,
@@ -120,6 +121,7 @@ async def build_daily_candidates(
             "scan_count": len(seeds),
             "selected_count": len(candidates),
         },
+        "digest": digest,
         "candidates": candidates,
         "blockers": payload_blockers,
         "next_actions": next_actions,
@@ -424,6 +426,66 @@ def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, int, int]:
     return ready, score, -source_order
 
 
+def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], next_actions: list[str], *, limit: int) -> dict[str, Any]:
+    ready_candidates = [candidate for candidate in candidates if candidate.get("status") == "ready"]
+    review_count = sum(1 for candidate in candidates if _candidate_tier(candidate) == "review")
+    blocked_count = sum(1 for candidate in candidates if candidate.get("status") == "blocked" or _candidate_tier(candidate) == "blocked")
+    top_candidate = ready_candidates[0] if ready_candidates else candidates[0] if candidates else None
+    if ready_candidates:
+        recommendation = "submit_top_candidate_when_confirmed"
+    elif candidates:
+        recommendation = "resolve_blockers"
+    else:
+        recommendation = "no_candidates"
+    return {
+        "kind": "ptcli.daily_candidates_digest",
+        "limit": limit,
+        "selected_count": len(candidates),
+        "ready_count": len(ready_candidates),
+        "review_count": review_count,
+        "blocked_count": blocked_count,
+        "top_candidate": _candidate_digest_item(top_candidate, rank=1) if top_candidate else None,
+        "top_submit_request": top_candidate.get("submit_request") if isinstance(top_candidate, dict) and top_candidate.get("status") == "ready" else None,
+        "top_submit_job_endpoint": top_candidate.get("submit_job_endpoint") if isinstance(top_candidate, dict) and top_candidate.get("status") == "ready" else None,
+        "top_submit_tool": top_candidate.get("submit_tool") if isinstance(top_candidate, dict) and top_candidate.get("status") == "ready" else None,
+        "recommendation": recommendation,
+        "push_items": [_candidate_digest_item(candidate, rank=index + 1) for index, candidate in enumerate(candidates)],
+        "blockers": blockers,
+        "next_actions": next_actions,
+    }
+
+
+def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> dict[str, Any] | None:
+    if not isinstance(candidate, dict):
+        return None
+    source = candidate.get("source") if isinstance(candidate.get("source"), dict) else {}
+    ranking = candidate.get("ranking") if isinstance(candidate.get("ranking"), dict) else {}
+    duplicate_check = candidate.get("duplicate_check") if isinstance(candidate.get("duplicate_check"), dict) else {}
+    workflow = candidate.get("agent_workflow") if isinstance(candidate.get("agent_workflow"), dict) else {}
+    return {
+        "rank": rank,
+        "status": candidate.get("status"),
+        "score": ranking.get("score"),
+        "tier": ranking.get("tier"),
+        "source_tracker": source.get("tracker"),
+        "source_id": source.get("torrent_id"),
+        "title": source.get("title"),
+        "size": source.get("size"),
+        "published_at": source.get("published_at"),
+        "promotion": source.get("promotion"),
+        "duplicate_status": duplicate_check.get("status"),
+        "blocker_count": len(_string_list(candidate.get("blockers"))),
+        "decision": workflow.get("decision"),
+        "submit_job_endpoint": candidate.get("submit_job_endpoint"),
+        "submit_tool": candidate.get("submit_tool"),
+    }
+
+
+def _candidate_tier(candidate: dict[str, Any]) -> str:
+    ranking = candidate.get("ranking") if isinstance(candidate.get("ranking"), dict) else {}
+    return str(ranking.get("tier") or candidate.get("status") or "")
+
+
 def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list[str]) -> dict[str, Any]:
     return {
         "kind": "ptcli.daily_candidates",
@@ -440,6 +502,7 @@ def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list
             "scan_count": 0,
             "selected_count": 0,
         },
+        "digest": _candidate_digest([], blockers, [], limit=limit),
         "candidates": [],
         "blockers": blockers,
         "next_actions": [],

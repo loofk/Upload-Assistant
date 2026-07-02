@@ -448,6 +448,7 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         "result": result,
         "site_policy": result.get("site_policy"),
         "ranking": result.get("ranking"),
+        "digest": result.get("digest"),
         "candidates": result.get("candidates", []),
         "count": result.get("count", 0),
         "ready_count": result.get("ready_count", 0),
@@ -1591,7 +1592,17 @@ def _job_response_contract() -> dict[str, Any]:
 
 def _candidate_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "count", "ready_count", "site_policy", "ranking", "candidates", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "count", "ready_count", "site_policy", "ranking", "digest", "candidates", "blockers", "next_actions"],
+        "digest_fields": [
+            "recommendation",
+            "top_candidate",
+            "top_submit_request",
+            "top_submit_job_endpoint",
+            "top_submit_tool",
+            "push_items",
+            "blockers",
+            "next_actions",
+        ],
         "candidate_fields": [
             "status",
             "source",
@@ -1664,6 +1675,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
                 "tool": "daily_candidates_job",
                 "description": "Find up to 10 ranked source/target retorrent candidates with duplicate checks, policy blockers, risk signals, and executable request templates.",
                 "required_fields": ["source_tracker", "target"],
+                "read_result": ["digest", "candidates", "ready_count"],
             },
             {
                 "name": "resume_blocked_job",
@@ -1796,6 +1808,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "ready_count": {"type": "integer"},
             "site_policy": {"type": "object"},
             "ranking": {"type": "object"},
+            "digest": {"type": "object"},
             "candidates": {"type": "array", "items": {"type": "object"}},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
