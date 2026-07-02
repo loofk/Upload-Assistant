@@ -254,6 +254,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
                 "/v1/jobs/retorrent/check": lambda payload: create_retorrent_check_job(job_store, payload),
                 "/v1/jobs/retorrent": lambda payload: create_retorrent_job(job_store, payload),
+                "/v1/jobs/retorrent/submit": lambda payload: create_manual_retorrent_job(job_store, payload),
                 "/v1/jobs/candidates/daily": lambda payload: create_daily_candidates_job(job_store, payload),
             }
             if path.startswith("/v1/jobs/") and path.endswith("/resume"):
@@ -351,6 +352,19 @@ def create_retorrent_job(job_store: JobStore, request: dict[str, Any]) -> dict[s
         normalized_request,
         ["ptcli", *argv],
         lambda: asyncio.run(retorrent(request)),
+    )
+
+
+def create_manual_retorrent_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
+    """Create the AI-facing manual retorrent job: source URL + target, then execute if gates allow."""
+    effective_request = {**request, "execute": True, "execute_if_no_duplicate": True, "manual_retorrent": True}
+    _, normalized_request, argv = _retorrent_execute_args(effective_request)
+    normalized_request = {**normalized_request, "mode": "manual_retorrent", "execute_if_no_duplicate": True}
+    return job_store.create(
+        "ptcli.manual_retorrent",
+        normalized_request,
+        ["ptcli", *argv],
+        lambda: asyncio.run(retorrent(effective_request)),
     )
 
 
@@ -1094,6 +1108,7 @@ def tools_payload() -> dict[str, Any]:
 
 def _agent_tool_schemas() -> list[dict[str, Any]]:
     retorrent_request_schema = _retorrent_tool_request_schema()
+    manual_retorrent_request_schema = _manual_retorrent_tool_request_schema()
     candidate_request_schema = _daily_candidate_tool_request_schema()
     job_id_schema = _job_id_tool_request_schema()
     return [
@@ -1131,6 +1146,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/retorrent",
             "description": "Create an asynchronous retorrent job and return a job_id for polling long-running download, material, upload, and qBittorrent steps.",
             "input_schema": retorrent_request_schema,
+            "response_contract": _job_response_contract(),
+            "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "resume_with": "resume_job"},
+            "safety": _live_upload_safety_contract(),
+        },
+        {
+            "name": "manual_retorrent_job",
+            "method": "POST",
+            "path": "/v1/jobs/retorrent/submit",
+            "description": "Submit the primary AI workflow: source tracker URL plus target tracker. It creates a retorrent job that checks duplicates and only proceeds when rule, duplicate, and confirmation gates allow.",
+            "input_schema": manual_retorrent_request_schema,
             "response_contract": _job_response_contract(),
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "resume_with": "resume_job"},
             "safety": _live_upload_safety_contract(),
@@ -1225,6 +1250,19 @@ def _retorrent_tool_request_schema() -> dict[str, Any]:
             "douban_url": {"type": "string"},
         },
     }
+
+
+def _manual_retorrent_tool_request_schema() -> dict[str, Any]:
+    schema = json.loads(json.dumps(_retorrent_tool_request_schema()))
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        properties.pop("execute", None)
+        properties["execute_if_no_duplicate"] = {
+            "type": "boolean",
+            "default": True,
+            "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work.",
+        }
+    return schema
 
 
 def _daily_candidate_tool_request_schema() -> dict[str, Any]:
@@ -1336,8 +1374,8 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
         "default_workflows": [
             {
                 "name": "manual_retorrent",
-                "tool": "retorrent_job",
-                "description": "Create a job from a source tracker URL and target tracker. Poll job status and resume if blocked.",
+                "tool": "manual_retorrent_job",
+                "description": "Create the primary source URL plus target tracker job. It checks duplicates and only proceeds when rule, duplicate, and confirmation gates allow.",
                 "required_fields": ["source", "target"],
                 "recommended_fields": ["save_path", "accept_rules", "confirm_upload", "uploaded_qbit_category", "uploaded_qbit_tags"],
             },
@@ -1398,6 +1436,15 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "douban_url": {"type": "string"},
         },
     }
+    manual_request_schema = json.loads(json.dumps(request_schema))
+    manual_properties = manual_request_schema.get("properties")
+    if isinstance(manual_properties, dict):
+        manual_properties.pop("execute", None)
+        manual_properties["execute_if_no_duplicate"] = {
+            "type": "boolean",
+            "default": True,
+            "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work.",
+        }
     response_schema = {
         "type": "object",
         "properties": {
@@ -1539,6 +1586,19 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": request_schema}}},
                     "responses": {"200": {"description": "Queued retorrent job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                }
+            },
+            "/v1/jobs/retorrent/submit": {
+                "post": {
+                    "operationId": "submitManualRetorrentJob",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": manual_request_schema}}},
+                    "responses": {
+                        "200": {
+                            "description": "Queued manual retorrent job that checks duplicates and executes only when gates allow.",
+                            "content": {"application/json": {"schema": job_response_schema}},
+                        }
+                    },
                 }
             },
             "/v1/candidates/daily": {

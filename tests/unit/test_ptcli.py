@@ -12441,11 +12441,55 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["command_argv"] == ["python3", "ptcli.py", "doctor", "--json"]
 
 
+def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, tmp_path) -> None:
+    captured_request = {}
+
+    async def fake_retorrent(request):
+        captured_request.update(request)
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["target duplicate check or live upload gate blocked execution."],
+            "next_actions": ["Review blockers and resume with explicit confirmations when safe."],
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_manual_retorrent_job(
+        store,
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+            "uploaded_qbit_category": "MTEAM",
+            "uploaded_qbit_tags": "retorrent",
+        },
+    )
+
+    assert job["kind"] == "ptcli.manual_retorrent"
+    assert job["status"] == "blocked"
+    assert job["request"]["mode"] == "manual_retorrent"
+    assert job["request"]["execute"] is True
+    assert job["request"]["execute_if_no_duplicate"] is True
+    assert captured_request["execute"] is True
+    assert captured_request["execute_if_no_duplicate"] is True
+    assert job["command_argv"][:2] == ["ptcli", "retorrent"]
+    assert "--execute" in job["command_argv"]
+    assert "--accept-rules" in job["command_argv"]
+    assert "--confirm-upload" in job["command_argv"]
+
+
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
     tools = ptcli_service.tools_payload()
     paths = {tool["path"] for tool in tools["tools"]}
     assert "/v1/jobs/retorrent/check" in paths
     assert "/v1/jobs/retorrent" in paths
+    assert "/v1/jobs/retorrent/submit" in paths
     assert "/v1/candidates/daily" in paths
     assert "/v1/jobs/candidates/daily" in paths
     assert "/v1/jobs/{job_id}" in paths
@@ -12453,6 +12497,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/.well-known/ptcli-agent.json" in paths
     tool_by_name = {tool["name"]: tool for tool in tools["tools"]}
     assert tool_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
+    assert tool_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
+    assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
+    assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
     assert "response_contract" in tool_by_name["get_job_status"]
@@ -12464,6 +12511,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/hermes/skill.json" in openapi["paths"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent" in openapi["paths"]
+    assert "/v1/jobs/retorrent/submit" in openapi["paths"]
     assert "/v1/candidates/daily" in openapi["paths"]
     assert "/v1/jobs/candidates/daily" in openapi["paths"]
     assert "/v1/jobs/{job_id}" in openapi["paths"]
@@ -12481,7 +12529,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
-    assert {tool["name"] for tool in manifest["tools"]} >= {"retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"manual_retorrent_job", "retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+    manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
+    assert manual_workflow["tool"] == "manual_retorrent_job"
     retorrent_tool = next(tool for tool in manifest["tools"] if tool["name"] == "retorrent_job")
     assert retorrent_tool["input_schema"]["required"] == ["source", "target"]
     assert "uploaded_qbit_upload_limit" in retorrent_tool["input_schema"]["properties"]
@@ -12498,7 +12548,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["auth"]["env"] == "PTCLI_API_TOKEN"
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+        assert set(tools_by_name) >= {"manual_retorrent_job", "retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+        assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
         assert tools_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
         assert "response_contract" in tools_by_name["retorrent_job"]
         assert "safety" in tools_by_name["resume_job"]

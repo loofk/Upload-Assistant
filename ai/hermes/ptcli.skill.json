@@ -35,7 +35,7 @@
   "workflows": [
     {
       "name": "manual_retorrent",
-      "tool": "retorrent_job",
+      "tool": "manual_retorrent_job",
       "required_fields": [
         "source",
         "target"
@@ -124,6 +124,74 @@
           "blocked",
           "failed",
           "complete"
+        ]
+      },
+      "safety": {
+        "live_upload": true,
+        "requires_confirmation": [
+          "accept_rules=true",
+          "confirm_upload=true"
+        ]
+      }
+    },
+    {
+      "name": "manual_retorrent_job",
+      "method": "POST",
+      "path": "/v1/jobs/retorrent/submit",
+      "description": "Submit the primary source URL plus target tracker job. It checks duplicates and only proceeds when rule, duplicate, and confirmation gates allow.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "source_tracker": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "accept_rules": {
+            "type": "boolean"
+          },
+          "confirm_upload": {
+            "type": "boolean"
+          },
+          "save_path": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "execute_if_no_duplicate": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "blockers",
+          "next_actions",
+          "summary_file",
+          "resume_state",
+          "agent_summary"
         ]
       },
       "safety": {
