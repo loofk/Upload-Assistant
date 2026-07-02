@@ -74,6 +74,7 @@ class JobStore:
             "summary_file": None,
             "resume_state": None,
             "agent_summary": None,
+            "agent_decision": None,
             "duplicate_check": None,
             "result": None,
         }
@@ -107,6 +108,7 @@ class JobStore:
             "summary_file": summary_file,
             "summary": summary_payload,
             "agent_summary": _agent_summary(summary_payload) or _agent_summary(job.get("result")),
+            "agent_decision": _agent_decision(job),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -163,10 +165,12 @@ class JobStore:
                     "summary_file": _result_summary_file(result),
                     "resume_state": _result_resume_state(result),
                     "agent_summary": _agent_summary(result),
+                    "agent_decision": None,
                     "duplicate_check": result.get("duplicate_check") if isinstance(result.get("duplicate_check"), dict) else None,
                     "result": result,
                 }
             )
+            job["agent_decision"] = _agent_decision(job)
         except Exception as exc:
             completed_at = int(time.time())
             job.update(
@@ -180,6 +184,7 @@ class JobStore:
                     "result": {"status": "error", "message": str(exc)},
                 }
             )
+            job["agent_decision"] = _agent_decision(job)
         self._write(job)
 
     def _read(self, job_id: str) -> dict[str, Any]:
@@ -897,6 +902,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "summary_file": job.get("summary_file"),
         "resume_state": job.get("resume_state"),
         "agent_summary": job.get("agent_summary") if isinstance(job.get("agent_summary"), dict) else _agent_summary(job.get("result")),
+        "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
         "result_status": _nested_value(job.get("result"), "status"),
         "next_stage": _nested_value(job.get("result"), "next_stage"),
         "next_command": _nested_value(job.get("result"), "next_command"),
@@ -904,6 +910,93 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "should_execute_next_command": _nested_value(job.get("result"), "should_execute_next_command"),
         "automation_action": _nested_value(job.get("result"), "automation_action"),
     }
+
+
+def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
+    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    status = str(job.get("status") or "unknown")
+    blockers = _string_list(job.get("blockers"))
+    next_actions = _string_list(job.get("next_actions"))
+    duplicate_check = _job_duplicate_check(job)
+    next_command_argv = _result_next_command_argv(result)
+    resume_state = job.get("resume_state") if isinstance(job.get("resume_state"), dict) else _result_resume_state(result)
+    missing_confirmations = _missing_live_confirmations(request)
+    duplicate_exists = duplicate_check.get("exists") is True
+    resume_available = bool(next_command_argv or (isinstance(resume_state, dict) and resume_state.get("resume_available") is True))
+    should_poll = status in {"queued", "running"}
+    should_resume = status in {"blocked", "failed"} and resume_available and not duplicate_exists and not missing_confirmations
+    can_attempt_live = not duplicate_exists and not missing_confirmations and status not in {"queued", "running"}
+
+    if should_poll:
+        decision = "wait"
+        stop_reason = None
+        recommended_action = "Poll get_job_status until the job is no longer queued or running."
+    elif duplicate_exists:
+        decision = "stop"
+        stop_reason = "target_duplicate_exists"
+        recommended_action = "Do not upload. Inspect duplicate_check.dupes or choose a different target."
+    elif missing_confirmations:
+        decision = "ask_confirmation"
+        stop_reason = "missing_required_confirmation"
+        recommended_action = f"Collect explicit confirmation for: {', '.join(missing_confirmations)}."
+    elif status == "complete":
+        decision = "done"
+        stop_reason = None
+        recommended_action = "Retorrent workflow is complete; inspect summary_file and seeding evidence."
+    elif should_resume:
+        decision = "resume"
+        stop_reason = None
+        recommended_action = "Call resume_job or run the allowlisted next_command_argv."
+    elif blockers:
+        decision = "blocked"
+        stop_reason = "blocked_by_runtime_or_gate"
+        recommended_action = next_actions[0] if next_actions else "Inspect blockers and resolve the missing runtime, credential, rule, metadata, or qBittorrent evidence."
+    else:
+        decision = "inspect"
+        stop_reason = "unknown_state"
+        recommended_action = "Inspect result, summary_file, and logs before taking live action."
+
+    return {
+        "workflow": job.get("kind"),
+        "status": status,
+        "decision": decision,
+        "recommended_action": recommended_action,
+        "stop_reason": stop_reason,
+        "duplicate_check": duplicate_check,
+        "missing_confirmations": missing_confirmations,
+        "can_attempt_live": can_attempt_live,
+        "should_poll": should_poll,
+        "should_resume": should_resume,
+        "resume_available": resume_available,
+        "next_command_argv": next_command_argv,
+        "summary_file": job.get("summary_file"),
+        "blocker_count": len(blockers),
+    }
+
+
+def _job_duplicate_check(job: dict[str, Any]) -> dict[str, Any]:
+    duplicate_check = job.get("duplicate_check")
+    if isinstance(duplicate_check, dict):
+        return duplicate_check
+    result = job.get("result")
+    if isinstance(result, dict):
+        nested_duplicate_check = result.get("duplicate_check")
+        if isinstance(nested_duplicate_check, dict):
+            return nested_duplicate_check
+        return _duplicate_check(result)
+    return {"searched": False, "status": "unknown", "exists": None, "count": None, "dupes": []}
+
+
+def _missing_live_confirmations(request: dict[str, Any]) -> list[str]:
+    if request.get("execute") is not True and request.get("execute_if_no_duplicate") is not True and request.get("mode") != "manual_retorrent":
+        return []
+    missing: list[str] = []
+    if request.get("accept_rules") is not True:
+        missing.append("accept_rules=true")
+    if request.get("confirm_upload") is not True:
+        missing.append("confirm_upload=true")
+    return missing
 
 
 def _job_status_from_result(result: dict[str, Any]) -> str:
@@ -1194,7 +1287,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -1308,9 +1401,9 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
-        "blocked_fields": ["blockers", "next_actions", "resume_state", "next_command_argv"],
+        "blocked_fields": ["blockers", "next_actions", "resume_state", "next_command_argv", "agent_decision"],
     }
 
 
@@ -1473,7 +1566,24 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "summary_file": {"type": ["string", "null"]},
             "resume_state": {"type": ["object", "null"]},
             "agent_summary": {"type": ["object", "null"]},
+            "agent_decision": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
+        },
+    }
+    job_summary_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "job_id": {"type": "string"},
+            "kind": {"type": "string"},
+            "summary_file": {"type": ["string", "null"]},
+            "summary": {"type": ["object", "null"]},
+            "agent_summary": {"type": ["object", "null"]},
+            "agent_decision": {"type": ["object", "null"]},
+            "result": {"type": ["object", "null"]},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
     candidate_request_schema = {
@@ -1630,7 +1740,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "operationId": "getPtcliJobSummary",
                     "security": token_security,
                     "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
-                    "responses": {"200": {"description": "Job summary and summary-file payload when available."}},
+                    "responses": {"200": {"description": "Job summary and summary-file payload when available.", "content": {"application/json": {"schema": job_summary_response_schema}}}},
                 }
             },
             "/v1/jobs/{job_id}/resume": {

@@ -12476,12 +12476,69 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["request"]["mode"] == "manual_retorrent"
     assert job["request"]["execute"] is True
     assert job["request"]["execute_if_no_duplicate"] is True
+    assert job["agent_decision"]["decision"] == "blocked"
+    assert job["agent_decision"]["duplicate_check"]["status"] == "not_found"
+    assert job["agent_decision"]["missing_confirmations"] == []
     assert captured_request["execute"] is True
     assert captured_request["execute_if_no_duplicate"] is True
     assert job["command_argv"][:2] == ["ptcli", "retorrent"]
     assert "--execute" in job["command_argv"]
     assert "--accept-rules" in job["command_argv"]
     assert "--confirm-upload" in job["command_argv"]
+
+
+def test_agent_decision_stops_manual_retorrent_when_duplicate_exists(monkeypatch, tmp_path) -> None:
+    async def fake_retorrent(_request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["target-duplicate: target tracker already has possible existing torrents."],
+            "next_actions": ["Do not upload this torrent to the target tracker."],
+            "duplicate_check": {"searched": True, "status": "exists", "exists": True, "count": 1, "dupes": [{"name": "Existing.Release"}]},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_manual_retorrent_job(
+        store,
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+        },
+    )
+    summary = store.summary(job["job_id"])
+
+    assert job["status"] == "blocked"
+    assert job["agent_decision"]["decision"] == "stop"
+    assert job["agent_decision"]["stop_reason"] == "target_duplicate_exists"
+    assert job["agent_decision"]["can_attempt_live"] is False
+    assert summary["agent_decision"]["duplicate_check"]["count"] == 1
+
+
+def test_agent_decision_requests_missing_live_confirmations(monkeypatch, tmp_path) -> None:
+    async def fake_retorrent(_request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["rule gate requires explicit confirmations."],
+            "next_actions": ["Review source and target rules, then resubmit with confirmations."],
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_manual_retorrent_job(store, {"source": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"})
+
+    assert job["status"] == "blocked"
+    assert job["agent_decision"]["decision"] == "ask_confirmation"
+    assert job["agent_decision"]["missing_confirmations"] == ["accept_rules=true", "confirm_upload=true"]
+    assert job["agent_decision"]["can_attempt_live"] is False
 
 
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
@@ -12500,6 +12557,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
     assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
+    assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
     assert "response_contract" in tool_by_name["get_job_status"]
@@ -12518,6 +12576,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/{job_id}/summary" in openapi["paths"]
     assert "/v1/jobs/{job_id}/resume" in openapi["paths"]
     assert openapi["paths"]["/v1/jobs/retorrent"]["post"]["security"] == [{"bearerAuth": []}]
+    summary_schema = openapi["paths"]["/v1/jobs/{job_id}/summary"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "agent_decision" in summary_schema["properties"]
 
 
 def test_agent_manifest_exposes_ai_safe_workflows() -> None:
@@ -12536,6 +12596,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert retorrent_tool["input_schema"]["required"] == ["source", "target"]
     assert "uploaded_qbit_upload_limit" in retorrent_tool["input_schema"]["properties"]
     assert "resume_state" in retorrent_tool["response_contract"]["required_fields"]
+    assert "agent_decision" in retorrent_tool["response_contract"]["required_fields"]
     assert "confirm_upload=true" in retorrent_tool["safety"]["requires_confirmation"]
     assert manifest["openclaw"]["manifest_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
     assert manifest["hermes"]["manifest_url"] == "http://ptcli.local:8080/v1/hermes/skill.json"
@@ -12550,6 +12611,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
         assert set(tools_by_name) >= {"manual_retorrent_job", "retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
+        assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert tools_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
         assert "response_contract" in tools_by_name["retorrent_job"]
         assert "safety" in tools_by_name["resume_job"]

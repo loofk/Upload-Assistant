@@ -116,7 +116,8 @@
           "next_actions",
           "summary_file",
           "resume_state",
-          "agent_summary"
+          "agent_summary",
+          "agent_decision"
         ],
         "status_values": [
           "queued",
@@ -191,7 +192,8 @@
           "next_actions",
           "summary_file",
           "resume_state",
-          "agent_summary"
+          "agent_summary",
+          "agent_decision"
         ]
       },
       "safety": {
@@ -286,7 +288,8 @@
           "next_actions",
           "summary_file",
           "resume_state",
-          "agent_summary"
+          "agent_summary",
+          "agent_decision"
         ]
       },
       "safety": {
