@@ -6316,10 +6316,19 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY"] == "0"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING"] == "assets.mediainfo_or_bdinfo,description.mediainfo_or_bdinfo,payload.mediainfo"
     assert "Generate or provide MediaInfo/BDInfo" in shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_NEXT_ACTIONS"]
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_SOURCE"] is None
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_LENGTH"] == 0
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_DESCRIPTION_HAS_EXCERPT"] == "0"
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_PAYLOAD_SOURCE"] is None
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_PAYLOAD_LENGTH"] == 0
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY"] == "0"
     assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING"] == "assets.screenshots,assets.image_host_uploads,description.screenshot_bbcode,description.screenshot_coverage"
     assert "Generate or provide screenshots" in shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS"]
     assert "Upload screenshots to an image host" in shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS"]
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_LOCAL_COUNT"] == 0
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_IMAGE_HOST_COUNT"] == 0
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_DESCRIPTION_COUNT"] == 0
+    assert shell_fields["PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING_URLS"] == "https://img.example/screen-1.png"
 
     matrix = ptcli_cli._summary_completion_matrix(
         flow_diagnostics={},
@@ -6397,11 +6406,20 @@ def test_summary_material_diagnostics_blocks_upload_when_description_completenes
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY"] == "0"
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING"] == "assets.mediainfo_or_bdinfo,description.mediainfo_or_bdinfo,payload.mediainfo"
     assert "Generate or provide MediaInfo/BDInfo" in readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_NEXT_ACTIONS"]
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_SOURCE"] is None
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_LENGTH"] == 0
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_DESCRIPTION_HAS_EXCERPT"] == "0"
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_PAYLOAD_SOURCE"] is None
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_PAYLOAD_LENGTH"] == 0
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY"] == "0"
     assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING"] == "assets.screenshots,assets.image_host_uploads,description.screenshot_bbcode,description.screenshot_coverage"
     assert "Generate or provide screenshots" in readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS"]
     assert "Upload screenshots to an image host" in readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS"]
     assert "Regenerate the MTEAM description" in readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS"]
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_LOCAL_COUNT"] == 0
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_IMAGE_HOST_COUNT"] == 0
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_DESCRIPTION_COUNT"] == 0
+    assert readiness_shell_fields["PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING_URLS"] == "https://img.example/screen-1.png"
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_RECOVERY_MISSING"] == "description.screenshot_coverage"
     assert readiness_shell_fields["PTCLI_READINESS_TARGET_UPLOAD_PAYLOAD_NEXT_ACTIONS"] == "Upload screenshots to an image host before live upload."
 

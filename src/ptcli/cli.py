@@ -11155,10 +11155,33 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     return 0
 
 
+def _media_info_chain_detail_shell_fields(prefix: str, media_info_chain: dict[str, Any]) -> dict[str, Any]:
+    return {
+        f"{prefix}_SOURCE": media_info_chain.get("material_source"),
+        f"{prefix}_LENGTH": media_info_chain.get("material_length"),
+        f"{prefix}_DESCRIPTION_HAS_EXCERPT": _shell_bool(media_info_chain.get("description_has_excerpt")) if media_info_chain.get("description_has_excerpt") is not None else None,
+        f"{prefix}_PAYLOAD_SOURCE": media_info_chain.get("payload_source"),
+        f"{prefix}_PAYLOAD_LENGTH": media_info_chain.get("payload_length"),
+    }
+
+
+def _screenshot_chain_detail_shell_fields(prefix: str, screenshot_chain: dict[str, Any]) -> dict[str, Any]:
+    return {
+        f"{prefix}_LOCAL_COUNT": screenshot_chain.get("local_screenshot_count"),
+        f"{prefix}_IMAGE_HOST_COUNT": screenshot_chain.get("image_host_count"),
+        f"{prefix}_DESCRIPTION_COUNT": screenshot_chain.get("description_image_count"),
+        f"{prefix}_IMAGE_HOST_URLS": ",".join(_string_list(screenshot_chain.get("image_host_urls"))),
+        f"{prefix}_DESCRIPTION_URLS": ",".join(_string_list(screenshot_chain.get("description_urls"))),
+        f"{prefix}_MISSING_URLS": ",".join(_string_list(screenshot_chain.get("missing_urls"))),
+    }
+
+
 def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> dict[str, Any]:
     material_recovery = readiness_summary.get("material_recovery") if isinstance(readiness_summary.get("material_recovery"), dict) else {}
     material_recovery_coverage = material_recovery.get("command_coverage") if isinstance(material_recovery.get("command_coverage"), dict) else {}
     material_description_evidence = readiness_summary.get("material_description_evidence") if isinstance(readiness_summary.get("material_description_evidence"), dict) else {}
+    media_info_chain = material_description_evidence.get("media_info_chain") if isinstance(material_description_evidence.get("media_info_chain"), dict) else {}
+    screenshot_chain = material_description_evidence.get("screenshot_chain") if isinstance(material_description_evidence.get("screenshot_chain"), dict) else {}
     source_followup = readiness_summary.get("source_followup") if isinstance(readiness_summary.get("source_followup"), dict) else {}
     source_followup_planned = source_followup.get("planned") if isinstance(source_followup.get("planned"), dict) else {}
     source_wait_query = source_followup.get("source_wait_query") if isinstance(source_followup.get("source_wait_query"), dict) else {}
@@ -11214,9 +11237,11 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY": _shell_bool(readiness_summary.get("material_description_media_info_chain_ready")) if readiness_summary.get("material_description_media_info_chain_ready") is not None else None,
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING": ",".join(_string_list(readiness_summary.get("material_description_media_info_chain_missing"))),
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_NEXT_ACTIONS": " | ".join(_string_list(readiness_summary.get("material_description_media_info_chain_next_actions"))),
+        **_media_info_chain_detail_shell_fields("PTCLI_READINESS_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN", media_info_chain),
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY": _shell_bool(readiness_summary.get("material_description_screenshot_chain_ready")) if readiness_summary.get("material_description_screenshot_chain_ready") is not None else None,
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING": ",".join(_string_list(readiness_summary.get("material_description_screenshot_chain_missing"))),
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS": " | ".join(_string_list(readiness_summary.get("material_description_screenshot_chain_next_actions"))),
+        **_screenshot_chain_detail_shell_fields("PTCLI_READINESS_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN", screenshot_chain),
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_INPUT_CHAIN_READY": _shell_bool(readiness_summary.get("material_description_input_chain_ready")) if readiness_summary.get("material_description_input_chain_ready") is not None else None,
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_INPUT_CHAIN_MISSING": ",".join(_string_list(readiness_summary.get("material_description_input_chain_missing"))),
         "PTCLI_READINESS_MATERIAL_DESCRIPTION_INPUT_CHAIN_NEXT_ACTIONS": " | ".join(_string_list(readiness_summary.get("material_description_input_chain_next_actions"))),
@@ -11444,22 +11469,11 @@ def _summary_check_target_material_chain_shell_fields(target_material_chain: dic
         "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_READY": _shell_bool(media_info_chain.get("ready")) if media_info_chain.get("ready") is not None else None,
         "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_MISSING": ",".join(_string_list(media_info_chain.get("missing"))),
         "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_NEXT_ACTIONS": " | ".join(_string_list(media_info_chain.get("next_actions"))),
-        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_SOURCE": media_info_chain.get("material_source"),
-        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_LENGTH": media_info_chain.get("material_length"),
-        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_DESCRIPTION_HAS_EXCERPT": _shell_bool(media_info_chain.get("description_has_excerpt"))
-        if media_info_chain.get("description_has_excerpt") is not None
-        else None,
-        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_PAYLOAD_SOURCE": media_info_chain.get("payload_source"),
-        "PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO_PAYLOAD_LENGTH": media_info_chain.get("payload_length"),
+        **_media_info_chain_detail_shell_fields("PTCLI_TARGET_MATERIAL_CHAIN_MEDIA_INFO", media_info_chain),
         "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_READY": _shell_bool(screenshot_chain.get("ready")) if screenshot_chain.get("ready") is not None else None,
         "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_MISSING": ",".join(_string_list(screenshot_chain.get("missing"))),
         "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_NEXT_ACTIONS": " | ".join(_string_list(screenshot_chain.get("next_actions"))),
-        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_LOCAL_COUNT": screenshot_chain.get("local_screenshot_count"),
-        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_IMAGE_HOST_COUNT": screenshot_chain.get("image_host_count"),
-        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_DESCRIPTION_COUNT": screenshot_chain.get("description_image_count"),
-        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_IMAGE_HOST_URLS": ",".join(_string_list(screenshot_chain.get("image_host_urls"))),
-        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_DESCRIPTION_URLS": ",".join(_string_list(screenshot_chain.get("description_urls"))),
-        "PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT_MISSING_URLS": ",".join(_string_list(screenshot_chain.get("missing_urls"))),
+        **_screenshot_chain_detail_shell_fields("PTCLI_TARGET_MATERIAL_CHAIN_SCREENSHOT", screenshot_chain),
     }
 
 
@@ -12176,9 +12190,11 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_READY": _shell_bool(media_info_chain.get("ready")) if media_info_chain.get("ready") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_MISSING": ",".join(_description_chain_recovery_missing("media_info_chain", media_info_chain)),
         "PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN_NEXT_ACTIONS": " | ".join(_description_chain_next_actions("media_info_chain", media_info_chain)),
+        **_media_info_chain_detail_shell_fields("PTCLI_MATERIAL_DESCRIPTION_MEDIA_INFO_CHAIN", media_info_chain),
         "PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_READY": _shell_bool(screenshot_chain.get("ready")) if screenshot_chain.get("ready") is not None else None,
         "PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_MISSING": ",".join(_description_chain_recovery_missing("screenshot_chain", screenshot_chain)),
         "PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN_NEXT_ACTIONS": " | ".join(_description_chain_next_actions("screenshot_chain", screenshot_chain)),
+        **_screenshot_chain_detail_shell_fields("PTCLI_MATERIAL_DESCRIPTION_SCREENSHOT_CHAIN", screenshot_chain),
         "PTCLI_MATERIAL_DESCRIPTION_MISSING": ",".join(_string_list(description.get("missing"))),
     }
 
