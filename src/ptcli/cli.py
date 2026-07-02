@@ -11684,12 +11684,32 @@ def _material_recovery_completion_command(resume_state: dict[str, Any], recovery
     if not argv:
         return {"command": None, "argv": []}
     completed_argv = list(argv)
+    for hint in recovery_hints:
+        if isinstance(hint, dict) and hint.get("resume_command_available") is True:
+            _merge_material_recovery_resume_argv(completed_argv, _argv_list(hint.get("resume_command_argv")))
     for flag in _material_recovery_missing_flags(recovery_hints):
         if flag not in completed_argv:
             completed_argv.append(flag)
     if completed_argv == argv:
         return {"command": None, "argv": []}
     return {"command": shlex.join(completed_argv), "argv": completed_argv}
+
+
+def _merge_material_recovery_resume_argv(target_argv: list[str], source_argv: list[str] | None) -> None:
+    if not source_argv:
+        return
+    index = 3 if len(source_argv) >= 3 and Path(source_argv[1]).name == "ptcli.py" else 0
+    while index < len(source_argv):
+        option = source_argv[index]
+        if not option.startswith("--"):
+            index += 1
+            continue
+        value = source_argv[index + 1] if index + 1 < len(source_argv) and not source_argv[index + 1].startswith("--") else None
+        if option not in target_argv:
+            target_argv.append(option)
+            if value is not None:
+                target_argv.append(value)
+        index += 2 if value is not None else 1
 
 
 def _first_material_recovery_command(recovery_hints: list[Any]) -> dict[str, Any]:

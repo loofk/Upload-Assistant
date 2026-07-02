@@ -8060,6 +8060,99 @@ def test_summary_check_promotes_material_recovery_command(tmp_path, capsys) -> N
     assert payload["readiness_summary"]["material_recovery"]["first_command"] == "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg"
 
 
+def test_summary_check_material_completion_merges_available_recovery_argv(tmp_path, capsys) -> None:
+    summary_file = tmp_path / "summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "kind": "ptcli.pipeline.run_summary",
+                "schema_version": 1,
+                "summary_file": str(summary_file),
+                "status": "blocked",
+                "ready": False,
+                "complete": False,
+                "blockers": ["target.materials_ready"],
+                "resume_commands": [
+                    {
+                        "stage": "resume-target-package",
+                        "command": "python3 ptcli.py pipeline --prepare-target",
+                        "argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+                    }
+                ],
+                "resume_state": {
+                    "next_stage": "resume-target-package",
+                    "next_command": "python3 ptcli.py pipeline --prepare-target",
+                    "next_command_argv": ["python3", "ptcli.py", "pipeline", "--prepare-target"],
+                    "materials": {
+                        "target_materials_missing": ["metadata.ptgen_description", "assets.image_host_uploads"],
+                        "recovery_hints": [
+                            {
+                                "key": "metadata.ptgen_description",
+                                "resume_stage": "resume-target-package",
+                                "reason": "Fetch PTGen/Douban description before regenerating the MTEAM package.",
+                                "command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                                "existing_file_options": ["--metadata-file"],
+                                "required_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                                "missing_command_flags": ["--enrich-metadata", "--fetch-ptgen"],
+                                "resume_command_available": False,
+                                "resume_command_stage": None,
+                                "resume_command": None,
+                                "resume_command_argv": [],
+                            },
+                            {
+                                "key": "assets.image_host_uploads",
+                                "resume_stage": "resume-target-package",
+                                "reason": "Upload screenshots to an image host before regenerating the MTEAM package.",
+                                "command_flags": ["--upload-screenshots", "--image-host"],
+                                "existing_file_options": ["--image-host-file"],
+                                "required_command_flags": ["--upload-screenshots"],
+                                "missing_command_flags": [],
+                                "resume_command_available": True,
+                                "resume_command_stage": "resume-target-package",
+                                "resume_command": "python3 ptcli.py pipeline --prepare-target --upload-screenshots --image-host ptpimg",
+                                "resume_command_argv": [
+                                    "python3",
+                                    "ptcli.py",
+                                    "pipeline",
+                                    "--prepare-target",
+                                    "--upload-screenshots",
+                                    "--image-host",
+                                    "ptpimg",
+                                ],
+                            },
+                        ],
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(["summary-check", "--summary-file", str(summary_file), "--json"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["next_command_source"] == "material_recovery_completion"
+    assert payload["next_command_argv"] == [
+        "python3",
+        "ptcli.py",
+        "pipeline",
+        "--prepare-target",
+        "--upload-screenshots",
+        "--image-host",
+        "ptpimg",
+        "--enrich-metadata",
+        "--fetch-ptgen",
+    ]
+    assert payload["next_command_run_allowed"] is True
+    recovery = payload["readiness_summary"]["material_recovery"]
+    assert recovery["command_coverage"]["available_count"] == 1
+    assert recovery["command_coverage"]["missing_count"] == 1
+    completion_candidates = [command for command in payload["candidate_commands"] if command["source"] == "material_recovery_completion"]
+    assert completion_candidates
+    assert completion_candidates[0]["argv"] == payload["next_command_argv"]
+
+
 def test_summary_check_treats_existing_material_files_as_recovery_coverage(tmp_path, capsys) -> None:
     summary_file = tmp_path / "summary.json"
     metadata_file = tmp_path / "metadata.json"
