@@ -320,7 +320,7 @@ def build_mteam_upload_payload_summary(package: dict[str, Any], torrent_file: st
     description_summary = _mteam_description_summary(package, description_length)
     torrent_summary, torrent_blockers = _torrent_file_summary(torrent_file)
     field_checks = _mteam_upload_field_checks(form_fields)
-    material_checks = _mteam_upload_material_checks(description_summary, description_length, materials=materials)
+    material_checks = _mteam_upload_material_checks(description_summary, description_length, materials=materials, form_fields=form_fields)
     recovery_missing = _mteam_upload_recovery_missing([*field_checks, *material_checks])
     blockers = [f"{check['name']}: {check['message']}" for check in field_checks if not check["ok"]]
     enforce_materials = require_materials
@@ -1929,7 +1929,7 @@ def _mteam_metadata_payload_value(name: str, form_fields: dict[str, Any]) -> str
     return None
 
 
-def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_length: int, materials: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_length: int, materials: dict[str, Any] | None = None, form_fields: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     exists = bool(description_summary.get("exists")) and bool(description_summary.get("is_file"))
     char_length = description_summary.get("char_length")
     blockers = description_summary.get("blockers") if isinstance(description_summary.get("blockers"), list) else []
@@ -1949,6 +1949,8 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
     ]
     content = description_summary.get("content") if isinstance(description_summary.get("content"), dict) else {}
     materials = materials if isinstance(materials, dict) else {}
+    form_fields = form_fields if isinstance(form_fields, dict) else {}
+    metadata = materials.get("metadata") if isinstance(materials.get("metadata"), dict) else {}
     assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
     screenshots = assets.get("screenshots") if isinstance(assets.get("screenshots"), dict) else {}
     image_hosts = assets.get("image_hosts") if isinstance(assets.get("image_hosts"), dict) else {}
@@ -1958,6 +1960,12 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
     description_image_urls = _mteam_description_image_urls_from_content(content)
     missing_image_urls = [url for url in expected_image_urls if url not in description_image_urls]
     screenshot_coverage_ready = _mteam_screenshot_coverage_ready(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls)
+    external_links = content.get("external_links") if isinstance(content.get("external_links"), dict) else {}
+    metadata_chain_items = {name: _mteam_metadata_chain_item(name, metadata, external_links, form_fields) for name in ("imdb", "tmdb", "douban")}
+    external_id_checks = {
+        name: bool(content.get(f"has_{name}") and metadata_chain_items[name].get("ready") is True)
+        for name in ("imdb", "tmdb", "douban")
+    }
     screenshot_coverage_check = _payload_field_check(
         "materials.description.screenshot_coverage",
         screenshot_coverage_ready,
@@ -1984,27 +1992,27 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
             ),
             _payload_field_check(
                 "materials.description.external_ids",
-                bool(content.get("has_imdb")) and bool(content.get("has_tmdb")) and bool(content.get("has_douban")),
+                all(external_id_checks.values()),
                 "MTEAM description includes IMDb, TMDb, and Douban references.",
                 "MTEAM description is missing one or more IMDb/TMDb/Douban references.",
             ),
             _payload_field_check(
                 "materials.description.external_ids.imdb",
-                bool(content.get("has_imdb")),
+                external_id_checks["imdb"],
                 "MTEAM description includes an IMDb reference.",
-                "MTEAM description is missing an IMDb reference.",
+                _mteam_description_metadata_link_missing_message("imdb", metadata_chain_items["imdb"], content),
             ),
             _payload_field_check(
                 "materials.description.external_ids.tmdb",
-                bool(content.get("has_tmdb")),
+                external_id_checks["tmdb"],
                 "MTEAM description includes a TMDb reference.",
-                "MTEAM description is missing a TMDb reference.",
+                _mteam_description_metadata_link_missing_message("tmdb", metadata_chain_items["tmdb"], content),
             ),
             _payload_field_check(
                 "materials.description.external_ids.douban",
-                bool(content.get("has_douban")),
+                external_id_checks["douban"],
                 "MTEAM description includes a Douban reference.",
-                "MTEAM description is missing a Douban reference.",
+                _mteam_description_metadata_link_missing_message("douban", metadata_chain_items["douban"], content),
             ),
             _payload_field_check(
                 "materials.description.mediainfo_or_bdinfo",
@@ -2055,6 +2063,21 @@ def _mteam_screenshot_coverage_missing_message(local_screenshot_count: int, imag
     if missing_image_urls:
         return "MTEAM description is missing one or more image-host screenshot URLs."
     return "MTEAM screenshot coverage is incomplete."
+
+
+def _mteam_description_metadata_link_missing_message(name: str, item: dict[str, Any], content: dict[str, Any]) -> str:
+    label = {"imdb": "IMDb", "tmdb": "TMDb", "douban": "Douban"}.get(name, name)
+    if not content.get(f"has_{name}"):
+        return f"MTEAM description is missing a {label} reference."
+    expected = item.get("expected_link")
+    description_link = item.get("description_link")
+    if not expected:
+        return f"MTEAM {label} metadata is missing, so the description reference cannot be verified."
+    if description_link != expected:
+        return f"MTEAM description {label} reference does not match metadata: expected {expected}, got {description_link or 'missing'}."
+    if item.get("payload_required") and item.get("payload_value") != expected:
+        return f"MTEAM payload {label} reference does not match metadata: expected {expected}, got {item.get('payload_value') or 'missing'}."
+    return f"MTEAM description {label} reference is not verified."
 
 
 def _mteam_upload_recovery_missing(checks: list[dict[str, Any]]) -> list[str]:

@@ -21034,6 +21034,47 @@ def test_mteam_upload_preflight_exposes_missing_description_external_id(tmp_path
     assert audit["description"]["external_id_missing"] == ["tmdb"]
 
 
+def test_mteam_upload_preflight_blocks_mismatched_description_external_id(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+    }
+    package = write_material_ready_mteam_package(source_info, tmp_path)
+    description_path = Path(package["files"]["description_draft"])
+    description = description_path.read_text(encoding="utf-8")
+    description_path.write_text(description.replace("https://www.themoviedb.org/movie/999", "https://www.themoviedb.org/movie/1000"), encoding="utf-8")
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    blockers = preflight["upload_payload"]["blockers"]
+    assert any("materials.description.external_ids.tmdb" in blocker and "expected https://www.themoviedb.org/movie/999" in blocker for blocker in blockers)
+    assert "description.external_ids.tmdb" in preflight["upload_payload"]["recovery_missing"]
+    assert "metadata.tmdb_id" not in preflight["upload_payload"]["recovery_missing"]
+    review = preflight["upload_payload"]["review"]
+    metadata_items = review["description"]["evidence"]["metadata_chain"]["items"]
+    assert metadata_items["tmdb"] == {
+        "ready": False,
+        "source_value": 999,
+        "expected_link": "https://www.themoviedb.org/movie/999",
+        "description_link": "https://www.themoviedb.org/movie/1000",
+        "payload_value": None,
+        "payload_required": False,
+    }
+    audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
+    assert audit["description_ready"] is False
+    assert "materials.description.external_ids.tmdb" in audit["description"]["missing"]
+
+
 def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> None:
     mediainfo = tmp_path / "MI_FULL_00.txt"
     mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
