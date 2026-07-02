@@ -1735,8 +1735,11 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
     expected_image_urls = _mteam_expected_image_urls(materials)
     description_image_urls = _mteam_description_image_urls_from_content(content)
     missing_image_urls = [url for url in expected_image_urls if url not in description_image_urls]
+    local_screenshot_count = int(screenshots.get("count", 0) or 0)
+    image_host_count = int(image_hosts.get("count", 0) or 0)
+    screenshot_coverage_ready = _mteam_screenshot_coverage_ready(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls)
     screenshot_coverage = {
-        "ready": not missing_image_urls,
+        "ready": screenshot_coverage_ready,
         "expected_urls": expected_image_urls,
         "description_urls": description_image_urls,
         "missing_urls": missing_image_urls,
@@ -1767,16 +1770,16 @@ def _mteam_upload_review_summary(form_fields: dict[str, Any], description_summar
                 payload_media_info_source=payload_media_info.get("source"),
                 payload_media_info_length=payload_media_info.get("length"),
                 screenshot_coverage=screenshot_coverage,
-                local_screenshot_count=int(screenshots.get("count", 0) or 0),
-                image_host_count=int(image_hosts.get("count", 0) or 0),
+                local_screenshot_count=local_screenshot_count,
+                image_host_count=image_host_count,
                 image_host_urls=expected_image_urls,
             ),
         },
         "materials": {
             "mediainfo_or_bdinfo_source": media_info_source,
             "mediainfo_or_bdinfo_length": media_info_length,
-            "screenshot_file_count": int(screenshots.get("count", 0) or 0),
-            "image_host_count": int(image_hosts.get("count", 0) or 0),
+            "screenshot_file_count": local_screenshot_count,
+            "image_host_count": image_host_count,
             "image_host_urls": expected_image_urls,
         },
         "form": {
@@ -1866,7 +1869,7 @@ def _mteam_description_evidence_summary(
             "missing_urls": missing_urls,
         },
         "screenshot_chain": {
-            "ready": bool(local_screenshot_count > 0 and image_host_count > 0 and description_count > 0 and missing_count == 0),
+            "ready": bool(local_screenshot_count > 0 and local_screenshot_count == image_host_count and image_host_count > 0 and description_count > 0 and missing_count == 0),
             "local_screenshot_count": local_screenshot_count,
             "image_host_count": image_host_count,
             "description_image_count": description_count,
@@ -1945,17 +1948,27 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
         ),
     ]
     content = description_summary.get("content") if isinstance(description_summary.get("content"), dict) else {}
+    materials = materials if isinstance(materials, dict) else {}
+    assets = materials.get("assets") if isinstance(materials.get("assets"), dict) else {}
+    screenshots = assets.get("screenshots") if isinstance(assets.get("screenshots"), dict) else {}
+    image_hosts = assets.get("image_hosts") if isinstance(assets.get("image_hosts"), dict) else {}
+    local_screenshot_count = int(screenshots.get("count", 0) or 0)
+    image_host_count = int(image_hosts.get("count", 0) or 0)
     expected_image_urls = _mteam_expected_image_urls(materials)
     description_image_urls = _mteam_description_image_urls_from_content(content)
     missing_image_urls = [url for url in expected_image_urls if url not in description_image_urls]
+    screenshot_coverage_ready = _mteam_screenshot_coverage_ready(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls)
     screenshot_coverage_check = _payload_field_check(
         "materials.description.screenshot_coverage",
-        not missing_image_urls,
+        screenshot_coverage_ready,
         "MTEAM description references every image-host screenshot URL.",
-        "MTEAM description is missing one or more image-host screenshot URLs.",
+        _mteam_screenshot_coverage_missing_message(local_screenshot_count, image_host_count, description_image_urls, missing_image_urls),
     )
     screenshot_coverage_check.update(
         {
+            "local_screenshot_count": local_screenshot_count,
+            "image_host_count": image_host_count,
+            "description_image_count": len(description_image_urls),
             "expected_urls": expected_image_urls,
             "description_urls": description_image_urls,
             "missing_urls": missing_image_urls,
@@ -2008,7 +2021,6 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
             screenshot_coverage_check,
         ]
     )
-    materials = materials if isinstance(materials, dict) else {}
     checks = materials.get("checks") if isinstance(materials.get("checks"), dict) else {}
     for scope in ("metadata", "assets"):
         for check in checks.get(scope, []) if isinstance(checks.get(scope), list) else []:
@@ -2023,6 +2035,26 @@ def _mteam_upload_material_checks(description_summary: dict[str, Any], expected_
                     )
                 )
     return material_checks
+
+
+def _mteam_screenshot_coverage_ready(local_screenshot_count: int, image_host_count: int, description_image_urls: list[str], missing_image_urls: list[str]) -> bool:
+    if image_host_count <= 0:
+        return True
+    if missing_image_urls:
+        return False
+    if local_screenshot_count != image_host_count:
+        return False
+    return not (image_host_count > 0 and len(description_image_urls) <= 0)
+
+
+def _mteam_screenshot_coverage_missing_message(local_screenshot_count: int, image_host_count: int, description_image_urls: list[str], missing_image_urls: list[str]) -> str:
+    if local_screenshot_count != image_host_count:
+        return f"MTEAM description has {image_host_count} hosted screenshot URL(s) for {local_screenshot_count} local screenshot file(s)."
+    if image_host_count > 0 and len(description_image_urls) <= 0:
+        return "MTEAM description is missing screenshot BBCode from image-host uploads."
+    if missing_image_urls:
+        return "MTEAM description is missing one or more image-host screenshot URLs."
+    return "MTEAM screenshot coverage is incomplete."
 
 
 def _mteam_upload_recovery_missing(checks: list[dict[str, Any]]) -> list[str]:

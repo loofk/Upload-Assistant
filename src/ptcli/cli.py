@@ -9448,8 +9448,22 @@ def _target_payload_review_description_recovery_missing(payload_review: Any) -> 
     description = payload_review.get("description") if isinstance(payload_review.get("description"), dict) else {}
     completeness = description.get("completeness") if isinstance(description.get("completeness"), dict) else {}
     missing = _string_list(completeness.get("recovery_missing"))
-    _extend_unique_string(missing, _description_evidence_recovery_missing(description.get("evidence")))
+    evidence = description.get("evidence")
+    missing = _filter_redundant_screenshot_coverage_recovery(missing, evidence)
+    _extend_unique_string(missing, _description_evidence_recovery_missing(evidence))
     return missing
+
+
+def _filter_redundant_screenshot_coverage_recovery(missing: list[str], evidence: Any) -> list[str]:
+    if "description.screenshot_coverage" not in missing or not isinstance(evidence, dict):
+        return missing
+    screenshot_chain = evidence.get("screenshot_chain") if isinstance(evidence.get("screenshot_chain"), dict) else {}
+    screenshot_coverage = evidence.get("screenshot_coverage") if isinstance(evidence.get("screenshot_coverage"), dict) else {}
+    image_host_count = int(screenshot_chain.get("image_host_count", 0) or 0)
+    missing_urls = [*_string_list(screenshot_chain.get("missing_urls")), *_string_list(screenshot_coverage.get("missing_urls"))]
+    if image_host_count > 0 or missing_urls:
+        return missing
+    return [item for item in missing if item != "description.screenshot_coverage"]
 
 
 def _description_evidence_recovery_missing(evidence: Any) -> list[str]:
@@ -9497,17 +9511,22 @@ def _description_evidence_recovery_missing(evidence: Any) -> list[str]:
     if screenshots.get("ready") is False:
         _append_unique_string(missing, "description.screenshot_bbcode")
     screenshot_coverage = evidence.get("screenshot_coverage") if isinstance(evidence.get("screenshot_coverage"), dict) else {}
-    if screenshot_coverage.get("ready") is False:
+    if screenshot_coverage.get("ready") is False and (
+        _string_list(screenshot_coverage.get("missing_urls")) or int(screenshot_coverage.get("missing_count", 0) or 0) > 0
+    ):
         _append_unique_string(missing, "description.screenshot_coverage")
     screenshot_chain = evidence.get("screenshot_chain") if isinstance(evidence.get("screenshot_chain"), dict) else {}
     if screenshot_chain.get("ready") is False:
-        if int(screenshot_chain.get("local_screenshot_count", 0) or 0) <= 0:
+        local_screenshot_count = int(screenshot_chain.get("local_screenshot_count", 0) or 0)
+        image_host_count = int(screenshot_chain.get("image_host_count", 0) or 0)
+        description_image_count = int(screenshot_chain.get("description_image_count", 0) or 0)
+        if local_screenshot_count <= 0:
             _append_unique_string(missing, "assets.screenshots")
-        if int(screenshot_chain.get("image_host_count", 0) or 0) <= 0:
+        if image_host_count <= 0 or (local_screenshot_count > 0 and image_host_count != local_screenshot_count):
             _append_unique_string(missing, "assets.image_host_uploads")
-        if int(screenshot_chain.get("description_image_count", 0) or 0) <= 0:
+        if description_image_count <= 0:
             _append_unique_string(missing, "description.screenshot_bbcode")
-        if _string_list(screenshot_chain.get("missing_urls")):
+        if _string_list(screenshot_chain.get("missing_urls")) or (local_screenshot_count > 0 and image_host_count > 0 and image_host_count != local_screenshot_count):
             _append_unique_string(missing, "description.screenshot_coverage")
     return missing
 

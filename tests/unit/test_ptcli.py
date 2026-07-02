@@ -21157,6 +21157,79 @@ def test_mteam_upload_preflight_execute_blocks_missing_image_host_urls_in_descri
     assert audit["description"]["evidence"]["screenshot_coverage"]["missing_count"] == 1
 
 
+def test_mteam_upload_preflight_blocks_partial_image_host_uploads(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshots = []
+    for index in (1, 2):
+        screenshot = tmp_path / f"screen-{index}.png"
+        screenshot.write_bytes(b"png")
+        screenshots.append(str(screenshot))
+    image_host_file = tmp_path / "image-host-uploads.json"
+    image_host_file.write_text(
+        json.dumps({"items": [{"raw_url": "https://img.example/raw-1.png", "img_url": "https://img.example/thumb-1.png", "web_url": "https://img.example/page-1"}]}),
+        encoding="utf-8",
+    )
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+    }
+    package = write_mteam_prepare_package(
+        source_info,
+        ["MTEAM"],
+        mteam_ready_stages(),
+        "/downloads/Example",
+        str(tmp_path),
+        accept_rules=True,
+        material_files={"mediainfo_file": str(mediainfo), "screenshot_files": screenshots, "image_host_file": str(image_host_file)},
+    )
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert preflight["status"] == "blocked"
+    coverage_check = next(check for check in preflight["upload_payload"]["material_checks"] if check["name"] == "materials.description.screenshot_coverage")
+    assert coverage_check["ok"] is False
+    assert coverage_check["message"] == "MTEAM description has 1 hosted screenshot URL(s) for 2 local screenshot file(s)."
+    assert coverage_check["local_screenshot_count"] == 2
+    assert coverage_check["image_host_count"] == 1
+    assert coverage_check["description_image_count"] == 1
+    assert coverage_check["expected_urls"] == ["https://img.example/thumb-1.png"]
+    assert coverage_check["description_urls"] == ["https://img.example/thumb-1.png"]
+    assert coverage_check["missing_urls"] == []
+    review = preflight["upload_payload"]["review"]
+    assert review["description"]["screenshot_coverage"] == {
+        "ready": False,
+        "expected_urls": ["https://img.example/thumb-1.png"],
+        "description_urls": ["https://img.example/thumb-1.png"],
+        "missing_urls": [],
+    }
+    assert review["description"]["evidence"]["screenshot_chain"] == {
+        "ready": False,
+        "local_screenshot_count": 2,
+        "image_host_count": 1,
+        "description_image_count": 1,
+        "image_host_urls": ["https://img.example/thumb-1.png"],
+        "description_urls": ["https://img.example/thumb-1.png"],
+        "missing_urls": [],
+    }
+    assert ptcli_cli._description_chain_recovery_missing("screenshot_chain", review["description"]["evidence"]["screenshot_chain"]) == [
+        "assets.image_host_uploads",
+        "description.screenshot_coverage",
+    ]
+    audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
+    assert audit["description_ready"] is False
+    assert "materials.description.screenshot_coverage" in audit["description"]["missing"]
+
+
 def test_mteam_upload_preflight_execute_blocks_stale_description_materials(tmp_path) -> None:
     mediainfo = tmp_path / "MI_FULL_00.txt"
     mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
