@@ -5809,6 +5809,9 @@ def test_summary_material_diagnostics_exposes_material_file_evidence(tmp_path) -
     image_host_evidence = diagnostics["sections"]["image_host"]["image_host_file_evidence"]
     assert image_host_evidence["exists"] is True
     assert len(image_host_evidence["sha1"]) == 40
+    assert diagnostics["sections"]["image_host"]["items"] == [{"img_url": "https://img.example/1.png"}]
+    assert diagnostics["image_host_urls"]["img_urls"] == ["https://img.example/1.png"]
+    assert diagnostics["image_host_urls"]["valid_count"] == 1
 
     shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
     assert shell_fields["PTCLI_MATERIAL_MEDIAINFO_FILE"] == str(mediainfo)
@@ -5819,6 +5822,9 @@ def test_summary_material_diagnostics_exposes_material_file_evidence(tmp_path) -
     assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_FILE"] == str(image_host)
     assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_FILE_EXISTS"] == "1"
     assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_FILE_SHA1"] == image_host_evidence["sha1"]
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_ITEM_COUNT"] == 1
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_VALID_COUNT"] == 1
+    assert shell_fields["PTCLI_MATERIAL_IMAGE_HOST_IMG_URLS"] == "https://img.example/1.png"
 
 
 def test_summary_material_shell_fields_expose_image_host_upload_failure() -> None:
@@ -19336,6 +19342,7 @@ def test_material_generation_artifacts_include_file_evidence(tmp_path) -> None:
     assert image_host_evidence["path"] == str(image_host)
     assert image_host_evidence["exists"] is True
     assert len(image_host_evidence["sha1"]) == 40
+    assert artifacts["image_host"]["items"] == [{"img_url": "https://img.example/1.png"}]
 
 
 def test_pipeline_stage_blocker_next_action_explains_bdmv_bdinfo_requirement() -> None:

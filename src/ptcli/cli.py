@@ -2141,18 +2141,23 @@ def _material_option_value_covers_recovery_key(option: str, value: str, recovery
 
 
 def _image_host_file_has_usable_urls(path_value: str) -> bool:
+    items = _image_host_file_items(path_value)
+    return bool(items) and all(isinstance(item, dict) and _image_host_recovery_item_has_url(item) for item in items)
+
+
+def _image_host_file_items(path_value: Any) -> list[Any]:
+    if not isinstance(path_value, (str, Path)) or not str(path_value):
+        return []
     try:
         payload = json.loads(Path(path_value).expanduser().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return False
+        return []
     if isinstance(payload, list):
-        items = payload
-    elif isinstance(payload, dict):
+        return payload
+    if isinstance(payload, dict):
         raw_items = payload.get("items") or payload.get("images") or payload.get("uploaded_images")
-        items = raw_items if isinstance(raw_items, list) else []
-    else:
-        items = []
-    return bool(items) and all(isinstance(item, dict) and _image_host_recovery_item_has_url(item) for item in items)
+        return raw_items if isinstance(raw_items, list) else []
+    return []
 
 
 def _mediainfo_file_looks_valid(path_value: str) -> bool:
@@ -4317,6 +4322,10 @@ def _summary_material_section(section: Any) -> dict[str, Any]:
     ):
         if key in section:
             payload[key] = section.get(key)
+    if "image_host_file" in payload and "items" not in payload:
+        parsed_items = _image_host_file_items(payload.get("image_host_file"))
+        if parsed_items:
+            payload["items"] = parsed_items
     if isinstance(payload.get("items"), list):
         payload["urls"] = _image_host_url_summary(payload["items"])
     return payload
@@ -8507,6 +8516,10 @@ def _append_material_file_stage_artifact(artifacts: dict[str, Any], stages: list
             evidence = _material_file_evidence(value)
             if evidence:
                 payload[f"{file_key}_evidence"] = evidence
+            if key == "image_host" and file_key == "image_host_file" and "items" not in result:
+                parsed_items = _image_host_file_items(value)
+                if parsed_items:
+                    payload["items"] = parsed_items
     if "media_file" in result:
         payload["media_file"] = result.get("media_file")
     if "count" in result:
