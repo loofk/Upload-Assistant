@@ -15402,6 +15402,104 @@ async def test_pipeline_upload_screenshots_before_prepare_target(monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_pipeline_partial_image_host_upload_records_returned_screenshot_evidence(monkeypatch, tmp_path) -> None:
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg", "ptpimg_api": "ptpimg-key"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Name.mkv\n", encoding="utf-8")
+    screenshots = []
+    for index in (1, 2):
+        screenshot = tmp_path / f"screen-{index}.png"
+        screenshot.write_bytes(f"png-{index}".encode())
+        screenshots.append(screenshot)
+    monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
+
+    async def fake_fetch_source_info(_config, tracker, source_id, base_dir=None):
+        _ = base_dir
+        return source_info_from_tuple(
+            tracker,
+            source_id,
+            (1234567, 999, "Name.2024.1080p.WEB-DL-GROUP", "a" * 40, "desc"),
+            {
+                "douban_id": "1291546",
+                "douban_url": "https://movie.douban.com/subject/1291546/",
+                "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+            },
+        )
+
+    async def fake_match_with_config(_config, _client_name, content_path):
+        return {"client": "qbittorrent", "path": content_path, "count": 1, "matches": [{"content_path": content_path, "hash": "a" * 40}]}
+
+    async def fake_upload_screenshot_image_hosts(_config, screenshot_files, output_dir, image_host=None):
+        assert screenshot_files == [str(path) for path in screenshots]
+        output_path = Path(output_dir) / "image-host-uploads.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "status": "uploaded",
+            "host": image_host,
+            "count": 1,
+            "items": [{"raw_url": "https://img.example/raw-1.png", "img_url": "https://img.example/thumb-1.png", "web_url": "https://img.example/page-1"}],
+            "blockers": [],
+        }
+        output_path.write_text(json.dumps(payload), encoding="utf-8")
+        return {**payload, "image_host_file": str(output_path)}
+
+    monkeypatch.setattr(ptcli_cli, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_cli, "_match_with_config", fake_match_with_config)
+    monkeypatch.setattr(ptcli_cli, "upload_screenshot_image_hosts", fake_upload_screenshot_image_hosts)
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "pipeline",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--path",
+            "/downloads/Name",
+            "--prepare-target",
+            "--target-output-dir",
+            str(tmp_path / "target"),
+            "--mediainfo-file",
+            str(mediainfo),
+            "--screenshot-file",
+            str(screenshots[0]),
+            "--screenshot-file",
+            str(screenshots[1]),
+            "--upload-screenshots",
+            "--image-host",
+            "ptpimg",
+            "--accept-rules",
+            "--json",
+        ]
+    )
+
+    payload = await ptcli_cli.pipeline_payload(args)
+
+    image_host_stage = next(stage for stage in payload["stages"] if stage["stage"] == "materials-image-host")
+    target_stage = next(stage for stage in payload["stages"] if stage["stage"] == "target-prepare")
+    enriched_item = image_host_stage["result"]["items"][0]
+    assert image_host_stage["ok"] is True
+    assert enriched_item["local_file"] == str(screenshots[0])
+    assert enriched_item["local_sha1"] == hashlib.sha1(screenshots[0].read_bytes()).hexdigest()
+    assert target_stage["ok"] is False
+    linkage = target_stage["result"]["materials"]["assets"]["image_hosts"]["screenshot_linkage"]
+    assert linkage["ready"] is False
+    assert linkage["local_screenshot_count"] == 2
+    assert linkage["image_host_count"] == 1
+    assert linkage["matched_count"] == 1
+    assert linkage["unverified_item_indexes"] == []
+    assert linkage["unmatched_item_indexes"] == []
+    assert linkage["missing_local_files"] == [str(screenshots[1])]
+    assert "assets.image_host_uploads" in target_stage["result"]["materials"]["missing"]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_material_prerequisite_check_blocks_missing_image_host(monkeypatch, tmp_path) -> None:
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},

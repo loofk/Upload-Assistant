@@ -7580,8 +7580,6 @@ def _enrich_image_host_file_local_evidence(image_host_file: Any, screenshot_file
         container = payload
     else:
         return None
-    if len(items) != len(screenshot_files):
-        return payload
     changed = False
     for item, screenshot in zip(items, screenshot_files):
         if not isinstance(item, dict):
