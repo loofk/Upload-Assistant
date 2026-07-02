@@ -5161,6 +5161,27 @@ def test_run_summary_resume_commands_prefer_artifact_save_paths() -> None:
     assert "--uploaded-save-path /verified/uploaded" in commands["resume-uploaded-torrent"]
 
 
+def test_run_summary_resume_commands_infer_source_save_path_from_content_parent() -> None:
+    payload = {
+        "source_tracker": "U2",
+        "source_torrent_id": "60635",
+        "target_trackers": ["MTEAM"],
+        "path": "/downloads/Example.Movie.2024",
+        "client": "default",
+        "effective_actions": {"live_target_upload": True, "inject_source": True, "wait_complete": True},
+    }
+    artifacts = {"source_torrent_file": "/tmp/U2-60635.torrent"}
+
+    commands = {command["stage"]: command for command in ptcli_cli._run_summary_resume_commands(payload, artifacts)}
+
+    command = commands["resume-source-torrent"]["command"]
+    argv = commands["resume-source-torrent"]["argv"]
+    assert "--path /downloads/Example.Movie.2024" in command
+    assert "--save-path /downloads" in command
+    assert argv[argv.index("--save-path") + 1] == "/downloads"
+    assert "/downloads/Example.Movie.2024" in argv
+
+
 def test_run_summary_resume_commands_use_source_qbit_wait_retry_hint() -> None:
     payload = {
         "source_tracker": "U2",

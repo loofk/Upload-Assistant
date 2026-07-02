@@ -8617,7 +8617,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     uploaded_retry_hint = qbit_retry_hints.get("uploaded") if isinstance(qbit_retry_hints.get("uploaded"), dict) and qbit_retry_hints.get("uploaded", {}).get("retry_recommended") is True else {}
     content_path = _source_qbit_wait_retry_content_path(source_retry_hint) or payload.get("path")
     path_args = ["--path", str(content_path)] if content_path else []
-    source_save_path = artifacts.get("source_save_path") or payload.get("source_save_path") or content_path or "/downloads"
+    source_save_path = artifacts.get("source_save_path") or payload.get("source_save_path") or _source_save_path_from_content_path(content_path) or "/downloads"
     source_save_path = _source_qbit_wait_retry_save_path(source_retry_hint) or source_save_path
     uploaded_save_path = artifacts.get("uploaded_save_path") or content_path
     uploaded_save_path = _uploaded_wait_retry_save_path(uploaded_retry_hint) or uploaded_save_path
@@ -8901,6 +8901,18 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
             )
         )
     return commands
+
+
+def _source_save_path_from_content_path(content_path: Any) -> str | None:
+    if not content_path:
+        return None
+    path_text = str(content_path).strip()
+    if not path_text:
+        return None
+    parent = Path(path_text).parent
+    if str(parent) in {"", ".", "/"}:
+        return None
+    return str(parent)
 
 
 def _run_summary_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], resume_commands: list[dict[str, Any]]) -> dict[str, Any]:
