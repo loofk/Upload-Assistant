@@ -812,6 +812,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
     metadata_sources = metadata_enrichment.get("sources") if isinstance(metadata_enrichment.get("sources"), list) else []
     if not metadata_sources:
         metadata_sources = _mteam_material_metadata_sources(metadata_field_evidence)
+    ptgen_evidence = metadata_enrichment.get("ptgen_evidence") if isinstance(metadata_enrichment.get("ptgen_evidence"), dict) else {}
     metadata_checks = [
         _material_check("imdb", bool(meta_draft.get("imdb") or meta_draft.get("imdb_id")), "IMDb id is present.", "IMDb id is missing; fetch or supply IMDb metadata before live upload."),
         _material_check("tmdb", bool(meta_draft.get("tmdb_id")), "TMDb id is present.", "TMDb id is missing; fetch or supply TMDb metadata before live upload."),
@@ -853,6 +854,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "applied": metadata_enrichment.get("applied") if isinstance(metadata_enrichment.get("applied"), dict) else {},
             "readiness": metadata_readiness,
             "field_evidence": metadata_field_evidence,
+            "ptgen_evidence": ptgen_evidence,
             "missing": metadata_enrichment.get("missing") if isinstance(metadata_enrichment.get("missing"), list) else [],
             "blockers": metadata_enrichment.get("blockers") if isinstance(metadata_enrichment.get("blockers"), list) else [],
             "readiness_blockers": metadata_enrichment.get("readiness_blockers") if isinstance(metadata_enrichment.get("readiness_blockers"), list) else [],

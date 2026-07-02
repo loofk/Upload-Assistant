@@ -5806,6 +5806,13 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
         "douban_url": {"ready": True, "required": True, "source": "ptgen", "value": "https://movie.douban.com/subject/1291546/"},
         "ptgen_description": {"ready": True, "required": True, "source": "ptgen", "length": 42},
     }
+    ptgen_evidence = {
+        "description_length": 42,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "douban_source": "description",
+        "payload_keys": [],
+    }
     diagnostics = ptcli_cli._summary_material_diagnostics(
         {
             "artifacts": {
@@ -5824,6 +5831,7 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
                         "applied": {"douban_url": "https://movie.douban.com/subject/1291546/"},
                         "readiness": readiness,
                         "field_evidence": field_evidence,
+                        "ptgen_evidence": ptgen_evidence,
                         "missing": ["tmdb_id"],
                         "blockers": ["TMDb enrichment returned no TMDb id."],
                         "readiness_blockers": ["Missing metadata after enrichment: tmdb_id"],
@@ -5842,6 +5850,7 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
     assert metadata["applied"] == {"douban_url": "https://movie.douban.com/subject/1291546/"}
     assert metadata["readiness"] == readiness
     assert metadata["field_evidence"] == field_evidence
+    assert metadata["ptgen_evidence"] == ptgen_evidence
     assert metadata["missing"] == ["tmdb_id"]
     assert metadata["readiness_blockers"] == ["Missing metadata after enrichment: tmdb_id"]
     assert diagnostics["metadata_fields"] == {
@@ -5856,6 +5865,7 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
     shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
     assert json.loads(shell_fields["PTCLI_MATERIAL_METADATA_READINESS"]) == readiness
     assert json.loads(shell_fields["PTCLI_MATERIAL_METADATA_FIELD_EVIDENCE"]) == field_evidence
+    assert json.loads(shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_EVIDENCE"]) == ptgen_evidence
     assert shell_fields["PTCLI_MATERIAL_METADATA_SOURCES"] == "source,ptgen"
     assert shell_fields["PTCLI_MATERIAL_METADATA_APPLIED_KEYS"] == "douban_url"
     assert shell_fields["PTCLI_MATERIAL_METADATA_READINESS_BLOCKERS"] == "Missing metadata after enrichment: tmdb_id"
@@ -5867,6 +5877,7 @@ def test_summary_material_diagnostics_recovers_metadata_readiness_from_target_pa
     assert shell_fields["PTCLI_MATERIAL_METADATA_DOUBAN_ID_SOURCE"] == "ptgen"
     assert shell_fields["PTCLI_MATERIAL_METADATA_DOUBAN_URL_READY"] == "1"
     assert shell_fields["PTCLI_MATERIAL_METADATA_DOUBAN_URL_SOURCE"] == "ptgen"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_DOUBAN_SOURCE"] == "description"
     assert shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_READY"] == "1"
     assert shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_REQUIRED"] == "1"
     assert shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_SOURCE"] == "ptgen"
@@ -18516,6 +18527,13 @@ def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
                 "douban_url": {"ready": True, "required": True, "source": "overrides"},
                 "ptgen_description": {"ready": False, "required": True, "source": None},
             },
+            "ptgen_evidence": {
+                "description_length": 0,
+                "douban_id": "1291546",
+                "douban_url": "https://movie.douban.com/subject/1291546/",
+                "douban_source": "source",
+                "payload_keys": [],
+            },
             "blockers": [],
             "readiness_blockers": ["PTGen/Douban description is missing after enrichment."],
         },
@@ -18540,6 +18558,13 @@ def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
     assert materials["metadata"]["sources"] == ["source", "overrides"]
     assert materials["metadata"]["applied"] == {"douban_url": "https://movie.douban.com/subject/1291546/"}
     assert materials["metadata"]["readiness"]["ptgen_description"] == {"ready": False, "required": True, "source": None}
+    assert materials["metadata"]["ptgen_evidence"] == {
+        "description_length": 0,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "douban_source": "source",
+        "payload_keys": [],
+    }
     assert materials["metadata"]["readiness_blockers"] == ["PTGen/Douban description is missing after enrichment."]
     assert materials["description"]["ready"] is False
     assert materials["description"]["inputs"]["metadata"]["tmdb"] is True
@@ -19194,6 +19219,53 @@ async def test_enrich_source_metadata_uses_source_ptgen_description_when_require
 
 
 @pytest.mark.asyncio
+async def test_enrich_source_metadata_backfills_douban_from_ptgen_description(monkeypatch, tmp_path) -> None:
+    ptgen_description = "\n".join(
+        [
+            "Douban: https://movie.douban.com/subject/1291546/",
+            "◎译　　名　PTGen 示例",
+            "◎简　　介　PTGen 已经解析到豆瓣链接。",
+        ]
+    )
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "name": "Name",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "douban_id": None,
+        "douban_url": None,
+    }
+
+    async def fake_ptgen(_self, _meta, _ptgen_site="", _ptgen_retry=3):
+        return ptgen_description
+
+    monkeypatch.setattr("src.trackers.COMMON.COMMON.ptgen", fake_ptgen)
+
+    result = await enrich_source_metadata({"TRACKERS": {"MTEAM": {}}}, source_info, fetch_ptgen=True, base_dir=str(tmp_path))
+
+    assert result["ready"] is True
+    assert result["source_info"]["douban_id"] == "1291546"
+    assert result["source_info"]["douban_url"] == "https://movie.douban.com/subject/1291546/"
+    assert result["source_info"]["ptgen_description"] == ptgen_description
+    assert result["applied"]["douban_id"] == "1291546"
+    assert result["applied"]["douban_url"] == "https://movie.douban.com/subject/1291546/"
+    assert result["sources"] == ["ptgen"]
+    assert result["readiness"]["douban_id"] == {"ready": True, "required": True, "source": "ptgen"}
+    assert result["readiness"]["douban_url"] == {"ready": True, "required": True, "source": "ptgen"}
+    assert result["field_evidence"]["douban_id"] == {"ready": True, "required": True, "source": "ptgen", "value": "1291546"}
+    assert result["ptgen_evidence"] == {
+        "description_length": len(ptgen_description),
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "douban_source": "description",
+        "payload_keys": [],
+    }
+
+
+@pytest.mark.asyncio
 async def test_enrich_source_metadata_derives_douban_id_from_existing_url() -> None:
     source_info = {
         "tracker": "U2",
@@ -19415,6 +19487,68 @@ async def test_pipeline_metadata_enrichment_stage_blocks_missing_ready_metadata(
     assert "Missing metadata after enrichment" in enrichment["readiness_blockers"][0]
     assert "PTGen/Douban description is missing" in enrichment["readiness_blockers"][1]
     assert "tmdb_id" in enrichment["missing"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_metadata_enrichment_stage_exposes_ptgen_evidence(monkeypatch) -> None:
+    args = argparse.Namespace(
+        metadata_file=None,
+        imdb_id=None,
+        tmdb_id=None,
+        douban_id=None,
+        douban_url=None,
+        fetch_ptgen=True,
+        base_dir=None,
+    )
+    source_stage = {
+        "stage": "source-info",
+        "ok": True,
+        "result": {
+            "tracker": "U2",
+            "torrent_id": "60635",
+            "imdb_id": 1234567,
+            "tmdb_id": 999,
+            "douban_id": None,
+            "douban_url": None,
+            "name": "Name",
+            "torrenthash": "a" * 40,
+        },
+    }
+    ptgen_evidence = {
+        "description_length": 42,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "douban_source": "description",
+        "payload_keys": [],
+    }
+
+    async def fake_enrich_source_metadata(_config, source_info, *, overrides=None, fetch_ptgen=False, base_dir=None):
+        _ = (overrides, fetch_ptgen, base_dir)
+        enriched = {
+            **source_info,
+            "douban_id": "1291546",
+            "douban_url": "https://movie.douban.com/subject/1291546/",
+            "ptgen_description": "◎译　　名　示例电影",
+        }
+        return {
+            "status": "enriched",
+            "ready": True,
+            "source_info": enriched,
+            "applied": {"douban_id": "1291546", "ptgen_description": {"length": 42}},
+            "missing": [],
+            "readiness": {"douban_id": {"ready": True, "required": True, "source": "ptgen"}},
+            "field_evidence": {"douban_id": {"ready": True, "required": True, "source": "ptgen", "value": "1291546"}},
+            "sources": ["ptgen"],
+            "ptgen_evidence": ptgen_evidence,
+            "blockers": [],
+        }
+
+    monkeypatch.setattr(ptcli_cli, "enrich_source_metadata", fake_enrich_source_metadata)
+
+    stage = await ptcli_cli._pipeline_metadata_enrichment_stage({}, args, source_stage)
+
+    assert stage["ok"] is True
+    assert stage["result"]["metadata_enrichment"]["ptgen_evidence"] == ptgen_evidence
 
 
 def test_pipeline_stage_blockers_include_metadata_enrichment_readiness() -> None:

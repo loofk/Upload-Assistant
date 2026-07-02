@@ -27,6 +27,7 @@ async def enrich_source_metadata(
     applied: dict[str, Any] = {}
     blockers: list[str] = []
     sources: list[str] = []
+    ptgen_evidence: dict[str, Any] = {}
     field_sources = _initial_metadata_field_sources(base)
     override_values = normalize_metadata_overrides(overrides or {})
     for key, value in override_values.items():
@@ -75,6 +76,8 @@ async def enrich_source_metadata(
             applied["ptgen_description"] = {"length": len(str(ptgen_result["description"]))}
             field_sources["ptgen_description"] = "ptgen"
             sources.append("ptgen")
+        if isinstance(ptgen_result.get("evidence"), dict):
+            ptgen_evidence = ptgen_result["evidence"]
         if ptgen_result.get("ptgen"):
             base["ptgen"] = ptgen_result["ptgen"]
         if ptgen_result.get("douban_id") and not base.get("douban_id"):
@@ -98,6 +101,7 @@ async def enrich_source_metadata(
         "readiness": _metadata_readiness(base, field_sources, fetch_ptgen=fetch_ptgen),
         "field_evidence": _metadata_field_evidence(base, field_sources, fetch_ptgen=fetch_ptgen),
         "sources": sources,
+        "ptgen_evidence": ptgen_evidence,
         "blockers": blockers,
     }
 
@@ -329,13 +333,64 @@ async def _ptgen_from_metadata(config: dict[str, Any], source_info: dict[str, An
     if not description.strip():
         return {"blocker": "PTGen enrichment returned no description text."}
 
-    douban_id = _normalize_douban_id(meta.get("douban_id") or meta.get("douban") or douban_url)
+    description_text = str(description).strip()
+    douban_id, douban_source = _douban_id_from_ptgen_result(meta, description_text, douban_url)
+    douban_url_value = _normalize_douban_url(meta.get("douban_url")) or _normalize_douban_url(douban_id)
+    ptgen_payload = meta.get("ptgen") if isinstance(meta.get("ptgen"), dict) else None
     return {
         "description": description,
-        "ptgen": meta.get("ptgen") if isinstance(meta.get("ptgen"), dict) else None,
+        "ptgen": ptgen_payload,
         "douban_id": douban_id,
-        "douban_url": _normalize_douban_url(meta.get("douban_url") or douban_id),
+        "douban_url": douban_url_value,
+        "evidence": {
+            "description_length": len(description_text),
+            "douban_id": douban_id,
+            "douban_url": douban_url_value,
+            "douban_source": douban_source,
+            "payload_keys": sorted(ptgen_payload.keys()) if isinstance(ptgen_payload, dict) else [],
+        },
     }
+
+
+def _douban_id_from_ptgen_result(meta: dict[str, Any], description: str, fallback_url: str | None) -> tuple[str | None, str | None]:
+    for key in ("douban_id", "douban", "douban_url"):
+        douban_id = _normalize_douban_id(meta.get(key))
+        if douban_id:
+            return douban_id, f"meta.{key}"
+    fallback_id = _normalize_douban_id(fallback_url)
+    if fallback_id:
+        return fallback_id, "input.douban_url"
+    payload_id = _extract_douban_id_from_value(meta.get("ptgen"))
+    if payload_id:
+        return payload_id, "ptgen_payload"
+    description_id = _extract_douban_id_from_text(description)
+    if description_id:
+        return description_id, "description"
+    return None, None
+
+
+def _extract_douban_id_from_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        priority_keys = ("douban_id", "douban", "douban_url", "link", "url", "format", "data")
+        for key in priority_keys:
+            if key in value:
+                douban_id = _extract_douban_id_from_value(value[key])
+                if douban_id:
+                    return douban_id
+        for item in value.values():
+            douban_id = _extract_douban_id_from_value(item)
+            if douban_id:
+                return douban_id
+        return None
+    if isinstance(value, list):
+        for item in value:
+            douban_id = _extract_douban_id_from_value(item)
+            if douban_id:
+                return douban_id
+        return None
+    return _extract_douban_id_from_text(str(value))
 
 
 def _ptgen_meta(source_info: dict[str, Any], work_root: Path, uuid: str, imdb_id: int | None, douban_url: str | None) -> dict[str, Any]:

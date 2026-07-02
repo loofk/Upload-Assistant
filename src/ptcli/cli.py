@@ -4196,6 +4196,7 @@ def _summary_target_material_metadata_section(target_materials: dict[str, Any]) 
         "applied": metadata.get("applied") if isinstance(metadata.get("applied"), dict) else {},
         "readiness": metadata.get("readiness") if isinstance(metadata.get("readiness"), dict) else {},
         "field_evidence": metadata.get("field_evidence") if isinstance(metadata.get("field_evidence"), dict) else {},
+        "ptgen_evidence": metadata.get("ptgen_evidence") if isinstance(metadata.get("ptgen_evidence"), dict) else {},
         "missing": _string_list(metadata.get("missing")),
         "blockers": _string_list(metadata.get("blockers")),
         "readiness_blockers": _string_list(metadata.get("readiness_blockers")),
@@ -7295,7 +7296,7 @@ async def _pipeline_metadata_enrichment_stage(config: dict[str, Any], args: argp
     enriched_source = result.get("source_info") if isinstance(result.get("source_info"), dict) else source_info
     stage_result = {
         **enriched_source,
-        "metadata_enrichment": {key: result.get(key) for key in ("status", "ready", "applied", "missing", "readiness", "field_evidence", "sources", "blockers")},
+        "metadata_enrichment": {key: result.get(key) for key in ("status", "ready", "applied", "missing", "readiness", "field_evidence", "sources", "ptgen_evidence", "blockers")},
     }
     readiness_blockers = _metadata_enrichment_readiness_blockers(result, fetch_ptgen=bool(getattr(args, "fetch_ptgen", False)))
     stage_result["metadata_enrichment"]["readiness_blockers"] = readiness_blockers
@@ -12025,6 +12026,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
     metadata = sections.get("metadata") if isinstance(sections.get("metadata"), dict) else {}
     metadata_readiness = metadata.get("readiness") if isinstance(metadata.get("readiness"), dict) else {}
     metadata_field_evidence = metadata.get("field_evidence") if isinstance(metadata.get("field_evidence"), dict) else {}
+    metadata_ptgen_evidence = metadata.get("ptgen_evidence") if isinstance(metadata.get("ptgen_evidence"), dict) else {}
     metadata_fields = material_diagnostics.get("metadata_fields") if isinstance(material_diagnostics.get("metadata_fields"), dict) else {}
     imdb_field = metadata_fields.get("imdb_id") if isinstance(metadata_fields.get("imdb_id"), dict) else {}
     tmdb_field = metadata_fields.get("tmdb_id") if isinstance(metadata_fields.get("tmdb_id"), dict) else {}
@@ -12122,6 +12124,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_METADATA_MISSING": ",".join(_string_list(metadata.get("missing"))),
         "PTCLI_MATERIAL_METADATA_READINESS": json.dumps(metadata_readiness, ensure_ascii=False) if metadata_readiness else None,
         "PTCLI_MATERIAL_METADATA_FIELD_EVIDENCE": json.dumps(metadata_field_evidence, ensure_ascii=False) if metadata_field_evidence else None,
+        "PTCLI_MATERIAL_METADATA_PTGEN_EVIDENCE": json.dumps(metadata_ptgen_evidence, ensure_ascii=False) if metadata_ptgen_evidence else None,
         "PTCLI_MATERIAL_METADATA_SOURCES": ",".join(_string_list(metadata.get("sources"))),
         "PTCLI_MATERIAL_METADATA_APPLIED_KEYS": ",".join(sorted(str(key) for key in metadata.get("applied", {}) if isinstance(metadata.get("applied"), dict))),
         "PTCLI_MATERIAL_METADATA_BLOCKERS": "|".join(_string_list(metadata.get("blockers"))),
@@ -12133,6 +12136,7 @@ def _summary_check_material_shell_fields(material_diagnostics: dict[str, Any]) -
         "PTCLI_MATERIAL_METADATA_DOUBAN_ID": metadata.get("douban_id"),
         "PTCLI_MATERIAL_METADATA_DOUBAN_URL": metadata.get("douban_url"),
         "PTCLI_MATERIAL_PTGEN_DESCRIPTION_LENGTH": metadata.get("ptgen_description_length"),
+        "PTCLI_MATERIAL_METADATA_PTGEN_DOUBAN_SOURCE": metadata_ptgen_evidence.get("douban_source"),
         "PTCLI_MATERIAL_METADATA_IMDB_READY": _shell_bool(imdb_field.get("ready")) if imdb_field.get("ready") is not None else None,
         "PTCLI_MATERIAL_METADATA_IMDB_SOURCE": imdb_field.get("source"),
         "PTCLI_MATERIAL_METADATA_TMDB_READY": _shell_bool(tmdb_field.get("ready")) if tmdb_field.get("ready") is not None else None,
