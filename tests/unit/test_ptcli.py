@@ -2871,6 +2871,12 @@ def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> N
             "injection_verified": False,
             "uploaded_wait_evidence": False,
             "hash_consistent": True,
+            "hash_evidence": {
+                "upload_response": uploaded_hash,
+                "downloaded_torrent": uploaded_hash,
+                "uploaded_wait_query": uploaded_hash,
+            },
+            "hash_consistency_blockers": [],
             "duplicate_clean": True,
             "rule_obligations_ready": True,
             "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
@@ -2915,6 +2921,12 @@ def test_readiness_uploaded_followup_summary_exposes_target_seeding_state() -> N
     assert followup["injection_verified"] is False
     assert followup["uploaded_wait_evidence"] is False
     assert followup["hash_consistent"] is True
+    assert followup["hash_evidence"] == {
+        "upload_response": uploaded_hash,
+        "downloaded_torrent": uploaded_hash,
+        "uploaded_wait_query": uploaded_hash,
+    }
+    assert followup["hash_consistency_blockers"] == []
     assert followup["duplicate_clean"] is True
     assert followup["rule_obligations_ready"] is True
     assert followup["uploaded_torrent_file"] == "/tmp/MTEAM-999.torrent"
@@ -3031,6 +3043,12 @@ def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
                 "injection_verified": False,
                 "uploaded_wait_evidence": False,
                 "hash_consistent": True,
+                "hash_evidence": {
+                    "upload_response": uploaded_hash,
+                    "downloaded_torrent": uploaded_hash,
+                    "uploaded_wait_query": uploaded_hash,
+                },
+                "hash_consistency_blockers": [],
                 "duplicate_clean": True,
                 "rule_obligations_ready": True,
                 "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
@@ -3084,6 +3102,12 @@ def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTION_VERIFIED"] == "0"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_EVIDENCE"] == "0"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_HASH_CONSISTENT"] == "1"
+    assert json.loads(fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_HASH_EVIDENCE"]) == {
+        "upload_response": uploaded_hash,
+        "downloaded_torrent": uploaded_hash,
+        "uploaded_wait_query": uploaded_hash,
+    }
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_HASH_BLOCKERS"] == ""
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_DUPLICATE_CLEAN"] == "1"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_RULES_READY"] == "1"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_FILE"] == "/tmp/MTEAM-999.torrent"
@@ -21994,6 +22018,12 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert completion_review["uploaded_torrent_hash"] == uploaded_hash
     assert completion_review["uploaded_torrent_path"] == str(tmp_path / "MTEAM-999.torrent")
     assert completion_review["injected_torrent_hash"] == uploaded_hash
+    assert completion_review["hash_evidence"]["upload_response"] == uploaded_hash
+    assert completion_review["hash_evidence"]["downloaded_torrent"] == uploaded_hash
+    assert completion_review["hash_evidence"]["injected_torrent"] == uploaded_hash
+    assert completion_review["hash_evidence"]["uploaded_wait_query"] == uploaded_hash
+    assert completion_review["hash_evidence"]["uploaded_wait_match"] == uploaded_hash
+    assert completion_review["hash_consistency_blockers"] == []
     assert completion_review["uploaded_save_path"] == "/downloads/Example"
     assert completion_review["uploaded_wait_query"]["torrent_hash"] == uploaded_hash
     assert summary_payload["qbit_wait_mismatch"] is False
@@ -22002,6 +22032,12 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert summary_payload["qbit_wait_diagnostics"]["uploaded"]["requested_hash_matched"] is None
     assert summary_payload["summary"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
     assert summary_payload["summary"]["hash_consistent"] is True
+    assert summary_payload["summary"]["hash_evidence"]["upload_response"] == uploaded_hash
+    assert summary_payload["summary"]["hash_evidence"]["downloaded_torrent"] == uploaded_hash
+    assert summary_payload["summary"]["hash_evidence"]["injected_torrent"] == uploaded_hash
+    assert summary_payload["summary"]["hash_evidence"]["uploaded_wait_query"] == uploaded_hash
+    assert summary_payload["summary"]["hash_evidence"]["uploaded_wait_match"] == uploaded_hash
+    assert summary_payload["summary"]["hash_consistency_blockers"] == []
     assert summary_payload["summary"]["duplicate_clean"] is True
     assert summary_payload["summary"]["rule_obligations"]["ready"] is True
     assert summary_payload["artifacts"]["package_dir"]["is_dir"] is True
@@ -22021,6 +22057,12 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert summary_payload["artifacts"]["fresh_duplicate_check"] == {"searched": True, "query": {"imdb": "tt1234567"}, "count": 0, "dupes": []}
     assert summary_payload["artifacts"]["uploaded_wait_evidence"] is True
     assert summary_payload["artifacts"]["target_hash_consistent"] is True
+    assert summary_payload["artifacts"]["target_hash_evidence"]["upload_response"] == uploaded_hash
+    assert summary_payload["artifacts"]["target_hash_evidence"]["downloaded_torrent"] == uploaded_hash
+    assert summary_payload["artifacts"]["target_hash_evidence"]["injected_torrent"] == uploaded_hash
+    assert summary_payload["artifacts"]["target_hash_evidence"]["uploaded_wait_query"] == uploaded_hash
+    assert summary_payload["artifacts"]["target_hash_evidence"]["uploaded_wait_match"] == uploaded_hash
+    assert summary_payload["artifacts"]["target_hash_consistency_blockers"] == []
     assert summary_payload["artifacts"]["target_duplicate_clean"] is True
     assert summary_payload["artifacts"]["target_rule_obligations"]["ready"] is True
     assert summary_payload["resume_state"]["ready"] is True
@@ -22051,6 +22093,12 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert uploaded_followup["injection_visible_in_client"] is True
     assert uploaded_followup["injection_verified"] is True
     assert uploaded_followup["uploaded_wait_evidence"] is True
+    assert uploaded_followup["hash_evidence"]["upload_response"] == uploaded_hash
+    assert uploaded_followup["hash_evidence"]["downloaded_torrent"] == uploaded_hash
+    assert uploaded_followup["hash_evidence"]["injected_torrent"] == uploaded_hash
+    assert uploaded_followup["hash_evidence"]["uploaded_wait_query"] == uploaded_hash
+    assert uploaded_followup["hash_evidence"]["uploaded_wait_match"] == uploaded_hash
+    assert uploaded_followup["hash_consistency_blockers"] == []
     assert uploaded_followup["uploaded_torrent_hash"] == uploaded_hash
     assert uploaded_followup["injected_torrent_hash"] == uploaded_hash
     assert uploaded_followup["uploaded_torrent_file"] == str(tmp_path / "MTEAM-999.torrent")
@@ -22071,6 +22119,12 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert target_completion["uploaded_torrent_file_evidence"]["metadata_readable"] is True
     assert target_completion["uploaded_torrent_file_evidence"]["torrent_hash"] == uploaded_hash
     assert len(target_completion["uploaded_torrent_file_evidence"]["sha1"]) == 40
+    assert target_completion["hash_evidence"]["upload_response"] == uploaded_hash
+    assert target_completion["hash_evidence"]["downloaded_torrent"] == uploaded_hash
+    assert target_completion["hash_evidence"]["injected_torrent"] == uploaded_hash
+    assert target_completion["hash_evidence"]["uploaded_wait_query"] == uploaded_hash
+    assert target_completion["hash_evidence"]["uploaded_wait_match"] == uploaded_hash
+    assert target_completion["hash_consistency_blockers"] == []
     assert target_completion["qbit_wait_mismatch"] is False
     assert target_completion["qbit_wait_mismatches"] == []
     preflight_diagnostics = diagnostics["target_upload_diagnostics"]["preflight"]
@@ -22164,6 +22218,8 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert len(shell_fields["PTCLI_TARGET_UPLOAD_TORRENT_SHA1"]) == 40
     assert shell_fields["PTCLI_TARGET_UPLOAD_TORRENT_INFOHASH"] == uploaded_hash
     assert shell_fields["PTCLI_TARGET_UPLOAD_TORRENT_METADATA_READABLE"] == "1"
+    assert json.loads(shell_fields["PTCLI_TARGET_UPLOAD_HASH_EVIDENCE"])["uploaded_wait_match"] == uploaded_hash
+    assert shell_fields["PTCLI_TARGET_UPLOAD_HASH_BLOCKERS"] == ""
     assert shell_fields["PTCLI_TARGET_UPLOAD_WAIT_MISMATCH"] == "0"
     assert shell_fields["PTCLI_TARGET_UPLOAD_WAIT_MISMATCHES"] == ""
     assert shell_fields["PTCLI_TARGET_UPLOAD_PAYLOAD_REVIEW_PRESENT"] == "1"
@@ -22892,11 +22948,34 @@ def test_target_upload_summary_retries_when_uploaded_hash_is_inconsistent_after_
     summary_payload = json.loads(Path(summary_file).read_text(encoding="utf-8"))
     assert summary_payload["summary"]["ready"] is False
     assert summary_payload["summary"]["hash_consistent"] is False
+    assert summary_payload["summary"]["hash_evidence"]["upload_response"] == "b" * 40
+    assert summary_payload["summary"]["hash_evidence"]["downloaded_torrent"] == uploaded_hash
+    assert summary_payload["summary"]["hash_evidence"]["injected_torrent"] == uploaded_hash
+    assert summary_payload["summary"]["hash_evidence"]["uploaded_wait_query"] == uploaded_hash
+    assert summary_payload["summary"]["hash_evidence"]["uploaded_wait_match"] == uploaded_hash
+    assert len(summary_payload["summary"]["hash_consistency_blockers"]) == 1
+    assert f"upload_response={'b' * 40}" in summary_payload["summary"]["hash_consistency_blockers"][0]
+    assert f"downloaded_torrent={uploaded_hash}" in summary_payload["summary"]["hash_consistency_blockers"][0]
+    assert summary_payload["summary"]["completion_review"]["hash_evidence"] == summary_payload["summary"]["hash_evidence"]
+    assert summary_payload["summary"]["completion_review"]["hash_consistency_blockers"] == summary_payload["summary"]["hash_consistency_blockers"]
+    assert summary_payload["artifacts"]["target_hash_evidence"] == summary_payload["summary"]["hash_evidence"]
+    assert summary_payload["artifacts"]["target_hash_consistency_blockers"] == summary_payload["summary"]["hash_consistency_blockers"]
     assert summary_payload["resume_state"]["uploaded_followup"]["uploaded_wait_evidence"] is True
     assert summary_payload["resume_state"]["uploaded_followup"]["hash_consistent"] is False
+    assert summary_payload["resume_state"]["uploaded_followup"]["hash_evidence"] == summary_payload["summary"]["hash_evidence"]
+    assert summary_payload["resume_state"]["uploaded_followup"]["hash_consistency_blockers"] == summary_payload["summary"]["hash_consistency_blockers"]
     assert summary_payload["resume_state"]["next_stage"] == "target-upload-retry"
     commands = {command["stage"]: command["command"] for command in summary_payload["recommended_commands"]}
     assert summary_payload["resume_state"]["next_command"] == commands["target-upload-retry"]
+    diagnostics = ptcli_cli._summary_check_diagnostics(summary_payload)
+    assert diagnostics["target_upload_diagnostics"]["completion"]["hash_evidence"] == summary_payload["summary"]["hash_evidence"]
+    assert diagnostics["target_upload_diagnostics"]["completion"]["hash_consistency_blockers"] == summary_payload["summary"]["hash_consistency_blockers"]
+    shell_fields = ptcli_cli._summary_check_target_upload_shell_fields(diagnostics["target_upload_diagnostics"])
+    assert json.loads(shell_fields["PTCLI_TARGET_UPLOAD_HASH_EVIDENCE"]) == summary_payload["summary"]["hash_evidence"]
+    assert shell_fields["PTCLI_TARGET_UPLOAD_HASH_BLOCKERS"] == summary_payload["summary"]["hash_consistency_blockers"][0]
+    followup_shell = ptcli_cli._summary_check_uploaded_followup_shell_fields(summary_payload["resume_state"])
+    assert json.loads(followup_shell["PTCLI_UPLOADED_FOLLOWUP_HASH_EVIDENCE"]) == summary_payload["summary"]["hash_evidence"]
+    assert followup_shell["PTCLI_UPLOADED_FOLLOWUP_HASH_BLOCKERS"] == summary_payload["summary"]["hash_consistency_blockers"][0]
 
 
 def test_target_upload_followup_requires_uploaded_torrent_visible_in_client(tmp_path) -> None:

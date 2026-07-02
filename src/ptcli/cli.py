@@ -1324,6 +1324,7 @@ def _first_bool_value(*values: Any) -> bool | None:
 def _readiness_uploaded_followup_summary(resume_state: dict[str, Any]) -> dict[str, Any]:
     followup = resume_state.get("uploaded_followup") if isinstance(resume_state.get("uploaded_followup"), dict) else {}
     torrent_evidence = followup.get("uploaded_torrent_file_evidence") if isinstance(followup.get("uploaded_torrent_file_evidence"), dict) else {}
+    hash_evidence = followup.get("hash_evidence") if isinstance(followup.get("hash_evidence"), dict) else {}
     wait_query = followup.get("uploaded_wait_query") if isinstance(followup.get("uploaded_wait_query"), dict) else {}
     wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
     gates = followup.get("gates") if isinstance(followup.get("gates"), dict) else {}
@@ -1344,6 +1345,8 @@ def _readiness_uploaded_followup_summary(resume_state: dict[str, Any]) -> dict[s
         "injection_verified": _first_bool_value(followup.get("injection_verified"), gates.get("injection_verified")),
         "uploaded_wait_evidence": _first_bool_value(followup.get("uploaded_wait_evidence"), gates.get("uploaded_wait_evidence")),
         "hash_consistent": followup.get("hash_consistent") if isinstance(followup.get("hash_consistent"), bool) else None,
+        "hash_evidence": hash_evidence,
+        "hash_consistency_blockers": _string_list(followup.get("hash_consistency_blockers")),
         "duplicate_clean": followup.get("duplicate_clean") if isinstance(followup.get("duplicate_clean"), bool) else None,
         "rule_obligations_ready": followup.get("rule_obligations_ready") if isinstance(followup.get("rule_obligations_ready"), bool) else None,
         "uploaded_torrent_file": followup.get("uploaded_torrent_file"),
@@ -2899,6 +2902,8 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
     duplicate_check = result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else _duplicate_check_from_target_package(preflight)
     preparation_audit = _target_preparation_audit_from_preflight(preflight)
     target_materials = _target_package_materials_from_dir(args.package_dir)
+    target_hash_evidence = _uploaded_torrent_hash_evidence(result)
+    target_hash_blockers = _uploaded_torrent_hash_consistency_blockers(result)
     return {
         "summary_file": summary_file,
         "package_dir": _path_artifact(args.package_dir),
@@ -2920,7 +2925,9 @@ def _target_upload_summary_artifacts(result: dict[str, Any], preflight: dict[str
         "uploaded_save_path": _path_artifact(_uploaded_save_path_from_result(result) or args.uploaded_save_path or package_content_path),
         "uploaded_wait_evidence": _wait_result_completed(result.get("uploaded_wait")),
         "fresh_duplicate_check": duplicate_check,
-        "target_hash_consistent": not _uploaded_torrent_hash_consistency_blockers(result),
+        "target_hash_consistent": not target_hash_blockers,
+        "target_hash_evidence": target_hash_evidence,
+        "target_hash_consistency_blockers": target_hash_blockers,
         "target_duplicate_clean": _fresh_duplicate_check_clean(duplicate_check),
         "target_rule_obligations": rule_obligations if isinstance(rule_obligations, dict) else None,
     }
@@ -3228,6 +3235,8 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
     injection_verified = bool(artifacts.get("injection_verified"))
     wait_evidence = bool(artifacts.get("uploaded_wait_evidence"))
     hash_consistent = bool(artifacts.get("target_hash_consistent"))
+    hash_evidence = artifacts.get("target_hash_evidence") if isinstance(artifacts.get("target_hash_evidence"), dict) else {}
+    hash_blockers = _string_list(artifacts.get("target_hash_consistency_blockers"))
     duplicate_clean = bool(artifacts.get("target_duplicate_clean"))
     rule_obligations_ready = _rule_obligations_artifact_ready(artifacts.get("target_rule_obligations"))
     ready = bool(uploaded and downloaded and injected and injection_visible and injection_verified and wait_evidence and hash_consistent and duplicate_clean and rule_obligations_ready)
@@ -3262,6 +3271,8 @@ def _target_upload_followup_closure(summary: dict[str, Any], artifacts: dict[str
         "injection_verified": injection_verified,
         "uploaded_wait_evidence": wait_evidence,
         "hash_consistent": hash_consistent,
+        "hash_evidence": hash_evidence,
+        "hash_consistency_blockers": hash_blockers,
         "duplicate_clean": duplicate_clean,
         "rule_obligations_ready": rule_obligations_ready,
         "missing": missing,
@@ -3831,6 +3842,10 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
     )
     uploaded_wait_retry = uploaded_followup.get("wait_retry") if isinstance(uploaded_followup.get("wait_retry"), dict) else {}
     uploaded_wait_mismatches = _string_list(uploaded_followup.get("qbit_wait_mismatches")) or _string_list(payload.get("qbit_wait_mismatches"))
+    hash_evidence = completion_review.get("hash_evidence") if isinstance(completion_review.get("hash_evidence"), dict) else {}
+    if not hash_evidence and isinstance(summary.get("hash_evidence"), dict):
+        hash_evidence = summary["hash_evidence"]
+    hash_consistency_blockers = _string_list(completion_review.get("hash_consistency_blockers")) or _string_list(summary.get("hash_consistency_blockers"))
     return {
         "present": bool(summary),
         "mode": summary.get("mode"),
@@ -3847,6 +3862,8 @@ def _summary_target_upload_diagnostics(payload: dict[str, Any]) -> dict[str, Any
             "uploaded_torrent_path": completion_review.get("uploaded_torrent_path"),
             "uploaded_torrent_file_evidence": uploaded_torrent_file_evidence,
             "injected_torrent_hash": completion_review.get("injected_torrent_hash"),
+            "hash_evidence": hash_evidence,
+            "hash_consistency_blockers": hash_consistency_blockers,
             "uploaded_save_path": completion_review.get("uploaded_save_path"),
             "uploaded_wait_query": uploaded_wait_query,
             "qbit_wait_mismatch": _first_bool_value(uploaded_followup.get("qbit_wait_mismatch"), bool(uploaded_wait_mismatches) if uploaded_wait_mismatches else None),
@@ -6287,6 +6304,8 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any], ar
     uploaded_wait = result.get("uploaded_wait")
     blockers = _target_upload_result_blockers(result)
     uploaded_torrent_hash = _uploaded_torrent_hash_from_result(result)
+    hash_evidence = _uploaded_torrent_hash_evidence(result)
+    hash_blockers = _uploaded_torrent_hash_consistency_blockers(result)
     duplicate_check = result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else _duplicate_check_from_target_package(preflight)
     rule_obligations = preflight.get("rule_obligation_review", {})
     _extend_unique_string(blockers, _target_rule_obligation_blockers(rule_obligations))
@@ -6320,7 +6339,9 @@ def _target_upload_summary(result: dict[str, Any], preflight: dict[str, Any], ar
         "target_preparation_ready": bool(preparation_audit.get("ready")),
         "completion_review": completion_review,
         "fresh_duplicate_check": duplicate_check,
-        "hash_consistent": not _uploaded_torrent_hash_consistency_blockers(result),
+        "hash_consistent": not hash_blockers,
+        "hash_evidence": hash_evidence,
+        "hash_consistency_blockers": hash_blockers,
         "duplicate_clean": _fresh_duplicate_check_clean(duplicate_check),
         "rule_obligations": rule_obligations,
     }
@@ -6340,7 +6361,9 @@ def _target_upload_completion_review(
     injection_visible = _injected_torrent_visible(injected_torrent)
     injection_verified = _injected_torrent_verified(injected_torrent)
     wait_complete = _wait_result_completed(uploaded_wait)
-    hash_consistent = not _uploaded_torrent_hash_consistency_blockers(result)
+    hash_evidence = _uploaded_torrent_hash_evidence(result)
+    hash_blockers = _uploaded_torrent_hash_consistency_blockers(result)
+    hash_consistent = not hash_blockers
     duplicate_clean = _fresh_duplicate_check_clean(duplicate_check)
     rule_obligations_ready = isinstance(rule_obligations, dict) and rule_obligations.get("ready") is True
     checks = {
@@ -6365,6 +6388,8 @@ def _target_upload_completion_review(
         "uploaded_torrent_hash": _uploaded_torrent_hash_from_result(result),
         "uploaded_torrent_path": downloaded_torrent.get("path") if isinstance(downloaded_torrent, dict) else None,
         "injected_torrent_hash": _torrent_hash_from_result(injected_torrent),
+        "hash_evidence": hash_evidence,
+        "hash_consistency_blockers": hash_blockers,
         "uploaded_save_path": _uploaded_save_path_from_result(result),
         "uploaded_wait_query": uploaded_wait.get("query") if isinstance(uploaded_wait, dict) else None,
         "preflight_status": preflight.get("status"),
@@ -11368,6 +11393,7 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
     uploaded_wait_query = uploaded_followup.get("uploaded_wait_query") if isinstance(uploaded_followup.get("uploaded_wait_query"), dict) else {}
     uploaded_wait_retry = uploaded_followup.get("wait_retry") if isinstance(uploaded_followup.get("wait_retry"), dict) else {}
     uploaded_torrent_evidence = uploaded_followup.get("uploaded_torrent_file_evidence") if isinstance(uploaded_followup.get("uploaded_torrent_file_evidence"), dict) else {}
+    uploaded_hash_evidence = uploaded_followup.get("hash_evidence") if isinstance(uploaded_followup.get("hash_evidence"), dict) else {}
     uploaded_followup_gates = uploaded_followup.get("gates") if isinstance(uploaded_followup.get("gates"), dict) else {}
     uploaded_followup_next_actions = _string_list(uploaded_followup.get("next_actions"))
     return {
@@ -11557,6 +11583,8 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         if uploaded_followup.get("uploaded_wait_evidence") is not None
         else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_HASH_CONSISTENT": _shell_bool(uploaded_followup.get("hash_consistent")) if uploaded_followup.get("hash_consistent") is not None else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_HASH_EVIDENCE": json.dumps(uploaded_hash_evidence, ensure_ascii=False) if uploaded_hash_evidence else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_HASH_BLOCKERS": "|".join(_string_list(uploaded_followup.get("hash_consistency_blockers"))),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_DUPLICATE_CLEAN": _shell_bool(uploaded_followup.get("duplicate_clean")) if uploaded_followup.get("duplicate_clean") is not None else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_RULES_READY": _shell_bool(uploaded_followup.get("rule_obligations_ready"))
         if uploaded_followup.get("rule_obligations_ready") is not None
@@ -12007,6 +12035,7 @@ def _material_critical_domain_missing(domains: dict[str, Any], name: str) -> lis
 def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[str, Any]) -> dict[str, Any]:
     completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
     checks = completion.get("checks") if isinstance(completion.get("checks"), dict) else {}
+    hash_evidence = completion.get("hash_evidence") if isinstance(completion.get("hash_evidence"), dict) else {}
     wait_query = completion.get("uploaded_wait_query") if isinstance(completion.get("uploaded_wait_query"), dict) else {}
     wait_retry = completion.get("wait_retry") if isinstance(completion.get("wait_retry"), dict) else {}
     torrent_evidence = completion.get("uploaded_torrent_file_evidence") if isinstance(completion.get("uploaded_torrent_file_evidence"), dict) else {}
@@ -12041,6 +12070,8 @@ def _summary_check_target_upload_shell_fields(target_upload_diagnostics: dict[st
         "PTCLI_TARGET_UPLOAD_TORRENT_METADATA_READABLE": _shell_bool(torrent_evidence.get("metadata_readable")) if torrent_evidence.get("metadata_readable") is not None else None,
         "PTCLI_TARGET_UPLOAD_TORRENT_REUSED": _shell_bool(torrent_evidence.get("reused")) if torrent_evidence.get("reused") is not None else None,
         "PTCLI_TARGET_UPLOAD_INJECTED_HASH": completion.get("injected_torrent_hash"),
+        "PTCLI_TARGET_UPLOAD_HASH_EVIDENCE": json.dumps(hash_evidence, ensure_ascii=False) if hash_evidence else None,
+        "PTCLI_TARGET_UPLOAD_HASH_BLOCKERS": "|".join(_string_list(completion.get("hash_consistency_blockers"))),
         "PTCLI_TARGET_UPLOAD_SAVE_PATH": completion.get("uploaded_save_path"),
         "PTCLI_TARGET_UPLOAD_WAIT_MISMATCH": _shell_bool(completion.get("qbit_wait_mismatch")) if completion.get("qbit_wait_mismatch") is not None else None,
         "PTCLI_TARGET_UPLOAD_WAIT_MISMATCHES": ",".join(_string_list(completion.get("qbit_wait_mismatches"))),
@@ -12131,6 +12162,7 @@ def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) 
     wait_retry = followup.get("wait_retry") if isinstance(followup.get("wait_retry"), dict) else {}
     wait_query = followup.get("uploaded_wait_query") if isinstance(followup.get("uploaded_wait_query"), dict) else {}
     torrent_evidence = followup.get("uploaded_torrent_file_evidence") if isinstance(followup.get("uploaded_torrent_file_evidence"), dict) else {}
+    hash_evidence = followup.get("hash_evidence") if isinstance(followup.get("hash_evidence"), dict) else {}
     gates = followup.get("gates") if isinstance(followup.get("gates"), dict) else {}
     next_actions = _string_list(followup.get("next_actions"))
     return {
@@ -12145,6 +12177,8 @@ def _summary_check_uploaded_followup_shell_fields(resume_state: dict[str, Any]) 
         "PTCLI_UPLOADED_FOLLOWUP_INJECTION_VERIFIED": _shell_bool(followup.get("injection_verified")) if followup.get("injection_verified") is not None else None,
         "PTCLI_UPLOADED_FOLLOWUP_WAIT_EVIDENCE": _shell_bool(followup.get("uploaded_wait_evidence")) if followup.get("uploaded_wait_evidence") is not None else None,
         "PTCLI_UPLOADED_FOLLOWUP_HASH_CONSISTENT": _shell_bool(followup.get("hash_consistent")) if followup.get("hash_consistent") is not None else None,
+        "PTCLI_UPLOADED_FOLLOWUP_HASH_EVIDENCE": json.dumps(hash_evidence, ensure_ascii=False) if hash_evidence else None,
+        "PTCLI_UPLOADED_FOLLOWUP_HASH_BLOCKERS": "|".join(_string_list(followup.get("hash_consistency_blockers"))),
         "PTCLI_UPLOADED_FOLLOWUP_DUPLICATE_CLEAN": _shell_bool(followup.get("duplicate_clean")) if followup.get("duplicate_clean") is not None else None,
         "PTCLI_UPLOADED_FOLLOWUP_RULES_READY": _shell_bool(followup.get("rule_obligations_ready")) if followup.get("rule_obligations_ready") is not None else None,
         "PTCLI_UPLOADED_FOLLOWUP_MISSING": ",".join(_string_list(followup.get("missing"))),
