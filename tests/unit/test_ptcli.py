@@ -4240,6 +4240,7 @@ async def test_generic_source_info_parses_hds_details(monkeypatch, tmp_path) -> 
     assert info.torrent_id == "456"
     assert info.imdb_id == 1234567
     assert info.tmdb_id == 76543
+    assert info.tmdb_type == "movie"
     assert info.name == "Example.Movie.2024.1080p.BluRay-GROUP"
     assert info.torrenthash == "abcdef1234567890abcdef1234567890abcdef12"
     assert info.douban_id == "1291546"
@@ -4336,6 +4337,7 @@ async def test_reference_source_info_uses_ptcli_generic_details(monkeypatch, tmp
     assert info.torrent_id == "60635"
     assert info.imdb_id == 7654321
     assert info.tmdb_id == 98765
+    assert info.tmdb_type == "tv"
     assert info.name == "U2.Reference.2024.1080p.BluRay-GROUP"
     assert info.torrenthash == "1234567890abcdef1234567890abcdef12345678"
     assert info.douban_id == "3541415"
@@ -4389,6 +4391,7 @@ async def test_reference_source_info_parses_plain_external_ids(monkeypatch, tmp_
     assert info.torrent_id == "2468"
     assert info.imdb_id == 7654321
     assert info.tmdb_id == 98765
+    assert info.tmdb_type is None
     assert info.douban_id == "3541415"
     assert info.douban_url == "https://movie.douban.com/subject/3541415/"
     assert info.torrenthash == "1234567890abcdef1234567890abcdef12345678"
@@ -4440,6 +4443,7 @@ async def test_reference_source_info_decodes_redirected_external_ids(monkeypatch
 
     assert info.imdb_id == 7654321
     assert info.tmdb_id == 98765
+    assert info.tmdb_type == "movie"
     assert info.douban_id == "3541415"
     assert info.douban_url == "https://movie.douban.com/subject/3541415/"
     assert info.torrenthash == "1234567890abcdef1234567890abcdef12345678"
@@ -19598,6 +19602,7 @@ def test_normalize_metadata_overrides_prefers_explicit_ids_over_ptgen_text() -> 
 
     assert overrides["imdb_id"] == 7654321
     assert overrides["tmdb_id"] == 111
+    assert overrides["tmdb_type"] == "tv"
     assert overrides["douban_id"] == "26752088"
     assert overrides["douban_url"] == "https://movie.douban.com/subject/26752088/"
 
@@ -19767,10 +19772,12 @@ async def test_enrich_source_metadata_backfills_tmdb_from_ptgen_description_afte
     assert result["blockers"] == []
     assert result["source_info"]["imdb_id"] == 1234567
     assert result["source_info"]["tmdb_id"] == 999
+    assert result["source_info"]["tmdb_type"] == "movie"
     assert result["source_info"]["douban_id"] == "1291546"
     assert result["source_info"]["douban_url"] == "https://movie.douban.com/subject/1291546/"
     assert result["source_info"]["ptgen_description"] == ptgen_description
     assert result["applied"]["tmdb_id"] == 999
+    assert result["applied"]["tmdb_type"] == "movie"
     assert result["applied"]["douban_id"] == "1291546"
     assert result["applied"]["douban_url"] == "https://movie.douban.com/subject/1291546/"
     assert result["sources"] == ["ptgen"]
@@ -19782,6 +19789,7 @@ async def test_enrich_source_metadata_backfills_tmdb_from_ptgen_description_afte
     assert result["ptgen_evidence"]["imdb_source"] == "description"
     assert result["ptgen_evidence"]["tmdb_id"] == 999
     assert result["ptgen_evidence"]["tmdb_source"] == "description"
+    assert result["ptgen_evidence"]["tmdb_type"] == "movie"
 
 
 @pytest.mark.asyncio
@@ -19848,8 +19856,10 @@ async def test_enrich_source_metadata_fetches_tmdb_without_legacy_tmdb_manager(m
 
     assert result["ready"] is True
     assert result["source_info"]["tmdb_id"] == 999
+    assert result["source_info"]["tmdb_type"] == "movie"
     assert result["sources"] == ["tmdb_api"]
     assert result["applied"]["tmdb_id"] == 999
+    assert result["applied"]["tmdb_type"] == "movie"
     assert result["readiness"]["tmdb_id"] == {"ready": True, "required": True, "source": "tmdb_api"}
     assert result["field_evidence"]["tmdb_id"] == {"ready": True, "required": True, "source": "tmdb_api", "value": 999}
 
@@ -19898,8 +19908,10 @@ async def test_enrich_source_metadata_fetches_imdb_from_tmdb_external_ids(monkey
 
     assert result["ready"] is True
     assert result["source_info"]["imdb_id"] == 1234567
+    assert result["source_info"]["tmdb_type"] == "movie"
     assert result["sources"] == ["tmdb_api"]
     assert result["applied"]["imdb_id"] == 1234567
+    assert result["applied"]["tmdb_type"] == "movie"
     assert result["readiness"]["imdb_id"] == {"ready": True, "required": True, "source": "tmdb_api"}
 
 
@@ -19956,7 +19968,9 @@ async def test_enrich_source_metadata_fetches_imdb_from_tmdb_tv_external_ids(mon
     ]
     assert result["ready"] is True
     assert result["source_info"]["imdb_id"] == 7654321
+    assert result["source_info"]["tmdb_type"] == "tv"
     assert result["applied"]["imdb_id"] == 7654321
+    assert result["applied"]["tmdb_type"] == "tv"
 
 
 @pytest.mark.asyncio
@@ -21326,6 +21340,44 @@ def test_mteam_upload_preflight_blocks_mismatched_description_external_id(tmp_pa
     audit = ptcli_cli._target_preparation_audit(package, str(torrent_file))
     assert audit["description_ready"] is False
     assert "materials.description.external_ids.tmdb" in audit["description"]["missing"]
+
+
+def test_mteam_upload_preflight_uses_tmdb_type_for_tv_description_link(tmp_path) -> None:
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "tmdb_type": "tv",
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例剧集\n◎简　　介　示例简介",
+    }
+    package = write_material_ready_mteam_package(source_info, tmp_path)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+    description = Path(package["files"]["description_draft"]).read_text(encoding="utf-8")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert package["meta_draft"]["category"] == "MOVIE"
+    assert package["meta_draft"]["tmdb_type"] == "tv"
+    assert package["materials"]["metadata"]["tmdb_type"] == "tv"
+    assert "https://www.themoviedb.org/tv/999" in description
+    assert "https://www.themoviedb.org/movie/999" not in description
+    assert preflight["status"] == "ready"
+    review = preflight["upload_payload"]["review"]
+    assert review["description"]["external_links"]["tmdb"] == "https://www.themoviedb.org/tv/999"
+    assert review["description"]["evidence"]["metadata_chain"]["items"]["tmdb"] == {
+        "ready": True,
+        "source_value": 999,
+        "expected_link": "https://www.themoviedb.org/tv/999",
+        "description_link": "https://www.themoviedb.org/tv/999",
+        "payload_value": None,
+        "payload_required": False,
+    }
 
 
 def test_mteam_upload_preflight_execute_accepts_ready_materials(tmp_path) -> None:

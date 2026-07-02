@@ -114,6 +114,7 @@ class SourceTorrentInfo:
     torrent_id: str
     imdb_id: int | None
     tmdb_id: int | None
+    tmdb_type: str | None
     name: str | None
     torrenthash: str | None
     description_length: int
@@ -160,11 +161,13 @@ def source_info_from_tuple(tracker: str, torrent_id: str, result: tuple[Any, ...
     metadata_text = "\n".join(_optional_str(value) or "" for value in (description, meta.get("description"), meta.get("bdinfo"), meta.get("mediainfo")))
     douban_id, douban_url = _extract_douban(metadata_text, metadata_text)
     ptgen_description = _optional_str(meta.get("ptgen_description")) or _extract_ptgen_description(metadata_text)
+    extracted_tmdb_id, extracted_tmdb_type = _extract_tmdb_ref(metadata_text, metadata_text)
     return SourceTorrentInfo(
         tracker=tracker,
         torrent_id=torrent_id,
         imdb_id=imdb_id or _optional_int(meta.get("imdb_id")) or _extract_imdb_id(metadata_text, metadata_text),
-        tmdb_id=tmdb_id or _optional_int(meta.get("tmdb_id")) or _extract_tmdb_id(metadata_text, metadata_text),
+        tmdb_id=tmdb_id or _optional_int(meta.get("tmdb_id")) or extracted_tmdb_id,
+        tmdb_type=_normalize_tmdb_type(meta.get("tmdb_type")) or extracted_tmdb_type,
         name=name,
         torrenthash=torrenthash,
         description_length=len(description or ""),
@@ -252,11 +255,13 @@ def _mteam_source_info_from_detail(tracker: str, torrent_id: str, data: Any) -> 
     detail = data if isinstance(data, dict) else {}
     douban_id, douban_url = _extract_douban_from_value(detail.get("douban"))
     description = _optional_str(detail.get("descr") or detail.get("description"))
+    tmdb_id, tmdb_type = _extract_tmdb_ref(str(detail.get("tmdb") or ""), description or "")
     return SourceTorrentInfo(
         tracker=tracker,
         torrent_id=torrent_id,
         imdb_id=_extract_id_from_url(detail.get("imdb"), r"tt(\d+)"),
-        tmdb_id=_extract_id_from_url(detail.get("tmdb"), r"/(?:movie|tv)/(\d+)"),
+        tmdb_id=tmdb_id,
+        tmdb_type=tmdb_type,
         name=_optional_str(detail.get("name") or detail.get("title")),
         torrenthash=_optional_str(detail.get("hash") or detail.get("infoHash")),
         description_length=len(description or ""),
@@ -281,6 +286,7 @@ async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torre
             torrent_id=torrent_id,
             imdb_id=None,
             tmdb_id=None,
+            tmdb_type=None,
             name=None,
             torrenthash=None,
             description_length=0,
@@ -297,11 +303,13 @@ async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torre
     page_text = soup.get_text("\n", strip=True)
     description = _extract_generic_description(soup, page_text)
     douban_id, douban_url = _extract_douban(page_text, response.text)
+    tmdb_id, tmdb_type = _extract_tmdb_ref(response.text, page_text)
     return SourceTorrentInfo(
         tracker=tracker,
         torrent_id=torrent_id,
         imdb_id=_extract_imdb_id(response.text, page_text),
-        tmdb_id=_extract_tmdb_id(response.text, page_text),
+        tmdb_id=tmdb_id,
+        tmdb_type=tmdb_type,
         name=_extract_generic_name(soup, page_text),
         torrenthash=_extract_torrent_hash(page_text, response.text),
         description_length=len(description),
@@ -361,9 +369,16 @@ def _extract_imdb_id(html: str, page_text: str) -> int | None:
 
 
 def _extract_tmdb_id(html: str, page_text: str) -> int | None:
+    tmdb_id, _tmdb_type = _extract_tmdb_ref(html, page_text)
+    return tmdb_id
+
+
+def _extract_tmdb_ref(html: str, page_text: str) -> tuple[int | None, str | None]:
     search_text = _decoded_search_text(html, page_text)
+    url_match = re.search(r"themoviedb\.org/(movie|tv)/(\d{2,10})", search_text, flags=re.IGNORECASE)
+    if url_match:
+        return int(url_match.group(2)), url_match.group(1).lower()
     for pattern in (
-        r"themoviedb\.org/(?:movie|tv)/(\d{2,10})",
         r"tmdb(?:[_\s-]*(?:id|编号|鏈接|链接))?[^0-9]{0,80}(\d{2,10})\b",
         r"\btmdb(?:[_\s-]*id)?\b[^0-9]{0,40}(\d{2,10})\b",
         r"themoviedb[^0-9]{0,80}(\d{2,10})\b",
@@ -371,7 +386,16 @@ def _extract_tmdb_id(html: str, page_text: str) -> int | None:
     ):
         value = _extract_first_int(pattern, search_text)
         if value:
-            return value
+            return value, None
+    return None, None
+
+
+def _normalize_tmdb_type(value: Any) -> str | None:
+    text = str(value or "").strip().lower()
+    if text in {"movie", "film"}:
+        return "movie"
+    if text in {"tv", "show", "series"}:
+        return "tv"
     return None
 
 

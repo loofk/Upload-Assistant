@@ -643,6 +643,7 @@ def build_mteam_prepare_preview(source_info: dict[str, Any] | None, target_track
         "name": source_info.get("name") if source_info else None,
         "imdb_id": source_info.get("imdb_id") if source_info else None,
         "tmdb_id": source_info.get("tmdb_id") if source_info else None,
+        "tmdb_type": source_info.get("tmdb_type") if source_info else None,
         "douban_id": source_info.get("douban_id") if source_info else None,
         "douban_url": source_info.get("douban_url") if source_info else None,
         "torrenthash": source_info.get("torrenthash") if source_info else None,
@@ -719,8 +720,7 @@ def _mteam_description_external_link_lines(meta_draft: dict[str, Any]) -> list[s
         links.append(f"IMDb: https://www.imdb.com/title/tt{imdb_id}")
     tmdb_id = meta_draft.get("tmdb_id")
     if tmdb_id:
-        tmdb_kind = "tv" if meta_draft.get("category") == "TV" else "movie"
-        links.append(f"TMDb: https://www.themoviedb.org/{tmdb_kind}/{tmdb_id}")
+        links.append(f"TMDb: https://www.themoviedb.org/{_mteam_tmdb_kind(meta_draft)}/{tmdb_id}")
     douban_url = meta_draft.get("douban_url")
     if not douban_url and meta_draft.get("douban_id"):
         douban_url = f"https://movie.douban.com/subject/{meta_draft['douban_id']}/"
@@ -847,6 +847,7 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "category": meta_draft.get("category"),
             "imdb_id": meta_draft.get("imdb_id"),
             "tmdb_id": meta_draft.get("tmdb_id"),
+            "tmdb_type": meta_draft.get("tmdb_type"),
             "douban_id": meta_draft.get("douban_id"),
             "douban_url": meta_draft.get("douban_url"),
             "source_description_available": source_description_length > 0,
@@ -1417,6 +1418,7 @@ def build_mteam_meta_draft(source_info: dict[str, Any] | None, content_path: str
         "imdb_id": imdb_id,
         "imdb": str(imdb_id) if imdb_id else None,
         "tmdb_id": source_info.get("tmdb_id") if source_info else None,
+        "tmdb_type": _normalize_tmdb_type(source_info.get("tmdb_type")) if source_info else None,
         "douban_id": douban_id,
         "douban_url": source_info.get("douban_url") if source_info else None,
         "ptgen_description_length": len(str(source_info.get("ptgen_description") or "")) if source_info else 0,
@@ -2058,8 +2060,7 @@ def _mteam_metadata_expected_link(name: str, metadata: dict[str, Any]) -> str | 
         return f"https://www.imdb.com/title/tt{imdb_id}" if imdb_id else None
     if name == "tmdb":
         tmdb_id = metadata.get("tmdb_id")
-        tmdb_kind = "tv" if metadata.get("category") == "TV" else "movie"
-        return f"https://www.themoviedb.org/{tmdb_kind}/{tmdb_id}" if tmdb_id else None
+        return f"https://www.themoviedb.org/{_mteam_tmdb_kind(metadata)}/{tmdb_id}" if tmdb_id else None
     if name == "douban":
         douban_url = metadata.get("douban_url")
         if douban_url:
@@ -2072,6 +2073,19 @@ def _mteam_metadata_expected_link(name: str, metadata: dict[str, Any]) -> str | 
 def _mteam_metadata_payload_value(name: str, form_fields: dict[str, Any]) -> str | None:
     if name in {"imdb", "douban"} and form_fields.get(name):
         return str(form_fields[name])
+    return None
+
+
+def _mteam_tmdb_kind(metadata: dict[str, Any]) -> str:
+    return _normalize_tmdb_type(metadata.get("tmdb_type")) or ("tv" if metadata.get("category") == "TV" else "movie")
+
+
+def _normalize_tmdb_type(value: Any) -> str | None:
+    text = str(value or "").strip().lower()
+    if text in {"movie", "film"}:
+        return "movie"
+    if text in {"tv", "show", "series"}:
+        return "tv"
     return None
 
 

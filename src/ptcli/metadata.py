@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 METADATA_KEYS = ("imdb_id", "tmdb_id", "douban_id", "douban_url")
+TMDB_TYPE_KEYS = ("tmdb_type", "tmdb_media_type", "tmdb_kind")
 PTGEN_DESCRIPTION_KEYS = ("ptgen_description", "ptgen", "douban_description", "description")
 
 
@@ -44,6 +45,11 @@ async def enrich_source_metadata(
             base["tmdb_id"] = tmdb_result["tmdb_id"]
             applied["tmdb_id"] = tmdb_result["tmdb_id"]
             field_sources["tmdb_id"] = "tmdb_api"
+            tmdb_type = _normalize_tmdb_type(tmdb_result.get("tmdb_type") or tmdb_result.get("media_type"))
+            if tmdb_type and not base.get("tmdb_type"):
+                base["tmdb_type"] = tmdb_type
+                applied["tmdb_type"] = tmdb_type
+                field_sources["tmdb_type"] = "tmdb_api"
             sources.append("tmdb_api")
         elif tmdb_result.get("blocker"):
             blocker_records.append(("tmdb_id", str(tmdb_result["blocker"])))
@@ -54,6 +60,11 @@ async def enrich_source_metadata(
             base["imdb_id"] = imdb_result["imdb_id"]
             applied["imdb_id"] = imdb_result["imdb_id"]
             field_sources["imdb_id"] = "tmdb_api"
+            tmdb_type = _normalize_tmdb_type(imdb_result.get("tmdb_type") or imdb_result.get("media_type"))
+            if tmdb_type and not base.get("tmdb_type"):
+                base["tmdb_type"] = tmdb_type
+                applied["tmdb_type"] = tmdb_type
+                field_sources["tmdb_type"] = "tmdb_api"
             sources.append("tmdb_api")
         elif imdb_result.get("blocker"):
             blocker_records.append(("imdb_id", str(imdb_result["blocker"])))
@@ -85,6 +96,11 @@ async def enrich_source_metadata(
                 base[key] = ptgen_result[key]
                 applied[key] = ptgen_result[key]
                 field_sources[key] = "ptgen"
+        tmdb_type = _normalize_tmdb_type(ptgen_result.get("tmdb_type"))
+        if tmdb_type and not base.get("tmdb_type"):
+            base["tmdb_type"] = tmdb_type
+            applied["tmdb_type"] = tmdb_type
+            field_sources["tmdb_type"] = "ptgen"
         if ptgen_result.get("douban_id") and not base.get("douban_id"):
             base["douban_id"] = ptgen_result["douban_id"]
             applied["douban_id"] = ptgen_result["douban_id"]
@@ -126,6 +142,8 @@ def _initial_metadata_field_sources(source_info: dict[str, Any]) -> dict[str, st
     field_sources = {key: "source" for key in METADATA_KEYS if source_info.get(key)}
     if source_info.get("ptgen_description"):
         field_sources["ptgen_description"] = "source"
+    if source_info.get("tmdb_type"):
+        field_sources["tmdb_type"] = "source"
     return field_sources
 
 
@@ -182,6 +200,9 @@ def normalize_metadata_overrides(payload: dict[str, Any]) -> dict[str, Any]:
         overrides["imdb_id"] = imdb_id
     if tmdb_id:
         overrides["tmdb_id"] = tmdb_id
+    tmdb_type = _normalize_tmdb_type(next((payload.get(key) for key in TMDB_TYPE_KEYS if payload.get(key)), None))
+    if tmdb_type:
+        overrides["tmdb_type"] = tmdb_type
     if douban_id:
         overrides["douban_id"] = douban_id
     if douban_url:
@@ -215,12 +236,14 @@ def _normalize_ptgen_description(payload: dict[str, Any]) -> str | None:
 def _metadata_overrides_from_text(text: str) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     imdb_id = _extract_imdb_id_from_text(text)
-    tmdb_id = _extract_tmdb_id_from_text(text)
+    tmdb_id, tmdb_type = _extract_tmdb_ref_from_text(text)
     douban_id = _extract_douban_id_from_text(text)
     if imdb_id:
         overrides["imdb_id"] = imdb_id
     if tmdb_id:
         overrides["tmdb_id"] = tmdb_id
+    if tmdb_type:
+        overrides["tmdb_type"] = tmdb_type
     if douban_id:
         overrides["douban_id"] = douban_id
         overrides["douban_url"] = f"https://movie.douban.com/subject/{douban_id}/"
@@ -236,11 +259,19 @@ def _extract_imdb_id_from_text(text: str) -> int | None:
 
 
 def _extract_tmdb_id_from_text(text: str) -> int | None:
+    tmdb_id, _tmdb_type = _extract_tmdb_ref_from_text(text)
+    return tmdb_id
+
+
+def _extract_tmdb_ref_from_text(text: str) -> tuple[int | None, str | None]:
+    url_match = re.search(r"themoviedb\.org/(movie|tv)/(\d{2,10})", text, flags=re.IGNORECASE)
+    if url_match:
+        return _normalize_int(url_match.group(2)), url_match.group(1).lower()
     for pattern in (r"themoviedb\.org/(?:movie|tv)/(\d{2,10})", r"\btmdb(?:[_\s:-]*id)?[^\d]{0,40}(\d{2,10})\b"):
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            return _normalize_int(match.group(1))
-    return None
+            return _normalize_int(match.group(1)), None
+    return None, None
 
 
 def _extract_douban_id_from_text(text: str) -> str | None:
@@ -271,8 +302,8 @@ async def _tmdb_from_imdb(config: dict[str, Any], imdb_id: Any) -> dict[str, Any
         return {"blocker": "TMDb enrichment timed out."}
     except (httpx.RequestError, ValueError) as exc:
         return {"blocker": f"TMDb enrichment failed: {exc}"}
-    normalized = _tmdb_id_from_find_payload(payload)
-    return {"tmdb_id": normalized} if normalized else {"blocker": "TMDb enrichment returned no TMDb id."}
+    match = _tmdb_match_from_find_payload(payload)
+    return match if match else {"blocker": "TMDb enrichment returned no TMDb id."}
 
 
 async def _imdb_from_tmdb(config: dict[str, Any], tmdb_id: Any) -> dict[str, Any]:
@@ -297,7 +328,7 @@ async def _imdb_from_tmdb(config: dict[str, Any], tmdb_id: Any) -> dict[str, Any
                 response.raise_for_status()
                 normalized = _imdb_id_from_external_ids_payload(response.json())
                 if normalized:
-                    return {"imdb_id": normalized, "media_type": media_type}
+                    return {"imdb_id": normalized, "media_type": media_type, "tmdb_type": media_type}
     except httpx.TimeoutException:
         return {"blocker": "TMDb external-id enrichment timed out."}
     except (httpx.HTTPError, ValueError) as exc:
@@ -306,9 +337,14 @@ async def _imdb_from_tmdb(config: dict[str, Any], tmdb_id: Any) -> dict[str, Any
 
 
 def _tmdb_id_from_find_payload(payload: Any) -> int | None:
+    match = _tmdb_match_from_find_payload(payload)
+    return _normalize_int(match.get("tmdb_id")) if match else None
+
+
+def _tmdb_match_from_find_payload(payload: Any) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         return None
-    for key in ("movie_results", "tv_results"):
+    for key, media_type in (("movie_results", "movie"), ("tv_results", "tv")):
         results = payload.get(key)
         if not isinstance(results, list):
             continue
@@ -317,7 +353,7 @@ def _tmdb_id_from_find_payload(payload: Any) -> int | None:
                 continue
             normalized = _normalize_int(item.get("id"))
             if normalized:
-                return normalized
+                return {"tmdb_id": normalized, "tmdb_type": media_type, "media_type": media_type}
     return None
 
 
@@ -367,11 +403,14 @@ async def _ptgen_from_metadata(config: dict[str, Any], source_info: dict[str, An
     if description_ids.get("tmdb_id"):
         evidence["tmdb_id"] = description_ids["tmdb_id"]
         evidence["tmdb_source"] = "description"
+    if description_ids.get("tmdb_type"):
+        evidence["tmdb_type"] = description_ids["tmdb_type"]
     return {
         "description": description,
         "ptgen": ptgen_payload,
         "imdb_id": description_ids.get("imdb_id"),
         "tmdb_id": description_ids.get("tmdb_id"),
+        "tmdb_type": description_ids.get("tmdb_type"),
         "douban_id": douban_id,
         "douban_url": douban_url_value,
         "evidence": evidence,
@@ -491,3 +530,12 @@ def _normalize_douban_url(value: Any) -> str | None:
     if not douban_id:
         return None
     return f"https://movie.douban.com/subject/{douban_id}/"
+
+
+def _normalize_tmdb_type(value: Any) -> str | None:
+    text = str(value or "").strip().lower()
+    if text in {"movie", "film"}:
+        return "movie"
+    if text in {"tv", "show", "series"}:
+        return "tv"
+    return None
