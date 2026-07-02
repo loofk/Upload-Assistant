@@ -20286,6 +20286,64 @@ async def test_enrich_source_metadata_fetches_imdb_from_tmdb_tv_external_ids(mon
 
 
 @pytest.mark.asyncio
+async def test_enrich_source_metadata_prefers_declared_tmdb_type_for_imdb_lookup(monkeypatch) -> None:
+    source_info = {
+        "tracker": "CHD",
+        "torrent_id": "2468",
+        "imdb_id": None,
+        "tmdb_id": 999,
+        "tmdb_type": "tv",
+        "name": "Series Name",
+        "torrenthash": "b" * 40,
+        "description_length": 100,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+    }
+    requested_urls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload) -> None:
+            self._payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            assert kwargs["timeout"] == 30.0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url, params):
+            assert params == {"api_key": "tmdb-key"}
+            requested_urls.append(url)
+            if "/movie/" in url:
+                return FakeResponse({"imdb_id": "tt1111111"})
+            return FakeResponse({"imdb_id": "tt7654321"})
+
+    monkeypatch.setattr(ptcli_metadata.httpx, "AsyncClient", FakeClient)
+
+    result = await enrich_source_metadata({"DEFAULT": {"tmdb_api": "tmdb-key"}}, source_info)
+
+    assert requested_urls == ["https://api.themoviedb.org/3/tv/999/external_ids"]
+    assert result["ready"] is True
+    assert result["source_info"]["imdb_id"] == 7654321
+    assert result["source_info"]["tmdb_type"] == "tv"
+    assert result["applied"]["imdb_id"] == 7654321
+    assert "tmdb_type" not in result["applied"]
+    assert result["readiness"]["imdb_id"] == {"ready": True, "required": True, "source": "tmdb_api"}
+
+
+@pytest.mark.asyncio
 async def test_pipeline_metadata_enrichment_stage_blocks_missing_ready_metadata(monkeypatch) -> None:
     args = argparse.Namespace(
         metadata_file=None,

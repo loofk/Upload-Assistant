@@ -55,7 +55,7 @@ async def enrich_source_metadata(
             blocker_records.append(("tmdb_id", str(tmdb_result["blocker"])))
 
     if base.get("tmdb_id") and not base.get("imdb_id"):
-        imdb_result = await _imdb_from_tmdb(config, base.get("tmdb_id"))
+        imdb_result = await _imdb_from_tmdb(config, base.get("tmdb_id"), tmdb_type=base.get("tmdb_type"))
         if imdb_result.get("imdb_id"):
             base["imdb_id"] = imdb_result["imdb_id"]
             applied["imdb_id"] = imdb_result["imdb_id"]
@@ -306,7 +306,7 @@ async def _tmdb_from_imdb(config: dict[str, Any], imdb_id: Any) -> dict[str, Any
     return match if match else {"blocker": "TMDb enrichment returned no TMDb id."}
 
 
-async def _imdb_from_tmdb(config: dict[str, Any], tmdb_id: Any) -> dict[str, Any]:
+async def _imdb_from_tmdb(config: dict[str, Any], tmdb_id: Any, *, tmdb_type: Any = None) -> dict[str, Any]:
     default = config.get("DEFAULT", {}) if isinstance(config, dict) else {}
     tmdb_api = str(default.get("tmdb_api") or "").strip() if isinstance(default, dict) else ""
     if not tmdb_api:
@@ -316,9 +316,11 @@ async def _imdb_from_tmdb(config: dict[str, Any], tmdb_id: Any) -> dict[str, Any
         return {"blocker": "TMDb enrichment requires a valid TMDb id."}
 
     blockers = []
+    preferred_type = _normalize_tmdb_type(tmdb_type)
+    media_types = (preferred_type, "tv" if preferred_type == "movie" else "movie") if preferred_type else ("movie", "tv")
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            for media_type in ("movie", "tv"):
+            for media_type in media_types:
                 response = await client.get(
                     f"https://api.themoviedb.org/3/{media_type}/{tmdb_value}/external_ids",
                     params={"api_key": tmdb_api},
