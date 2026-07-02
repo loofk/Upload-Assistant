@@ -12990,6 +12990,45 @@ def test_doctor_uploaded_torrent_file_resume_blocks_unreadable_metadata(tmp_path
     assert "Torrent metadata is not readable" in uploaded_check["message"]
     assert any("Fix uploaded_torrent_file" in action for action in payload["next_actions"])
 
+    args = ptcli_cli.build_parser().parse_args(
+        [
+            "doctor",
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--to",
+            "MTEAM",
+            "--base-dir",
+            str(tmp_path),
+            "--path",
+            str(content_path),
+            "--package-dir",
+            package["package_dir"],
+            "--accept-rules",
+            "--target-execute",
+            "--confirm-upload",
+            "--uploaded-torrent-file",
+            str(uploaded_torrent),
+            "--inject-uploaded-torrent",
+            "--uploaded-save-path",
+            str(content_path),
+            "--wait-uploaded-complete",
+            "--json",
+        ]
+    )
+    summary_payload = ptcli_cli._doctor_summary_payload(payload, args, str(tmp_path / "ptcli-doctor-summary.json"))
+    artifact = summary_payload["artifacts"]["uploaded_torrent_file"]
+    assert artifact["path"] == str(uploaded_torrent)
+    assert artifact["exists"] is True
+    assert artifact["is_file"] is True
+    assert artifact["size_bytes"] > 0
+    assert len(artifact["sha1"]) == 40
+    assert artifact["metadata_readable"] is False
+    assert artifact["doctor_check_ok"] is False
+    assert "Torrent metadata is not readable" in artifact["doctor_check_message"]
+    assert summary_payload["resume_state"]["artifacts"]["uploaded_torrent_file"] is False
+
 
 def test_doctor_resume_files_still_require_target_materials(tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
@@ -13759,6 +13798,7 @@ def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path,
     content_path = tmp_path / "downloads" / "Name"
     content_path.mkdir(parents=True)
     uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
+    uploaded_hash = str(Torrent.read(uploaded_torrent, validate=False).infohash)
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -13826,6 +13866,11 @@ def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path,
     assert summary_payload["target_mode"] == "resumed_uploaded_torrent"
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["path"] == str(uploaded_torrent)
     assert summary_payload["artifacts"]["uploaded_torrent_file"]["is_file"] is True
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["size_bytes"] > 0
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["metadata_readable"] is True
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["torrent_hash"] == uploaded_hash
+    assert len(summary_payload["artifacts"]["uploaded_torrent_file"]["sha1"]) == 40
+    assert summary_payload["artifacts"]["uploaded_torrent_file"]["doctor_check_ok"] is True
     assert summary_payload["artifacts"]["download_uploaded_torrent"] is True
     assert summary_payload["artifacts"]["inject_uploaded_torrent"] is True
     assert summary_payload["artifacts"]["wait_uploaded_complete"] is True

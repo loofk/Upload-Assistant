@@ -5834,11 +5834,11 @@ def _doctor_resume_state(payload: dict[str, Any], artifacts: dict[str, Any], fai
         "available_stages": [str(command.get("stage")) for command in recommended_commands if isinstance(command, dict)],
         "artifacts": {
             "content_path": bool(_path_artifact_exists(artifacts.get("content_path"))),
-            "source_torrent_file": bool(_path_artifact_exists(artifacts.get("source_torrent_file"))),
+            "source_torrent_file": _doctor_torrent_artifact_ready(artifacts.get("source_torrent_file")),
             "package_dir": bool(_path_artifact_exists(artifacts.get("package_dir"))),
-            "target_torrent_file": bool(_path_artifact_exists(artifacts.get("target_torrent_file"))),
+            "target_torrent_file": _doctor_torrent_artifact_ready(artifacts.get("target_torrent_file")),
             "uploaded_torrent_id": bool(artifacts.get("uploaded_torrent_id")),
-            "uploaded_torrent_file": bool(_path_artifact_exists(artifacts.get("uploaded_torrent_file"))),
+            "uploaded_torrent_file": _doctor_torrent_artifact_ready(artifacts.get("uploaded_torrent_file")),
             "effective_uploaded_save_path": bool(_path_artifact_exists(artifacts.get("effective_uploaded_save_path"))),
             "flow_check_ready": bool(artifacts.get("flow_check_ready")),
             "rule_check_ready": bool(artifacts.get("rule_check_ready")),
@@ -5885,7 +5885,7 @@ def _doctor_source_followup_plan(payload: dict[str, Any], artifacts: dict[str, A
         source_torrent_file
         and isinstance(source_torrent_artifact, dict)
         and source_torrent_artifact.get("path") == source_torrent_file
-        and _path_artifact_exists(source_torrent_artifact)
+        and _doctor_torrent_artifact_ready(source_torrent_artifact)
     )
     save_path = _first_option_value(option_values, "--save-path")
     wait_timeout = _first_option_value(option_values, "--wait-timeout")
@@ -6005,9 +6005,9 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
     content_path = args.content_path or package_preflight.get("content_path")
     return {
         "content_path": _path_artifact(str(content_path)) if content_path else None,
-        "source_torrent_file": _path_artifact(args.source_torrent_file),
+        "source_torrent_file": _doctor_torrent_artifact(args.source_torrent_file, checks, "source_torrent_file"),
         "package_dir": _path_artifact(args.package_dir),
-        "target_torrent_file": _path_artifact(args.target_torrent_file),
+        "target_torrent_file": _doctor_torrent_artifact(args.target_torrent_file, checks, "target_torrent_file"),
         "target_materials": target_materials,
         "target_preparation_audit": preparation_audit,
         "target_preparation_ready": bool(preparation_audit.get("ready")),
@@ -6019,7 +6019,7 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
         "material_gate": material_gate,
         "live_material_gate": _doctor_live_material_gate_artifact(material_gate),
         "uploaded_torrent_id": args.uploaded_torrent_id,
-        "uploaded_torrent_file": _path_artifact(args.uploaded_torrent_file),
+        "uploaded_torrent_file": _doctor_torrent_artifact(args.uploaded_torrent_file, checks, "uploaded_torrent_file"),
         "effective_uploaded_save_path": _path_artifact(str(effective_uploaded_save_path)) if effective_uploaded_save_path else None,
         "flow_check_ready": bool(flow_check.get("ready")),
         "rule_check_ready": bool(rule_check.get("ready")),
@@ -6036,6 +6036,33 @@ def _doctor_summary_artifacts(args: argparse.Namespace, payload: dict[str, Any],
 
 def _doctor_check_ok(checks: list[Any], name: str) -> bool:
     return any(isinstance(check, dict) and check.get("name") == name and check.get("ok") is True for check in checks)
+
+
+def _doctor_named_check(checks: list[Any], name: str) -> dict[str, Any]:
+    return next((check for check in checks if isinstance(check, dict) and check.get("name") == name), {})
+
+
+def _doctor_torrent_artifact(path: str | None, checks: list[Any], check_name: str) -> dict[str, Any] | None:
+    if not path:
+        return None
+    resolved = Path(path).expanduser()
+    artifact = _torrent_file_evidence(resolved, require_metadata=True)
+    artifact["exists"] = resolved.exists()
+    artifact["is_file"] = resolved.is_file()
+    artifact["is_dir"] = resolved.is_dir()
+
+    check = _doctor_named_check(checks, check_name)
+    if check:
+        artifact["doctor_check_ok"] = check.get("ok") is True
+        artifact["doctor_check_message"] = check.get("message")
+        for key in ("size_bytes", "metadata_readable", "torrent_hash"):
+            if key in check:
+                artifact[key] = check.get(key)
+    return artifact
+
+
+def _doctor_torrent_artifact_ready(artifact: Any) -> bool:
+    return _torrent_file_evidence_complete(artifact)
 
 
 def _doctor_live_material_gate_artifact(material_gate: dict[str, Any]) -> dict[str, Any]:
