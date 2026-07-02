@@ -17,11 +17,12 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, build_daily_candidates
 from src.ptcli.cli import build_parser, pipeline_payload, retorrent_payload
-from src.ptcli.config import load_config
+from src.ptcli.config import load_config, resolve_client_config
+from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.source import resolve_source_reference
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
@@ -224,7 +225,8 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
         server_version = "ptcli-service/1"
 
         def do_GET(self) -> None:  # noqa: N802
-            path = urlparse(self.path).path
+            parsed_url = urlparse(self.path)
+            path = parsed_url.path
             if path == "/health":
                 self._send_json(HTTPStatus.OK, health_payload())
                 return
@@ -236,6 +238,13 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 return
             if path in AGENT_MANIFEST_PATHS:
                 self._send_json(HTTPStatus.OK, agent_manifest_payload(base_url=self._request_base_url()))
+                return
+            if path == "/v1/deployment/check":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                self._send_json(HTTPStatus.OK, deployment_check_payload(query))
                 return
             if path.startswith("/v1/jobs/"):
                 if not self._authorized():
@@ -1181,6 +1190,156 @@ def health_payload() -> dict[str, Any]:
     }
 
 
+def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return a local deployment readiness report without touching trackers or qBittorrent."""
+    request = request or {}
+    base_dir = Path(str(request.get("base_dir") or os.environ.get("PTCLI_BASE_DIR") or os.getcwd())).expanduser()
+    config_path = _deployment_path(request.get("config") or os.environ.get("PTCLI_CONFIG") or "data/config.py", base_dir)
+    cookies_dir = _deployment_path(request.get("cookies_dir") or "data/cookies", base_dir)
+    tmp_dir = Path(os.environ.get("TMPDIR") or str(base_dir / "tmp")).expanduser()
+    job_dir = _resolve_job_dir(request.get("job_dir") or os.environ.get("PTCLI_JOB_DIR"))
+    downloads_path = Path(str(request.get("downloads_path") or os.environ.get("PTCLI_DOWNLOADS_PATH") or "/downloads")).expanduser()
+    client = str(request.get("client") or "default")
+
+    runtime_check = build_runtime_dependency_check()
+    checks: list[dict[str, Any]] = [
+        {
+            "name": "runtime.ptcli_dependencies",
+            "ok": bool(runtime_check.get("ok")),
+            "message": runtime_check.get("message"),
+            "details": runtime_check,
+        },
+        _deployment_file_check("config", config_path, required=True),
+        _deployment_dir_check("cookies_dir", cookies_dir, required=True),
+        _deployment_dir_check("tmp_dir", tmp_dir, required=True, writable=True),
+        _deployment_dir_check("job_dir", job_dir, required=True, writable=True),
+        _deployment_dir_check("downloads_path", downloads_path, required=True),
+        _deployment_api_token_check(),
+    ]
+
+    config: dict[str, Any] | None = None
+    qbit: dict[str, Any] = {"configured": False, "client": client, "connectivity_checked": False}
+    if checks[1]["ok"]:
+        try:
+            config = load_config(str(config_path))
+            checks.append({"name": "config.load", "ok": True, "message": f"Config loaded: {config_path}"})
+        except Exception as exc:
+            checks.append({"name": "config.load", "ok": False, "message": f"Config could not be loaded: {exc}"})
+    if config is not None:
+        try:
+            resolved_client, qbit_config = resolve_client_config(config, client)
+            qbit = {
+                "configured": True,
+                "client": resolved_client,
+                "torrent_client": qbit_config.get("torrent_client"),
+                "qbit_url": qbit_config.get("qbit_url"),
+                "qbit_port": qbit_config.get("qbit_port"),
+                "qui_proxy_configured": bool(qbit_config.get("qui_proxy_url")),
+                "connectivity_checked": False,
+            }
+            checks.append({"name": "qbit.config", "ok": True, "message": f"qBittorrent client config is present: {resolved_client}", "details": qbit})
+        except Exception as exc:
+            checks.append({"name": "qbit.config", "ok": False, "message": f"qBittorrent client config is not ready: {exc}", "details": qbit})
+
+    blockers = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking", True) is not False]
+    warnings = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking") is False]
+    next_actions = _deployment_next_actions(checks)
+    ready = not blockers
+    return {
+        "kind": "ptcli.deployment_check",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "ready": ready,
+        "checks": checks,
+        "blockers": blockers,
+        "warnings": warnings,
+        "next_actions": next_actions,
+        "paths": {
+            "base_dir": str(base_dir),
+            "config": str(config_path),
+            "cookies_dir": str(cookies_dir),
+            "tmp_dir": str(tmp_dir),
+            "job_dir": str(job_dir),
+            "downloads_path": str(downloads_path),
+        },
+        "qbit": qbit,
+        "connectivity_checked": False,
+    }
+
+
+def _deployment_path(path: Any, base_dir: Path) -> Path:
+    candidate = Path(str(path)).expanduser()
+    return candidate if candidate.is_absolute() else base_dir / candidate
+
+
+def _deployment_file_check(name: str, path: Path, *, required: bool) -> dict[str, Any]:
+    exists = path.is_file()
+    ok = exists or not required
+    return {
+        "name": f"path.{name}",
+        "ok": ok,
+        "blocking": required,
+        "path": str(path),
+        "message": f"{name} file is present: {path}" if exists else f"{name} file is missing: {path}",
+    }
+
+
+def _deployment_dir_check(name: str, path: Path, *, required: bool, writable: bool = False) -> dict[str, Any]:
+    exists = path.is_dir()
+    is_writable = os.access(path, os.W_OK) if exists else False
+    ok = (exists or not required) and (not writable or is_writable)
+    if not exists:
+        message = f"{name} directory is missing: {path}"
+    elif writable and not is_writable:
+        message = f"{name} directory is not writable: {path}"
+    else:
+        message = f"{name} directory is ready: {path}"
+    return {
+        "name": f"path.{name}",
+        "ok": ok,
+        "blocking": required,
+        "path": str(path),
+        "exists": exists,
+        "writable": is_writable,
+        "message": message,
+    }
+
+
+def _deployment_api_token_check() -> dict[str, Any]:
+    configured = bool(os.environ.get("PTCLI_API_TOKEN"))
+    return {
+        "name": "security.api_token",
+        "ok": configured,
+        "blocking": False,
+        "configured": configured,
+        "message": "PTCLI_API_TOKEN is configured." if configured else "PTCLI_API_TOKEN is not configured; keep the API bound to localhost or set a token before exposing it.",
+    }
+
+
+def _deployment_next_actions(checks: list[dict[str, Any]]) -> list[str]:
+    actions: list[str] = []
+    for check in checks:
+        if check.get("ok") is not False:
+            continue
+        name = str(check.get("name") or "")
+        path = check.get("path")
+        if name == "path.config":
+            actions.append(f"Mount or create data/config.py at {path}.")
+        elif name == "path.cookies_dir":
+            actions.append(f"Mount data/cookies at {path} and add source tracker cookie files such as U2.txt or CHD.txt.")
+        elif name in {"path.tmp_dir", "path.job_dir"}:
+            actions.append(f"Create the writable directory {path} or fix its permissions.")
+        elif name == "path.downloads_path":
+            actions.append(f"Mount the qBittorrent download path at {path}, matching the paths used by qBittorrent.")
+        elif name == "qbit.config":
+            actions.append("Configure DEFAULT.default_torrent_client and TORRENT_CLIENTS.<client> for qBittorrent in data/config.py.")
+        elif name == "runtime.ptcli_dependencies":
+            actions.append("Install focused ptcli dependencies from requirements-ptcli.txt or rebuild the ptcli Docker image.")
+        elif name == "security.api_token":
+            actions.append("Set PTCLI_API_TOKEN before exposing ptcli-api outside localhost.")
+    return actions
+
+
 def tools_payload() -> dict[str, Any]:
     return {
         "status": "ok",
@@ -1307,6 +1466,29 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return an OpenClaw/Hermes-friendly skill manifest with OpenAPI, tool, auth, safety, and workflow metadata.",
             "input_schema": {"type": "object", "required": [], "properties": {}},
             "response_contract": {"required_fields": ["schema_version", "base_url", "auth", "discovery", "safety", "tools", "default_workflows"]},
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "deployment_check",
+            "method": "GET",
+            "path": "/v1/deployment/check",
+            "description": "Check local ptcli deployment readiness: runtime imports, config mount, cookies/tmp/job/download paths, API token warning, and qBittorrent config presence. This does not contact trackers or qBittorrent.",
+            "input_schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                    "config": {"type": "string"},
+                    "base_dir": {"type": "string"},
+                    "cookies_dir": {"type": "string"},
+                    "job_dir": {"type": "string"},
+                    "downloads_path": {"type": "string"},
+                    "client": {"type": "string", "default": "default"},
+                },
+            },
+            "response_contract": {
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "qbit"],
+                "status_values": ["ok", "blocked"],
+            },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
     ]
@@ -1459,6 +1641,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
         },
         "discovery": {
             "health": f"{public_base_url}/health",
+            "deployment_check": f"{public_base_url}/v1/deployment/check",
             "openapi": f"{public_base_url}/openapi.json",
             "tools": f"{public_base_url}/v1/tools",
             "manifest": f"{public_base_url}/.well-known/ptcli-agent.json",
@@ -1630,6 +1813,20 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "tools": {"type": "array", "items": {"type": "object"}},
         },
     }
+    deployment_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "checks": {"type": "array", "items": {"type": "object"}},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "warnings": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+            "paths": {"type": "object"},
+            "qbit": {"type": "object"},
+        },
+    }
     return {
         "openapi": "3.1.0",
         "info": {"title": "ptcli Retorrent API", "version": "1.0.0"},
@@ -1668,6 +1865,19 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                 "get": {
                     "operationId": "getPtcliHermesSkill",
                     "responses": {"200": {"description": "Hermes-compatible ptcli skill manifest.", "content": {"application/json": {"schema": manifest_response_schema}}}},
+                }
+            },
+            "/v1/deployment/check": {
+                "get": {
+                    "operationId": "checkPtcliDeployment",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "config", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "base_dir", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "downloads_path", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "client", "in": "query", "required": False, "schema": {"type": "string"}},
+                    ],
+                    "responses": {"200": {"description": "Local deployment readiness report.", "content": {"application/json": {"schema": deployment_response_schema}}}},
                 }
             },
             "/v1/retorrent/check": {

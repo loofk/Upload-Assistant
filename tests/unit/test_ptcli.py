@@ -12547,6 +12547,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent/check" in paths
     assert "/v1/jobs/retorrent" in paths
     assert "/v1/jobs/retorrent/submit" in paths
+    assert "/v1/deployment/check" in paths
     assert "/v1/candidates/daily" in paths
     assert "/v1/jobs/candidates/daily" in paths
     assert "/v1/jobs/{job_id}" in paths
@@ -12558,6 +12559,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert tool_by_name["deployment_check"]["method"] == "GET"
+    assert "qbit" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
@@ -12569,6 +12572,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/agent-manifest" in openapi["paths"]
     assert "/v1/openclaw/skill.json" in openapi["paths"]
     assert "/v1/hermes/skill.json" in openapi["paths"]
+    assert "/v1/deployment/check" in openapi["paths"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent" in openapi["paths"]
     assert "/v1/jobs/retorrent/submit" in openapi["paths"]
@@ -12588,10 +12592,11 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["schema_version"] == "ptcli.agent_manifest.v1"
     assert manifest["base_url"] == "http://ptcli.local:8080"
     assert manifest["discovery"]["openapi"] == "http://ptcli.local:8080/openapi.json"
+    assert manifest["discovery"]["deployment_check"] == "http://ptcli.local:8080/v1/deployment/check"
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
-    assert {tool["name"] for tool in manifest["tools"]} >= {"manual_retorrent_job", "retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
     assert manual_workflow["tool"] == "manual_retorrent_job"
     retorrent_tool = next(tool for tool in manifest["tools"] if tool["name"] == "retorrent_job")
@@ -12610,8 +12615,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["schema_version"] == "ptcli.agent_manifest.v1"
         assert payload["auth"]["env"] == "PTCLI_API_TOKEN"
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
+        assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"manual_retorrent_job", "retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+        assert set(tools_by_name) >= {"deployment_check", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
+        assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
@@ -12633,6 +12640,45 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     assert "yournetwork" not in compose
     assert "PTCLI_API_TOKEN=change-me" in env_example
     assert "PTCLI_PUBLIC_BASE_URL=http://127.0.0.1:8080" in env_example
+
+
+def test_deployment_check_reports_ready_seedbox_mounts(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    tmp_dir = tmp_path / "tmp"
+    job_dir = tmp_path / "jobs"
+    downloads_dir = tmp_path / "downloads"
+    for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
+        directory.mkdir(parents=True)
+    (data_dir / "config.py").write_text(
+        "config = {'DEFAULT': {'default_torrent_client': 'qbittorrent'}, 'TORRENT_CLIENTS': {'qbittorrent': {'torrent_client': 'qbit', 'qbit_url': 'http://host.docker.internal', 'qbit_port': '8080'}}}",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TMPDIR", str(tmp_dir))
+
+    payload = ptcli_service.deployment_check_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir)})
+
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["qbit"]["configured"] is True
+    assert payload["qbit"]["qbit_url"] == "http://host.docker.internal"
+    assert payload["connectivity_checked"] is False
+    assert any(check["name"] == "security.api_token" and check["blocking"] is False for check in payload["checks"])
+
+
+def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
+    (tmp_path / "data" / "cookies").mkdir(parents=True)
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "jobs").mkdir()
+    (tmp_path / "downloads").mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp"))
+
+    payload = ptcli_service.deployment_check_payload({"base_dir": str(tmp_path), "job_dir": str(tmp_path / "jobs"), "downloads_path": str(tmp_path / "downloads")})
+
+    assert payload["status"] == "blocked"
+    assert payload["ready"] is False
+    assert any("config file is missing" in blocker for blocker in payload["blockers"])
+    assert any("Mount or create data/config.py" in action for action in payload["next_actions"])
 
 
 def test_parse_recent_candidate_seeds_from_nexusphp_html() -> None:

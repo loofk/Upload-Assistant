@@ -16,6 +16,7 @@
   },
   "discovery": {
     "health": "http://127.0.0.1:8080/health",
+    "deployment_check": "http://127.0.0.1:8080/v1/deployment/check",
     "openapi": "http://127.0.0.1:8080/openapi.json",
     "tools": "http://127.0.0.1:8080/v1/tools",
     "manifest": "http://127.0.0.1:8080/.well-known/ptcli-agent.json"
@@ -33,6 +34,47 @@
     "blocked_contract": "When rules, duplicate checks, qBittorrent evidence, or required confirmations are missing, APIs return status=blocked with blockers and next_actions."
   },
   "tools": [
+    {
+      "name": "deployment_check",
+      "method": "GET",
+      "path": "/v1/deployment/check",
+      "description": "Check local ptcli deployment readiness: runtime imports, config mount, cookies/tmp/job/download paths, API token warning, and qBittorrent config presence. This does not contact trackers or qBittorrent.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "config": {
+            "type": "string"
+          },
+          "base_dir": {
+            "type": "string"
+          },
+          "downloads_path": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string",
+            "default": "default"
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "checks",
+          "blockers",
+          "warnings",
+          "next_actions",
+          "paths",
+          "qbit"
+        ]
+      },
+      "safety": {
+        "live_upload": false
+      }
+    },
     {
       "name": "retorrent_job",
       "method": "POST",

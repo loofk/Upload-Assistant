@@ -162,6 +162,7 @@ docker compose up -d ptcli-api
 
 # 检查 API 服务
 curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/v1/deployment/check
 curl http://127.0.0.1:8080/v1/tools
 docker compose ps ptcli-api
 
