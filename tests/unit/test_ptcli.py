@@ -12891,7 +12891,7 @@ def test_doctor_accepts_resume_files_for_live_closure(tmp_path) -> None:
     content_path = tmp_path / "downloads" / "Name"
     content_path.mkdir(parents=True)
     source_torrent = tmp_path / "U2-60635.torrent"
-    source_torrent.write_bytes(b"d4:infod")
+    write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
@@ -12937,6 +12937,60 @@ def test_doctor_accepts_resume_files_for_live_closure(tmp_path) -> None:
     assert any(check["name"] == "download_uploaded_torrent" and check["ok"] is True and "already available" in check["message"] for check in payload["checks"])
 
 
+def test_doctor_uploaded_torrent_file_resume_blocks_unreadable_metadata(tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "U2.txt").write_text("uid=1;", encoding="utf-8")
+    content_path = tmp_path / "downloads" / "Name"
+    content_path.mkdir(parents=True)
+    uploaded_torrent = tmp_path / "MTEAM-999.torrent"
+    uploaded_torrent.write_bytes(b"d4:infod")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+    }
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Name.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": None,
+        "douban_id": None,
+        "douban_url": None,
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+    }
+    package = write_material_ready_mteam_package(source_info, tmp_path, content_path=str(content_path), output_dir=str(tmp_path / "target"))
+
+    payload = build_doctor_check(
+        config,
+        source_tracker="U2",
+        source_id="60635",
+        target_trackers="MTEAM",
+        client="default",
+        base_dir=str(tmp_path),
+        content_path=str(content_path),
+        package_dir=package["package_dir"],
+        uploaded_torrent_file=str(uploaded_torrent),
+        accept_rules=True,
+        target_execute=True,
+        confirm_upload=True,
+        inject_uploaded_torrent=True,
+        uploaded_save_path=str(content_path),
+        wait_uploaded_complete=True,
+    )
+
+    uploaded_check = next(check for check in payload["checks"] if check["name"] == "uploaded_torrent_file")
+    assert payload["ready"] is False
+    assert payload["live_safe_to_attempt"] is False
+    assert uploaded_check["ok"] is False
+    assert uploaded_check["path"] == str(uploaded_torrent)
+    assert uploaded_check["metadata_readable"] is False
+    assert "Torrent metadata is not readable" in uploaded_check["message"]
+    assert any("Fix uploaded_torrent_file" in action for action in payload["next_actions"])
+
+
 def test_doctor_resume_files_still_require_target_materials(tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -12944,7 +12998,7 @@ def test_doctor_resume_files_still_require_target_materials(tmp_path) -> None:
     content_path = tmp_path / "downloads" / "Name"
     content_path.mkdir(parents=True)
     source_torrent = tmp_path / "U2-60635.torrent"
-    source_torrent.write_bytes(b"d4:infod")
+    write_valid_torrent(source_torrent, tmp_path / "source-content" / "Name.mkv")
     uploaded_torrent = make_mteam_safe_torrent(tmp_path, "uploaded-resume")
     config = {
         "DEFAULT": {"default_torrent_client": "qbittorrent"},

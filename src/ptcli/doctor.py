@@ -236,7 +236,27 @@ def _torrent_file_check(name: str, torrent_file: str | None, required: bool) -> 
     if not path.is_file():
         return _check(name, False, f"Torrent path is not a file: {path}")
     data = path.read_bytes()
-    return _check(name, data.startswith(b"d"), f"Torrent file: {path}" if data.startswith(b"d") else f"Torrent file does not look like a .torrent file: {path}")
+    if not data.startswith(b"d"):
+        return {**_check(name, False, f"Torrent file does not look like a .torrent file: {path}"), "path": str(path), "size_bytes": len(data), "metadata_readable": False}
+    try:
+        from torf import Torrent
+
+        torrent = Torrent.read(str(path), validate=False)
+    except Exception as exc:
+        return {
+            **_check(name, False, f"Torrent metadata is not readable: {path} ({exc})"),
+            "path": str(path),
+            "size_bytes": len(data),
+            "metadata_readable": False,
+        }
+    torrent_hash = str(getattr(torrent, "infohash", "") or "").lower()
+    return {
+        **_check(name, bool(torrent_hash), f"Torrent file metadata is readable: {path}" if torrent_hash else f"Torrent infohash is unavailable: {path}"),
+        "path": str(path),
+        "size_bytes": len(data),
+        "metadata_readable": bool(torrent_hash),
+        "torrent_hash": torrent_hash or None,
+    }
 
 
 def _package_preflight(package_dir: str | None, target_execute: bool, target_torrent_file: str | None, *, recover_uploaded: bool = False) -> dict[str, Any] | None:
