@@ -11190,6 +11190,9 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
     uploaded_followup = readiness_summary.get("uploaded_followup") if isinstance(readiness_summary.get("uploaded_followup"), dict) else {}
     uploaded_wait_query = uploaded_followup.get("uploaded_wait_query") if isinstance(uploaded_followup.get("uploaded_wait_query"), dict) else {}
     uploaded_wait_retry = uploaded_followup.get("wait_retry") if isinstance(uploaded_followup.get("wait_retry"), dict) else {}
+    uploaded_torrent_evidence = uploaded_followup.get("uploaded_torrent_file_evidence") if isinstance(uploaded_followup.get("uploaded_torrent_file_evidence"), dict) else {}
+    uploaded_followup_gates = uploaded_followup.get("gates") if isinstance(uploaded_followup.get("gates"), dict) else {}
+    uploaded_followup_next_actions = _string_list(uploaded_followup.get("next_actions"))
     return {
         "PTCLI_READINESS_STATUS": readiness_summary.get("status"),
         "PTCLI_READINESS_READY": _shell_bool(readiness_summary.get("ready")) if readiness_summary.get("ready") is not None else None,
@@ -11342,9 +11345,12 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_READY_FOR_SEEDING": _shell_bool(uploaded_followup.get("ready_for_uploaded_seeding"))
         if uploaded_followup.get("ready_for_uploaded_seeding") is not None
         else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_GATES": json.dumps(uploaded_followup_gates, ensure_ascii=False) if uploaded_followup_gates else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_MISSING": ",".join(_string_list(uploaded_followup.get("missing"))),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_BLOCKERS": "|".join(_string_list(uploaded_followup.get("blockers"))),
-        "PTCLI_READINESS_UPLOADED_FOLLOWUP_NEXT_ACTIONS": " | ".join(_string_list(uploaded_followup.get("next_actions"))),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_NEXT_ACTION_COUNT": len(uploaded_followup_next_actions),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_FIRST_NEXT_ACTION": uploaded_followup_next_actions[0] if uploaded_followup_next_actions else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_NEXT_ACTIONS": " | ".join(uploaded_followup_next_actions),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_UPLOADED": _shell_bool(uploaded_followup.get("uploaded")) if uploaded_followup.get("uploaded") is not None else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_DOWNLOADED": _shell_bool(uploaded_followup.get("downloaded")) if uploaded_followup.get("downloaded") is not None else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_INJECTED": _shell_bool(uploaded_followup.get("injected")) if uploaded_followup.get("injected") is not None else None,
@@ -11366,6 +11372,15 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         if uploaded_followup.get("rule_obligations_ready") is not None
         else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_FILE": uploaded_followup.get("uploaded_torrent_file"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_EXISTS": _shell_bool(uploaded_torrent_evidence.get("exists")) if uploaded_torrent_evidence.get("exists") is not None else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_IS_FILE": _shell_bool(uploaded_torrent_evidence.get("is_file")) if uploaded_torrent_evidence.get("is_file") is not None else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_SIZE_BYTES": uploaded_torrent_evidence.get("size_bytes"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_SHA1": uploaded_torrent_evidence.get("sha1"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_INFOHASH": uploaded_torrent_evidence.get("torrent_hash"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_METADATA_READABLE": _shell_bool(uploaded_torrent_evidence.get("metadata_readable"))
+        if uploaded_torrent_evidence.get("metadata_readable") is not None
+        else None,
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_REUSED": _shell_bool(uploaded_torrent_evidence.get("reused")) if uploaded_torrent_evidence.get("reused") is not None else None,
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_SAVE_PATH": uploaded_followup.get("uploaded_save_path"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_HASH": uploaded_wait_query.get("torrent_hash"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_CONTENT_PATH": uploaded_wait_query.get("content_path"),
@@ -11379,6 +11394,7 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH": uploaded_wait_retry.get("suggested_torrent_hash"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH": uploaded_wait_retry.get("suggested_content_path"),
         "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH": uploaded_wait_retry.get("suggested_save_path"),
+        "PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_RETRY_REASON": uploaded_wait_retry.get("reason"),
     }
 
 

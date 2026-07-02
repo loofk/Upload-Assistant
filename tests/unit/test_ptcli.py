@@ -2980,12 +2980,21 @@ def test_readiness_source_followup_summary_exposes_source_seeding_state() -> Non
 def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
     uploaded_hash = "a" * 40
     retry_hash = "b" * 40
+    torrent_sha1 = "c" * 40
     fields = ptcli_cli._summary_check_readiness_shell_fields(
         {
             "uploaded_followup": {
                 "present": True,
                 "ready": False,
                 "ready_for_uploaded_seeding": False,
+                "gates": {
+                    "uploaded": True,
+                    "downloaded": True,
+                    "injected": False,
+                    "injection_visible_in_client": False,
+                    "injection_verified": False,
+                    "uploaded_wait_evidence": False,
+                },
                 "missing": ["injected_torrent_hash", "injection_visible_in_client", "uploaded_wait_evidence"],
                 "blockers": ["uploaded MTEAM torrent is not visible in qBittorrent after injection", "qBittorrent has not reported the uploaded MTEAM torrent as complete"],
                 "next_actions": ["Inject the uploaded MTEAM torrent into qBittorrent.", "Wait for qBittorrent to report the uploaded MTEAM torrent as complete."],
@@ -3002,6 +3011,15 @@ def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
                 "duplicate_clean": True,
                 "rule_obligations_ready": True,
                 "uploaded_torrent_file": "/tmp/MTEAM-999.torrent",
+                "uploaded_torrent_file_evidence": {
+                    "exists": True,
+                    "is_file": True,
+                    "size_bytes": 1234,
+                    "sha1": torrent_sha1,
+                    "torrent_hash": uploaded_hash,
+                    "metadata_readable": True,
+                    "reused": False,
+                },
                 "uploaded_save_path": "/downloads/Example",
                 "uploaded_wait_query": {"torrent_hash": uploaded_hash, "content_path": "/downloads/Example", "timeout": 42.0, "interval": 3.0},
                 "qbit_wait_mismatch": True,
@@ -3011,6 +3029,7 @@ def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
                     "suggested_torrent_hash": retry_hash,
                     "suggested_content_path": "/downloads/Other",
                     "suggested_save_path": "/downloads",
+                    "reason": "uploaded wait matched a different torrent hash",
                 },
             }
         }
@@ -3019,8 +3038,18 @@ def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_PRESENT"] == "1"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_READY"] == "0"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_READY_FOR_SEEDING"] == "0"
+    assert json.loads(fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_GATES"]) == {
+        "uploaded": True,
+        "downloaded": True,
+        "injected": False,
+        "injection_visible_in_client": False,
+        "injection_verified": False,
+        "uploaded_wait_evidence": False,
+    }
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_MISSING"] == "injected_torrent_hash,injection_visible_in_client,uploaded_wait_evidence"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_BLOCKERS"] == "uploaded MTEAM torrent is not visible in qBittorrent after injection|qBittorrent has not reported the uploaded MTEAM torrent as complete"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_NEXT_ACTION_COUNT"] == 2
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_FIRST_NEXT_ACTION"] == "Inject the uploaded MTEAM torrent into qBittorrent."
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_NEXT_ACTIONS"] == "Inject the uploaded MTEAM torrent into qBittorrent. | Wait for qBittorrent to report the uploaded MTEAM torrent as complete."
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_UPLOADED"] == "1"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_DOWNLOADED"] == "1"
@@ -3035,6 +3064,13 @@ def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_DUPLICATE_CLEAN"] == "1"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_RULES_READY"] == "1"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_FILE"] == "/tmp/MTEAM-999.torrent"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_EXISTS"] == "1"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_IS_FILE"] == "1"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_SIZE_BYTES"] == 1234
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_SHA1"] == torrent_sha1
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_INFOHASH"] == uploaded_hash
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_METADATA_READABLE"] == "1"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_REUSED"] == "0"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_SAVE_PATH"] == "/downloads/Example"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_HASH"] == uploaded_hash
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_QUERY_CONTENT_PATH"] == "/downloads/Example"
@@ -3046,6 +3082,7 @@ def test_readiness_shell_fields_export_uploaded_followup_state() -> None:
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_HASH"] == retry_hash
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_CONTENT_PATH"] == "/downloads/Other"
     assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_SUGGESTED_SAVE_PATH"] == "/downloads"
+    assert fields["PTCLI_READINESS_UPLOADED_FOLLOWUP_WAIT_RETRY_REASON"] == "uploaded wait matched a different torrent hash"
 
 
 def test_readiness_shell_fields_export_source_followup_state() -> None:
@@ -21383,6 +21420,14 @@ async def test_target_upload_injects_downloaded_torrent(monkeypatch, tmp_path, c
     assert "export PTCLI_UPLOADED_FOLLOWUP_TORRENT_METADATA_READABLE=1\n" in out
     assert f"export PTCLI_UPLOADED_FOLLOWUP_TORRENT_INFOHASH={uploaded_hash}\n" in out
     assert "export PTCLI_UPLOADED_FOLLOWUP_SAVE_PATH=/downloads/Example\n" in out
+    assert "export PTCLI_READINESS_UPLOADED_FOLLOWUP_READY=1\n" in out
+    assert "export PTCLI_READINESS_UPLOADED_FOLLOWUP_READY_FOR_SEEDING=1\n" in out
+    assert "export PTCLI_READINESS_UPLOADED_FOLLOWUP_GATES=" in out
+    assert "export PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_EXISTS=1\n" in out
+    assert "export PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_IS_FILE=1\n" in out
+    assert "export PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_METADATA_READABLE=1\n" in out
+    assert f"export PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_INFOHASH={uploaded_hash}\n" in out
+    assert f"export PTCLI_READINESS_UPLOADED_FOLLOWUP_TORRENT_HASH={uploaded_hash}\n" in out
     assert f"export PTCLI_TARGET_UPLOAD_TORRENT_HASH={uploaded_hash}\n" in out
     assert f"export PTCLI_TARGET_UPLOAD_TORRENT_PATH={str(tmp_path / 'MTEAM-999.torrent')}\n" in out
     assert f"export PTCLI_TARGET_UPLOAD_INJECTED_HASH={uploaded_hash}\n" in out
