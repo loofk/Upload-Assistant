@@ -5183,9 +5183,10 @@ def test_run_summary_resume_commands_use_source_qbit_wait_retry_hint() -> None:
 
     commands = {command["stage"]: command for command in ptcli_cli._run_summary_resume_commands(payload, artifacts)}
 
+    assert "--path /downloads/ObservedSource" in commands["resume-source-torrent"]["command"]
     assert "--save-path /downloads" in commands["resume-source-torrent"]["command"]
     assert "/downloads" in commands["resume-source-torrent"]["argv"]
-    assert "/downloads/ObservedSource" not in commands["resume-source-torrent"]["argv"]
+    assert "/downloads/ObservedSource" in commands["resume-source-torrent"]["argv"]
     assert "/verified/source" not in commands["resume-source-torrent"]["argv"]
 
 
@@ -5253,6 +5254,34 @@ def test_run_summary_resume_commands_include_source_download_retry_without_torre
     assert "--base-dir /tmp/base" in command
     assert "--client seedbox" in command
     assert "--summary-output-dir /tmp/summary" in command
+
+
+def test_run_summary_resume_commands_use_source_qbit_wait_retry_hint_without_torrent_file() -> None:
+    payload = {
+        "source_tracker": "U2",
+        "source_torrent_id": "60635",
+        "target_trackers": ["MTEAM"],
+        "client": "default",
+        "source_save_path": "/verified/source",
+        "effective_actions": {"live_target_upload": True, "download_source": True, "inject_source": True, "wait_complete": True},
+    }
+    artifacts = {
+        "qbit_wait_retry_hints": {
+            "source": {
+                "retry_recommended": True,
+                "suggested_torrent_hash": "f" * 40,
+                "suggested_content_path": "/downloads/ObservedSource",
+                "suggested_save_path": "/downloads",
+            }
+        }
+    }
+
+    commands = {command["stage"]: command for command in ptcli_cli._run_summary_resume_commands(payload, artifacts)}
+
+    assert "--path /downloads/ObservedSource" in commands["resume-source-download"]["command"]
+    assert "--save-path /downloads" in commands["resume-source-download"]["command"]
+    assert "/downloads/ObservedSource" in commands["resume-source-download"]["argv"]
+    assert "/verified/source" not in commands["resume-source-download"]["argv"]
 
 
 def test_run_summary_resume_commands_include_target_torrent_export_retry() -> None:

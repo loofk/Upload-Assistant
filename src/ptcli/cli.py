@@ -3061,6 +3061,11 @@ def _source_qbit_wait_retry_save_path(hint: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _source_qbit_wait_retry_content_path(hint: dict[str, Any]) -> str | None:
+    value = hint.get("suggested_content_path")
+    return value if isinstance(value, str) and value else None
+
+
 def _qbit_wait_retry_save_path(hint: dict[str, Any]) -> str | None:
     for key in ("suggested_content_path", "suggested_save_path"):
         value = hint.get(key)
@@ -8609,11 +8614,11 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
     wait_options = payload.get("wait_options") if isinstance(payload.get("wait_options"), dict) else {}
     source_wait_options = wait_options.get("source") if isinstance(wait_options.get("source"), dict) else {}
     uploaded_wait_options = wait_options.get("uploaded") if isinstance(wait_options.get("uploaded"), dict) else {}
-    content_path = payload.get("path")
-    path_args = ["--path", str(content_path)] if content_path else []
     qbit_retry_hints = artifacts.get("qbit_wait_retry_hints") if isinstance(artifacts.get("qbit_wait_retry_hints"), dict) else {}
     source_retry_hint = qbit_retry_hints.get("source") if isinstance(qbit_retry_hints.get("source"), dict) and qbit_retry_hints.get("source", {}).get("retry_recommended") is True else {}
     uploaded_retry_hint = qbit_retry_hints.get("uploaded") if isinstance(qbit_retry_hints.get("uploaded"), dict) and qbit_retry_hints.get("uploaded", {}).get("retry_recommended") is True else {}
+    content_path = _source_qbit_wait_retry_content_path(source_retry_hint) or payload.get("path")
+    path_args = ["--path", str(content_path)] if content_path else []
     source_save_path = artifacts.get("source_save_path") or payload.get("source_save_path") or content_path or "/downloads"
     source_save_path = _source_qbit_wait_retry_save_path(source_retry_hint) or source_save_path
     uploaded_save_path = artifacts.get("uploaded_save_path") or content_path
@@ -8665,6 +8670,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
             *base_dir_args,
             "--client",
             client,
+            *path_args,
             "--download-source",
             "--output-dir",
             str(source_output_dir),
@@ -8699,6 +8705,7 @@ def _run_summary_resume_commands(payload: dict[str, Any], artifacts: dict[str, A
                     *base_dir_args,
                     "--client",
                     client,
+                    *path_args,
                     "--source-torrent-file",
                     str(source_torrent_file),
                     "--inject-source",
