@@ -4185,6 +4185,57 @@ async def test_reference_source_info_parses_plain_external_ids(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
+async def test_reference_source_info_decodes_redirected_external_ids(monkeypatch, tmp_path) -> None:
+    cookies_dir = tmp_path / "data" / "cookies"
+    cookies_dir.mkdir(parents=True)
+    (cookies_dir / "CHD.txt").write_text("uid=1;", encoding="utf-8")
+    html = """
+    <html>
+      <head><title>CHD Reference</title></head>
+      <body>
+        <h1>CHD.Redirected.2024.1080p.BluRay-GROUP</h1>
+        <a href="/redirect.php?url=https%3A%2F%2Fwww.imdb.com%2Ftitle%2Ftt7654321%2F&amp;site=imdb">IMDb链接</a>
+        <a href="/redirect.php?url=https%3A%2F%2Fwww.themoviedb.org%2Fmovie%2F98765&amp;site=tmdb">TMDb链接</a>
+        <a href="/redirect.php?url=https%3A%2F%2Fmovie.douban.com%2Fsubject%2F3541415%2F&amp;site=douban">豆瓣链接</a>
+        <table>
+          <tr><td>特征码</td><td>1234567890ABCDEF1234567890ABCDEF12345678</td></tr>
+        </table>
+      </body>
+    </html>
+    """
+
+    class FakeResponse:
+        text = html
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def get(self, url):
+            assert url == "https://ptchdbits.co/details.php?id=2468"
+            return FakeResponse()
+
+    monkeypatch.setattr(ptcli_source.httpx, "AsyncClient", FakeClient)
+
+    info = await ptcli_source.fetch_source_info({}, "CHD", "2468", base_dir=str(tmp_path))
+
+    assert info.imdb_id == 7654321
+    assert info.tmdb_id == 98765
+    assert info.douban_id == "3541415"
+    assert info.douban_url == "https://movie.douban.com/subject/3541415/"
+    assert info.torrenthash == "1234567890abcdef1234567890abcdef12345678"
+
+
+@pytest.mark.asyncio
 async def test_reference_source_info_preserves_ptgen_description(monkeypatch, tmp_path) -> None:
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)

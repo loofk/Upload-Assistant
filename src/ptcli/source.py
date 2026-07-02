@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import html as html_lib
 import os
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import unquote
 
 import aiofiles
 import httpx
@@ -301,7 +303,7 @@ async def _fetch_generic_source_info(config: dict[str, Any], tracker: str, torre
         imdb_id=_extract_imdb_id(response.text, page_text),
         tmdb_id=_extract_tmdb_id(response.text, page_text),
         name=_extract_generic_name(soup, page_text),
-        torrenthash=_extract_torrent_hash(page_text),
+        torrenthash=_extract_torrent_hash(page_text, response.text),
         description_length=len(description),
         douban_id=douban_id,
         douban_url=douban_url,
@@ -327,32 +329,47 @@ def _extract_id_from_url(value: Any, pattern: str) -> int | None:
     return _extract_first_int(pattern, value)
 
 
+def _decoded_search_text(*parts: str | None) -> str:
+    candidates: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        raw = str(part)
+        candidates.append(raw)
+        decoded = raw
+        for _ in range(3):
+            next_decoded = html_lib.unescape(unquote(decoded))
+            if next_decoded == decoded:
+                break
+            decoded = next_decoded
+            candidates.append(decoded)
+    return "\n".join(candidates)
+
+
 def _extract_imdb_id(html: str, page_text: str) -> int | None:
+    search_text = _decoded_search_text(html, page_text)
     for pattern in (
         r"imdb\.com/title/tt(\d{5,10})",
         r"\btt(\d{5,10})\b",
+        r"imdb[^0-9t]{0,80}(?:tt)?(\d{5,10})\b",
         r"\bimdb(?:[_\s-]*id)?\b[^0-9t]{0,40}(?:tt)?(\d{5,10})\b",
     ):
-        value = _extract_first_int(pattern, html)
+        value = _extract_first_int(pattern, search_text)
         if value:
             return value
-    return _extract_first_int(r"\bimdb(?:[_\s-]*id)?\b[^0-9t]{0,40}(?:tt)?(\d{5,10})\b", page_text)
+    return None
 
 
 def _extract_tmdb_id(html: str, page_text: str) -> int | None:
+    search_text = _decoded_search_text(html, page_text)
     for pattern in (
         r"themoviedb\.org/(?:movie|tv)/(\d{2,10})",
+        r"tmdb(?:[_\s-]*(?:id|编号|鏈接|链接))?[^0-9]{0,80}(\d{2,10})\b",
         r"\btmdb(?:[_\s-]*id)?\b[^0-9]{0,40}(\d{2,10})\b",
+        r"themoviedb[^0-9]{0,80}(\d{2,10})\b",
         r"\bthe\s*movie\s*db\b[^0-9]{0,40}(\d{2,10})\b",
     ):
-        value = _extract_first_int(pattern, html)
-        if value:
-            return value
-    for pattern in (
-        r"\btmdb(?:[_\s-]*id)?\b[^0-9]{0,40}(\d{2,10})\b",
-        r"\bthe\s*movie\s*db\b[^0-9]{0,40}(\d{2,10})\b",
-    ):
-        value = _extract_first_int(pattern, page_text)
+        value = _extract_first_int(pattern, search_text)
         if value:
             return value
     return None
@@ -372,9 +389,10 @@ def _extract_douban_from_value(value: Any) -> tuple[str | None, str | None]:
 
 
 def _extract_douban(page_text: str, html: str) -> tuple[str | None, str | None]:
-    match = re.search(r"douban\.com/subject/(\d+)", html, flags=re.IGNORECASE)
+    search_text = _decoded_search_text(html, page_text)
+    match = re.search(r"douban\.com/subject/(\d+)", search_text, flags=re.IGNORECASE)
     if not match:
-        match = re.search(r"(?:douban|豆瓣)[^\d]{0,32}(\d{5,})", page_text, flags=re.IGNORECASE)
+        match = re.search(r"(?:douban|豆瓣(?:编号|鏈接|链接)?)[^\d]{0,80}(\d{5,})", search_text, flags=re.IGNORECASE)
     if not match:
         return None, None
     douban_id = match.group(1)
@@ -397,9 +415,16 @@ def _extract_generic_name(soup: BeautifulSoup, page_text: str) -> str | None:
     return first_line[:240] or None
 
 
-def _extract_torrent_hash(page_text: str) -> str | None:
-    match = re.search(r"(?:info\s*hash|torrent\s*hash|hash)[^A-Fa-f0-9]{0,48}([A-Fa-f0-9]{40})", page_text, flags=re.IGNORECASE)
-    return match.group(1).lower() if match else None
+def _extract_torrent_hash(page_text: str, html: str | None = None) -> str | None:
+    search_text = _decoded_search_text(page_text, html)
+    for pattern in (
+        r"(?:info\s*hash|infohash|torrent\s*hash|torrenthash|hash\s*(?:码|碼|值)?)[^A-Fa-f0-9]{0,48}([A-Fa-f0-9]{40})",
+        r"(?:种子\s*(?:hash|哈希)|種子\s*(?:hash|哈希)|信息\s*(?:hash|哈希)|特征码|特徵碼|哈希(?:值|码|碼)?|散列值?)[^A-Fa-f0-9]{0,48}([A-Fa-f0-9]{40})",
+    ):
+        match = re.search(pattern, search_text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+    return None
 
 
 def _extract_generic_description(soup: BeautifulSoup, page_text: str) -> str:
