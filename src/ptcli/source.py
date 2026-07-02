@@ -9,7 +9,7 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 import aiofiles
 import httpx
@@ -65,6 +65,35 @@ GENERIC_DETAILS_BASE_URLS: dict[str, str] = {
     "TTG": "https://totheglory.im",
     "U2": "https://u2.dmhy.org",
 }
+
+MTEAM_DETAIL_HOSTS: frozenset[str] = frozenset({"m-team.cc", "kp.m-team.cc", "pt.m-team.cc", "api.m-team.cc"})
+
+
+def _tracker_url_hosts() -> dict[str, str]:
+    hosts: dict[str, str] = {}
+    url_maps = (GENERIC_DETAILS_BASE_URLS, NEXUS_DOWNLOAD_BASE_URLS, TTG_DOWNLOAD_BASE_URLS, MTEAM_API_TRACKERS)
+    for url_map in url_maps:
+        for tracker, base_url in url_map.items():
+            _register_tracker_host(hosts, tracker, urlparse(base_url).hostname)
+    for template in COOKIE_DOWNLOAD_URLS.values():
+        _register_tracker_host(hosts, "HDS", urlparse(template).hostname)
+    for host in MTEAM_DETAIL_HOSTS:
+        _register_tracker_host(hosts, "MTEAM", host)
+    return hosts
+
+
+def _register_tracker_host(hosts: dict[str, str], tracker: str, host: str | None) -> None:
+    if not host:
+        return
+    normalized = host.lower().strip()
+    if not normalized:
+        return
+    hosts[normalized] = tracker
+    if normalized.startswith("www."):
+        hosts[normalized.removeprefix("www.")] = tracker
+
+
+TRACKER_URL_HOSTS: dict[str, str] = _tracker_url_hosts()
 
 
 def source_info_adapter(tracker: str) -> str | None:
@@ -131,15 +160,61 @@ def extract_torrent_id(value: str) -> str:
     raw_value = value.strip()
     if not raw_value:
         raise ValueError("Torrent id is required.")
-    query_match = re.search(r"[?&]id=(\d+)", raw_value)
+    query_match = re.search(r"[?&](?:id|torrentid|torrent_id|tid)=(\d+)", raw_value, flags=re.IGNORECASE)
     if query_match:
         return query_match.group(1)
-    path_match = re.search(r"/details/(\d+)", raw_value)
-    if path_match:
-        return path_match.group(1)
+    for pattern in (
+        r"/details/(\d+)",
+        r"/detail/(\d+)",
+        r"/torrent/(\d+)",
+        r"/torrents/(\d+)",
+        r"/download/(\d+)",
+        r"/dl/(\d+)",
+    ):
+        path_match = re.search(pattern, raw_value, flags=re.IGNORECASE)
+        if path_match:
+            return path_match.group(1)
     if raw_value.isdigit():
         return raw_value
     raise ValueError(f"Could not extract torrent id from: {value}")
+
+
+def infer_tracker_from_url(value: str) -> str:
+    """Infer a focused tracker code from a source details/download URL."""
+    raw_value = value.strip()
+    if not raw_value:
+        raise ValueError("Source URL is required.")
+    parsed = urlparse(raw_value if "://" in raw_value else f"https://{raw_value}")
+    host = (parsed.hostname or "").lower().strip()
+    if not host:
+        raise ValueError(f"Could not infer tracker from source URL: {value}")
+    candidates = [host]
+    if host.startswith("www."):
+        candidates.append(host.removeprefix("www."))
+    for candidate in candidates:
+        if candidate in TRACKER_URL_HOSTS:
+            return TRACKER_URL_HOSTS[candidate]
+    for known_host, tracker in TRACKER_URL_HOSTS.items():
+        if host.endswith(f".{known_host}"):
+            return tracker
+    raise ValueError(f"Unsupported or unknown source tracker host: {host}")
+
+
+def resolve_source_reference(value: str, tracker: str | None = None) -> dict[str, Any]:
+    """Normalize a user/API source reference into tracker, torrent id, and details URL."""
+    source_tracker = normalize_tracker(tracker) if tracker else infer_tracker_from_url(value)
+    torrent_id = extract_torrent_id(value)
+    raw_value = value.strip()
+    parsed = urlparse(raw_value)
+    details_url = raw_value if parsed.scheme and parsed.netloc else source_details_url(source_tracker, torrent_id)
+    return {
+        "tracker": source_tracker,
+        "source_id": torrent_id,
+        "torrent_id": torrent_id,
+        "requested_source": value,
+        "details_url": details_url,
+        "inferred_tracker": tracker is None,
+    }
 
 
 def create_source_meta(base_dir: str | None = None) -> dict[str, Any]:

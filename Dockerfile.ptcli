@@ -30,4 +30,6 @@ RUN chmod +x /Upload-Assistant/ptcli.py && \
     mkdir -p /Upload-Assistant/data/cookies /Upload-Assistant/tmp && \
     chmod 777 /Upload-Assistant/tmp
 
+EXPOSE 8080
+
 ENTRYPOINT ["python", "/Upload-Assistant/ptcli.py"]

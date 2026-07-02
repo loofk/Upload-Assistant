@@ -12,6 +12,7 @@ from torf import Torrent
 import src.ptcli.cli as ptcli_cli
 import src.ptcli.doctor as ptcli_doctor
 import src.ptcli.metadata as ptcli_metadata
+import src.ptcli.service as ptcli_service
 import src.ptcli.source as ptcli_source
 import src.ptcli.target as ptcli_target
 from src.ptcli.cli import _with_captured_stdout, build_parser, build_plan, main
@@ -23,7 +24,7 @@ from src.ptcli.materials import find_primary_media_file, generate_bdinfo_materia
 from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, load_ptgen_description_override, normalize_metadata_overrides
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summarize_torrent
 from src.ptcli.rules import build_rule_check
-from src.ptcli.source import create_source_meta, extract_torrent_id, source_info_from_tuple
+from src.ptcli.source import create_source_meta, extract_torrent_id, infer_tracker_from_url, resolve_source_reference, source_info_from_tuple
 from src.ptcli.target import (
     build_mteam_description_draft,
     build_mteam_field_mapping,
@@ -339,6 +340,7 @@ def test_help_points_to_capability_matrix() -> None:
     parser = build_parser()
     subparsers = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction)).choices
 
+    assert "serve" in subparsers
     source_info_help = subparsers["source-info"].format_help()
     assert "ptcli sites" in source_info_help
     assert "--json" in source_info_help
@@ -346,6 +348,16 @@ def test_help_points_to_capability_matrix() -> None:
     assert "enabled ptcli retorrent flow" in subparsers["flow-check"].format_help()
     assert "full live closure sources" in subparsers["retorrent"].format_help()
     assert "full live closure pipeline" in subparsers["retorrent"].format_help()
+    assert "JSON API service" in subparsers["serve"].format_help()
+
+
+def test_serve_parser_accepts_api_options() -> None:
+    args = build_parser().parse_args(["serve", "--host", "0.0.0.0", "--port", "18080", "--api-token", "secret"])
+
+    assert args.command == "serve"
+    assert args.host == "0.0.0.0"
+    assert args.port == 18080
+    assert args.api_token == "secret"
 
 
 def test_pipeline_help_describes_live_closure_defaults() -> None:
@@ -12142,6 +12154,95 @@ def test_extract_torrent_id_from_supported_inputs() -> None:
     assert extract_torrent_id("12345") == "12345"
     assert extract_torrent_id("https://u2.dmhy.org/details.php?id=60635&hit=1") == "60635"
     assert extract_torrent_id("https://kp.m-team.cc/details/111") == "111"
+    assert extract_torrent_id("https://kp.m-team.cc/detail/222") == "222"
+    assert extract_torrent_id("https://totheglory.im/dl/333/passkey") == "333"
+
+
+def test_infer_tracker_from_source_url_hosts() -> None:
+    assert infer_tracker_from_url("https://u2.dmhy.org/details.php?id=60635") == "U2"
+    assert infer_tracker_from_url("https://ptchdbits.co/details.php?id=12345") == "CHD"
+    assert infer_tracker_from_url("https://www.tjupt.org/details.php?id=6789") == "TJUPT"
+    assert infer_tracker_from_url("https://kp.m-team.cc/details/111") == "MTEAM"
+
+
+def test_resolve_source_reference_uses_explicit_tracker_for_numeric_id() -> None:
+    reference = resolve_source_reference("60635", "U2")
+
+    assert reference["tracker"] == "U2"
+    assert reference["source_id"] == "60635"
+    assert reference["details_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert reference["inferred_tracker"] is False
+
+
+def test_service_duplicate_check_builds_pipeline_args_from_source_url() -> None:
+    args, normalized, argv = ptcli_service._pipeline_check_args(
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "client": "seedbox",
+            "accept_rules": True,
+            "enrich_metadata": True,
+        }
+    )
+
+    assert args.command == "pipeline"
+    assert args.source_tracker == "U2"
+    assert args.source_id == "60635"
+    assert args.target_trackers == "MTEAM"
+    assert args.check_dupes is True
+    assert args.accept_rules is True
+    assert args.enrich_metadata is True
+    assert normalized["source"]["details_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert normalized["execute"] is False
+    assert argv[:7] == ["pipeline", "--from", "U2", "--source-id", "60635", "--to", "MTEAM"]
+
+
+def test_service_execute_builds_retorrent_args_with_live_confirmations() -> None:
+    args, normalized, argv = ptcli_service._retorrent_execute_args(
+        {
+            "source": "https://ptchdbits.co/details.php?id=12345",
+            "target": "MTEAM",
+            "execute": True,
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+            "uploaded_qbit_category": "MTEAM",
+            "uploaded_qbit_tags": "retorrent",
+            "tmdb_type": "movie",
+        }
+    )
+
+    assert args.command == "retorrent"
+    assert args.source_tracker == "CHD"
+    assert args.source_id == "12345"
+    assert args.execute is True
+    assert args.accept_rules is True
+    assert args.confirm_upload is True
+    assert args.save_path == "/downloads"
+    assert args.uploaded_qbit_category == "MTEAM"
+    assert args.uploaded_qbit_tags == "retorrent"
+    assert args.tmdb_type == "movie"
+    assert normalized["execute"] is True
+    assert "--confirm-upload" in argv
+
+
+def test_service_duplicate_check_summary_marks_existing_target_seed() -> None:
+    summary = ptcli_service._duplicate_check(
+        {
+            "stages": [
+                {
+                    "stage": "target-dupe-check",
+                    "ok": True,
+                    "result": {"searched": True, "count": 1, "dupes": [{"id": "999", "name": "Existing"}]},
+                }
+            ]
+        }
+    )
+
+    assert summary["searched"] is True
+    assert summary["exists"] is True
+    assert summary["status"] == "exists"
+    assert summary["count"] == 1
 
 
 def test_source_info_from_tuple_includes_meta_side_effects() -> None:

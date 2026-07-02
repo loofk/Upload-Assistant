@@ -44,6 +44,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 ## AI 友好输出
 
 - 关键命令支持 `--json`。
+- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、`/v1/retorrent/check` 和 `/v1/retorrent`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
 - `sites --json` 暴露每个站点的 `source_info`、`source_info_adapter`、`source_download`、`source_download_adapter`、`credential_requirements`、`target_upload`、`full_live_closure_to_mteam` 能力。
 - `rule-check --json` 暴露 `rule_obligations[].review_scope.required_confirmations`，供 agent 在 live 前逐项提示人工确认。
 - `flow-check --json` 暴露 `source_capability`、`target_capabilities` 和去重后的 `credential_requirements`，供盒子脚本在 live 前检查配置缺口。
@@ -57,6 +58,29 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - `doctor --write-summary` 会写出 `mode` / `target_mode`，区分 live 上传检查、按新种 ID 恢复检查、本地新种文件恢复检查和普通 readiness check。
 - `doctor --check-runtime`、`pipeline --target-execute`、`retorrent --execute` 和需要 qBittorrent 注入的 `target-upload` 会检查 focused ptcli 运行时依赖，legacy Web UI/Discord 依赖不是默认要求。
 
+## 本地 AI 调用服务
+
+```bash
+# 本机启动，仅监听 localhost
+python3 ptcli.py serve --host 127.0.0.1 --port 8080
+
+# 查看 AI 可用工具和 OpenAPI
+curl http://127.0.0.1:8080/v1/tools
+curl http://127.0.0.1:8080/openapi.json
+
+# 只查源站信息和目标站是否已有种子，不上传
+curl -X POST http://127.0.0.1:8080/v1/retorrent/check \
+  -H "Content-Type: application/json" \
+  -d '{"source":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM"}'
+
+# 不存在重复种时尝试一键转种；规则确认和上传确认必须显式给出
+curl -X POST http://127.0.0.1:8080/v1/retorrent \
+  -H "Content-Type: application/json" \
+  -d '{"source":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM","execute":true,"accept_rules":true,"confirm_upload":true,"save_path":"/downloads","uploaded_qbit_category":"MTEAM","uploaded_qbit_tags":"retorrent"}'
+```
+
+若需要把 API 暴露给其他容器或局域网工具，建议设置 `PTCLI_API_TOKEN`，调用时添加 `Authorization: Bearer <token>`。服务端点不会绕过站点规则；live 下载/上传仍依赖现有 rule gate、dupe gate 和 `confirm_upload`。
+
 ## 配置要求
 
 - qBittorrent client 配置沿用 `data/config.py`。
@@ -65,20 +89,25 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - `Dockerfile.ptcli` 是 focused CLI 镜像，只安装 `requirements-ptcli.txt` 和 ptcli 需要的系统依赖；旧 `Dockerfile` 保留给 legacy/full UA 入口。
 - 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；release 工作流会额外发布 `*-legacy-webui` 标签给旧 Web UI 镜像。
 - 旧 `upload.py` 需要显式覆盖 entrypoint、使用 legacy Dockerfile，或拉取 `*-legacy-webui` 标签才会运行。
-- `docker-compose.yml` 默认提供 `ptcli` 一次性 CLI 服务，可用 `docker compose run --rm ptcli retorrent ...` 在盒子上执行；legacy Web UI 需要显式 `--profile legacy-webui`。
+- `docker-compose.yml` 默认提供 `ptcli-api` 常驻 HTTP API 服务；一次性 CLI 服务放在 `cli` profile，可用 `docker compose --profile cli run --rm ptcli retorrent ...` 在盒子上执行；legacy Web UI 需要显式 `--profile legacy-webui`。
 - live 验证需要在真实盒子环境中提供有效 cookie、MTEAM API key、qBittorrent 连接和实际内容路径。
 
 ## Docker/Seedbox
 
 ```bash
-# 检查 focused CLI 能力矩阵
-docker compose run --rm ptcli sites --json
+# 构建并启动本地 API 服务
+docker compose build ptcli-api
+docker compose up -d ptcli-api
 
-# 本地构建 focused CLI 镜像
-docker compose build ptcli
+# 检查 API 服务
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/v1/tools
+
+# 检查 focused CLI 能力矩阵
+docker compose --profile cli run --rm ptcli sites --json
 
 # 盒子上一键闭环示例
-docker compose run --rm ptcli retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json
+docker compose --profile cli run --rm ptcli retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json
 
 # 仅在需要旧 Web UI 时启用；该服务使用 *-legacy-webui 镜像或旧 Dockerfile
 docker compose --profile legacy-webui up legacy-webui

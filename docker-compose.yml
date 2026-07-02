@@ -1,9 +1,31 @@
 services:
+  ptcli-api:
+    image: ghcr.io/loofk/upload-assistant:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ptcli
+    restart: unless-stopped
+    networks:
+      - yournetwork # change to the network with your qBittorrent instance
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # Optional but recommended when exposing the API outside localhost.
+      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+    volumes:
+      - /path/to/torrents/:/downloads/:rw # map this to qBittorrent download location with matching container paths
+      - /mnt/user/appdata/Upload-Assistant/data/config.py:/Upload-Assistant/data/config.py:rw
+      - /mnt/user/appdata/Upload-Assistant/data/cookies/:/Upload-Assistant/data/cookies/:rw
+      - /mnt/user/appdata/Upload-Assistant/tmp/:/Upload-Assistant/tmp/:rw
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+
   ptcli:
     image: ghcr.io/loofk/upload-assistant:latest
     build:
       context: .
       dockerfile: Dockerfile.ptcli
+    profiles:
+      - cli
     restart: "no"
     networks:
       - yournetwork # change to the network with your qBittorrent instance

@@ -102,6 +102,12 @@ def build_parser() -> argparse.ArgumentParser:
     sites = subparsers.add_parser("sites", help="List supported tracker codes for the focused CLI.")
     sites.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
+    serve = subparsers.add_parser("serve", help="Run the local AI-friendly JSON API service.", description="Run the local AI-friendly JSON API service.")
+    serve.add_argument("--host", default="127.0.0.1", help="HTTP bind host. Use 0.0.0.0 inside Docker when exposing the port.")
+    serve.add_argument("--port", type=int, default=8080, help="HTTP bind port.")
+    serve.add_argument("--api-token", help="Optional bearer token. Defaults to PTCLI_API_TOKEN when set.")
+    serve.add_argument("--json", action="store_true", help="Accepted for consistency; serve writes HTTP JSON responses.")
+
     rules = subparsers.add_parser("rules", help="Show rule review profiles for supported trackers.")
     rules.add_argument("--trackers", help="Optional comma-separated tracker codes. Defaults to all supported trackers.")
     rules.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
@@ -11348,6 +11354,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "sites":
             _print_payload(build_sites_payload(), json_output)
+            return 0
+
+        if args.command == "serve":
+            from src.ptcli.service import run_service
+
+            run_service(args.host, args.port, api_token=args.api_token or os.environ.get("PTCLI_API_TOKEN"))
             return 0
 
         if args.command == "rules":
