@@ -1065,10 +1065,20 @@ def _image_host_asset(path_value: Any) -> dict[str, Any]:
 
 
 def _image_host_item_urls(item: dict[str, Any]) -> tuple[str, str]:
-    raw_url = _usable_web_url(item.get("raw_url") or item.get("url"))
-    img_url = _usable_web_url(item.get("img_url")) or raw_url
-    web_url = _usable_web_url(item.get("web_url")) or raw_url or img_url
+    raw_url = _usable_web_url(_first_image_host_value(item, ("raw_url", "raw", "direct_url", "full_url", "full", "source_url", "source", "url")))
+    img_url = _usable_web_url(
+        _first_image_host_value(item, ("img_url", "image_url", "image", "display_url", "medium_url", "medium", "thumb_url", "thumbnail_url", "thumbnail", "thumb", "url"))
+    ) or raw_url
+    web_url = _usable_web_url(_first_image_host_value(item, ("web_url", "page_url", "viewer_url", "url_viewer", "show_url", "link", "url"))) or raw_url or img_url
     return img_url, web_url
+
+
+def _first_image_host_value(item: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        value = item.get(key)
+        if value:
+            return value
+    return None
 
 
 def _usable_web_url(value: Any) -> str:
@@ -2089,7 +2099,7 @@ def _mteam_expected_image_urls(materials: dict[str, Any] | None) -> list[str]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        url = str(item.get("img_url") or item.get("raw_url") or item.get("url") or "").strip()
+        url, _web_url = _image_host_item_urls(item)
         if url and url not in urls:
             urls.append(url)
     return urls

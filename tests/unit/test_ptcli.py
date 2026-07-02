@@ -18851,6 +18851,48 @@ def test_mteam_description_uses_img_url_when_raw_url_is_missing(tmp_path) -> Non
     assert "[url=https://img.example/thumb.png][img]https://img.example/thumb.png[/img][/url]" in description
 
 
+def test_mteam_image_host_alias_urls_feed_description_and_preflight(tmp_path) -> None:
+    mediainfo = tmp_path / "MI_FULL_00.txt"
+    mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+    screenshot = tmp_path / "screen-1.png"
+    screenshot.write_bytes(b"png")
+    image_hosts = tmp_path / "image-host.json"
+    image_hosts.write_text(json.dumps({"items": [{"thumb": "https://img.example/thumb.png", "link": "https://img.example/page"}]}), encoding="utf-8")
+    source_info = {
+        "tracker": "U2",
+        "torrent_id": "60635",
+        "name": "Example.Movie.2024.1080p.WEB-DL-GROUP",
+        "imdb_id": 1234567,
+        "tmdb_id": 999,
+        "douban_id": "1291546",
+        "douban_url": "https://movie.douban.com/subject/1291546/",
+        "torrenthash": "a" * 40,
+        "description_length": 100,
+        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+    }
+    material_files = {"mediainfo_file": str(mediainfo), "screenshot_files": [str(screenshot)], "image_host_file": str(image_hosts)}
+    preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
+
+    materials = build_mteam_materials_manifest(preview, source_info, "/downloads/Example", material_files=material_files)
+    description = build_mteam_description_draft(preview["meta_draft"], source_info, materials=materials)
+    package = write_mteam_prepare_package(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example", str(tmp_path / "target"), accept_rules=True, material_files=material_files)
+    torrent_file = make_mteam_safe_torrent(tmp_path, "upload")
+
+    preflight = build_mteam_upload_preflight(package["package_dir"], execute=True, torrent_file=str(torrent_file))
+
+    assert materials["assets"]["image_hosts"]["ready"] is True
+    assert materials["assets"]["image_hosts"]["valid_count"] == 1
+    assert materials["assets"]["image_hosts"]["invalid_count"] == 0
+    assert "[url=https://img.example/page][img]https://img.example/thumb.png[/img][/url]" in description
+    assert preflight["status"] == "ready"
+    assert preflight["upload_payload"]["review"]["description"]["screenshot_coverage"] == {
+        "ready": True,
+        "expected_urls": ["https://img.example/thumb.png"],
+        "description_urls": ["https://img.example/thumb.png"],
+        "missing_urls": [],
+    }
+
+
 def test_mteam_materials_manifest_requires_bdinfo_for_bdmv_content(tmp_path) -> None:
     content = tmp_path / "Disc"
     (content / "BDMV" / "STREAM").mkdir(parents=True)
