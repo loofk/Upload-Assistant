@@ -146,12 +146,16 @@ OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/opencla
 - `Dockerfile.ptcli` 是 focused CLI 镜像，只安装 `requirements-ptcli.txt` 和 ptcli 需要的系统依赖；旧 `Dockerfile` 保留给 legacy/full UA 入口。
 - 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；release 工作流会额外发布 `*-legacy-webui` 标签给旧 Web UI 镜像。
 - 旧 `upload.py` 需要显式覆盖 entrypoint、使用 legacy Dockerfile，或拉取 `*-legacy-webui` 标签才会运行。
-- `docker-compose.yml` 默认提供 `ptcli-api` 常驻 HTTP API 服务；一次性 CLI 服务放在 `cli` profile，可用 `docker compose --profile cli run --rm ptcli retorrent ...` 在盒子上执行；legacy Web UI 需要显式 `--profile legacy-webui`。
+- `docker-compose.yml` 默认提供 `ptcli-api` 常驻 HTTP API 服务，使用项目内 `ptcli-net` 网络并带 `/health` healthcheck；一次性 CLI 服务放在 `cli` profile，可用 `docker compose --profile cli run --rm ptcli retorrent ...` 在盒子上执行；legacy Web UI 需要显式 `--profile legacy-webui`。
+- 如果 qBittorrent 跑在宿主机上，容器内的 `data/config.py` 可把 `qbit_url` 写成 `http://host.docker.internal` 并保持对应 `qbit_port`；如果 qBittorrent 也是 Docker 容器，把两边放到同一个 Docker 网络后使用 qBittorrent 的服务名作为 host。
 - live 验证需要在真实盒子环境中提供有效 cookie、MTEAM API key、qBittorrent 连接和实际内容路径。
 
 ## Docker/Seedbox
 
 ```bash
+# 首次部署建议先准备 .env
+cp .env.ptcli.example .env
+
 # 构建并启动本地 API 服务
 docker compose build ptcli-api
 docker compose up -d ptcli-api
@@ -159,6 +163,7 @@ docker compose up -d ptcli-api
 # 检查 API 服务
 curl http://127.0.0.1:8080/health
 curl http://127.0.0.1:8080/v1/tools
+docker compose ps ptcli-api
 
 # 检查 focused CLI 能力矩阵
 docker compose --profile cli run --rm ptcli sites --json

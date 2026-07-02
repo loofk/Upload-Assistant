@@ -12620,6 +12620,21 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "safety" in tools_by_name["resume_job"]
 
 
+def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
+    compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+    env_example = Path(".env.ptcli.example").read_text(encoding="utf-8")
+
+    assert "ptcli-api:" in compose
+    assert "healthcheck:" in compose
+    assert "http://127.0.0.1:8080/health" in compose
+    assert "host.docker.internal:host-gateway" in compose
+    assert "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in compose
+    assert "name: ${PTCLI_DOCKER_NETWORK:-upload-assistant-ptcli}" in compose
+    assert "yournetwork" not in compose
+    assert "PTCLI_API_TOKEN=change-me" in env_example
+    assert "PTCLI_PUBLIC_BASE_URL=http://127.0.0.1:8080" in env_example
+
+
 def test_parse_recent_candidate_seeds_from_nexusphp_html() -> None:
     html = """
     <table>

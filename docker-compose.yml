@@ -6,10 +6,16 @@ services:
       dockerfile: Dockerfile.ptcli
     restart: unless-stopped
     networks:
-      - yournetwork # change to the network with your qBittorrent instance
+      - ptcli-net
+    extra_hosts:
+      # Lets Linux Docker containers reach qBittorrent running on the seedbox host.
+      # If qBittorrent is another container, put both services on the same Docker network
+      # and use that container/service name in data/config.py instead.
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:8080:8080"
     environment:
+      - TZ=${TZ:-Asia/Shanghai}
       # Optional but recommended when exposing the API outside localhost.
       - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
@@ -20,6 +26,12 @@ services:
       - /mnt/user/appdata/Upload-Assistant/data/cookies/:/Upload-Assistant/data/cookies/:rw
       - /mnt/user/appdata/Upload-Assistant/tmp/:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   ptcli:
     image: ghcr.io/loofk/upload-assistant:latest
@@ -30,7 +42,12 @@ services:
       - cli
     restart: "no"
     networks:
-      - yournetwork # change to the network with your qBittorrent instance
+      - ptcli-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
       - /path/to/torrents/:/downloads/:rw # map this to qBittorrent download location with matching container paths
       - /mnt/user/appdata/Upload-Assistant/data/config.py:/Upload-Assistant/data/config.py:rw
@@ -48,7 +65,7 @@ services:
       - legacy-webui
     restart: unless-stopped
     networks:
-      - yournetwork #change to the network with ur torrent instance
+      - ptcli-net
     ports: 
       # Change left side to your specific port. Use 0.0.0.0:5000:5000 to expose to ANY device.
       # 127.0.0.1 means only accessible from the host machine. If you change to 0.0.0.0:5000:5000 it will be accessible from any device on the network
@@ -71,5 +88,5 @@ services:
       - /mnt/user/appdata/Upload-Assistant/tmp/:/Upload-Assistant/tmp:rw #map this to your /tmp folder.
       - /mnt/user/appdata/Upload-Assistant/webui-auth:/root/.config/upload-assistant:rw # persist web UI session auth config
 networks:
-  "yournetwork": #change this to your network 
-    external: true
+  ptcli-net:
+    name: ${PTCLI_DOCKER_NETWORK:-upload-assistant-ptcli}
