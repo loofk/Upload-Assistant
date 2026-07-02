@@ -18038,6 +18038,7 @@ def test_mteam_materials_manifest_tracks_metadata_and_missing_assets() -> None:
 
 
 def test_mteam_materials_manifest_accepts_ptgen_description() -> None:
+    ptgen_description = "◎译　　名　示例电影\n◎简　　介　示例简介"
     source_info = {
         "tracker": "U2",
         "torrent_id": "60635",
@@ -18048,7 +18049,7 @@ def test_mteam_materials_manifest_accepts_ptgen_description() -> None:
         "douban_url": "https://movie.douban.com/subject/1291546/",
         "torrenthash": "a" * 40,
         "description_length": 100,
-        "ptgen_description": "◎译　　名　示例电影\n◎简　　介　示例简介",
+        "ptgen_description": ptgen_description,
     }
     preview = build_mteam_prepare_preview(source_info, ["MTEAM"], mteam_ready_stages(), "/downloads/Example")
 
@@ -18056,7 +18057,18 @@ def test_mteam_materials_manifest_accepts_ptgen_description() -> None:
 
     metadata_checks = {check["name"]: check for check in materials["checks"]["metadata"]}
     assert metadata_checks["ptgen_description"]["ok"] is True
-    assert materials["metadata"]["ptgen_description_length"] == len(source_info["ptgen_description"])
+    assert materials["metadata"]["ptgen_description_length"] == len(ptgen_description)
+    assert materials["metadata"]["sources"] == ["source"]
+    assert materials["metadata"]["readiness"]["ptgen_description"] == {"ready": True, "required": True, "source": "source"}
+    assert materials["metadata"]["field_evidence"]["ptgen_description"] == {"ready": True, "required": True, "source": "source", "length": len(ptgen_description)}
+
+    diagnostics = ptcli_cli._summary_material_diagnostics({"artifacts": {"target_materials": materials, "target_materials_ready": materials["ready"]}})
+    assert diagnostics["metadata_fields"]["ptgen_description"] == {"ready": True, "required": True, "source": "source", "length": len(ptgen_description)}
+    shell_fields = ptcli_cli._summary_check_material_shell_fields(diagnostics)
+    assert shell_fields["PTCLI_MATERIAL_METADATA_SOURCES"] == "source"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_READY"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_REQUIRED"] == "1"
+    assert shell_fields["PTCLI_MATERIAL_METADATA_PTGEN_SOURCE"] == "source"
 
 
 def test_mteam_materials_manifest_records_existing_material_files(tmp_path) -> None:

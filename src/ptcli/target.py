@@ -796,6 +796,8 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
     meta_draft = preview.get("meta_draft") if isinstance(preview.get("meta_draft"), dict) else {}
     material_files = material_files if isinstance(material_files, dict) else {}
     metadata_enrichment = source_info.get("metadata_enrichment") if isinstance(source_info, dict) and isinstance(source_info.get("metadata_enrichment"), dict) else {}
+    metadata_readiness = metadata_enrichment.get("readiness") if isinstance(metadata_enrichment.get("readiness"), dict) else {}
+    metadata_field_evidence = metadata_enrichment.get("field_evidence") if isinstance(metadata_enrichment.get("field_evidence"), dict) else {}
     source_description_length = int(source_info.get("description_length", 0) or 0) if isinstance(source_info, dict) else 0
     mediainfo = _material_file_asset(material_files.get("mediainfo_file"))
     bdinfo = _material_file_asset(material_files.get("bdinfo_file"))
@@ -803,6 +805,13 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
     image_hosts = _image_host_asset(material_files.get("image_host_file"))
     disc_structure = _disc_structure_asset(content_path)
     ptgen_description_length = len(str(source_info.get("ptgen_description") or "")) if isinstance(source_info, dict) else 0
+    if not metadata_field_evidence:
+        metadata_field_evidence = _mteam_material_metadata_field_evidence(meta_draft, source_info, ptgen_description_length)
+    if not metadata_readiness:
+        metadata_readiness = _mteam_material_metadata_readiness(metadata_field_evidence)
+    metadata_sources = metadata_enrichment.get("sources") if isinstance(metadata_enrichment.get("sources"), list) else []
+    if not metadata_sources:
+        metadata_sources = _mteam_material_metadata_sources(metadata_field_evidence)
     metadata_checks = [
         _material_check("imdb", bool(meta_draft.get("imdb") or meta_draft.get("imdb_id")), "IMDb id is present.", "IMDb id is missing; fetch or supply IMDb metadata before live upload."),
         _material_check("tmdb", bool(meta_draft.get("tmdb_id")), "TMDb id is present.", "TMDb id is missing; fetch or supply TMDb metadata before live upload."),
@@ -840,10 +849,10 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
             "ptgen_description_length": ptgen_description_length,
             "enrichment_status": metadata_enrichment.get("status"),
             "enrichment_ready": metadata_enrichment.get("ready") if isinstance(metadata_enrichment.get("ready"), bool) else None,
-            "sources": metadata_enrichment.get("sources") if isinstance(metadata_enrichment.get("sources"), list) else [],
+            "sources": metadata_sources,
             "applied": metadata_enrichment.get("applied") if isinstance(metadata_enrichment.get("applied"), dict) else {},
-            "readiness": metadata_enrichment.get("readiness") if isinstance(metadata_enrichment.get("readiness"), dict) else {},
-            "field_evidence": metadata_enrichment.get("field_evidence") if isinstance(metadata_enrichment.get("field_evidence"), dict) else {},
+            "readiness": metadata_readiness,
+            "field_evidence": metadata_field_evidence,
             "missing": metadata_enrichment.get("missing") if isinstance(metadata_enrichment.get("missing"), list) else [],
             "blockers": metadata_enrichment.get("blockers") if isinstance(metadata_enrichment.get("blockers"), list) else [],
             "readiness_blockers": metadata_enrichment.get("readiness_blockers") if isinstance(metadata_enrichment.get("readiness_blockers"), list) else [],
@@ -868,6 +877,56 @@ def build_mteam_materials_manifest(preview: dict[str, Any], source_info: dict[st
         "recovery_plan": _mteam_material_recovery_plan(all_checks),
         "next_actions": _mteam_material_next_actions(all_checks),
     }
+
+
+def _mteam_material_metadata_field_evidence(meta_draft: dict[str, Any], source_info: dict[str, Any] | None, ptgen_description_length: int) -> dict[str, Any]:
+    source_info = source_info if isinstance(source_info, dict) else {}
+    field_values = {
+        "imdb_id": meta_draft.get("imdb_id"),
+        "tmdb_id": meta_draft.get("tmdb_id"),
+        "douban_id": meta_draft.get("douban_id"),
+        "douban_url": meta_draft.get("douban_url"),
+    }
+    evidence = {
+        key: {
+            "ready": bool(value),
+            "required": True,
+            "source": "source" if source_info.get(key) else None,
+            "value": value,
+        }
+        for key, value in field_values.items()
+    }
+    evidence["ptgen_description"] = {
+        "ready": ptgen_description_length > 0,
+        "required": True,
+        "source": "source" if source_info.get("ptgen_description") else None,
+        "length": ptgen_description_length,
+    }
+    return evidence
+
+
+def _mteam_material_metadata_readiness(field_evidence: dict[str, Any]) -> dict[str, Any]:
+    readiness: dict[str, Any] = {}
+    for key, evidence in field_evidence.items():
+        if not isinstance(evidence, dict):
+            continue
+        readiness[key] = {
+            "ready": evidence.get("ready") if isinstance(evidence.get("ready"), bool) else None,
+            "required": evidence.get("required") if isinstance(evidence.get("required"), bool) else None,
+            "source": evidence.get("source"),
+        }
+    return readiness
+
+
+def _mteam_material_metadata_sources(field_evidence: dict[str, Any]) -> list[str]:
+    sources: list[str] = []
+    for evidence in field_evidence.values():
+        if not isinstance(evidence, dict):
+            continue
+        source = evidence.get("source")
+        if isinstance(source, str) and source and source not in sources:
+            sources.append(source)
+    return sources
 
 
 def _mteam_description_input_summary(metadata_checks: list[dict[str, Any]], asset_checks: list[dict[str, Any]]) -> dict[str, Any]:
