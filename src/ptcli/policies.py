@@ -115,6 +115,61 @@ def qbit_limits_for_policy(policy: SitePolicy) -> dict[str, Any]:
     }
 
 
+def build_site_policy_coverage(policy: dict[str, Any], *, roles: list[str] | tuple[str, ...] | None = None) -> dict[str, Any]:
+    """Return role-aware policy completeness hints for AI-safe automation."""
+    tracker = str(policy.get("tracker") or "UNKNOWN")
+    normalized_roles = _string_list(roles) or ["unknown"]
+    automation = policy.get("automation") if isinstance(policy.get("automation"), dict) else {
+        "download": policy.get("allow_auto_download"),
+        "upload": policy.get("allow_auto_upload"),
+        "retorrent": policy.get("allow_retorrent"),
+        "manual_review_required": policy.get("manual_review_required"),
+    }
+    missing: list[str] = []
+    disabled: list[str] = []
+    recommendations: list[str] = []
+
+    if not policy.get("rules_url"):
+        missing.append("rules_url")
+        recommendations.append(f"{tracker}: add rules_url so agents can point reviewers to the authoritative rule page.")
+    if policy.get("manual_review_required") is True and not policy.get("rule_review_fingerprint"):
+        missing.append("rule_review_fingerprint")
+        recommendations.append(f"{tracker}: record rule_review_fingerprint after manual rule review.")
+    if normalized_roles == ["unknown"] or "unknown" in normalized_roles:
+        missing.append("source_or_target_role")
+        recommendations.append(f"{tracker}: pass source_tracker/from and target/to so coverage can apply role-specific gates.")
+
+    if "source" in normalized_roles:
+        if automation.get("download") is not True:
+            disabled.append("auto_download")
+            recommendations.append(f"{tracker}: enable allow_auto_download before using it as an automated source tracker.")
+        elif policy.get("download_rate_limit") is None:
+            missing.append("download_rate_limit")
+            recommendations.append(f"{tracker}: set download_rate_limit for source pulls on the seedbox.")
+        if policy.get("min_seed_time_hours") is None:
+            missing.append("min_seed_time_hours")
+            recommendations.append(f"{tracker}: set min_seed_time_hours for source-side seeding obligations.")
+    if "target" in normalized_roles:
+        if automation.get("upload") is not True:
+            disabled.append("auto_upload")
+            recommendations.append(f"{tracker}: enable allow_auto_upload before using it as an automated target tracker.")
+        elif policy.get("upload_rate_limit") is None:
+            missing.append("upload_rate_limit")
+            recommendations.append(f"{tracker}: set upload_rate_limit for target-side seeding after upload.")
+        if policy.get("min_ratio") is None:
+            missing.append("min_ratio")
+            recommendations.append(f"{tracker}: set min_ratio for target-side seeding obligations.")
+
+    return {
+        "tracker": tracker,
+        "complete": not missing and not disabled,
+        "roles": normalized_roles,
+        "missing_fields": missing,
+        "disabled_automation": disabled,
+        "recommendations": recommendations,
+    }
+
+
 def merge_qbit_limits(policy_limits: dict[str, Any], *, upload_limit: Any = None, download_limit: Any = None) -> dict[str, Any]:
     merged = dict(policy_limits)
     if upload_limit is not None and upload_limit != "":
@@ -244,3 +299,11 @@ def _policy_next_actions(blockers: list[str]) -> list[str]:
         "Review every involved tracker rule page, then rerun with --accept-rules.",
         "Add or update PTCLI.SITE_POLICIES/SITE_POLICIES in data/config.py for local automation and qBittorrent rate limits.",
     ]
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    if value is None:
+        return []
+    return [str(value)]

@@ -13,7 +13,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from src.ptcli.mainland import normalize_tracker, parse_tracker_list, unsupported_trackers
-from src.ptcli.policies import build_site_policy, build_site_policy_report, qbit_limits_for_tracker
+from src.ptcli.policies import build_site_policy, build_site_policy_coverage, build_site_policy_report, qbit_limits_for_tracker
 from src.ptcli.rules import build_rule_check
 from src.ptcli.source import (
     GENERIC_DETAILS_BASE_URLS,
@@ -206,6 +206,7 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "source_policy": source_policy,
         "target_policies": target_policies,
         "policy_summary": policy_summary,
+        "policy_coverage": policy_summary.get("policy_coverage"),
         "ranking": ranking,
         "recommendation": _candidate_recommendation(seed, source_info_payload, duplicate_check, blockers, ranking),
         "blockers": blockers,
@@ -299,6 +300,8 @@ def _candidate_execute_request(config: dict[str, Any], seed: CandidateSeed, targ
 
 def _candidate_policy_summary(source_policy: dict[str, Any], target_policies: list[dict[str, Any]], execute_request: dict[str, Any], *, accept_rules: bool) -> dict[str, Any]:
     policies = [source_policy, *target_policies]
+    source_coverage = build_site_policy_coverage(source_policy, roles=["source"])
+    target_coverages = [build_site_policy_coverage(policy, roles=["target"]) for policy in target_policies]
     return {
         "accept_rules": bool(accept_rules),
         "manual_review_ready": bool(accept_rules) or not any(policy.get("manual_review_required") is True for policy in policies),
@@ -332,6 +335,35 @@ def _candidate_policy_summary(source_policy: dict[str, Any], target_policies: li
             "source_fingerprint": source_policy.get("rule_review_fingerprint"),
             "target_fingerprints": [policy.get("rule_review_fingerprint") for policy in target_policies if policy.get("rule_review_fingerprint")],
         },
+        "policy_coverage": _candidate_policy_coverage_summary(source_coverage, target_coverages),
+    }
+
+
+def _candidate_policy_coverage_summary(source_coverage: dict[str, Any], target_coverages: list[dict[str, Any]]) -> dict[str, Any]:
+    coverages = [source_coverage, *target_coverages]
+    missing = {
+        tracker_key: fields
+        for tracker_key, fields in [
+            ("source", _string_list(source_coverage.get("missing_fields"))),
+            *[(f"target:{coverage.get('tracker') or index}", _string_list(coverage.get("missing_fields"))) for index, coverage in enumerate(target_coverages)],
+        ]
+        if fields
+    }
+    disabled = {
+        tracker_key: fields
+        for tracker_key, fields in [
+            ("source", _string_list(source_coverage.get("disabled_automation"))),
+            *[(f"target:{coverage.get('tracker') or index}", _string_list(coverage.get("disabled_automation"))) for index, coverage in enumerate(target_coverages)],
+        ]
+        if fields
+    }
+    return {
+        "ready": all(bool(coverage.get("complete")) for coverage in coverages),
+        "source": source_coverage,
+        "targets": target_coverages,
+        "missing_policy_fields": missing,
+        "disabled_automation": disabled,
+        "recommendations": [recommendation for coverage in coverages for recommendation in _string_list(coverage.get("recommendations"))],
     }
 
 
@@ -534,6 +566,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "duplicate_status": duplicate_check.get("status"),
         "blocker_count": len(_string_list(candidate.get("blockers"))),
         "decision": workflow.get("decision"),
+        "policy_coverage": policy_summary.get("policy_coverage"),
         "policy_summary": _candidate_digest_policy_summary(policy_summary),
         "submit_job_endpoint": candidate.get("submit_job_endpoint"),
         "submit_tool": candidate.get("submit_tool"),
@@ -546,6 +579,7 @@ def _candidate_digest_policy_summary(policy_summary: dict[str, Any]) -> dict[str
     return {
         "manual_review_ready": policy_summary.get("manual_review_ready"),
         "automation": policy_summary.get("automation"),
+        "policy_coverage": policy_summary.get("policy_coverage"),
         "qbit_limits": qbit_limits,
         "seeding_requirements": seeding,
     }

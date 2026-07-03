@@ -24,7 +24,7 @@ from src.ptcli.cli import build_parser, pipeline_payload, retorrent_payload
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.mainland import parse_tracker_list
-from src.ptcli.policies import build_site_policy_report
+from src.ptcli.policies import build_site_policy_coverage, build_site_policy_report
 from src.ptcli.source import resolve_source_reference
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
@@ -825,9 +825,10 @@ def _daily_candidate_schedule_run_next_actions(jobs: list[dict[str, Any]], skipp
 
 
 def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None = None) -> dict[str, Any]:
+    policy_roles = roles or ["unknown"]
     item = {
         "tracker": policy.get("tracker"),
-        "roles": roles or ["unknown"],
+        "roles": policy_roles,
         "rules_url": policy.get("rules_url"),
         "manual_review_required": policy.get("manual_review_required"),
         "rule_review_fingerprint": policy.get("rule_review_fingerprint"),
@@ -850,58 +851,8 @@ def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None 
         },
         "notes": _string_list(policy.get("notes")),
     }
-    item["policy_coverage"] = _site_policy_coverage(item)
+    item["policy_coverage"] = build_site_policy_coverage(policy, roles=policy_roles)
     return item
-
-
-def _site_policy_coverage(item: dict[str, Any]) -> dict[str, Any]:
-    tracker = str(item.get("tracker") or "UNKNOWN")
-    roles = _string_list(item.get("roles")) or ["unknown"]
-    automation = item.get("automation") if isinstance(item.get("automation"), dict) else {}
-    qbit_limits = item.get("qbit_limits") if isinstance(item.get("qbit_limits"), dict) else {}
-    seeding = item.get("seeding_requirements") if isinstance(item.get("seeding_requirements"), dict) else {}
-    missing: list[str] = []
-    disabled: list[str] = []
-    recommendations: list[str] = []
-
-    if not item.get("rules_url"):
-        missing.append("rules_url")
-        recommendations.append(f"{tracker}: add rules_url so agents can point reviewers to the authoritative rule page.")
-    if item.get("manual_review_required") is True and not item.get("rule_review_fingerprint"):
-        missing.append("rule_review_fingerprint")
-        recommendations.append(f"{tracker}: record rule_review_fingerprint after manual rule review.")
-    if roles == ["unknown"] or "unknown" in roles:
-        missing.append("source_or_target_role")
-        recommendations.append(f"{tracker}: call site_policies with source_tracker/from and target/to so coverage can apply role-specific gates.")
-
-    if "source" in roles:
-        if automation.get("download") is not True:
-            disabled.append("auto_download")
-            recommendations.append(f"{tracker}: enable allow_auto_download before using it as an automated source tracker.")
-        elif qbit_limits.get("download_limit") is None:
-            missing.append("download_rate_limit")
-            recommendations.append(f"{tracker}: set download_rate_limit for source pulls on the seedbox.")
-        if seeding.get("min_seed_time_hours") is None:
-            missing.append("min_seed_time_hours")
-            recommendations.append(f"{tracker}: set min_seed_time_hours for source-side seeding obligations.")
-    if "target" in roles:
-        if automation.get("upload") is not True:
-            disabled.append("auto_upload")
-            recommendations.append(f"{tracker}: enable allow_auto_upload before using it as an automated target tracker.")
-        elif qbit_limits.get("upload_limit") is None:
-            missing.append("upload_rate_limit")
-            recommendations.append(f"{tracker}: set upload_rate_limit for target-side seeding after upload.")
-        if seeding.get("min_ratio") is None:
-            missing.append("min_ratio")
-            recommendations.append(f"{tracker}: set min_ratio for target-side seeding obligations.")
-
-    return {
-        "complete": not missing and not disabled,
-        "roles": roles,
-        "missing_fields": missing,
-        "disabled_automation": disabled,
-        "recommendations": recommendations,
-    }
 
 
 def _site_policy_agent_summary(matrix: list[dict[str, Any]], report: dict[str, Any]) -> dict[str, Any]:
@@ -1122,6 +1073,9 @@ def _agent_candidate_summary(payload: dict[str, Any]) -> dict[str, Any] | None:
         return None
     digest = _candidate_digest_from_payload(candidate_payload) or {}
     push_items = digest.get("push_items") if isinstance(digest.get("push_items"), list) else []
+    top_candidate = digest.get("top_candidate") if isinstance(digest.get("top_candidate"), dict) else {}
+    top_policy_summary = top_candidate.get("policy_summary") if isinstance(top_candidate.get("policy_summary"), dict) else {}
+    policy_coverage = top_policy_summary.get("policy_coverage") if isinstance(top_policy_summary.get("policy_coverage"), dict) else {}
     nested_result = candidate_payload.get("result") if isinstance(candidate_payload.get("result"), dict) else {}
     return {
         "type": "daily_candidates",
@@ -1136,6 +1090,8 @@ def _agent_candidate_summary(payload: dict[str, Any]) -> dict[str, Any] | None:
         "top_submit_request": digest.get("top_submit_request"),
         "top_submit_job_endpoint": digest.get("top_submit_job_endpoint"),
         "top_submit_tool": digest.get("top_submit_tool"),
+        "policy_coverage": policy_coverage or None,
+        "policy_coverage_ready": policy_coverage.get("ready") if isinstance(policy_coverage.get("ready"), bool) else None,
         "push_count": len(push_items),
         "digest": digest,
         "blockers": _string_list(candidate_payload.get("blockers") or nested_result.get("blockers")),
@@ -1354,11 +1310,20 @@ def _agent_candidate_decision(
         return None
     digest = _candidate_digest_from_payload(result) or {}
     top_submit_request = digest.get("top_submit_request") if isinstance(digest.get("top_submit_request"), dict) else None
+    top_candidate = digest.get("top_candidate") if isinstance(digest.get("top_candidate"), dict) else {}
+    top_policy_summary = top_candidate.get("policy_summary") if isinstance(top_candidate.get("policy_summary"), dict) else {}
+    policy_coverage = top_policy_summary.get("policy_coverage") if isinstance(top_policy_summary.get("policy_coverage"), dict) else {}
+    policy_coverage_ready = policy_coverage.get("ready") if isinstance(policy_coverage.get("ready"), bool) else None
     ready_count = int(digest.get("ready_count") or 0)
     if status in {"queued", "running"}:
         decision = "wait"
         stop_reason = None
         recommended_action = "Poll get_job_status until the daily candidate job is complete."
+    elif top_submit_request and ready_count > 0 and policy_coverage_ready is False:
+        decision = "configure_policy"
+        stop_reason = "policy_coverage_incomplete"
+        recommendations = _string_list(policy_coverage.get("recommendations"))
+        recommended_action = recommendations[0] if recommendations else "Complete policy_coverage missing fields before submitting the top candidate."
     elif top_submit_request and ready_count > 0:
         decision = "submit_candidate_when_confirmed"
         stop_reason = None
@@ -1382,8 +1347,10 @@ def _agent_candidate_decision(
         "top_submit_job_endpoint": digest.get("top_submit_job_endpoint"),
         "top_submit_tool": digest.get("top_submit_tool"),
         "ready_count": ready_count,
+        "policy_coverage": policy_coverage or None,
+        "policy_coverage_ready": policy_coverage_ready,
         "missing_confirmations": _missing_live_confirmations(top_submit_request or request),
-        "can_submit_job": bool(top_submit_request and ready_count > 0),
+        "can_submit_job": bool(top_submit_request and ready_count > 0 and policy_coverage_ready is not False),
         "should_poll": status in {"queued", "running"},
         "should_resume": False,
         "resume_available": False,
@@ -2171,6 +2138,7 @@ def _candidate_response_contract() -> dict[str, Any]:
             "source_policy",
             "target_policies",
             "policy_summary",
+            "policy_coverage",
             "ranking",
             "recommendation",
             "blockers",

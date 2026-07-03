@@ -12546,7 +12546,12 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
         "kind": "ptcli.daily_candidates_digest",
         "recommendation": "submit_top_candidate_when_confirmed",
         "ready_count": 1,
-        "top_candidate": {"source_tracker": "U2", "source_id": "60635", "title": "Example.Release"},
+        "top_candidate": {
+            "source_tracker": "U2",
+            "source_id": "60635",
+            "title": "Example.Release",
+            "policy_summary": {"policy_coverage": {"ready": True, "recommendations": []}},
+        },
         "top_submit_request": {
             "source": "https://u2.dmhy.org/details.php?id=60635",
             "source_tracker": "U2",
@@ -12594,11 +12599,70 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert job["candidate_digest"]["top_submit_tool"] == "manual_retorrent_job"
     assert job["agent_summary"]["type"] == "daily_candidates"
     assert job["agent_summary"]["top_candidate"]["source_id"] == "60635"
+    assert job["agent_summary"]["policy_coverage_ready"] is True
     assert job["agent_decision"]["decision"] == "submit_candidate_when_confirmed"
+    assert job["agent_decision"]["policy_coverage_ready"] is True
     assert job["agent_decision"]["can_submit_job"] is True
     assert job["agent_decision"]["missing_confirmations"] == ["confirm_upload=true"]
     assert summary["candidate_digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
     assert summary["agent_decision"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/submit"
+
+
+def test_daily_candidates_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
+    digest = {
+        "kind": "ptcli.daily_candidates_digest",
+        "recommendation": "submit_top_candidate_when_confirmed",
+        "ready_count": 1,
+        "top_candidate": {
+            "source_tracker": "U2",
+            "source_id": "60635",
+            "title": "Example.Release",
+            "policy_summary": {
+                "policy_coverage": {
+                    "ready": False,
+                    "missing_policy_fields": {"source": ["download_rate_limit"]},
+                    "recommendations": ["U2: set download_rate_limit for source pulls on the seedbox."],
+                }
+            },
+        },
+        "top_submit_request": {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "source_tracker": "U2",
+            "target": "MTEAM",
+            "execute_if_no_duplicate": True,
+            "accept_rules": True,
+            "confirm_upload": False,
+        },
+        "top_submit_job_endpoint": "/v1/jobs/retorrent/submit",
+        "top_submit_tool": "manual_retorrent_job",
+        "push_items": [],
+        "blockers": [],
+        "next_actions": [],
+    }
+
+    async def fake_daily_candidates(_request):
+        return {
+            "kind": "ptcli.service.daily_candidates",
+            "status": "ok",
+            "ok": True,
+            "count": 1,
+            "ready_count": 1,
+            "digest": digest,
+            "candidates": [{"status": "ready"}],
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_daily_candidates_job(store, {"source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
+
+    assert job["agent_decision"]["decision"] == "configure_policy"
+    assert job["agent_decision"]["stop_reason"] == "policy_coverage_incomplete"
+    assert job["agent_decision"]["policy_coverage_ready"] is False
+    assert job["agent_decision"]["can_submit_job"] is False
+    assert "download_rate_limit" in job["agent_decision"]["recommended_action"]
 
 
 def test_daily_candidate_schedule_payload_normalizes_job_requests(monkeypatch) -> None:
@@ -12806,6 +12870,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
     assert "top_submit_request" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "policy_coverage" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_job_endpoint" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "response_contract" in tool_by_name["get_job_status"]
@@ -12880,6 +12945,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_digest" in tools_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
         assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "candidate_digest" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert tools_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
@@ -13030,6 +13096,7 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["source_id"] == "60635"
     assert result["digest"]["push_items"][0]["decision"] == "submit_when_confirmed"
     assert result["digest"]["push_items"][0]["policy_summary"]["manual_review_ready"] is True
+    assert result["digest"]["push_items"][0]["policy_summary"]["policy_coverage"]["ready"] is True
     assert result["digest"]["push_items"][0]["policy_summary"]["qbit_limits"]["source"]["download_limit"] == 20 * 1024 * 1024
     assert result["digest"]["push_items"][0]["policy_summary"]["qbit_limits"]["target"]["upload_limit"] == 2 * 1024 * 1024
     candidate = result["candidates"][0]
@@ -13051,6 +13118,10 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["policy_summary"]["seeding_requirements"]["targets"][0]["min_ratio"] == 1.0
     assert candidate["policy_summary"]["rules"]["source_fingerprint"] == "u2-review"
     assert candidate["policy_summary"]["rules"]["target_fingerprints"] == ["mteam-review"]
+    assert candidate["policy_summary"]["policy_coverage"]["ready"] is True
+    assert candidate["policy_summary"]["policy_coverage"]["source"]["complete"] is True
+    assert candidate["policy_summary"]["policy_coverage"]["targets"][0]["complete"] is True
+    assert candidate["policy_coverage"]["ready"] is True
     assert candidate["agent_workflow"]["tool"] == "manual_retorrent_job"
     assert candidate["agent_workflow"]["decision"] == "submit_when_confirmed"
     assert candidate["submit_tool"] == "manual_retorrent_job"
