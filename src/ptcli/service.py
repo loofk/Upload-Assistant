@@ -31,6 +31,7 @@ JSON_CONTENT_TYPE = "application/json; charset=utf-8"
 DEFAULT_SERVICE_PORT = 8080
 JOB_SCHEMA_VERSION = 1
 DEFAULT_JOB_POLL_AFTER_SECONDS = 5
+DEFAULT_MAX_CONCURRENT_JOBS = 1
 DAILY_CANDIDATE_SCHEDULE_ENV = "PTCLI_DAILY_CANDIDATE_SCHEDULES"
 JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 RESUME_COMMAND_ALLOWLIST = {"pipeline", "target-upload", "doctor", "summary-check", "retorrent"}
@@ -54,10 +55,12 @@ class ServiceError(Exception):
 class JobStore:
     """Tiny file-backed job store for long-running ptcli service tasks."""
 
-    def __init__(self, root: str | Path | None = None, *, run_inline: bool = False, recover_interrupted: bool = True) -> None:
+    def __init__(self, root: str | Path | None = None, *, run_inline: bool = False, recover_interrupted: bool = True, max_concurrent_jobs: int | None = None) -> None:
         self.root = _resolve_job_dir(root)
         self.run_inline = run_inline
+        self.max_concurrent_jobs = _resolve_max_concurrent_jobs(max_concurrent_jobs)
         self._lock = threading.Lock()
+        self._run_slots = threading.BoundedSemaphore(self.max_concurrent_jobs)
         self.root.mkdir(parents=True, exist_ok=True)
         if recover_interrupted:
             self.recover_interrupted_jobs()
@@ -90,7 +93,7 @@ class JobStore:
         if self.run_inline:
             self._run(job_id, runner)
         else:
-            thread = threading.Thread(target=self._run, args=(job_id, runner), daemon=True)
+            thread = threading.Thread(target=self._run_when_slot_available, args=(job_id, runner), daemon=True)
             thread.start()
         return self.get(job_id)
 
@@ -172,6 +175,7 @@ class JobStore:
             "limit": limit,
             "filters": {"status": status_filter or None, "kind": kind_filter or None},
             "status_counts": status_counts,
+            "queue": _job_queue_summary(status_counts, self.max_concurrent_jobs),
             "jobs": jobs,
             "next_actions": _job_list_next_actions(jobs, total, limit),
         }
@@ -283,6 +287,10 @@ class JobStore:
         self._write(job)
         return self.get(job_id)
 
+    def _run_when_slot_available(self, job_id: str, runner: Callable[[], dict[str, Any]]) -> None:
+        with self._run_slots:
+            self._run(job_id, runner)
+
     def _run(self, job_id: str, runner: Callable[[], dict[str, Any]]) -> None:
         job = self._read(job_id)
         if job.get("status") != "queued":
@@ -345,9 +353,9 @@ class JobStore:
             tmp_path.replace(path)
 
 
-def run_service(host: str, port: int, *, api_token: str | None = None, job_dir: str | None = None) -> None:
+def run_service(host: str, port: int, *, api_token: str | None = None, job_dir: str | None = None, max_concurrent_jobs: int | None = None) -> None:
     """Run the local ptcli JSON API service."""
-    job_store = JobStore(job_dir)
+    job_store = JobStore(job_dir, max_concurrent_jobs=max_concurrent_jobs)
     handler = _handler_class(api_token, job_store)
     server = ThreadingHTTPServer((host, port), handler)
     print(f"ptcli service listening on http://{host}:{port}")
@@ -1703,6 +1711,24 @@ def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int
     return max(minimum, min(maximum, parsed))
 
 
+def _resolve_max_concurrent_jobs(value: int | str | None = None) -> int:
+    configured = value if value is not None else os.environ.get("PTCLI_MAX_CONCURRENT_JOBS")
+    return _bounded_int(configured, default=DEFAULT_MAX_CONCURRENT_JOBS, minimum=1, maximum=16)
+
+
+def _job_queue_summary(status_counts: dict[str, int], max_concurrent_jobs: int) -> dict[str, Any]:
+    queued_count = int(status_counts.get("queued") or 0)
+    running_count = int(status_counts.get("running") or 0)
+    available_slots = max(0, max_concurrent_jobs - running_count)
+    return {
+        "max_concurrent_jobs": max_concurrent_jobs,
+        "running_count": running_count,
+        "queued_count": queued_count,
+        "available_slots": available_slots,
+        "backlog_count": max(0, queued_count - available_slots),
+    }
+
+
 def _timestamp(value: Any) -> int | None:
     try:
         return int(value)
@@ -2400,6 +2426,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     cookies_dir = _deployment_path(request.get("cookies_dir") or "data/cookies", base_dir)
     tmp_dir = Path(os.environ.get("TMPDIR") or str(base_dir / "tmp")).expanduser()
     job_dir = _resolve_job_dir(request.get("job_dir") or os.environ.get("PTCLI_JOB_DIR"))
+    max_concurrent_jobs = _resolve_max_concurrent_jobs(request.get("max_concurrent_jobs"))
     downloads_path = Path(str(request.get("downloads_path") or os.environ.get("PTCLI_DOWNLOADS_PATH") or "/downloads")).expanduser()
     client = str(request.get("client") or "default")
     compose_path = _deployment_path(request.get("compose_file") or os.environ.get("PTCLI_COMPOSE_FILE") or "docker-compose.yml", base_dir)
@@ -2491,6 +2518,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "next_actions": next_actions,
         "paths": paths,
         "mounts": mounts,
+        "queue": {"max_concurrent_jobs": max_concurrent_jobs},
         "qbit": qbit,
         "daily_candidates": daily_candidate_plan,
         "docker_compose": docker_compose,
@@ -2931,13 +2959,14 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                     "base_dir": {"type": "string"},
                     "cookies_dir": {"type": "string"},
                     "job_dir": {"type": "string"},
+                    "max_concurrent_jobs": {"type": "integer", "default": DEFAULT_MAX_CONCURRENT_JOBS},
                     "downloads_path": {"type": "string"},
                     "compose_file": {"type": "string"},
                     "client": {"type": "string", "default": "default"},
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "qbit", "daily_candidates", "docker_compose", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "queue", "qbit", "daily_candidates", "docker_compose", "agent_summary"],
                 "status_values": ["ok", "blocked"],
                 "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_daily_ready"],
             },
@@ -3138,9 +3167,10 @@ def _job_response_contract() -> dict[str, Any]:
 
 def _job_list_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "jobs", "next_actions"],
+        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
         "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
+        "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
 
 
@@ -3388,6 +3418,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "limit": {"type": "integer"},
             "filters": {"type": "object"},
             "status_counts": {"type": "object"},
+            "queue": {"type": "object"},
             "jobs": {"type": "array", "items": {"type": "object"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
@@ -3491,6 +3522,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "next_actions": {"type": "array", "items": {"type": "string"}},
             "paths": {"type": "object"},
             "mounts": {"type": "object"},
+            "queue": {"type": "object"},
             "qbit": {"type": "object"},
             "daily_candidates": {"type": "object"},
             "docker_compose": {"type": "object"},

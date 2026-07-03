@@ -108,6 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8080, help="HTTP bind port.")
     serve.add_argument("--api-token", help="Optional bearer token. Defaults to PTCLI_API_TOKEN when set.")
     serve.add_argument("--job-dir", help="Directory for file-backed API jobs. Defaults to PTCLI_JOB_DIR or TMPDIR/ptcli-jobs.")
+    serve.add_argument("--max-concurrent-jobs", type=int, help="Maximum ptcli API jobs to run at once. Defaults to PTCLI_MAX_CONCURRENT_JOBS or 1.")
     serve.add_argument("--json", action="store_true", help="Accepted for consistency; serve writes HTTP JSON responses.")
 
     daily_schedule = subparsers.add_parser(
@@ -11578,7 +11579,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "serve":
             from src.ptcli.service import run_service
 
-            run_service(args.host, args.port, api_token=args.api_token or os.environ.get("PTCLI_API_TOKEN"), job_dir=args.job_dir)
+            run_service(args.host, args.port, api_token=args.api_token or os.environ.get("PTCLI_API_TOKEN"), job_dir=args.job_dir, max_concurrent_jobs=args.max_concurrent_jobs)
             return 0
 
         if args.command == "daily-schedule":

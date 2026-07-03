@@ -91,6 +91,10 @@
           "job_dir": {
             "type": "string"
           },
+          "max_concurrent_jobs": {
+            "type": "integer",
+            "default": 1
+          },
           "downloads_path": {
             "type": "string"
           },
@@ -114,6 +118,7 @@
           "next_actions",
           "paths",
           "mounts",
+          "queue",
           "qbit",
           "daily_candidates",
           "docker_compose",
@@ -756,6 +761,7 @@
           "limit",
           "filters",
           "status_counts",
+          "queue",
           "jobs",
           "next_actions"
         ],
@@ -782,6 +788,13 @@
           "status",
           "kind",
           "limit"
+        ],
+        "queue_fields": [
+          "max_concurrent_jobs",
+          "running_count",
+          "queued_count",
+          "available_slots",
+          "backlog_count"
         ]
       },
       "safety": {

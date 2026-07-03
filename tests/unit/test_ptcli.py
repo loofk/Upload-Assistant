@@ -5,6 +5,8 @@ import io
 import json
 import shlex
 import subprocess
+import threading
+import time
 from http import HTTPStatus
 from pathlib import Path
 
@@ -364,13 +366,14 @@ def test_help_points_to_capability_matrix() -> None:
 
 
 def test_serve_parser_accepts_api_options() -> None:
-    args = build_parser().parse_args(["serve", "--host", "0.0.0.0", "--port", "18080", "--api-token", "secret", "--job-dir", "/tmp/jobs"])
+    args = build_parser().parse_args(["serve", "--host", "0.0.0.0", "--port", "18080", "--api-token", "secret", "--job-dir", "/tmp/jobs", "--max-concurrent-jobs", "2"])
 
     assert args.command == "serve"
     assert args.host == "0.0.0.0"
     assert args.port == 18080
     assert args.api_token == "secret"
     assert args.job_dir == "/tmp/jobs"
+    assert args.max_concurrent_jobs == 2
 
 
 def test_site_policy_overrides_parse_rate_limits() -> None:
@@ -12378,6 +12381,45 @@ def test_job_store_marks_blocked_results(tmp_path) -> None:
     assert job["next_actions"] == ["accept rules"]
 
 
+def test_job_store_limits_concurrent_background_jobs(tmp_path) -> None:
+    store = ptcli_service.JobStore(tmp_path, run_inline=False, recover_interrupted=False, max_concurrent_jobs=1)
+    first_started = threading.Event()
+    release_first = threading.Event()
+    second_started = threading.Event()
+
+    def first_runner():
+        first_started.set()
+        assert release_first.wait(2)
+        return {"status": "ok", "next_actions": ["first done"]}
+
+    def second_runner():
+        second_started.set()
+        return {"status": "ok", "next_actions": ["second done"]}
+
+    first = store.create("ptcli.test", {"name": "first"}, ["ptcli", "first"], first_runner)
+    assert first_started.wait(2)
+    second = store.create("ptcli.test", {"name": "second"}, ["ptcli", "second"], second_runner)
+    time.sleep(0.05)
+
+    assert store.get(first["job_id"])["status"] == "running"
+    assert store.get(second["job_id"])["status"] == "queued"
+    assert second_started.is_set() is False
+    listed = store.list({})
+    assert listed["queue"]["max_concurrent_jobs"] == 1
+    assert listed["queue"]["running_count"] == 1
+    assert listed["queue"]["queued_count"] == 1
+    assert listed["queue"]["backlog_count"] == 1
+
+    release_first.set()
+    deadline = time.time() + 2
+    while time.time() < deadline and store.get(second["job_id"])["status"] != "complete":
+        time.sleep(0.01)
+
+    assert store.get(first["job_id"])["status"] == "complete"
+    assert store.get(second["job_id"])["status"] == "complete"
+    assert second_started.is_set() is True
+
+
 def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> None:
     job_id = "b" * 32
     queued = {
@@ -13587,6 +13629,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["deployment_check"]["method"] == "GET"
     assert "qbit" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "mounts" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "queue" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "docker_compose" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_summary" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -13604,6 +13647,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["list_jobs"]["method"] == "GET"
     assert tool_by_name["list_jobs"]["path"] == "/v1/jobs"
     assert "jobs" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
+    assert "queue" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
+    assert "max_concurrent_jobs" in tool_by_name["list_jobs"]["response_contract"]["queue_fields"]
     assert "interruption" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "runtime" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "resume_endpoint" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -13654,8 +13699,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     job_list_schema = openapi["paths"]["/v1/jobs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "jobs" in job_list_schema["properties"]
     assert "status_counts" in job_list_schema["properties"]
+    assert "queue" in job_list_schema["properties"]
     deployment_schema = openapi["paths"]["/v1/deployment/check"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "mounts" in deployment_schema["properties"]
+    assert "queue" in deployment_schema["properties"]
     assert "daily_candidates" in deployment_schema["properties"]
     assert "docker_compose" in deployment_schema["properties"]
     assert "agent_summary" in deployment_schema["properties"]
@@ -13699,6 +13746,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "queue" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "docker_compose" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_summary" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -13741,6 +13789,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "cancellation" in tools_by_name["cancel_job"]["response_contract"]["required_fields"]
         assert tools_by_name["list_jobs"]["path"] == "/v1/jobs"
         assert "jobs" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "queue" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "max_concurrent_jobs" in tools_by_name["list_jobs"]["response_contract"]["queue_fields"]
         assert "interruption" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "cancellation" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "runtime" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -13769,10 +13819,12 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     assert "http://127.0.0.1:8080/health" in compose
     assert "host.docker.internal:host-gateway" in compose
     assert "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in compose
+    assert "PTCLI_MAX_CONCURRENT_JOBS=${PTCLI_MAX_CONCURRENT_JOBS:-1}" in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}" in compose
     assert "- daily" in compose
     assert 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]' in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=" in env_example
+    assert "PTCLI_MAX_CONCURRENT_JOBS=1" in env_example
     assert "name: ${PTCLI_DOCKER_NETWORK:-upload-assistant-ptcli}" in compose
     assert "yournetwork" not in compose
     assert "PTCLI_API_TOKEN=change-me" in env_example
@@ -13809,7 +13861,7 @@ services:
         '[{"name":"u2-to-mteam","source_tracker":"U2","target":"MTEAM","limit":10,"time":"09:00","timezone":"Asia/Shanghai","accept_rules":true}]',
     )
 
-    payload = ptcli_service.deployment_check_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir)})
+    payload = ptcli_service.deployment_check_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir), "max_concurrent_jobs": 2})
 
     assert payload["status"] == "ok"
     assert payload["ready"] is True
@@ -13817,6 +13869,7 @@ services:
     assert payload["daily_candidates"]["configured"] is True
     assert payload["daily_candidates"]["count"] == 1
     assert payload["docker_compose"]["daily_schedule_service_ready"] is True
+    assert payload["queue"]["max_concurrent_jobs"] == 2
     assert payload["agent_summary"]["ready_for_ai"] is True
     assert payload["agent_summary"]["ready_for_daily_candidates"] is True
     assert payload["agent_summary"]["docker_compose_daily_ready"] is True
