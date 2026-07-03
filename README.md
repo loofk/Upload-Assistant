@@ -196,6 +196,9 @@ docker compose ps ptcli-api
 # 检查 focused CLI 能力矩阵
 docker compose --profile cli run --rm ptcli sites --json
 
+# 执行一次每日候选扫描；适合放进宿主机 cron，结果写到挂载的 tmp/daily-candidates
+docker compose --profile daily run --rm ptcli-daily-schedule
+
 # 盒子上一键闭环示例
 docker compose --profile cli run --rm ptcli retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json
 

@@ -13417,11 +13417,14 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     env_example = Path(".env.ptcli.example").read_text(encoding="utf-8")
 
     assert "ptcli-api:" in compose
+    assert "ptcli-daily-schedule:" in compose
     assert "healthcheck:" in compose
     assert "http://127.0.0.1:8080/health" in compose
     assert "host.docker.internal:host-gateway" in compose
     assert "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}" in compose
+    assert "- daily" in compose
+    assert 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]' in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=" in env_example
     assert "name: ${PTCLI_DOCKER_NETWORK:-upload-assistant-ptcli}" in compose
     assert "yournetwork" not in compose
