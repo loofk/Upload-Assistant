@@ -561,7 +561,8 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     context = _site_policy_request_context(request)
     config = load_config(context.get("config"))
     report = build_site_policy_report(config, context["trackers"], accept_rules=bool(context.get("accept_rules")))
-    matrix = [_site_policy_matrix_item(policy) for policy in report.get("site_policies", []) if isinstance(policy, dict)]
+    roles = context.get("roles") if isinstance(context.get("roles"), dict) else {}
+    matrix = [_site_policy_matrix_item(policy, roles=_string_list(roles.get(str(policy.get("tracker"))))) for policy in report.get("site_policies", []) if isinstance(policy, dict)]
     return {
         "kind": "ptcli.site_policies",
         "status": report.get("status", "ok"),
@@ -699,6 +700,7 @@ def _candidate_request_context(request: dict[str, Any]) -> dict[str, Any]:
 
 def _site_policy_request_context(request: dict[str, Any]) -> dict[str, Any]:
     raw_trackers = request.get("trackers") or request.get("tracker")
+    roles: dict[str, set[str]] = {}
     if isinstance(raw_trackers, list):
         trackers = parse_tracker_list(",".join(str(item) for item in raw_trackers))
     elif raw_trackers:
@@ -708,11 +710,17 @@ def _site_policy_request_context(request: dict[str, Any]) -> dict[str, Any]:
         source = request.get("source_tracker") or request.get("source") or request.get("from")
         target = request.get("target") or request.get("target_tracker") or request.get("target_trackers") or request.get("to")
         if source:
-            trackers.extend(parse_tracker_list(str(source)))
+            source_trackers = parse_tracker_list(str(source))
+            trackers.extend(source_trackers)
+            _add_site_policy_roles(roles, source_trackers, "source")
         if isinstance(target, list):
-            trackers.extend(parse_tracker_list(",".join(str(item) for item in target)))
+            target_trackers = parse_tracker_list(",".join(str(item) for item in target))
+            trackers.extend(target_trackers)
+            _add_site_policy_roles(roles, target_trackers, "target")
         elif target:
-            trackers.extend(parse_tracker_list(str(target)))
+            target_trackers = parse_tracker_list(str(target))
+            trackers.extend(target_trackers)
+            _add_site_policy_roles(roles, target_trackers, "target")
     deduped: list[str] = []
     seen: set[str] = set()
     for tracker in trackers:
@@ -721,11 +729,19 @@ def _site_policy_request_context(request: dict[str, Any]) -> dict[str, Any]:
             seen.add(tracker)
     if not deduped:
         raise ServiceError("trackers or source/target is required for site policy report.")
+    for tracker in deduped:
+        roles.setdefault(tracker, {"unknown"})
     return {
         "trackers": deduped,
+        "roles": {tracker: sorted(roles.get(tracker, {"unknown"})) for tracker in deduped},
         "config": request.get("config"),
         "accept_rules": _truthy(request.get("accept_rules")),
     }
+
+
+def _add_site_policy_roles(roles: dict[str, set[str]], trackers: list[str], role: str) -> None:
+    for tracker in trackers:
+        roles.setdefault(tracker, set()).add(role)
 
 
 def _truthy(value: Any) -> bool:
@@ -808,9 +824,10 @@ def _daily_candidate_schedule_run_next_actions(jobs: list[dict[str, Any]], skipp
     return actions
 
 
-def _site_policy_matrix_item(policy: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None = None) -> dict[str, Any]:
+    item = {
         "tracker": policy.get("tracker"),
+        "roles": roles or ["unknown"],
         "rules_url": policy.get("rules_url"),
         "manual_review_required": policy.get("manual_review_required"),
         "rule_review_fingerprint": policy.get("rule_review_fingerprint"),
@@ -833,9 +850,71 @@ def _site_policy_matrix_item(policy: dict[str, Any]) -> dict[str, Any]:
         },
         "notes": _string_list(policy.get("notes")),
     }
+    item["policy_coverage"] = _site_policy_coverage(item)
+    return item
+
+
+def _site_policy_coverage(item: dict[str, Any]) -> dict[str, Any]:
+    tracker = str(item.get("tracker") or "UNKNOWN")
+    roles = _string_list(item.get("roles")) or ["unknown"]
+    automation = item.get("automation") if isinstance(item.get("automation"), dict) else {}
+    qbit_limits = item.get("qbit_limits") if isinstance(item.get("qbit_limits"), dict) else {}
+    seeding = item.get("seeding_requirements") if isinstance(item.get("seeding_requirements"), dict) else {}
+    missing: list[str] = []
+    disabled: list[str] = []
+    recommendations: list[str] = []
+
+    if not item.get("rules_url"):
+        missing.append("rules_url")
+        recommendations.append(f"{tracker}: add rules_url so agents can point reviewers to the authoritative rule page.")
+    if item.get("manual_review_required") is True and not item.get("rule_review_fingerprint"):
+        missing.append("rule_review_fingerprint")
+        recommendations.append(f"{tracker}: record rule_review_fingerprint after manual rule review.")
+    if roles == ["unknown"] or "unknown" in roles:
+        missing.append("source_or_target_role")
+        recommendations.append(f"{tracker}: call site_policies with source_tracker/from and target/to so coverage can apply role-specific gates.")
+
+    if "source" in roles:
+        if automation.get("download") is not True:
+            disabled.append("auto_download")
+            recommendations.append(f"{tracker}: enable allow_auto_download before using it as an automated source tracker.")
+        elif qbit_limits.get("download_limit") is None:
+            missing.append("download_rate_limit")
+            recommendations.append(f"{tracker}: set download_rate_limit for source pulls on the seedbox.")
+        if seeding.get("min_seed_time_hours") is None:
+            missing.append("min_seed_time_hours")
+            recommendations.append(f"{tracker}: set min_seed_time_hours for source-side seeding obligations.")
+    if "target" in roles:
+        if automation.get("upload") is not True:
+            disabled.append("auto_upload")
+            recommendations.append(f"{tracker}: enable allow_auto_upload before using it as an automated target tracker.")
+        elif qbit_limits.get("upload_limit") is None:
+            missing.append("upload_rate_limit")
+            recommendations.append(f"{tracker}: set upload_rate_limit for target-side seeding after upload.")
+        if seeding.get("min_ratio") is None:
+            missing.append("min_ratio")
+            recommendations.append(f"{tracker}: set min_ratio for target-side seeding obligations.")
+
+    return {
+        "complete": not missing and not disabled,
+        "roles": roles,
+        "missing_fields": missing,
+        "disabled_automation": disabled,
+        "recommendations": recommendations,
+    }
 
 
 def _site_policy_agent_summary(matrix: list[dict[str, Any]], report: dict[str, Any]) -> dict[str, Any]:
+    missing_by_tracker = {
+        str(item.get("tracker")): _string_list((item.get("policy_coverage") or {}).get("missing_fields"))
+        for item in matrix
+        if _string_list((item.get("policy_coverage") or {}).get("missing_fields"))
+    }
+    disabled_by_tracker = {
+        str(item.get("tracker")): _string_list((item.get("policy_coverage") or {}).get("disabled_automation"))
+        for item in matrix
+        if _string_list((item.get("policy_coverage") or {}).get("disabled_automation"))
+    }
     return {
         "ready": bool(report.get("ready")),
         "tracker_count": len(matrix),
@@ -850,6 +929,10 @@ def _site_policy_agent_summary(matrix: list[dict[str, Any]], report: dict[str, A
             for item in matrix
             if (item.get("seeding_requirements") or {}).get("min_seed_time_hours") is not None or (item.get("seeding_requirements") or {}).get("min_ratio") is not None
         ],
+        "policy_coverage_ready": all(bool((item.get("policy_coverage") or {}).get("complete")) for item in matrix),
+        "missing_policy_fields": missing_by_tracker,
+        "disabled_automation": disabled_by_tracker,
+        "policy_recommendations": [recommendation for item in matrix for recommendation in _string_list((item.get("policy_coverage") or {}).get("recommendations"))],
         "blockers": _string_list(report.get("blockers")),
         "next_actions": _string_list(report.get("next_actions")),
     }
@@ -1917,7 +2000,17 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "input_schema": site_policy_request_schema,
             "response_contract": {
                 "required_fields": ["status", "ok", "ready", "policy_matrix", "qbit_limits", "blockers", "next_actions", "agent_summary"],
-                "policy_fields": ["tracker", "rules_url", "automation", "qbit_limits", "seeding_requirements", "manual_review_required", "rule_review_fingerprint"],
+                "policy_fields": [
+                    "tracker",
+                    "roles",
+                    "rules_url",
+                    "automation",
+                    "qbit_limits",
+                    "seeding_requirements",
+                    "manual_review_required",
+                    "rule_review_fingerprint",
+                    "policy_coverage",
+                ],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },

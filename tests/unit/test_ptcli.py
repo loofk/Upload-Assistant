@@ -12714,20 +12714,60 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     }
     monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
 
-    payload = ptcli_service.site_policies_payload({"trackers": "U2,MTEAM", "accept_rules": True})
+    payload = ptcli_service.site_policies_payload({"source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
 
     assert payload["status"] == "ok"
     assert payload["ready"] is True
     assert payload["request"]["trackers"] == ["U2", "MTEAM"]
+    assert payload["request"]["roles"] == {"U2": ["source"], "MTEAM": ["target"]}
     matrix_by_tracker = {item["tracker"]: item for item in payload["policy_matrix"]}
+    assert matrix_by_tracker["U2"]["roles"] == ["source"]
     assert matrix_by_tracker["U2"]["automation"]["download"] is True
     assert matrix_by_tracker["U2"]["qbit_limits"]["download_limit"] == 20 * 1024 * 1024
     assert matrix_by_tracker["U2"]["seeding_requirements"]["min_seed_time_hours"] == 72
+    assert matrix_by_tracker["U2"]["policy_coverage"]["complete"] is True
+    assert matrix_by_tracker["MTEAM"]["roles"] == ["target"]
     assert matrix_by_tracker["MTEAM"]["automation"]["upload"] is True
     assert matrix_by_tracker["MTEAM"]["qbit_limits"]["upload_limit"] == 2 * 1024 * 1024
     assert matrix_by_tracker["MTEAM"]["seeding_requirements"]["min_ratio"] == 1.0
+    assert matrix_by_tracker["MTEAM"]["policy_coverage"]["complete"] is True
     assert payload["agent_summary"]["qbit_limits_present"] == ["U2", "MTEAM"]
     assert payload["agent_summary"]["seeding_requirements_present"] == ["U2", "MTEAM"]
+    assert payload["agent_summary"]["policy_coverage_ready"] is True
+    assert payload["agent_summary"]["missing_policy_fields"] == {}
+    assert payload["agent_summary"]["disabled_automation"] == {}
+
+
+def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                },
+                "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
+                },
+            }
+        }
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+
+    payload = ptcli_service.site_policies_payload({"source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
+
+    matrix_by_tracker = {item["tracker"]: item for item in payload["policy_matrix"]}
+    assert matrix_by_tracker["U2"]["policy_coverage"]["complete"] is False
+    assert matrix_by_tracker["MTEAM"]["policy_coverage"]["complete"] is False
+    assert payload["agent_summary"]["policy_coverage_ready"] is False
+    assert payload["agent_summary"]["missing_policy_fields"] == {
+        "U2": ["rule_review_fingerprint", "download_rate_limit", "min_seed_time_hours"],
+        "MTEAM": ["rule_review_fingerprint", "upload_rate_limit", "min_ratio"],
+    }
+    assert payload["agent_summary"]["disabled_automation"] == {}
+    assert any("U2: set download_rate_limit" in item for item in payload["agent_summary"]["policy_recommendations"])
+    assert any("MTEAM: set upload_rate_limit" in item for item in payload["agent_summary"]["policy_recommendations"])
 
 
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
@@ -12754,6 +12794,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert tool_by_name["daily_candidates_schedule"]["method"] == "POST"
     assert "schedule_fields" in tool_by_name["daily_candidates_schedule"]["response_contract"]
     assert tool_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"
@@ -12829,6 +12870,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
         assert tools_by_name["daily_candidates_schedule"]["path"] == "/v1/candidates/daily/schedule"
         assert tools_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"

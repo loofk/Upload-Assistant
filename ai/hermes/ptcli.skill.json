@@ -146,12 +146,14 @@
         ],
         "policy_fields": [
           "tracker",
+          "roles",
           "rules_url",
           "automation",
           "qbit_limits",
           "seeding_requirements",
           "manual_review_required",
-          "rule_review_fingerprint"
+          "rule_review_fingerprint",
+          "policy_coverage"
         ]
       },
       "safety": {
