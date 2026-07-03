@@ -12601,6 +12601,50 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert summary["agent_decision"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/submit"
 
 
+def test_daily_candidate_schedule_payload_normalizes_job_requests(monkeypatch) -> None:
+    monkeypatch.delenv("PTCLI_DAILY_CANDIDATE_SCHEDULES", raising=False)
+
+    payload = ptcli_service.daily_candidate_schedule_payload(
+        {
+            "schedules": [
+                {
+                    "name": "u2-to-mteam",
+                    "source_tracker": "U2",
+                    "target": "MTEAM",
+                    "limit": 99,
+                    "time": "09:30",
+                    "accept_rules": True,
+                }
+            ]
+        }
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["count"] == 1
+    schedule = payload["schedules"][0]
+    assert schedule["name"] == "u2-to-mteam"
+    assert schedule["job_endpoint"] == "/v1/jobs/candidates/daily"
+    assert schedule["job_request"]["limit"] == 10
+    assert schedule["job_request"]["accept_rules"] is True
+    assert schedule["schedule"]["time"] == "09:30"
+    assert schedule["push_contract"]["items"] == "candidate_digest.push_items"
+    assert schedule["submit_top_candidate_with"] == "manual_retorrent_job"
+
+
+def test_daily_candidate_schedule_payload_reads_env(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "PTCLI_DAILY_CANDIDATE_SCHEDULES",
+        json.dumps([{"source_tracker": "CHD", "target": "MTEAM", "time": "08:00"}]),
+    )
+
+    payload = ptcli_service.daily_candidate_schedule_payload({})
+
+    assert payload["source"] == "env"
+    assert payload["env"] == "PTCLI_DAILY_CANDIDATE_SCHEDULES"
+    assert payload["schedules"][0]["name"] == "CHD-to-MTEAM-daily"
+    assert payload["schedules"][0]["job_request"]["source_tracker"] == "CHD"
+
+
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
     tools = ptcli_service.tools_payload()
     paths = {tool["path"] for tool in tools["tools"]}
@@ -12609,6 +12653,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent/submit" in paths
     assert "/v1/deployment/check" in paths
     assert "/v1/candidates/daily" in paths
+    assert "/v1/candidates/daily/schedule" in paths
     assert "/v1/jobs/candidates/daily" in paths
     assert "/v1/jobs/{job_id}" in paths
     assert "/v1/jobs/{job_id}/resume" in paths
@@ -12620,6 +12665,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
+    assert tool_by_name["daily_candidates_schedule"]["method"] == "POST"
+    assert "schedule_fields" in tool_by_name["daily_candidates_schedule"]["response_contract"]
     assert tool_by_name["deployment_check"]["method"] == "GET"
     assert "qbit" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
@@ -12640,6 +12687,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent" in openapi["paths"]
     assert "/v1/jobs/retorrent/submit" in openapi["paths"]
     assert "/v1/candidates/daily" in openapi["paths"]
+    assert "/v1/candidates/daily/schedule" in openapi["paths"]
     assert "/v1/jobs/candidates/daily" in openapi["paths"]
     assert "/v1/jobs/{job_id}" in openapi["paths"]
     assert "/v1/jobs/{job_id}/summary" in openapi["paths"]
@@ -12686,6 +12734,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert set(tools_by_name) >= {"deployment_check", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "get_job_status", "resume_job"}
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
+        assert tools_by_name["daily_candidates_schedule"]["path"] == "/v1/candidates/daily/schedule"
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "digest" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
         assert "candidate_digest" in tools_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
@@ -12706,6 +12755,8 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     assert "http://127.0.0.1:8080/health" in compose
     assert "host.docker.internal:host-gateway" in compose
     assert "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in compose
+    assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}" in compose
+    assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=" in env_example
     assert "name: ${PTCLI_DOCKER_NETWORK:-upload-assistant-ptcli}" in compose
     assert "yournetwork" not in compose
     assert "PTCLI_API_TOKEN=change-me" in env_example

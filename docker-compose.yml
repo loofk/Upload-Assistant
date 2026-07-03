@@ -20,6 +20,7 @@ services:
       - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+      - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
     volumes:
       - /path/to/torrents/:/downloads/:rw # map this to qBittorrent download location with matching container paths
       - /mnt/user/appdata/Upload-Assistant/data/config.py:/Upload-Assistant/data/config.py:rw

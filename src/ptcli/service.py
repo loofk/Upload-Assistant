@@ -28,6 +28,7 @@ from src.ptcli.source import resolve_source_reference
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
 DEFAULT_SERVICE_PORT = 8080
 JOB_SCHEMA_VERSION = 1
+DAILY_CANDIDATE_SCHEDULE_ENV = "PTCLI_DAILY_CANDIDATE_SCHEDULES"
 JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 RESUME_COMMAND_ALLOWLIST = {"pipeline", "target-upload", "doctor", "summary-check", "retorrent"}
 AGENT_MANIFEST_PATHS = {
@@ -247,6 +248,15 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
                 self._send_json(HTTPStatus.OK, deployment_check_payload(query))
                 return
+            if path == "/v1/candidates/daily/schedule":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                try:
+                    self._send_json(HTTPStatus.OK, daily_candidate_schedule_payload({}))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
             if path.startswith("/v1/jobs/"):
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -267,6 +277,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/retorrent/check": lambda payload: asyncio.run(retorrent_check(payload)),
                 "/v1/retorrent": lambda payload: asyncio.run(retorrent(payload)),
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
+                "/v1/candidates/daily/schedule": daily_candidate_schedule_payload,
                 "/v1/jobs/retorrent/check": lambda payload: create_retorrent_check_job(job_store, payload),
                 "/v1/jobs/retorrent": lambda payload: create_retorrent_job(job_store, payload),
                 "/v1/jobs/retorrent/submit": lambda payload: create_manual_retorrent_job(job_store, payload),
@@ -456,6 +467,38 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def daily_candidate_schedule_payload(request: dict[str, Any]) -> dict[str, Any]:
+    """Return a normalized daily candidate schedule plan without executing jobs."""
+    raw_schedules = request.get("schedules") if isinstance(request, dict) else None
+    source = "request"
+    if raw_schedules is None:
+        raw_schedules = _daily_candidate_schedules_from_env()
+        source = "env"
+    schedules: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    for index, raw_schedule in enumerate(_schedule_list(raw_schedules)):
+        if not isinstance(raw_schedule, dict):
+            blockers.append(f"schedule[{index}] must be an object.")
+            continue
+        try:
+            schedules.append(_normalized_daily_candidate_schedule(raw_schedule, index=index))
+        except ServiceError as exc:
+            blockers.append(f"schedule[{index}]: {exc}")
+    if not schedules and not blockers:
+        blockers.append(f"No daily candidate schedules configured. Set {DAILY_CANDIDATE_SCHEDULE_ENV} or POST schedules.")
+    return {
+        "kind": "ptcli.daily_candidate_schedule",
+        "status": "ok" if schedules and not blockers else "partial" if schedules else "blocked",
+        "ok": bool(schedules),
+        "source": source,
+        "env": DAILY_CANDIDATE_SCHEDULE_ENV,
+        "count": len(schedules),
+        "schedules": schedules,
+        "blockers": blockers,
+        "next_actions": _daily_candidate_schedule_next_actions(schedules, blockers),
+    }
+
+
 def _pipeline_check_args(request: dict[str, Any]) -> tuple[argparse.Namespace, dict[str, Any], list[str]]:
     source = _resolve_request_source(request)
     target_trackers = _target_trackers(request)
@@ -573,6 +616,66 @@ def _candidate_request_context(request: dict[str, Any]) -> dict[str, Any]:
         "accept_rules": bool(request.get("accept_rules")),
         "check_dupes": request.get("check_dupes", True) is not False,
     }
+
+
+def _daily_candidate_schedules_from_env() -> Any:
+    raw = os.environ.get(DAILY_CANDIDATE_SCHEDULE_ENV)
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ServiceError(f"{DAILY_CANDIDATE_SCHEDULE_ENV} is not valid JSON: {exc.msg}") from exc
+
+
+def _schedule_list(raw_schedules: Any) -> list[Any]:
+    if isinstance(raw_schedules, dict) and isinstance(raw_schedules.get("schedules"), list):
+        return raw_schedules["schedules"]
+    if isinstance(raw_schedules, list):
+        return raw_schedules
+    if raw_schedules in (None, ""):
+        return []
+    return [raw_schedules]
+
+
+def _normalized_daily_candidate_schedule(schedule: dict[str, Any], *, index: int) -> dict[str, Any]:
+    request = _candidate_request_context(schedule)
+    enabled = schedule.get("enabled", True) is not False
+    schedule_time = str(schedule.get("time") or schedule.get("at") or schedule.get("schedule_time") or "09:00")
+    timezone = str(schedule.get("timezone") or os.environ.get("TZ") or "Asia/Shanghai")
+    name = str(schedule.get("name") or f"{request['source_tracker']}-to-{request['target_trackers']}-daily")
+    return {
+        "name": name,
+        "enabled": enabled,
+        "schedule": {
+            "frequency": "daily",
+            "time": schedule_time,
+            "timezone": timezone,
+        },
+        "job_endpoint": "/v1/jobs/candidates/daily",
+        "job_tool": "daily_candidates_job",
+        "job_request": request,
+        "poll_with": "get_job_status",
+        "read_digest_from": ["candidate_digest", "agent_summary.digest", "result.digest"],
+        "submit_top_candidate_with": "manual_retorrent_job",
+        "push_contract": {
+            "items": "candidate_digest.push_items",
+            "top_candidate": "candidate_digest.top_candidate",
+            "top_submit_request": "candidate_digest.top_submit_request",
+            "agent_decision": "agent_decision",
+        },
+        "blockers": [] if enabled else ["schedule is disabled"],
+        "source_index": index,
+    }
+
+
+def _daily_candidate_schedule_next_actions(schedules: list[dict[str, Any]], blockers: list[str]) -> list[str]:
+    if blockers and not schedules:
+        return [f"Set {DAILY_CANDIDATE_SCHEDULE_ENV} to a JSON array of daily candidate schedules, or POST schedules to /v1/candidates/daily/schedule."]
+    actions = ["Create daily jobs by POSTing each enabled schedule.job_request to /v1/jobs/candidates/daily, then poll job status and read candidate_digest."]
+    if any(schedule.get("enabled") is False for schedule in schedules):
+        actions.append("Enable disabled schedules before expecting daily candidate output.")
+    return actions
 
 
 def _append_common_options(argv: list[str], request: dict[str, Any]) -> None:
@@ -1473,6 +1576,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     retorrent_request_schema = _retorrent_tool_request_schema()
     manual_retorrent_request_schema = _manual_retorrent_tool_request_schema()
     candidate_request_schema = _daily_candidate_tool_request_schema()
+    candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     job_id_schema = _job_id_tool_request_schema()
     return [
         {
@@ -1541,6 +1645,18 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": _job_response_contract(),
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "daily_candidates_schedule",
+            "method": "POST",
+            "path": "/v1/candidates/daily/schedule",
+            "description": "Validate and normalize daily candidate schedules into job requests that external cron, Docker, OpenClaw, or Hermes can run. This endpoint does not contact trackers or upload.",
+            "input_schema": candidate_schedule_request_schema,
+            "response_contract": {
+                "required_fields": ["status", "ok", "count", "schedules", "blockers", "next_actions"],
+                "schedule_fields": ["name", "enabled", "schedule", "job_endpoint", "job_request", "push_contract"],
+            },
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
             "name": "get_job_status",
@@ -1663,6 +1779,30 @@ def _daily_candidate_tool_request_schema() -> dict[str, Any]:
             "check_dupes": {"type": "boolean", "default": True},
             "base_dir": {"type": "string"},
             "config": {"type": "string"},
+        },
+    }
+
+
+def _daily_candidate_schedule_tool_request_schema() -> dict[str, Any]:
+    candidate_properties = _daily_candidate_tool_request_schema()["properties"]
+    return {
+        "type": "object",
+        "required": [],
+        "properties": {
+            "schedules": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["source_tracker", "target"],
+                    "properties": {
+                        **candidate_properties,
+                        "name": {"type": "string"},
+                        "enabled": {"type": "boolean", "default": True},
+                        "time": {"type": "string", "default": "09:00"},
+                        "timezone": {"type": "string", "default": "Asia/Shanghai"},
+                    },
+                },
+            }
         },
     }
 
@@ -1910,6 +2050,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "check_dupes": {"type": "boolean", "default": True},
         },
     }
+    candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
         "properties": {
@@ -1922,6 +2063,19 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "ranking": {"type": "object"},
             "digest": {"type": "object"},
             "candidates": {"type": "array", "items": {"type": "object"}},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    candidate_schedule_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "source": {"type": "string"},
+            "env": {"type": "string"},
+            "count": {"type": "integer"},
+            "schedules": {"type": "array", "items": {"type": "object"}},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
@@ -2057,6 +2211,19 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "requestBody": {"required": True, "content": {"application/json": {"schema": candidate_request_schema}}},
                     "responses": {"200": {"description": "Daily retorrent candidates.", "content": {"application/json": {"schema": candidate_response_schema}}}},
                 }
+            },
+            "/v1/candidates/daily/schedule": {
+                "get": {
+                    "operationId": "dailyRetorrentCandidateScheduleFromEnv",
+                    "security": token_security,
+                    "responses": {"200": {"description": "Daily candidate schedule plan from environment.", "content": {"application/json": {"schema": candidate_schedule_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "dailyRetorrentCandidateSchedule",
+                    "security": token_security,
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": candidate_schedule_request_schema}}},
+                    "responses": {"200": {"description": "Normalized daily candidate schedule plan.", "content": {"application/json": {"schema": candidate_schedule_response_schema}}}},
+                },
             },
             "/v1/jobs/candidates/daily": {
                 "post": {

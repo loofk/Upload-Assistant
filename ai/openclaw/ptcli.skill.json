@@ -308,6 +308,87 @@
       }
     },
     {
+      "name": "daily_candidates_schedule",
+      "method": "POST",
+      "path": "/v1/candidates/daily/schedule",
+      "description": "Validate and normalize daily candidate schedules into job requests that external cron, Docker, OpenClaw, or Hermes can run. This endpoint does not contact trackers or upload.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "schedules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "source_tracker",
+                "target"
+              ],
+              "properties": {
+                "source_tracker": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": [
+                    "string",
+                    "array"
+                  ]
+                },
+                "limit": {
+                  "type": "integer",
+                  "default": 10,
+                  "maximum": 10
+                },
+                "accept_rules": {
+                  "type": "boolean"
+                },
+                "check_dupes": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "name": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "time": {
+                  "type": "string",
+                  "default": "09:00"
+                },
+                "timezone": {
+                  "type": "string",
+                  "default": "Asia/Shanghai"
+                }
+              }
+            }
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "count",
+          "schedules",
+          "blockers",
+          "next_actions"
+        ],
+        "schedule_fields": [
+          "name",
+          "enabled",
+          "schedule",
+          "job_endpoint",
+          "job_request",
+          "push_contract"
+        ]
+      },
+      "safety": {
+        "live_upload": false
+      }
+    },
+    {
       "name": "get_job_status",
       "method": "GET",
       "path": "/v1/jobs/{job_id}",
