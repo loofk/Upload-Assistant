@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import hashlib
+import io
 import json
 import shlex
 import subprocess
@@ -12595,6 +12596,92 @@ def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path)
     assert captured_request["source_url"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
     assert captured_request["source"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
     assert job["command_argv"][:7] == ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to"]
+
+
+class _NonClosingBytesIO(io.BytesIO):
+    def close(self) -> None:
+        self.flush()
+
+
+class _FakeSocket:
+    def __init__(self, request_bytes: bytes) -> None:
+        self.input = io.BytesIO(request_bytes)
+        self.output = _NonClosingBytesIO()
+
+    def makefile(self, mode: str, *_args, **_kwargs):
+        return self.input if "r" in mode else self.output
+
+    def sendall(self, data: bytes) -> None:
+        self.output.write(data)
+
+
+class _FakeServer:
+    server_address = ("127.0.0.1", 8080)
+
+
+def _service_json_request(handler_class, method: str, path: str, *, payload: dict | None = None, api_token: str | None = None) -> tuple[int, dict]:
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    headers = {
+        "Host": "127.0.0.1:8080",
+        "Content-Type": "application/json",
+    }
+    if api_token:
+        headers["Authorization"] = f"Bearer {api_token}"
+    if body is not None:
+        headers["Content-Length"] = str(len(body))
+    raw_headers = "".join(f"{key}: {value}\r\n" for key, value in headers.items()).encode("utf-8")
+    raw_request = f"{method} {path} HTTP/1.1\r\n".encode() + raw_headers + b"\r\n" + (body or b"")
+    fake_socket = _FakeSocket(raw_request)
+    handler_class(fake_socket, ("127.0.0.1", 12345), _FakeServer())
+    raw_response = fake_socket.output.getvalue()
+    status_line, response_body = raw_response.split(b"\r\n", 1)[0], raw_response.split(b"\r\n\r\n", 1)[1]
+    return int(status_line.decode("utf-8").split()[1]), json.loads(response_body.decode("utf-8"))
+
+
+def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_context(monkeypatch, tmp_path) -> None:
+    captured_request = {}
+
+    async def fake_retorrent(request):
+        captured_request.update(request)
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["rule gate requires explicit confirmations."],
+            "next_actions": ["Review source and target rules, then resubmit with confirmations."],
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    store = ptcli_service.JobStore(tmp_path / "jobs", run_inline=True)
+    handler_class = ptcli_service._handler_class("secret", store)
+    request = {
+        "source_url": "https://u2.dmhy.org/details.php?id=60635&hit=1",
+        "target": "MTEAM",
+        "save_path": "/downloads",
+    }
+
+    unauthorized_status, unauthorized_body = _service_json_request(handler_class, "POST", "/v1/jobs/retorrent/from-url", payload=request)
+    assert unauthorized_status == 401
+    assert unauthorized_body["message"] == "Unauthorized."
+    assert captured_request == {}
+
+    status, payload = _service_json_request(handler_class, "POST", "/v1/jobs/retorrent/from-url", payload=request, api_token="secret")
+    assert status == 200
+    assert payload["kind"] == "ptcli.source_url_retorrent"
+    assert payload["status"] == "blocked"
+    assert payload["request"]["mode"] == "source_url_retorrent"
+    assert payload["source_reference"]["tracker"] == "U2"
+    assert payload["source_reference"]["source_id"] == "60635"
+    assert payload["agent_decision"]["source_reference"] == payload["source_reference"]
+    assert captured_request["source"] == request["source_url"]
+    assert captured_request["source_url"] == request["source_url"]
+
+    status, job_status = _service_json_request(handler_class, "GET", f"/v1/jobs/{payload['job_id']}", api_token="secret")
+    assert status == 200
+    assert job_status["job_id"] == payload["job_id"]
+    assert job_status["source_reference"] == payload["source_reference"]
+    assert job_status["command_argv"][:7] == ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to"]
 
 
 def test_manual_retorrent_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
