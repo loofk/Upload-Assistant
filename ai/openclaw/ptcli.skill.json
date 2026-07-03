@@ -76,6 +76,63 @@
       }
     },
     {
+      "name": "site_policies",
+      "method": "POST",
+      "path": "/v1/site-policies",
+      "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "trackers": {
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "source_tracker": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "accept_rules": {
+            "type": "boolean"
+          },
+          "config": {
+            "type": "string"
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "policy_matrix",
+          "qbit_limits",
+          "blockers",
+          "next_actions",
+          "agent_summary"
+        ],
+        "policy_fields": [
+          "tracker",
+          "rules_url",
+          "automation",
+          "qbit_limits",
+          "seeding_requirements",
+          "manual_review_required",
+          "rule_review_fingerprint"
+        ]
+      },
+      "safety": {
+        "live_upload": false
+      }
+    },
+    {
       "name": "retorrent_job",
       "method": "POST",
       "path": "/v1/jobs/retorrent",

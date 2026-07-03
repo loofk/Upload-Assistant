@@ -12691,6 +12691,45 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert "Poll each jobs[].status_endpoint" in payload["next_actions"][0]
 
 
+def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "rule_review_fingerprint": "u2-review",
+                },
+                "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
+                    "upload_rate_limit": "2MiB/s",
+                    "min_ratio": 1.0,
+                    "rule_review_fingerprint": "mteam-review",
+                },
+            }
+        }
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+
+    payload = ptcli_service.site_policies_payload({"trackers": "U2,MTEAM", "accept_rules": True})
+
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["request"]["trackers"] == ["U2", "MTEAM"]
+    matrix_by_tracker = {item["tracker"]: item for item in payload["policy_matrix"]}
+    assert matrix_by_tracker["U2"]["automation"]["download"] is True
+    assert matrix_by_tracker["U2"]["qbit_limits"]["download_limit"] == 20 * 1024 * 1024
+    assert matrix_by_tracker["U2"]["seeding_requirements"]["min_seed_time_hours"] == 72
+    assert matrix_by_tracker["MTEAM"]["automation"]["upload"] is True
+    assert matrix_by_tracker["MTEAM"]["qbit_limits"]["upload_limit"] == 2 * 1024 * 1024
+    assert matrix_by_tracker["MTEAM"]["seeding_requirements"]["min_ratio"] == 1.0
+    assert payload["agent_summary"]["qbit_limits_present"] == ["U2", "MTEAM"]
+    assert payload["agent_summary"]["seeding_requirements_present"] == ["U2", "MTEAM"]
+
+
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
     tools = ptcli_service.tools_payload()
     paths = {tool["path"] for tool in tools["tools"]}
@@ -12698,6 +12737,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent" in paths
     assert "/v1/jobs/retorrent/submit" in paths
     assert "/v1/deployment/check" in paths
+    assert "/v1/site-policies" in paths
     assert "/v1/candidates/daily" in paths
     assert "/v1/candidates/daily/schedule" in paths
     assert "/v1/jobs/candidates/daily" in paths
@@ -12712,6 +12752,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
+    assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
+    assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert tool_by_name["daily_candidates_schedule"]["method"] == "POST"
     assert "schedule_fields" in tool_by_name["daily_candidates_schedule"]["response_contract"]
     assert tool_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"
@@ -12732,6 +12774,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/openclaw/skill.json" in openapi["paths"]
     assert "/v1/hermes/skill.json" in openapi["paths"]
     assert "/v1/deployment/check" in openapi["paths"]
+    assert "/v1/site-policies" in openapi["paths"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent" in openapi["paths"]
     assert "/v1/jobs/retorrent/submit" in openapi["paths"]
@@ -12760,7 +12803,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
-    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
     assert manual_workflow["tool"] == "manual_retorrent_job"
     retorrent_tool = next(tool for tool in manifest["tools"] if tool["name"] == "retorrent_job")
@@ -12781,8 +12824,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"deployment_check", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
+        assert set(tools_by_name) >= {"deployment_check", "site_policies", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
+        assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
+        assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
         assert tools_by_name["daily_candidates_schedule"]["path"] == "/v1/candidates/daily/schedule"
         assert tools_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"

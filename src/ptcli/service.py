@@ -23,6 +23,8 @@ from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, build_daily_candidates
 from src.ptcli.cli import build_parser, pipeline_payload, retorrent_payload
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.doctor import build_runtime_dependency_check
+from src.ptcli.mainland import parse_tracker_list
+from src.ptcli.policies import build_site_policy_report
 from src.ptcli.source import resolve_source_reference
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
@@ -248,6 +250,16 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
                 self._send_json(HTTPStatus.OK, deployment_check_payload(query))
                 return
+            if path == "/v1/site-policies":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                try:
+                    self._send_json(HTTPStatus.OK, site_policies_payload(query))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
             if path == "/v1/candidates/daily/schedule":
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -276,6 +288,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
                 "/v1/retorrent/check": lambda payload: asyncio.run(retorrent_check(payload)),
                 "/v1/retorrent": lambda payload: asyncio.run(retorrent(payload)),
+                "/v1/site-policies": site_policies_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
                 "/v1/candidates/daily/schedule": daily_candidate_schedule_payload,
                 "/v1/jobs/retorrent/check": lambda payload: create_retorrent_check_job(job_store, payload),
@@ -543,6 +556,28 @@ def daily_candidate_schedule_payload(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
+    """Return a tracker policy matrix for AI-safe automation decisions."""
+    context = _site_policy_request_context(request)
+    config = load_config(context.get("config"))
+    report = build_site_policy_report(config, context["trackers"], accept_rules=bool(context.get("accept_rules")))
+    matrix = [_site_policy_matrix_item(policy) for policy in report.get("site_policies", []) if isinstance(policy, dict)]
+    return {
+        "kind": "ptcli.site_policies",
+        "status": report.get("status", "ok"),
+        "ok": bool(report.get("ready")),
+        "ready": bool(report.get("ready")),
+        "request": context,
+        "policy_matrix": matrix,
+        "site_policies": report.get("site_policies", []),
+        "qbit_limits": report.get("qbit_limits", {}),
+        "blockers": _string_list(report.get("blockers")),
+        "next_actions": _string_list(report.get("next_actions")),
+        "agent_summary": _site_policy_agent_summary(matrix, report),
+        "report": report,
+    }
+
+
 def _pipeline_check_args(request: dict[str, Any]) -> tuple[argparse.Namespace, dict[str, Any], list[str]]:
     source = _resolve_request_source(request)
     target_trackers = _target_trackers(request)
@@ -662,6 +697,45 @@ def _candidate_request_context(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _site_policy_request_context(request: dict[str, Any]) -> dict[str, Any]:
+    raw_trackers = request.get("trackers") or request.get("tracker")
+    if isinstance(raw_trackers, list):
+        trackers = parse_tracker_list(",".join(str(item) for item in raw_trackers))
+    elif raw_trackers:
+        trackers = parse_tracker_list(str(raw_trackers))
+    else:
+        trackers = []
+        source = request.get("source_tracker") or request.get("source") or request.get("from")
+        target = request.get("target") or request.get("target_tracker") or request.get("target_trackers") or request.get("to")
+        if source:
+            trackers.extend(parse_tracker_list(str(source)))
+        if isinstance(target, list):
+            trackers.extend(parse_tracker_list(",".join(str(item) for item in target)))
+        elif target:
+            trackers.extend(parse_tracker_list(str(target)))
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for tracker in trackers:
+        if tracker and tracker not in seen:
+            deduped.append(tracker)
+            seen.add(tracker)
+    if not deduped:
+        raise ServiceError("trackers or source/target is required for site policy report.")
+    return {
+        "trackers": deduped,
+        "config": request.get("config"),
+        "accept_rules": _truthy(request.get("accept_rules")),
+    }
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _daily_candidate_schedules_from_env() -> Any:
     raw = os.environ.get(DAILY_CANDIDATE_SCHEDULE_ENV)
     if not raw:
@@ -732,6 +806,53 @@ def _daily_candidate_schedule_run_next_actions(jobs: list[dict[str, Any]], skipp
     if blockers:
         actions.append("Resolve top-level schedule blockers before treating the run as complete.")
     return actions
+
+
+def _site_policy_matrix_item(policy: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tracker": policy.get("tracker"),
+        "rules_url": policy.get("rules_url"),
+        "manual_review_required": policy.get("manual_review_required"),
+        "rule_review_fingerprint": policy.get("rule_review_fingerprint"),
+        "automation": policy.get("automation") if isinstance(policy.get("automation"), dict) else {
+            "download": policy.get("allow_auto_download"),
+            "upload": policy.get("allow_auto_upload"),
+            "retorrent": policy.get("allow_retorrent"),
+            "manual_review_required": policy.get("manual_review_required"),
+        },
+        "qbit_limits": {
+            "download_limit": policy.get("download_rate_limit"),
+            "download_limit_human": policy.get("download_rate_limit_human"),
+            "upload_limit": policy.get("upload_rate_limit"),
+            "upload_limit_human": policy.get("upload_rate_limit_human"),
+        },
+        "seeding_requirements": {
+            "min_seed_time_hours": policy.get("min_seed_time_hours"),
+            "min_ratio": policy.get("min_ratio"),
+            "freeleech_required": policy.get("freeleech_required"),
+        },
+        "notes": _string_list(policy.get("notes")),
+    }
+
+
+def _site_policy_agent_summary(matrix: list[dict[str, Any]], report: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ready": bool(report.get("ready")),
+        "tracker_count": len(matrix),
+        "trackers": [str(item.get("tracker")) for item in matrix if item.get("tracker")],
+        "manual_review_required": [str(item.get("tracker")) for item in matrix if item.get("manual_review_required") is True],
+        "auto_download_enabled": [str(item.get("tracker")) for item in matrix if (item.get("automation") or {}).get("download") is True],
+        "auto_upload_enabled": [str(item.get("tracker")) for item in matrix if (item.get("automation") or {}).get("upload") is True],
+        "retorrent_enabled": [str(item.get("tracker")) for item in matrix if (item.get("automation") or {}).get("retorrent") is True],
+        "qbit_limits_present": [str(item.get("tracker")) for item in matrix if (item.get("qbit_limits") or {}).get("download_limit") is not None or (item.get("qbit_limits") or {}).get("upload_limit") is not None],
+        "seeding_requirements_present": [
+            str(item.get("tracker"))
+            for item in matrix
+            if (item.get("seeding_requirements") or {}).get("min_seed_time_hours") is not None or (item.get("seeding_requirements") or {}).get("min_ratio") is not None
+        ],
+        "blockers": _string_list(report.get("blockers")),
+        "next_actions": _string_list(report.get("next_actions")),
+    }
 
 
 def _append_common_options(argv: list[str], request: dict[str, Any]) -> None:
@@ -1633,6 +1754,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     manual_retorrent_request_schema = _manual_retorrent_tool_request_schema()
     candidate_request_schema = _daily_candidate_tool_request_schema()
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
+    site_policy_request_schema = _site_policy_tool_request_schema()
     job_id_schema = _job_id_tool_request_schema()
     return [
         {
@@ -1787,6 +1909,18 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
+        {
+            "name": "site_policies",
+            "method": "POST",
+            "path": "/v1/site-policies",
+            "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
+            "input_schema": site_policy_request_schema,
+            "response_contract": {
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "qbit_limits", "blockers", "next_actions", "agent_summary"],
+                "policy_fields": ["tracker", "rules_url", "automation", "qbit_limits", "seeding_requirements", "manual_review_required", "rule_review_fingerprint"],
+            },
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
     ]
 
 
@@ -1872,6 +2006,20 @@ def _daily_candidate_schedule_tool_request_schema() -> dict[str, Any]:
                     },
                 },
             }
+        },
+    }
+
+
+def _site_policy_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": [],
+        "properties": {
+            "trackers": {"type": ["string", "array"], "description": "Comma-separated tracker codes or an array, e.g. U2,MTEAM."},
+            "source_tracker": {"type": "string", "description": "Optional source tracker code when asking for a source/target pair."},
+            "target": {"type": ["string", "array"], "description": "Optional target tracker code(s) when asking for a source/target pair."},
+            "accept_rules": {"type": "boolean", "description": "Whether manual rule review obligations are acknowledged for this policy read."},
+            "config": {"type": "string", "description": "Path to data/config.py inside the container."},
         },
     }
 
@@ -2162,6 +2310,22 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
+    site_policy_request_schema = _site_policy_tool_request_schema()
+    site_policy_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "request": {"type": "object"},
+            "policy_matrix": {"type": "array", "items": {"type": "object"}},
+            "site_policies": {"type": "array", "items": {"type": "object"}},
+            "qbit_limits": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+            "agent_summary": {"type": "object"},
+        },
+    }
     manifest_response_schema = {
         "type": "object",
         "properties": {
@@ -2240,6 +2404,26 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     ],
                     "responses": {"200": {"description": "Local deployment readiness report.", "content": {"application/json": {"schema": deployment_response_schema}}}},
                 }
+            },
+            "/v1/site-policies": {
+                "get": {
+                    "operationId": "getPtcliSitePolicies",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "trackers", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "source_tracker", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "target", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "accept_rules", "in": "query", "required": False, "schema": {"type": "boolean"}},
+                        {"name": "config", "in": "query", "required": False, "schema": {"type": "string"}},
+                    ],
+                    "responses": {"200": {"description": "Chinese PT site policy matrix.", "content": {"application/json": {"schema": site_policy_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "postPtcliSitePolicies",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": site_policy_request_schema}}},
+                    "responses": {"200": {"description": "Chinese PT site policy matrix.", "content": {"application/json": {"schema": site_policy_response_schema}}}},
+                },
             },
             "/v1/retorrent/check": {
                 "post": {

@@ -117,6 +117,11 @@ curl -X POST http://127.0.0.1:8080/v1/candidates/daily/schedule \
 curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/daily/schedule \
   -H "Content-Type: application/json" \
   -d '{"schedules":[{"name":"u2-to-mteam","source_tracker":"U2","target":"MTEAM","limit":10,"time":"09:00","accept_rules":true}]}'
+
+# 站点策略矩阵：审计自动化 gate、QB 限速、做种要求、规则 URL 和人工确认状态；不会联系站点
+curl -X POST http://127.0.0.1:8080/v1/site-policies \
+  -H "Content-Type: application/json" \
+  -d '{"trackers":"U2,MTEAM","accept_rules":true}'
 ```
 
 若需要把 API 暴露给其他容器或局域网工具，建议设置 `PTCLI_API_TOKEN`，调用时添加 `Authorization: Bearer <token>`。服务端点不会绕过站点规则；live 下载/上传仍依赖现有 rule gate、dupe gate 和 `confirm_upload`。
@@ -153,6 +158,7 @@ OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/opencla
   }
   ```
   CLI/API 显式传入的 `qbit_upload_limit`、`qbit_download_limit`、`uploaded_qbit_upload_limit`、`uploaded_qbit_download_limit` 会覆盖站点策略默认值。
+  HTTP 服务也提供 `/v1/site-policies`，可直接读取 `policy_matrix[].automation`、`policy_matrix[].qbit_limits` 和 `policy_matrix[].seeding_requirements` 供 AI 或部署脚本审计。
 - 任务式 API 默认把 job 文件写入 `PTCLI_JOB_DIR`，未设置时写入 `TMPDIR/ptcli-jobs`；Docker Compose 默认设置为 `/Upload-Assistant/tmp/ptcli-jobs`。
 - `Dockerfile.ptcli` 是 focused CLI 镜像，只安装 `requirements-ptcli.txt` 和 ptcli 需要的系统依赖；旧 `Dockerfile` 保留给 legacy/full UA 入口。
 - 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；release 工作流会额外发布 `*-legacy-webui` 标签给旧 Web UI 镜像。
