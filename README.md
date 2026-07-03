@@ -123,6 +123,7 @@ curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/daily/schedule \
 # 盒子/cron 本地触发：读取 PTCLI_DAILY_CANDIDATE_SCHEDULES 或传入 schedules 文件，inline 执行候选扫描并返回 schedule_digest；不会上传
 python3 ptcli.py daily-schedule --write-summary --summary-output-dir ./tmp/daily-candidates --json
 docker compose --profile cli run --rm ptcli daily-schedule --write-summary --summary-output-dir /Upload-Assistant/tmp/daily-candidates --json
+python3 ptcli.py summary-check --summary-file ./tmp/daily-candidates/ptcli-daily-schedule-summary.json --json
 
 # 站点策略矩阵：审计自动化 gate、QB 限速、做种要求、规则 URL 和人工确认状态；不会联系站点
 curl -X POST http://127.0.0.1:8080/v1/site-policies \

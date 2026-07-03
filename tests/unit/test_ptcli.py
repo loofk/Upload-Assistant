@@ -13094,6 +13094,17 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert summary["schedule_digest"]["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
     assert summary["summary_file"] == str(summary_path)
 
+    check_code = main(["summary-check", "--summary-file", str(summary_path), "--json"])
+    check_payload = json.loads(capsys.readouterr().out)
+
+    assert check_code == 0
+    assert check_payload["kind"] == "ptcli.daily_schedule.summary"
+    assert check_payload["ready_for_push"] is True
+    assert check_payload["can_submit_any"] is True
+    assert check_payload["live_safe_to_attempt"] is False
+    assert check_payload["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
+    assert check_payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
+
 
 def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> None:
     config = {

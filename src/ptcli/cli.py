@@ -61,7 +61,7 @@ from src.ptcli.target import (
 )
 
 SUMMARY_SCHEMA_VERSION = 1
-SUPPORTED_SUMMARY_KINDS = ("ptcli.pipeline.run_summary", "ptcli.target_upload.summary", "ptcli.doctor.live_readiness")
+SUPPORTED_SUMMARY_KINDS = ("ptcli.pipeline.run_summary", "ptcli.target_upload.summary", "ptcli.doctor.live_readiness", "ptcli.daily_schedule.summary")
 SUMMARY_CHECK_RUN_COMMANDS = {"pipeline", "target-upload", "doctor"}
 
 
@@ -3606,6 +3606,8 @@ def _summary_check_from_payload(payload: dict[str, Any], summary_file: str) -> d
         return _target_upload_summary_check(payload, summary_file)
     if kind == "ptcli.doctor.live_readiness":
         return _doctor_summary_check(payload, summary_file)
+    if kind == "ptcli.daily_schedule.summary":
+        return _daily_schedule_summary_check(payload, summary_file)
     msg = "summary kind dispatch escaped validation"
     raise RuntimeError(msg)
 
@@ -5490,6 +5492,52 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
     }
     check_payload["candidate_commands"] = _summary_candidate_commands(check_payload)
     return _summary_check_result(check_payload)
+
+
+def _daily_schedule_summary_check(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
+    diagnostics = _summary_check_diagnostics(payload)
+    schedule_digest = payload.get("schedule_digest") if isinstance(payload.get("schedule_digest"), dict) else {}
+    agent_decision = payload.get("agent_decision") if isinstance(payload.get("agent_decision"), dict) else {}
+    blockers = _string_list(payload.get("blockers")) or _string_list(schedule_digest.get("blockers"))
+    ready_for_push = bool(schedule_digest.get("push_count")) and not blockers
+    can_submit_any = bool(agent_decision.get("can_submit_any")) or bool(schedule_digest.get("submit_request_count"))
+    pending_count = int(schedule_digest.get("pending_job_count") or 0)
+    blocked_count = int(schedule_digest.get("blocked_job_count") or 0)
+    if pending_count:
+        _extend_unique_string(blockers, [f"{pending_count} daily candidate job(s) are still pending."])
+    if blocked_count:
+        _extend_unique_string(blockers, [f"{blocked_count} daily candidate job(s) are blocked or failed."])
+    check_status = "ok" if ready_for_push and not blockers else "blocked"
+    next_actions = _string_list(payload.get("next_actions"))
+    if can_submit_any:
+        next_actions.append("Review top_submit_requests, add confirm_upload=true plus save_path or path, then submit approved requests to source_url_retorrent_job.")
+    elif pending_count:
+        next_actions.append("Wait for pending candidate jobs and rerun summary-check on this daily schedule summary.")
+    elif not next_actions:
+        next_actions.append("Inspect schedule_digest.items and rerun daily-schedule later or adjust configured schedules.")
+    return _summary_check_result(
+        {
+            "status": check_status,
+            "kind": payload.get("kind"),
+            "summary_file": summary_file,
+            "automation_handoff": _summary_automation_handoff(summary_file),
+            "ready": ready_for_push,
+            "complete": pending_count == 0,
+            "ready_for_push": ready_for_push,
+            "can_submit_any": can_submit_any,
+            "live_safe_to_attempt": False,
+            "blockers": blockers,
+            "next_actions": list(dict.fromkeys(next_actions)),
+            "job_count": payload.get("job_count"),
+            "schedule_digest": schedule_digest,
+            "agent_decision": agent_decision,
+            "top_submit_requests": schedule_digest.get("top_submit_requests", []),
+            "push_items": schedule_digest.get("push_items", []),
+            "skipped": payload.get("skipped", []),
+            **diagnostics,
+            "candidate_commands": [],
+        }
+    )
 
 
 def _summary_next_command(payload: dict[str, Any], resume_state: dict[str, Any], preferred_stages: tuple[str, ...]) -> dict[str, Any]:
