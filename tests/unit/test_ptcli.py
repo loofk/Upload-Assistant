@@ -12377,6 +12377,51 @@ def test_job_store_marks_blocked_results(tmp_path) -> None:
     assert job["next_actions"] == ["accept rules"]
 
 
+def test_job_store_recovers_interrupted_running_jobs_on_startup(tmp_path) -> None:
+    job_id = "a" * 32
+    interrupted = {
+        "schema_version": 1,
+        "job_id": job_id,
+        "kind": "ptcli.retorrent",
+        "status": "running",
+        "ok": False,
+        "request": {"source_reference": {"tracker": "U2", "source_id": "60635"}, "target_trackers": ["MTEAM"]},
+        "command_argv": ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to", "MTEAM", "--json"],
+        "created_at": 100,
+        "updated_at": 101,
+        "started_at": 101,
+        "completed_at": None,
+        "blockers": [],
+        "next_actions": [],
+        "summary_file": None,
+        "resume_state": {"next_command_argv": ["python3", "ptcli.py", "doctor", "--json"]},
+        "agent_summary": None,
+        "agent_decision": None,
+        "duplicate_check": None,
+        "result": None,
+    }
+    (tmp_path / f"{job_id}.json").write_text(json.dumps(interrupted), encoding="utf-8")
+
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    job = store.get(job_id)
+
+    assert job["status"] == "blocked"
+    assert job["ok"] is False
+    assert "service restarted" in job["blockers"][0]
+    assert job["interruption"]["previous_status"] == "running"
+    assert job["interruption"]["reason"] == "service_startup_recovery"
+    assert job["resume_plan"]["recommended"] is True
+    assert job["agent_decision"]["decision"] == "resume"
+    assert job["agent_decision"]["should_resume"] is True
+    assert job["next_command_argv"] == ["python3", "ptcli.py", "doctor", "--json"]
+
+    payload = store.list({"status": "blocked"})
+    assert payload["count"] == 1
+    assert payload["jobs"][0]["job_id"] == job_id
+    assert payload["jobs"][0]["interruption"]["previous_status"] == "running"
+    assert any("Resume recommended blocked jobs" in action for action in payload["next_actions"])
+
+
 def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     result = {
@@ -13351,6 +13396,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_context" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "interruption" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "workflow_context" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -13388,6 +13434,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["list_jobs"]["method"] == "GET"
     assert tool_by_name["list_jobs"]["path"] == "/v1/jobs"
     assert "jobs" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
+    assert "interruption" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "resume_endpoint" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
 
     openapi = ptcli_service.openapi_payload(require_auth=True)
@@ -13422,6 +13469,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_context" in summary_schema["properties"]
     assert "source_reference" in summary_schema["properties"]
     assert "workflow_context" in summary_schema["properties"]
+    job_schema = openapi["paths"]["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "interruption" in job_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
     schedule_jobs_schema = openapi["paths"]["/v1/jobs/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -13509,8 +13558,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "interruption" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert tools_by_name["list_jobs"]["path"] == "/v1/jobs"
         assert "jobs" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "interruption" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_endpoint" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "source_reference" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]

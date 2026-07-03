@@ -52,11 +52,13 @@ class ServiceError(Exception):
 class JobStore:
     """Tiny file-backed job store for long-running ptcli service tasks."""
 
-    def __init__(self, root: str | Path | None = None, *, run_inline: bool = False) -> None:
+    def __init__(self, root: str | Path | None = None, *, run_inline: bool = False, recover_interrupted: bool = True) -> None:
         self.root = _resolve_job_dir(root)
         self.run_inline = run_inline
         self._lock = threading.Lock()
         self.root.mkdir(parents=True, exist_ok=True)
+        if recover_interrupted:
+            self.recover_interrupted_jobs()
 
     def create(self, kind: str, request: dict[str, Any], command_argv: list[str], runner: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         job_id = uuid.uuid4().hex
@@ -92,6 +94,50 @@ class JobStore:
 
     def get(self, job_id: str) -> dict[str, Any]:
         return _job_public_payload(self._read(job_id))
+
+    def recover_interrupted_jobs(self) -> dict[str, Any]:
+        recovered: list[dict[str, Any]] = []
+        for path in sorted(self.root.glob("*.json")):
+            try:
+                job = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if job.get("status") not in {"queued", "running"}:
+                continue
+            now = int(time.time())
+            previous_status = str(job.get("status") or "unknown")
+            blocker = f"Job was {previous_status} when the ptcli service restarted; the in-process runner is no longer attached."
+            next_actions = ["Inspect summary_file/result evidence, then resume with resume_endpoint if an allowlisted resume command is available; otherwise submit a new job."]
+            job.setdefault("interruption", {})
+            if isinstance(job["interruption"], dict):
+                job["interruption"].update({"detected_at": now, "previous_status": previous_status, "reason": "service_startup_recovery"})
+            job.update(
+                {
+                    "status": "blocked",
+                    "ok": False,
+                    "updated_at": now,
+                    "completed_at": now,
+                    "blockers": [blocker],
+                    "next_actions": next_actions,
+                    "result": {
+                        "status": "blocked",
+                        "blockers": [blocker],
+                        "next_actions": next_actions,
+                        "interruption": job.get("interruption"),
+                        "next_command_argv": _resume_argv_from_job(job),
+                    },
+                }
+            )
+            job["agent_decision"] = _agent_decision(job)
+            self._write(job)
+            recovered.append(_job_list_item(job))
+        return {
+            "status": "ok",
+            "ok": True,
+            "count": len(recovered),
+            "recovered_jobs": recovered,
+            "next_actions": ["Review recovered jobs with GET /v1/jobs?status=blocked before resuming."] if recovered else [],
+        }
 
     def list(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
         request = request or {}
@@ -1606,6 +1652,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "completed_at": job.get("completed_at"),
         "blockers": _string_list(job.get("blockers")),
         "next_actions": _string_list(job.get("next_actions")),
+        "interruption": job.get("interruption") if isinstance(job.get("interruption"), dict) else None,
         "summary_file": _job_summary_file(job),
         "source_reference": _job_source_reference(job),
         "target_trackers": (job.get("request") or {}).get("target_trackers") if isinstance(job.get("request"), dict) else None,
@@ -1644,6 +1691,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "completed_at": job.get("completed_at"),
         "blockers": _string_list(job.get("blockers")),
         "next_actions": _string_list(job.get("next_actions")),
+        "interruption": job.get("interruption") if isinstance(job.get("interruption"), dict) else None,
         "duplicate_check": job.get("duplicate_check"),
         "summary_file": job.get("summary_file"),
         "resume_state": job.get("resume_state"),
@@ -2948,9 +2996,9 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
-        "blocked_fields": ["blockers", "next_actions", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
+        "blocked_fields": ["blockers", "next_actions", "interruption", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
     }
 
@@ -2958,7 +3006,7 @@ def _job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "summary_file", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "summary_file", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
     }
 
@@ -3153,6 +3201,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "command_argv": {"type": "array", "items": {"type": "string"}},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
+            "interruption": {"type": ["object", "null"]},
             "duplicate_check": {"type": "object"},
             "summary_file": {"type": ["string", "null"]},
             "resume_state": {"type": ["object", "null"]},
