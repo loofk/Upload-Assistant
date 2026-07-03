@@ -1960,10 +1960,30 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         except Exception as exc:
             checks.append({"name": "qbit.config", "ok": False, "message": f"qBittorrent client config is not ready: {exc}", "details": qbit})
 
+    daily_candidate_plan = _deployment_daily_candidate_plan(request)
+    checks.append(
+        {
+            "name": "automation.daily_candidates",
+            "ok": bool(daily_candidate_plan.get("configured")) and not bool(daily_candidate_plan.get("blockers")),
+            "blocking": False,
+            "message": _deployment_daily_candidate_message(daily_candidate_plan),
+            "details": daily_candidate_plan,
+        }
+    )
+
     blockers = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking", True) is not False]
     warnings = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking") is False]
     next_actions = _deployment_next_actions(checks)
     ready = not blockers
+    paths = {
+        "base_dir": str(base_dir),
+        "config": str(config_path),
+        "cookies_dir": str(cookies_dir),
+        "tmp_dir": str(tmp_dir),
+        "job_dir": str(job_dir),
+        "downloads_path": str(downloads_path),
+    }
+    mounts = _deployment_mount_summary(checks)
     return {
         "kind": "ptcli.deployment_check",
         "status": "ok" if ready else "blocked",
@@ -1973,15 +1993,11 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "blockers": blockers,
         "warnings": warnings,
         "next_actions": next_actions,
-        "paths": {
-            "base_dir": str(base_dir),
-            "config": str(config_path),
-            "cookies_dir": str(cookies_dir),
-            "tmp_dir": str(tmp_dir),
-            "job_dir": str(job_dir),
-            "downloads_path": str(downloads_path),
-        },
+        "paths": paths,
+        "mounts": mounts,
         "qbit": qbit,
+        "daily_candidates": daily_candidate_plan,
+        "agent_summary": _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan),
         "connectivity_checked": False,
     }
 
@@ -2035,6 +2051,100 @@ def _deployment_api_token_check() -> dict[str, Any]:
     }
 
 
+def _deployment_daily_candidate_plan(request: dict[str, Any]) -> dict[str, Any]:
+    schedule_request: dict[str, Any] = {}
+    if "schedules" in request:
+        schedule_request["schedules"] = request.get("schedules")
+    elif "daily_candidate_schedules" in request:
+        schedule_request["schedules"] = request.get("daily_candidate_schedules")
+    try:
+        plan = daily_candidate_schedule_payload(schedule_request)
+    except ServiceError as exc:
+        return {
+            "configured": False,
+            "status": "blocked",
+            "ok": False,
+            "source": "request" if schedule_request else "env",
+            "env": DAILY_CANDIDATE_SCHEDULE_ENV,
+            "count": 0,
+            "schedules": [],
+            "blockers": [str(exc)],
+            "next_actions": [f"Fix {DAILY_CANDIDATE_SCHEDULE_ENV} JSON or POST valid schedules to /v1/candidates/daily/schedule."],
+        }
+    return {
+        "configured": bool(plan.get("count")),
+        "status": plan.get("status"),
+        "ok": bool(plan.get("ok")),
+        "source": plan.get("source"),
+        "env": plan.get("env"),
+        "count": plan.get("count", 0),
+        "schedules": plan.get("schedules", []),
+        "blockers": _string_list(plan.get("blockers")),
+        "next_actions": _string_list(plan.get("next_actions")),
+    }
+
+
+def _deployment_daily_candidate_message(plan: dict[str, Any]) -> str:
+    if plan.get("configured") and not plan.get("blockers"):
+        return f"Daily candidate schedules are configured: {plan.get('count', 0)}."
+    if plan.get("configured"):
+        return f"Daily candidate schedules need attention: {', '.join(_string_list(plan.get('blockers')))}"
+    return f"No daily candidate schedules configured; set {DAILY_CANDIDATE_SCHEDULE_ENV} when daily push jobs are needed."
+
+
+def _deployment_mount_summary(checks: list[dict[str, Any]]) -> dict[str, Any]:
+    mount_names = {"path.config", "path.cookies_dir", "path.tmp_dir", "path.job_dir", "path.downloads_path"}
+    required: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for check in checks:
+        if check.get("name") not in mount_names:
+            continue
+        item = {
+            "name": str(check.get("name")).removeprefix("path."),
+            "path": check.get("path"),
+            "ok": bool(check.get("ok")),
+            "exists": check.get("exists", bool(check.get("ok"))),
+            "writable": check.get("writable"),
+            "message": check.get("message"),
+        }
+        required.append(item)
+        if not item["ok"]:
+            missing.append(item)
+    return {
+        "required": required,
+        "missing": missing,
+        "ready": not missing,
+    }
+
+
+def _deployment_agent_summary(
+    ready: bool,
+    checks: list[dict[str, Any]],
+    paths: dict[str, str],
+    mounts: dict[str, Any],
+    qbit: dict[str, Any],
+    daily_candidate_plan: dict[str, Any],
+) -> dict[str, Any]:
+    check_by_name = {str(check.get("name")): check for check in checks}
+    api_token_check = check_by_name.get("security.api_token", {})
+    blocking_failures = [str(check.get("name")) for check in checks if check.get("ok") is False and check.get("blocking", True) is not False]
+    warning_failures = [str(check.get("name")) for check in checks if check.get("ok") is False and check.get("blocking") is False]
+    return {
+        "ready_for_ai": ready,
+        "ready_for_manual_retorrent": ready and bool(qbit.get("configured")),
+        "ready_for_daily_candidates": ready and bool(daily_candidate_plan.get("configured")) and not bool(daily_candidate_plan.get("blockers")),
+        "api_token_configured": bool(api_token_check.get("configured")),
+        "qbit_configured": bool(qbit.get("configured")),
+        "daily_candidates_configured": bool(daily_candidate_plan.get("configured")),
+        "missing_mounts": mounts.get("missing", []),
+        "blocking_checks": blocking_failures,
+        "warning_checks": warning_failures,
+        "configured_paths": paths,
+        "qbit_client": qbit.get("client"),
+        "daily_candidate_schedule_count": daily_candidate_plan.get("count", 0),
+    }
+
+
 def _deployment_next_actions(checks: list[dict[str, Any]]) -> list[str]:
     actions: list[str] = []
     for check in checks:
@@ -2056,6 +2166,8 @@ def _deployment_next_actions(checks: list[dict[str, Any]]) -> list[str]:
             actions.append("Install focused ptcli dependencies from requirements-ptcli.txt or rebuild the ptcli Docker image.")
         elif name == "security.api_token":
             actions.append("Set PTCLI_API_TOKEN before exposing ptcli-api outside localhost.")
+        elif name == "automation.daily_candidates":
+            actions.extend(_string_list((check.get("details") or {}).get("next_actions")))
     return actions
 
 
@@ -2243,8 +2355,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "qbit"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "qbit", "daily_candidates", "agent_summary"],
                 "status_values": ["ok", "blocked"],
+                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "missing_mounts", "qbit_configured", "daily_candidates_configured"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
@@ -2740,7 +2853,10 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "warnings": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
             "paths": {"type": "object"},
+            "mounts": {"type": "object"},
             "qbit": {"type": "object"},
+            "daily_candidates": {"type": "object"},
+            "agent_summary": {"type": "object"},
         },
     }
     return {

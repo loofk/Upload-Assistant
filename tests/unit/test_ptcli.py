@@ -13152,6 +13152,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert tool_by_name["deployment_check"]["method"] == "GET"
     assert "qbit" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "mounts" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "agent_summary" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "ready_for_daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
     assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
@@ -13191,6 +13195,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "workflow_context" in summary_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
+    deployment_schema = openapi["paths"]["/v1/deployment/check"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "mounts" in deployment_schema["properties"]
+    assert "daily_candidates" in deployment_schema["properties"]
+    assert "agent_summary" in deployment_schema["properties"]
 
 
 def test_agent_manifest_exposes_ai_safe_workflows() -> None:
@@ -13228,6 +13236,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
         assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
+        assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "agent_summary" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "ready_for_daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -13290,11 +13302,21 @@ def test_deployment_check_reports_ready_seedbox_mounts(tmp_path, monkeypatch) ->
         encoding="utf-8",
     )
     monkeypatch.setenv("TMPDIR", str(tmp_dir))
+    monkeypatch.setenv(
+        "PTCLI_DAILY_CANDIDATE_SCHEDULES",
+        '[{"name":"u2-to-mteam","source_tracker":"U2","target":"MTEAM","limit":10,"time":"09:00","timezone":"Asia/Shanghai","accept_rules":true}]',
+    )
 
     payload = ptcli_service.deployment_check_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir)})
 
     assert payload["status"] == "ok"
     assert payload["ready"] is True
+    assert payload["mounts"]["ready"] is True
+    assert payload["daily_candidates"]["configured"] is True
+    assert payload["daily_candidates"]["count"] == 1
+    assert payload["agent_summary"]["ready_for_ai"] is True
+    assert payload["agent_summary"]["ready_for_daily_candidates"] is True
+    assert payload["agent_summary"]["daily_candidate_schedule_count"] == 1
     assert payload["qbit"]["configured"] is True
     assert payload["qbit"]["qbit_url"] == "http://host.docker.internal"
     assert payload["connectivity_checked"] is False
@@ -13312,6 +13334,9 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
 
     assert payload["status"] == "blocked"
     assert payload["ready"] is False
+    assert payload["daily_candidates"]["configured"] is False
+    assert payload["agent_summary"]["ready_for_ai"] is False
+    assert payload["agent_summary"]["missing_mounts"]
     assert any("config file is missing" in blocker for blocker in payload["blockers"])
     assert any("Mount or create data/config.py" in action for action in payload["next_actions"])
 

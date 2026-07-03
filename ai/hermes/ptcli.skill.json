@@ -85,6 +85,12 @@
           "base_dir": {
             "type": "string"
           },
+          "cookies_dir": {
+            "type": "string"
+          },
+          "job_dir": {
+            "type": "string"
+          },
           "downloads_path": {
             "type": "string"
           },
@@ -104,7 +110,18 @@
           "warnings",
           "next_actions",
           "paths",
-          "qbit"
+          "mounts",
+          "qbit",
+          "daily_candidates",
+          "agent_summary"
+        ],
+        "agent_summary_fields": [
+          "ready_for_ai",
+          "ready_for_manual_retorrent",
+          "ready_for_daily_candidates",
+          "missing_mounts",
+          "qbit_configured",
+          "daily_candidates_configured"
         ]
       },
       "safety": {
