@@ -117,6 +117,7 @@ class JobStore:
             "policy_coverage": _job_policy_coverage(job),
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
             "resume_context": _job_resume_context(job),
+            "source_reference": _job_source_reference(job),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -301,6 +302,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/jobs/retorrent/check": lambda payload: create_retorrent_check_job(job_store, payload),
                 "/v1/jobs/retorrent": lambda payload: create_retorrent_job(job_store, payload),
                 "/v1/jobs/retorrent/submit": lambda payload: create_manual_retorrent_job(job_store, payload),
+                "/v1/jobs/retorrent/from-url": lambda payload: create_source_url_retorrent_job(job_store, payload),
                 "/v1/jobs/candidates/daily": lambda payload: create_daily_candidates_job(job_store, payload),
                 "/v1/jobs/candidates/daily/schedule": lambda payload: create_daily_candidate_schedule_jobs(job_store, payload),
             }
@@ -407,14 +409,27 @@ def create_retorrent_job(job_store: JobStore, request: dict[str, Any]) -> dict[s
 
 def create_manual_retorrent_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
     """Create the AI-facing manual retorrent job: source URL + target, then execute if gates allow."""
+    return _create_ai_retorrent_job(job_store, request, kind="ptcli.manual_retorrent", mode="manual_retorrent")
+
+
+def create_source_url_retorrent_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
+    """Create a retorrent job from a source details URL plus target tracker."""
+    source_url = request.get("source_url") or request.get("source") or request.get("source_link") or request.get("url")
+    if not source_url:
+        raise ServiceError("source_url or source is required.")
+    effective = {**request, "source": str(source_url), "source_url": str(source_url)}
+    return _create_ai_retorrent_job(job_store, effective, kind="ptcli.source_url_retorrent", mode="source_url_retorrent")
+
+
+def _create_ai_retorrent_job(job_store: JobStore, request: dict[str, Any], *, kind: str, mode: str) -> dict[str, Any]:
     effective_request = {**request, "execute": True, "execute_if_no_duplicate": True, "manual_retorrent": True}
     source = _resolve_request_source(effective_request)
     target_trackers = _target_trackers(effective_request)
     effective_request = _request_with_policy_qbit_defaults(effective_request, source, target_trackers)
     _, normalized_request, argv = _retorrent_execute_args(effective_request)
-    normalized_request = {**normalized_request, "mode": "manual_retorrent", "execute_if_no_duplicate": True}
+    normalized_request = {**normalized_request, "mode": mode, "execute_if_no_duplicate": True}
     return job_store.create(
-        "ptcli.manual_retorrent",
+        kind,
         normalized_request,
         ["ptcli", *argv],
         lambda: asyncio.run(retorrent(effective_request)),
@@ -805,7 +820,7 @@ def _normalized_daily_candidate_schedule(schedule: dict[str, Any], *, index: int
         "job_request": request,
         "poll_with": "get_job_status",
         "read_digest_from": ["candidate_digest", "agent_summary.digest", "result.digest"],
-        "submit_top_candidate_with": "manual_retorrent_job",
+        "submit_top_candidate_with": "source_url_retorrent_job",
         "push_contract": {
             "items": "candidate_digest.push_items",
             "top_candidate": "candidate_digest.top_candidate",
@@ -830,7 +845,7 @@ def _daily_candidate_schedule_run_next_actions(jobs: list[dict[str, Any]], skipp
     if not jobs:
         return ["Fix schedule blockers, then POST schedules to /v1/jobs/candidates/daily/schedule again."]
     actions = ["Poll each jobs[].status_endpoint until complete, then read candidate_digest and agent_decision from the job status or summary."]
-    actions.append("If agent_decision.decision is submit_candidate_when_confirmed, review rules and submit candidate_digest.top_submit_request to manual_retorrent_job with confirm_upload=true and a save_path or path.")
+    actions.append("If agent_decision.decision is submit_candidate_when_confirmed, review rules and submit candidate_digest.top_submit_request to source_url_retorrent_job with confirm_upload=true and a save_path or path.")
     if skipped:
         actions.append("Inspect skipped schedules before expecting candidates from every configured source/target pair.")
     if blockers:
@@ -968,6 +983,9 @@ def _list_value(value: Any) -> list[Any]:
 def _normalized_request(request: dict[str, Any], source: dict[str, Any], target_trackers: str, *, execute: bool) -> dict[str, Any]:
     return {
         "source": source,
+        "source_reference": source,
+        "source_input": source.get("requested_source"),
+        "source_url": source.get("details_url"),
         "target_trackers": target_trackers,
         "execute": execute,
         "accept_rules": bool(request.get("accept_rules")),
@@ -1389,6 +1407,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "policy_coverage": _job_policy_coverage(job),
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
         "resume_context": _job_resume_context(job),
+        "source_reference": _job_source_reference(job),
         "result_status": _nested_value(job.get("result"), "status"),
         "next_stage": _nested_value(job.get("result"), "next_stage"),
         "next_command": _nested_value(job.get("result"), "next_command"),
@@ -1416,6 +1435,17 @@ def _job_resume_context(job: dict[str, Any]) -> dict[str, Any] | None:
     request = job.get("request")
     if isinstance(request, dict) and isinstance(request.get("resume_context"), dict):
         return request["resume_context"]
+    return None
+
+
+def _job_source_reference(job: dict[str, Any]) -> dict[str, Any] | None:
+    request = job.get("request")
+    if not isinstance(request, dict):
+        return None
+    if isinstance(request.get("source_reference"), dict):
+        return request["source_reference"]
+    if isinstance(request.get("source"), dict):
+        return request["source"]
     return None
 
 
@@ -1465,7 +1495,7 @@ def _agent_candidate_decision(
     elif top_submit_request and ready_count > 0:
         decision = "submit_candidate_when_confirmed"
         stop_reason = None
-        recommended_action = "Review digest.top_candidate and site rules, add confirm_upload=true plus a save_path or path, then submit digest.top_submit_request to manual_retorrent_job."
+        recommended_action = "Review digest.top_candidate and site rules, add confirm_upload=true plus a save_path or path, then submit digest.top_submit_request to source_url_retorrent_job."
     elif blockers or digest.get("recommendation") == "resolve_blockers":
         decision = "blocked"
         stop_reason = "candidate_blockers"
@@ -1510,6 +1540,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     next_command_argv = _result_next_command_argv(result)
     resume_state = job.get("resume_state") if isinstance(job.get("resume_state"), dict) else _result_resume_state(result)
     resume_context = _job_resume_context(job)
+    source_reference = _job_source_reference(job)
     missing_confirmations = _missing_live_confirmations(request)
     policy_coverage = _job_policy_coverage(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     policy_qbit_defaults = _job_policy_qbit_defaults(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
@@ -1571,6 +1602,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "should_resume": should_resume,
         "resume_available": resume_available,
         "resume_context": resume_context,
+        "source_reference": source_reference,
         "next_command_argv": next_command_argv,
         "summary_file": job.get("summary_file"),
         "blocker_count": len(blockers),
@@ -1954,6 +1986,7 @@ def tools_payload() -> dict[str, Any]:
 def _agent_tool_schemas() -> list[dict[str, Any]]:
     retorrent_request_schema = _retorrent_tool_request_schema()
     manual_retorrent_request_schema = _manual_retorrent_tool_request_schema()
+    source_url_retorrent_request_schema = _source_url_retorrent_tool_request_schema()
     candidate_request_schema = _daily_candidate_tool_request_schema()
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
@@ -2003,6 +2036,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/retorrent/submit",
             "description": "Submit the primary AI workflow: source tracker URL plus target tracker. It creates a retorrent job that checks duplicates and only proceeds when rule, duplicate, and confirmation gates allow.",
             "input_schema": manual_retorrent_request_schema,
+            "response_contract": _job_response_contract(),
+            "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "resume_with": "resume_job"},
+            "safety": _live_upload_safety_contract(),
+        },
+        {
+            "name": "source_url_retorrent_job",
+            "method": "POST",
+            "path": "/v1/jobs/retorrent/from-url",
+            "description": "Recommended AI entrypoint for a user-provided source tracker details URL plus target tracker. It infers the source tracker and torrent id, checks duplicates, and only proceeds when rule, duplicate, and confirmation gates allow.",
+            "input_schema": source_url_retorrent_request_schema,
             "response_contract": _job_response_contract(),
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "resume_with": "resume_job"},
             "safety": _live_upload_safety_contract(),
@@ -2066,7 +2109,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_context", "source_reference", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -2182,6 +2225,19 @@ def _manual_retorrent_tool_request_schema() -> dict[str, Any]:
     return schema
 
 
+def _source_url_retorrent_tool_request_schema() -> dict[str, Any]:
+    schema = json.loads(json.dumps(_manual_retorrent_tool_request_schema()))
+    schema["required"] = ["source_url", "target"]
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        properties["source_url"] = {
+            "type": "string",
+            "description": "User-provided source tracker details or download URL. The service infers tracker and torrent id from this URL.",
+        }
+        properties["source"]["description"] = "Alias for source_url; source_url is preferred for this tool."
+    return schema
+
+
 def _daily_candidate_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -2263,7 +2319,7 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_context", "source_reference"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
         "blocked_fields": ["blockers", "next_actions", "resume_state", "next_command_argv", "agent_decision"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
@@ -2346,6 +2402,13 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
         },
         "default_workflows": [
             {
+                "name": "source_url_retorrent",
+                "tool": "source_url_retorrent_job",
+                "description": "Recommended flow when a user sends one source tracker link and a target tracker. The service infers tracker/torrent id, checks duplicates, then proceeds only when rules and confirmations allow.",
+                "required_fields": ["source_url", "target"],
+                "recommended_fields": ["save_path", "accept_rules", "confirm_upload", "uploaded_qbit_category", "uploaded_qbit_tags"],
+            },
+            {
                 "name": "manual_retorrent",
                 "tool": "manual_retorrent_job",
                 "description": "Create the primary source URL plus target tracker job. It checks duplicates and only proceeds when rule, duplicate, and confirmation gates allow.",
@@ -2419,6 +2482,15 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "default": True,
             "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work.",
         }
+    source_url_request_schema = json.loads(json.dumps(manual_request_schema))
+    source_url_request_schema["required"] = ["source_url", "target"]
+    source_url_properties = source_url_request_schema.get("properties")
+    if isinstance(source_url_properties, dict):
+        source_url_properties["source_url"] = {
+            "type": "string",
+            "description": "User-provided source tracker details/download URL. The service infers source_tracker and torrent id from this URL.",
+        }
+        source_url_properties["source"]["description"] = "Alias for source_url; source_url is preferred for this endpoint."
     response_schema = {
         "type": "object",
         "properties": {
@@ -2452,6 +2524,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "candidate_digest": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
+            "source_reference": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
         },
     }
@@ -2470,6 +2543,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_coverage": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
+            "source_reference": {"type": ["object", "null"]},
             "result": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
@@ -2686,6 +2760,19 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "responses": {
                         "200": {
                             "description": "Queued manual retorrent job that checks duplicates and executes only when gates allow.",
+                            "content": {"application/json": {"schema": job_response_schema}},
+                        }
+                    },
+                }
+            },
+            "/v1/jobs/retorrent/from-url": {
+                "post": {
+                    "operationId": "submitSourceUrlRetorrentJob",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": source_url_request_schema}}},
+                    "responses": {
+                        "200": {
+                            "description": "Queued source-URL retorrent job that infers tracker/torrent id and executes only when gates allow.",
                             "content": {"application/json": {"schema": job_response_schema}},
                         }
                     },

@@ -12558,6 +12558,45 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert "--uploaded-qbit-upload-limit" in job["command_argv"]
 
 
+def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path) -> None:
+    captured_request = {}
+
+    async def fake_retorrent(request):
+        captured_request.update(request)
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["rule gate requires explicit confirmations."],
+            "next_actions": ["Review source and target rules, then resubmit with confirmations."],
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_source_url_retorrent_job(
+        store,
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635&hit=1",
+            "target": "MTEAM",
+            "save_path": "/downloads",
+        },
+    )
+    summary = store.summary(job["job_id"])
+
+    assert job["kind"] == "ptcli.source_url_retorrent"
+    assert job["request"]["mode"] == "source_url_retorrent"
+    assert job["request"]["source_reference"]["tracker"] == "U2"
+    assert job["request"]["source_reference"]["source_id"] == "60635"
+    assert job["source_reference"] == job["request"]["source_reference"]
+    assert job["agent_decision"]["source_reference"] == job["source_reference"]
+    assert summary["source_reference"] == job["source_reference"]
+    assert captured_request["source_url"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
+    assert captured_request["source"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
+    assert job["command_argv"][:7] == ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to"]
+
+
 def test_manual_retorrent_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
     config = {
         "PTCLI": {
@@ -12669,16 +12708,17 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
             "title": "Example.Release",
             "policy_summary": {"policy_coverage": {"ready": True, "recommendations": []}},
         },
-        "top_submit_request": {
-            "source": "https://u2.dmhy.org/details.php?id=60635",
-            "source_tracker": "U2",
-            "target": "MTEAM",
+            "top_submit_request": {
+                "source": "https://u2.dmhy.org/details.php?id=60635",
+                "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                "source_tracker": "U2",
+                "target": "MTEAM",
             "execute_if_no_duplicate": True,
             "accept_rules": True,
             "confirm_upload": False,
         },
-        "top_submit_job_endpoint": "/v1/jobs/retorrent/submit",
-        "top_submit_tool": "manual_retorrent_job",
+        "top_submit_job_endpoint": "/v1/jobs/retorrent/from-url",
+        "top_submit_tool": "source_url_retorrent_job",
         "push_items": [{"rank": 1, "source_id": "60635", "decision": "submit_when_confirmed"}],
         "blockers": [],
         "next_actions": [],
@@ -12713,7 +12753,7 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     summary = store.summary(job["job_id"])
 
     assert job["status"] == "complete"
-    assert job["candidate_digest"]["top_submit_tool"] == "manual_retorrent_job"
+    assert job["candidate_digest"]["top_submit_tool"] == "source_url_retorrent_job"
     assert job["agent_summary"]["type"] == "daily_candidates"
     assert job["agent_summary"]["top_candidate"]["source_id"] == "60635"
     assert job["agent_summary"]["policy_coverage_ready"] is True
@@ -12722,7 +12762,8 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert job["agent_decision"]["can_submit_job"] is True
     assert job["agent_decision"]["missing_confirmations"] == ["confirm_upload=true"]
     assert summary["candidate_digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
-    assert summary["agent_decision"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/submit"
+    assert summary["candidate_digest"]["top_submit_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert summary["agent_decision"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/from-url"
 
 
 def test_daily_candidates_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
@@ -12750,8 +12791,8 @@ def test_daily_candidates_job_requests_policy_config_when_coverage_missing(monke
             "accept_rules": True,
             "confirm_upload": False,
         },
-        "top_submit_job_endpoint": "/v1/jobs/retorrent/submit",
-        "top_submit_tool": "manual_retorrent_job",
+        "top_submit_job_endpoint": "/v1/jobs/retorrent/from-url",
+        "top_submit_tool": "source_url_retorrent_job",
         "push_items": [],
         "blockers": [],
         "next_actions": [],
@@ -12809,7 +12850,7 @@ def test_daily_candidate_schedule_payload_normalizes_job_requests(monkeypatch) -
     assert schedule["job_request"]["accept_rules"] is True
     assert schedule["schedule"]["time"] == "09:30"
     assert schedule["push_contract"]["items"] == "candidate_digest.push_items"
-    assert schedule["submit_top_candidate_with"] == "manual_retorrent_job"
+    assert schedule["submit_top_candidate_with"] == "source_url_retorrent_job"
 
 
 def test_daily_candidate_schedule_payload_reads_env(monkeypatch) -> None:
@@ -12833,8 +12874,8 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
         "ready_count": 1,
         "top_candidate": {"source_tracker": "U2", "source_id": "60635"},
         "top_submit_request": {"source": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"},
-        "top_submit_job_endpoint": "/v1/jobs/retorrent/submit",
-        "top_submit_tool": "manual_retorrent_job",
+        "top_submit_job_endpoint": "/v1/jobs/retorrent/from-url",
+        "top_submit_tool": "source_url_retorrent_job",
         "push_items": [{"rank": 1, "source_id": "60635"}],
     }
 
@@ -12866,7 +12907,7 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["job_count"] == 1
     assert payload["jobs"][0]["schedule_name"] == "u2-to-mteam"
     assert payload["jobs"][0]["status"] == "complete"
-    assert payload["jobs"][0]["candidate_digest"]["top_submit_tool"] == "manual_retorrent_job"
+    assert payload["jobs"][0]["candidate_digest"]["top_submit_tool"] == "source_url_retorrent_job"
     assert payload["jobs"][0]["status_endpoint"].startswith("/v1/jobs/")
     assert payload["skipped"] == [{"name": "disabled", "blockers": ["schedule is disabled"]}]
     assert "Poll each jobs[].status_endpoint" in payload["next_actions"][0]
@@ -12957,6 +12998,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent/check" in paths
     assert "/v1/jobs/retorrent" in paths
     assert "/v1/jobs/retorrent/submit" in paths
+    assert "/v1/jobs/retorrent/from-url" in paths
     assert "/v1/deployment/check" in paths
     assert "/v1/site-policies" in paths
     assert "/v1/candidates/daily" in paths
@@ -12969,6 +13011,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     tool_by_name = {tool["name"]: tool for tool in tools["tools"]}
     assert tool_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
     assert tool_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
+    assert tool_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
+    assert tool_by_name["source_url_retorrent_job"]["input_schema"]["required"] == ["source_url", "target"]
     assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
@@ -12979,6 +13023,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_qbit_defaults" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "source_reference" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["request_fields"]
     assert "uploaded_qbit_upload_limit" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
@@ -13010,6 +13056,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent" in openapi["paths"]
     assert "/v1/jobs/retorrent/submit" in openapi["paths"]
+    assert "/v1/jobs/retorrent/from-url" in openapi["paths"]
     assert "/v1/candidates/daily" in openapi["paths"]
     assert "/v1/candidates/daily/schedule" in openapi["paths"]
     assert "/v1/jobs/candidates/daily" in openapi["paths"]
@@ -13024,6 +13071,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_coverage" in summary_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
+    assert "source_reference" in summary_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
 
@@ -13038,7 +13086,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
-    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
+    source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
+    assert source_url_workflow["tool"] == "source_url_retorrent_job"
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
     assert manual_workflow["tool"] == "manual_retorrent_job"
     retorrent_tool = next(tool for tool in manifest["tools"] if tool["name"] == "retorrent_job")
@@ -13059,12 +13109,14 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"deployment_check", "site_policies", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
+        assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
+        assert tools_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
+        assert tools_by_name["source_url_retorrent_job"]["input_schema"]["required"] == ["source_url", "target"]
         assert tools_by_name["daily_candidates_schedule"]["path"] == "/v1/candidates/daily/schedule"
         assert tools_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"
         assert "job_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
@@ -13077,6 +13129,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_qbit_defaults" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+        assert "source_reference" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
@@ -13224,9 +13278,10 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["ranking"]["scan_count"] == 1
     assert result["ranking"]["selected_count"] == 1
     assert result["digest"]["recommendation"] == "submit_top_candidate_when_confirmed"
-    assert result["digest"]["top_submit_tool"] == "manual_retorrent_job"
-    assert result["digest"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/submit"
+    assert result["digest"]["top_submit_tool"] == "source_url_retorrent_job"
+    assert result["digest"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/from-url"
     assert result["digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert result["digest"]["top_submit_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["push_items"][0]["source_id"] == "60635"
     assert result["digest"]["push_items"][0]["decision"] == "submit_when_confirmed"
     assert result["digest"]["push_items"][0]["policy_summary"]["manual_review_ready"] is True
@@ -13256,17 +13311,18 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["policy_summary"]["policy_coverage"]["source"]["complete"] is True
     assert candidate["policy_summary"]["policy_coverage"]["targets"][0]["complete"] is True
     assert candidate["policy_coverage"]["ready"] is True
-    assert candidate["agent_workflow"]["tool"] == "manual_retorrent_job"
+    assert candidate["agent_workflow"]["tool"] == "source_url_retorrent_job"
     assert candidate["agent_workflow"]["decision"] == "submit_when_confirmed"
-    assert candidate["submit_tool"] == "manual_retorrent_job"
-    assert candidate["submit_job_endpoint"] == "/v1/jobs/retorrent/submit"
+    assert candidate["submit_tool"] == "source_url_retorrent_job"
+    assert candidate["submit_job_endpoint"] == "/v1/jobs/retorrent/from-url"
     assert candidate["submit_request"] == candidate["execute_request"]
     assert candidate["execute_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert candidate["execute_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert candidate["execute_request"]["execute_if_no_duplicate"] is True
     assert "execute" not in candidate["execute_request"]
     assert candidate["execute_request"]["qbit_download_limit"] == 20 * 1024 * 1024
     assert candidate["execute_request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
-    assert candidate["execute_job_endpoint"] == "/v1/jobs/retorrent/submit"
+    assert candidate["execute_job_endpoint"] == "/v1/jobs/retorrent/from-url"
 
 
 async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers(monkeypatch) -> None:

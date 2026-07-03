@@ -35,6 +35,16 @@
   },
   "workflows": [
     {
+      "name": "source_url_retorrent",
+      "tool": "source_url_retorrent_job",
+      "required_fields": [
+        "source_url",
+        "target"
+      ],
+      "poll": "get_job_status",
+      "resume": "resume_job"
+    },
+    {
       "name": "manual_retorrent",
       "tool": "manual_retorrent_job",
       "required_fields": [
@@ -228,7 +238,8 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
-          "resume_context"
+          "resume_context",
+          "source_reference"
         ],
         "status_values": [
           "queued",
@@ -308,7 +319,87 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
-          "resume_context"
+          "resume_context",
+          "source_reference"
+        ]
+      },
+      "safety": {
+        "live_upload": true,
+        "requires_confirmation": [
+          "accept_rules=true",
+          "confirm_upload=true"
+        ]
+      }
+    },
+    {
+      "name": "source_url_retorrent_job",
+      "method": "POST",
+      "path": "/v1/jobs/retorrent/from-url",
+      "description": "Recommended AI entrypoint for a user-provided source tracker details URL plus target tracker. It infers the source tracker and torrent id, checks duplicates, and only proceeds when rule, duplicate, and confirmation gates allow.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "source_url",
+          "target"
+        ],
+        "properties": {
+          "source_url": {
+            "type": "string",
+            "description": "User-provided source tracker details or download URL."
+          },
+          "source": {
+            "type": "string",
+            "description": "Alias for source_url."
+          },
+          "source_tracker": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "accept_rules": {
+            "type": "boolean"
+          },
+          "confirm_upload": {
+            "type": "boolean"
+          },
+          "save_path": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "execute_if_no_duplicate": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "blockers",
+          "next_actions",
+          "summary_file",
+          "resume_state",
+          "agent_summary",
+          "agent_decision",
+          "candidate_digest",
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "resume_context",
+          "source_reference"
         ]
       },
       "safety": {
@@ -364,7 +455,8 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
-          "resume_context"
+          "resume_context",
+          "source_reference"
         ],
         "result_fields": [
           "ranking",
@@ -597,7 +689,8 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
-          "resume_context"
+          "resume_context",
+          "source_reference"
         ]
       },
       "safety": {
@@ -626,7 +719,8 @@
           "job_id",
           "blockers",
           "next_actions",
-          "resume_context"
+          "resume_context",
+          "source_reference"
         ]
       },
       "safety": {

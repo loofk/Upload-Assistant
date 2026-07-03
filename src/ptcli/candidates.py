@@ -28,7 +28,8 @@ from src.ptcli.target import search_mteam_duplicates
 
 DEFAULT_CANDIDATE_LIMIT = 10
 MAX_CANDIDATE_SCAN = 50
-MANUAL_RETORRENT_JOB_ENDPOINT = "/v1/jobs/retorrent/submit"
+SOURCE_URL_RETORRENT_JOB_ENDPOINT = "/v1/jobs/retorrent/from-url"
+SOURCE_URL_RETORRENT_JOB_TOOL = "source_url_retorrent_job"
 RECENT_PATHS: dict[str, str] = {
     "HDS": "/index.php?page=torrents",
     "TTG": "/browse.php",
@@ -213,10 +214,10 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "risk_flags": blockers,
         "agent_workflow": _candidate_agent_workflow(status, blockers),
         "submit_request": execute_request,
-        "submit_job_endpoint": MANUAL_RETORRENT_JOB_ENDPOINT,
-        "submit_tool": "manual_retorrent_job",
+        "submit_job_endpoint": SOURCE_URL_RETORRENT_JOB_ENDPOINT,
+        "submit_tool": SOURCE_URL_RETORRENT_JOB_TOOL,
         "execute_request": execute_request,
-        "execute_job_endpoint": MANUAL_RETORRENT_JOB_ENDPOINT,
+        "execute_job_endpoint": SOURCE_URL_RETORRENT_JOB_ENDPOINT,
     }
 
 
@@ -276,8 +277,10 @@ def _candidate_blockers(
 
 
 def _candidate_execute_request(config: dict[str, Any], seed: CandidateSeed, targets: list[str], *, accept_rules: bool) -> dict[str, Any]:
+    source_reference = seed.details_url or seed.torrent_id
     request = {
-        "source": seed.details_url or seed.torrent_id,
+        "source": source_reference,
+        "source_url": source_reference,
         "source_tracker": seed.tracker,
         "target": ",".join(targets),
         "execute_if_no_duplicate": True,
@@ -387,16 +390,16 @@ def _first_policy_value(policies: list[dict[str, Any]], key: str) -> Any:
 def _candidate_agent_workflow(status: str, blockers: list[str]) -> dict[str, Any]:
     if status == "ready":
         decision = "submit_when_confirmed"
-        recommended_action = "Review site rules, set confirm_upload=true with a save_path or path, then submit submit_request to manual_retorrent_job."
+        recommended_action = f"Review site rules, set confirm_upload=true with a save_path or path, then submit submit_request to {SOURCE_URL_RETORRENT_JOB_TOOL}."
     elif any("target-duplicate" in blocker for blocker in blockers):
         decision = "stop_or_review_duplicate"
         recommended_action = "Inspect duplicate_check.dupes before taking any upload action."
     else:
         decision = "resolve_blockers"
-        recommended_action = "Resolve blockers before submitting this candidate to the manual retorrent job."
+        recommended_action = f"Resolve blockers before submitting this candidate to {SOURCE_URL_RETORRENT_JOB_TOOL}."
     return {
-        "tool": "manual_retorrent_job",
-        "endpoint": MANUAL_RETORRENT_JOB_ENDPOINT,
+        "tool": SOURCE_URL_RETORRENT_JOB_TOOL,
+        "endpoint": SOURCE_URL_RETORRENT_JOB_ENDPOINT,
         "decision": decision,
         "recommended_action": recommended_action,
         "requires": ["accept_rules=true", "confirm_upload=true", "save_path or path"],
