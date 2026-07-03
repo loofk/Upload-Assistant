@@ -529,6 +529,8 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
         recommendation = "resolve_blockers"
     else:
         recommendation = "no_candidates"
+    push_items = [_candidate_digest_item(candidate, rank=index + 1) for index, candidate in enumerate(candidates)]
+    push_summary = _candidate_push_summary(len(candidates), len(ready_candidates), review_count, blocked_count, recommendation)
     return {
         "kind": "ptcli.daily_candidates_digest",
         "limit": limit,
@@ -536,12 +538,16 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
         "ready_count": len(ready_candidates),
         "review_count": review_count,
         "blocked_count": blocked_count,
+        "push_title": "Daily PT retorrent candidates",
+        "push_summary": push_summary,
+        "push_count": len(push_items),
+        "recommended_action": _candidate_digest_recommended_action(recommendation),
         "top_candidate": _candidate_digest_item(top_candidate, rank=1) if top_candidate else None,
         "top_submit_request": top_candidate.get("submit_request") if isinstance(top_candidate, dict) and top_candidate.get("status") == "ready" else None,
         "top_submit_job_endpoint": top_candidate.get("submit_job_endpoint") if isinstance(top_candidate, dict) and top_candidate.get("status") == "ready" else None,
         "top_submit_tool": top_candidate.get("submit_tool") if isinstance(top_candidate, dict) and top_candidate.get("status") == "ready" else None,
         "recommendation": recommendation,
-        "push_items": [_candidate_digest_item(candidate, rank=index + 1) for index, candidate in enumerate(candidates)],
+        "push_items": push_items,
         "blockers": blockers,
         "next_actions": next_actions,
     }
@@ -551,29 +557,94 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
     if not isinstance(candidate, dict):
         return None
     source = candidate.get("source") if isinstance(candidate.get("source"), dict) else {}
+    source_info = candidate.get("source_info") if isinstance(candidate.get("source_info"), dict) else {}
     ranking = candidate.get("ranking") if isinstance(candidate.get("ranking"), dict) else {}
     duplicate_check = candidate.get("duplicate_check") if isinstance(candidate.get("duplicate_check"), dict) else {}
     workflow = candidate.get("agent_workflow") if isinstance(candidate.get("agent_workflow"), dict) else {}
     policy_summary = candidate.get("policy_summary") if isinstance(candidate.get("policy_summary"), dict) else {}
+    blockers = _string_list(candidate.get("blockers"))
+    status = str(candidate.get("status") or "")
+    title = source.get("title") or source_info.get("name")
+    submit_request = candidate.get("submit_request") if isinstance(candidate.get("submit_request"), dict) else None
+    can_submit = bool(status == "ready" and submit_request)
+    action_label = "submit_when_confirmed" if can_submit else "review_blockers"
     return {
         "rank": rank,
-        "status": candidate.get("status"),
+        "status": status,
         "score": ranking.get("score"),
         "tier": ranking.get("tier"),
         "source_tracker": source.get("tracker"),
         "source_id": source.get("torrent_id"),
-        "title": source.get("title"),
+        "source_url": source.get("details_url"),
+        "title": title,
         "size": source.get("size"),
         "published_at": source.get("published_at"),
         "promotion": source.get("promotion"),
+        "metadata": {
+            "imdb_id": source_info.get("imdb_id"),
+            "tmdb_id": source_info.get("tmdb_id"),
+            "douban_id": source_info.get("douban_id"),
+            "douban_url": source_info.get("douban_url"),
+            "name": source_info.get("name"),
+        },
         "duplicate_status": duplicate_check.get("status"),
-        "blocker_count": len(_string_list(candidate.get("blockers"))),
+        "duplicate_count": duplicate_check.get("count"),
+        "blocker_count": len(blockers),
+        "blockers": blockers,
+        "next_actions": _candidate_push_next_actions(candidate, workflow),
         "decision": workflow.get("decision"),
+        "recommended_action": workflow.get("recommended_action"),
+        "summary_text": _candidate_push_line(rank, status, source, source_info, ranking, duplicate_check, blockers),
+        "action_label": action_label,
+        "action_endpoint": candidate.get("submit_job_endpoint") if can_submit else None,
+        "can_submit": can_submit,
         "policy_coverage": policy_summary.get("policy_coverage"),
         "policy_summary": _candidate_digest_policy_summary(policy_summary),
+        "submit_request": submit_request if can_submit else None,
         "submit_job_endpoint": candidate.get("submit_job_endpoint"),
         "submit_tool": candidate.get("submit_tool"),
     }
+
+
+def _candidate_push_summary(selected_count: int, ready_count: int, review_count: int, blocked_count: int, recommendation: str) -> str:
+    if selected_count <= 0:
+        return "No daily retorrent candidates are available yet."
+    return f"{selected_count} candidate(s): {ready_count} ready, {review_count} need review, {blocked_count} blocked. Recommendation: {recommendation}."
+
+
+def _candidate_digest_recommended_action(recommendation: str) -> str:
+    if recommendation == "submit_top_candidate_when_confirmed":
+        return "Review digest.top_candidate, add confirm_upload=true plus save_path or path, then submit digest.top_submit_request to source_url_retorrent_job."
+    if recommendation == "resolve_blockers":
+        return "Review digest.push_items[].blockers and resolve policy, duplicate, metadata, or adapter blockers before submitting."
+    return "Adjust source/target schedule or rerun after source candidates are available."
+
+
+def _candidate_push_line(
+    rank: int,
+    status: str,
+    source: dict[str, Any],
+    source_info: dict[str, Any],
+    ranking: dict[str, Any],
+    duplicate_check: dict[str, Any],
+    blockers: list[str],
+) -> str:
+    tracker = source.get("tracker") or "?"
+    torrent_id = source.get("torrent_id") or "?"
+    title = source.get("title") or source_info.get("name") or "untitled"
+    size = source.get("size") or "size unknown"
+    promotion = source.get("promotion") or "no promo"
+    duplicate_status = duplicate_check.get("status") or "unknown"
+    score = ranking.get("score")
+    blocker_text = f", blockers={len(blockers)}" if blockers else ""
+    return f"#{rank} [{status}] {tracker}-{torrent_id} {title} ({size}, {promotion}), score={score}, duplicate={duplicate_status}{blocker_text}."
+
+
+def _candidate_push_next_actions(candidate: dict[str, Any], workflow: dict[str, Any]) -> list[str]:
+    blockers = _string_list(candidate.get("blockers"))
+    if blockers:
+        return [workflow.get("recommended_action") or "Resolve blockers before submitting this candidate."]
+    return [workflow.get("recommended_action") or "Review site rules and submit this candidate after confirmation."]
 
 
 def _candidate_digest_policy_summary(policy_summary: dict[str, Any]) -> dict[str, Any]:
