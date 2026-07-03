@@ -118,7 +118,7 @@ class JobStore:
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
             "resume_context": _job_resume_context(job),
             "source_reference": _job_source_reference(job),
-            "workflow_context": _job_workflow_context(job),
+            "workflow_context": _job_workflow_context(job, summary_payload),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -1451,9 +1451,16 @@ def _job_source_reference(job: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _job_workflow_context(job: dict[str, Any]) -> dict[str, Any]:
+def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = None) -> dict[str, Any]:
     request = job.get("request") if isinstance(job.get("request"), dict) else {}
-    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    result = payload if isinstance(payload, dict) else job.get("result") if isinstance(job.get("result"), dict) else {}
+    agent_summary = _agent_summary(result) or (job.get("agent_summary") if isinstance(job.get("agent_summary"), dict) else {}) or {}
+    metadata = agent_summary.get("metadata") if isinstance(agent_summary.get("metadata"), dict) else {}
+    materials = agent_summary.get("materials") if isinstance(agent_summary.get("materials"), dict) else {}
+    target_preflight = agent_summary.get("target_preflight") if isinstance(agent_summary.get("target_preflight"), dict) else {}
+    qbit = agent_summary.get("qbit") if isinstance(agent_summary.get("qbit"), dict) else {}
+    qbit_source = qbit.get("source") if isinstance(qbit.get("source"), dict) else {}
+    qbit_target = qbit.get("target") if isinstance(qbit.get("target"), dict) else {}
     duplicate_check = _job_duplicate_check(job)
     policy_coverage = _job_policy_coverage(job)
     resume_state = job.get("resume_state") if isinstance(job.get("resume_state"), dict) else _result_resume_state(result)
@@ -1485,6 +1492,46 @@ def _job_workflow_context(job: dict[str, Any]) -> dict[str, Any]:
             "policy_coverage_ready": policy_ready,
             "confirmations_ready": not missing_confirmations,
             "resume_available": resume_available,
+            "materials_ready": materials.get("ready_for_mteam_upload"),
+            "target_preflight_ready": target_preflight.get("ready"),
+            "qbit_source_ready": qbit_source.get("ready"),
+            "qbit_target_ready": qbit_target.get("ready"),
+            "uploaded_seeding_evidence": qbit_target.get("uploaded_wait_evidence"),
+        },
+        "metadata": {
+            "ready": metadata.get("ready"),
+            "imdb_ready": metadata.get("imdb_ready"),
+            "tmdb_ready": metadata.get("tmdb_ready"),
+            "douban_ready": metadata.get("douban_ready"),
+            "ptgen_description_ready": metadata.get("ptgen_description_ready"),
+            "missing": _string_list(metadata.get("missing")),
+        },
+        "materials": {
+            "ready_for_mteam_upload": materials.get("ready_for_mteam_upload"),
+            "critical_ready": materials.get("critical_ready"),
+            "critical_missing": _string_list(materials.get("critical_missing")),
+            "next_step": (materials.get("critical_path") or {}).get("next_step") if isinstance(materials.get("critical_path"), dict) else None,
+            "mediainfo_or_bdinfo_ready": materials.get("mediainfo_or_bdinfo_ready"),
+            "screenshots_ready": materials.get("screenshots_ready"),
+            "screenshot_count": materials.get("screenshot_count"),
+            "description_ready": materials.get("description_ready"),
+            "upload_material_blockers": _string_list(materials.get("upload_material_blockers")),
+        },
+        "target_preflight": {
+            "ready": target_preflight.get("ready"),
+            "materials_ready": target_preflight.get("materials_ready"),
+            "metadata_ready": target_preflight.get("metadata_ready"),
+            "assets_ready": target_preflight.get("assets_ready"),
+            "description_ready": target_preflight.get("description_ready"),
+            "payload_ready": target_preflight.get("payload_ready"),
+            "missing": _string_list(target_preflight.get("missing")),
+            "description_missing": _string_list(target_preflight.get("description_missing")),
+            "blockers": _string_list(target_preflight.get("blockers")),
+        },
+        "qbit": {
+            "source": qbit_source,
+            "target": qbit_target,
+            "wait_diagnostics": qbit.get("wait_diagnostics") if isinstance(qbit.get("wait_diagnostics"), dict) else {},
         },
         "required_confirmations_missing": missing_confirmations,
         "policy_coverage": policy_coverage,

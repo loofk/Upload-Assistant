@@ -12419,6 +12419,11 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
             "missing": ["materials.metadata.tmdb"],
             "description_missing": ["materials.description.external_ids.tmdb"],
         },
+        "closure_status": {
+            "source": {"ready": True, "torrent_hash": "a" * 40, "content_path": "/downloads/Example", "injection_verified": True, "wait_complete": True},
+            "target": {"ready": False, "uploaded_torrent_hash": "b" * 40, "injected_torrent_hash": None, "injection_visible_in_client": False, "injection_verified": False, "uploaded_wait_evidence": False},
+        },
+        "qbit_wait_diagnostics": {"source": {"complete": True}, "uploaded": {"complete": False}},
         "resume_state": {
             "resume_available": True,
             "next_stage": "resume-target-package",
@@ -12439,8 +12444,21 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["agent_summary"]["materials"]["screenshot_count"] == 2
     assert job["agent_summary"]["target_preflight"]["description_ready"] is False
     assert job["agent_summary"]["resume"]["next_stage"] == "resume-target-package"
+    assert job["workflow_context"]["metadata"]["tmdb_ready"] is False
+    assert job["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
+    assert job["workflow_context"]["materials"]["next_step"] == "metadata"
+    assert job["workflow_context"]["target_preflight"]["description_ready"] is False
+    assert job["workflow_context"]["qbit"]["source"]["torrent_hash"] == "a" * 40
+    assert job["workflow_context"]["qbit"]["target"]["uploaded_torrent_hash"] == "b" * 40
+    assert job["workflow_context"]["gates"]["materials_ready"] is False
+    assert job["workflow_context"]["gates"]["target_preflight_ready"] is False
+    assert job["workflow_context"]["gates"]["qbit_source_ready"] is True
+    assert job["workflow_context"]["gates"]["qbit_target_ready"] is False
+    assert job["workflow_context"]["gates"]["uploaded_seeding_evidence"] is False
     assert summary["agent_summary"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["agent_summary"]["resume"]["materials_missing"] == ["metadata.tmdb"]
+    assert summary["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
+    assert summary["workflow_context"]["target_preflight"]["missing"] == ["materials.metadata.tmdb"]
 
 
 def test_job_store_resume_blocks_without_next_command(tmp_path) -> None:
