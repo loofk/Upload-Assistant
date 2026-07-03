@@ -236,6 +236,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "resume_plan",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -319,6 +320,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "resume_plan",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -399,6 +401,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "resume_plan",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -457,6 +460,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "resume_plan",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -704,6 +708,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "resume_plan",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -736,6 +741,7 @@
           "job_id",
           "blockers",
           "next_actions",
+          "resume_plan",
           "resume_context",
           "source_reference",
           "workflow_context"

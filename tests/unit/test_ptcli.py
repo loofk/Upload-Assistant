@@ -12444,6 +12444,13 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["agent_summary"]["materials"]["screenshot_count"] == 2
     assert job["agent_summary"]["target_preflight"]["description_ready"] is False
     assert job["agent_summary"]["resume"]["next_stage"] == "resume-target-package"
+    assert job["resume_plan"]["available"] is True
+    assert job["resume_plan"]["allowed"] is True
+    assert job["resume_plan"]["recommended"] is True
+    assert job["resume_plan"]["endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
+    assert job["workflow_context"]["resume_plan"] == job["resume_plan"]
+    assert job["workflow_context"]["gates"]["resume_allowed"] is True
+    assert job["workflow_context"]["gates"]["resume_recommended"] is True
     assert job["workflow_context"]["metadata"]["tmdb_ready"] is False
     assert job["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert job["workflow_context"]["materials"]["next_step"] == "metadata"
@@ -12457,6 +12464,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["workflow_context"]["gates"]["uploaded_seeding_evidence"] is False
     assert summary["agent_summary"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["agent_summary"]["resume"]["materials_missing"] == ["metadata.tmdb"]
+    assert summary["resume_plan"] == job["resume_plan"]
     assert summary["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["workflow_context"]["target_preflight"]["missing"] == ["materials.metadata.tmdb"]
 
@@ -12470,6 +12478,10 @@ def test_job_store_resume_blocks_without_next_command(tmp_path) -> None:
     assert resume["kind"] == "ptcli.resume"
     assert resume["status"] == "blocked"
     assert resume["blockers"] == ["No executable resume command is available for this job."]
+    assert parent["resume_plan"]["available"] is False
+    assert parent["resume_plan"]["allowed"] is False
+    assert parent["resume_plan"]["recommended"] is False
+    assert parent["resume_plan"]["blocker"] == "No executable resume command is available for this job."
 
 
 def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> None:
@@ -12501,6 +12513,11 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["request"]["resume_context"]["inherited_policy"]["policy_coverage"] == {"ready": True}
     assert resume["resume_context"] == resume["request"]["resume_context"]
     assert resume["agent_decision"]["resume_context"] == resume["resume_context"]
+    assert parent["resume_plan"]["available"] is True
+    assert parent["resume_plan"]["allowed"] is True
+    assert parent["resume_plan"]["recommended"] is True
+    assert parent["resume_plan"]["subcommand"] == "doctor"
+    assert parent["resume_plan"]["endpoint"] == f"/v1/jobs/{parent['job_id']}/resume"
 
 
 def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, tmp_path) -> None:
@@ -13262,6 +13279,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_coverage" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "resume_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -13325,6 +13344,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     site_policy_schema = openapi["paths"]["/v1/site-policies"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_gap_summary" in site_policy_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
+    assert "resume_plan" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
     assert "source_reference" in summary_schema["properties"]
     assert "workflow_context" in summary_schema["properties"]
@@ -13359,6 +13379,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert retorrent_tool["input_schema"]["required"] == ["source", "target"]
     assert "uploaded_qbit_upload_limit" in retorrent_tool["input_schema"]["properties"]
     assert "resume_state" in retorrent_tool["response_contract"]["required_fields"]
+    assert "resume_plan" in retorrent_tool["response_contract"]["required_fields"]
     assert "agent_decision" in retorrent_tool["response_contract"]["required_fields"]
     assert "confirm_upload=true" in retorrent_tool["safety"]["requires_confirmation"]
     assert manifest["openclaw"]["manifest_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
@@ -13401,6 +13422,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_coverage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "policy_qbit_defaults" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "policy_qbit_defaults" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "resume_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
