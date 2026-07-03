@@ -13285,8 +13285,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "mounts" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "docker_compose" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_summary" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "ready_for_daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "docker_compose_daily_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
     assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
@@ -13334,6 +13336,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     deployment_schema = openapi["paths"]["/v1/deployment/check"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "mounts" in deployment_schema["properties"]
     assert "daily_candidates" in deployment_schema["properties"]
+    assert "docker_compose" in deployment_schema["properties"]
     assert "agent_summary" in deployment_schema["properties"]
 
 
@@ -13374,8 +13377,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "docker_compose" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_summary" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "ready_for_daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "docker_compose_daily_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -13444,6 +13449,18 @@ def test_deployment_check_reports_ready_seedbox_mounts(tmp_path, monkeypatch) ->
         "config = {'DEFAULT': {'default_torrent_client': 'qbittorrent'}, 'TORRENT_CLIENTS': {'qbittorrent': {'torrent_client': 'qbit', 'qbit_url': 'http://host.docker.internal', 'qbit_port': '8080'}}}",
         encoding="utf-8",
     )
+    (tmp_path / "docker-compose.yml").write_text(
+        """
+services:
+  ptcli-api:
+    command: ["serve"]
+  ptcli-daily-schedule:
+    profiles:
+      - daily
+    command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]
+""",
+        encoding="utf-8",
+    )
     monkeypatch.setenv("TMPDIR", str(tmp_dir))
     monkeypatch.setenv(
         "PTCLI_DAILY_CANDIDATE_SCHEDULES",
@@ -13457,8 +13474,10 @@ def test_deployment_check_reports_ready_seedbox_mounts(tmp_path, monkeypatch) ->
     assert payload["mounts"]["ready"] is True
     assert payload["daily_candidates"]["configured"] is True
     assert payload["daily_candidates"]["count"] == 1
+    assert payload["docker_compose"]["daily_schedule_service_ready"] is True
     assert payload["agent_summary"]["ready_for_ai"] is True
     assert payload["agent_summary"]["ready_for_daily_candidates"] is True
+    assert payload["agent_summary"]["docker_compose_daily_ready"] is True
     assert payload["agent_summary"]["daily_candidate_schedule_count"] == 1
     assert payload["qbit"]["configured"] is True
     assert payload["qbit"]["qbit_url"] == "http://host.docker.internal"

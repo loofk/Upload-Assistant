@@ -2070,6 +2070,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     job_dir = _resolve_job_dir(request.get("job_dir") or os.environ.get("PTCLI_JOB_DIR"))
     downloads_path = Path(str(request.get("downloads_path") or os.environ.get("PTCLI_DOWNLOADS_PATH") or "/downloads")).expanduser()
     client = str(request.get("client") or "default")
+    compose_path = _deployment_path(request.get("compose_file") or os.environ.get("PTCLI_COMPOSE_FILE") or "docker-compose.yml", base_dir)
 
     runtime_check = build_runtime_dependency_check()
     checks: list[dict[str, Any]] = [
@@ -2112,6 +2113,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
             checks.append({"name": "qbit.config", "ok": False, "message": f"qBittorrent client config is not ready: {exc}", "details": qbit})
 
     daily_candidate_plan = _deployment_daily_candidate_plan(request)
+    docker_compose = _deployment_docker_compose_summary(compose_path)
     checks.append(
         {
             "name": "automation.daily_candidates",
@@ -2119,6 +2121,16 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
             "blocking": False,
             "message": _deployment_daily_candidate_message(daily_candidate_plan),
             "details": daily_candidate_plan,
+        }
+    )
+    checks.append(
+        {
+            "name": "docker.compose_daily_schedule",
+            "ok": bool(docker_compose.get("daily_schedule_service_ready")),
+            "blocking": False,
+            "message": _deployment_docker_compose_message(docker_compose),
+            "path": str(compose_path),
+            "details": docker_compose,
         }
     )
 
@@ -2133,6 +2145,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "tmp_dir": str(tmp_dir),
         "job_dir": str(job_dir),
         "downloads_path": str(downloads_path),
+        "compose_file": str(compose_path),
     }
     mounts = _deployment_mount_summary(checks)
     return {
@@ -2148,7 +2161,8 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "mounts": mounts,
         "qbit": qbit,
         "daily_candidates": daily_candidate_plan,
-        "agent_summary": _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan),
+        "docker_compose": docker_compose,
+        "agent_summary": _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan, docker_compose),
         "connectivity_checked": False,
     }
 
@@ -2243,6 +2257,65 @@ def _deployment_daily_candidate_message(plan: dict[str, Any]) -> str:
     return f"No daily candidate schedules configured; set {DAILY_CANDIDATE_SCHEDULE_ENV} when daily push jobs are needed."
 
 
+def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
+    exists = compose_path.is_file()
+    text = ""
+    if exists:
+        try:
+            text = compose_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return {
+                "present": True,
+                "readable": False,
+                "path": str(compose_path),
+                "error": str(exc),
+                "ptcli_api_service": False,
+                "daily_schedule_service": False,
+                "daily_profile": False,
+                "daily_schedule_command": False,
+                "daily_schedule_service_ready": False,
+            }
+    return {
+        "present": exists,
+        "readable": exists,
+        "path": str(compose_path),
+        "ptcli_api_service": "ptcli-api:" in text,
+        "daily_schedule_service": "ptcli-daily-schedule:" in text,
+        "daily_profile": "- daily" in text,
+        "daily_schedule_command": 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]' in text,
+        "daily_schedule_service_ready": all(
+            (
+                exists,
+                "ptcli-api:" in text,
+                "ptcli-daily-schedule:" in text,
+                "- daily" in text,
+                'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]' in text,
+            )
+        ),
+    }
+
+
+def _deployment_docker_compose_message(summary: dict[str, Any]) -> str:
+    path = summary.get("path")
+    if summary.get("daily_schedule_service_ready"):
+        return f"Docker Compose daily schedule service is configured: {path}"
+    if not summary.get("present"):
+        return f"docker-compose.yml is not present at {path}; skip this warning if not using Docker Compose."
+    if not summary.get("readable"):
+        return f"docker-compose.yml could not be read at {path}: {summary.get('error')}"
+    missing = [
+        name
+        for name, ready in (
+            ("ptcli-api service", summary.get("ptcli_api_service")),
+            ("ptcli-daily-schedule service", summary.get("daily_schedule_service")),
+            ("daily profile", summary.get("daily_profile")),
+            ("daily-schedule summary command", summary.get("daily_schedule_command")),
+        )
+        if not ready
+    ]
+    return f"Docker Compose daily schedule service is incomplete at {path}: {', '.join(missing)}."
+
+
 def _deployment_mount_summary(checks: list[dict[str, Any]]) -> dict[str, Any]:
     mount_names = {"path.config", "path.cookies_dir", "path.tmp_dir", "path.job_dir", "path.downloads_path"}
     required: list[dict[str, Any]] = []
@@ -2275,6 +2348,7 @@ def _deployment_agent_summary(
     mounts: dict[str, Any],
     qbit: dict[str, Any],
     daily_candidate_plan: dict[str, Any],
+    docker_compose: dict[str, Any],
 ) -> dict[str, Any]:
     check_by_name = {str(check.get("name")): check for check in checks}
     api_token_check = check_by_name.get("security.api_token", {})
@@ -2287,6 +2361,7 @@ def _deployment_agent_summary(
         "api_token_configured": bool(api_token_check.get("configured")),
         "qbit_configured": bool(qbit.get("configured")),
         "daily_candidates_configured": bool(daily_candidate_plan.get("configured")),
+        "docker_compose_daily_ready": bool(docker_compose.get("daily_schedule_service_ready")),
         "missing_mounts": mounts.get("missing", []),
         "blocking_checks": blocking_failures,
         "warning_checks": warning_failures,
@@ -2319,6 +2394,8 @@ def _deployment_next_actions(checks: list[dict[str, Any]]) -> list[str]:
             actions.append("Set PTCLI_API_TOKEN before exposing ptcli-api outside localhost.")
         elif name == "automation.daily_candidates":
             actions.extend(_string_list((check.get("details") or {}).get("next_actions")))
+        elif name == "docker.compose_daily_schedule":
+            actions.append("Add or update the ptcli-daily-schedule service in docker-compose.yml, or run ptcli daily-schedule manually if not using Docker Compose.")
     return actions
 
 
@@ -2503,13 +2580,14 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                     "cookies_dir": {"type": "string"},
                     "job_dir": {"type": "string"},
                     "downloads_path": {"type": "string"},
+                    "compose_file": {"type": "string"},
                     "client": {"type": "string", "default": "default"},
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "qbit", "daily_candidates", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "qbit", "daily_candidates", "docker_compose", "agent_summary"],
                 "status_values": ["ok", "blocked"],
-                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "missing_mounts", "qbit_configured", "daily_candidates_configured"],
+                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_daily_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
@@ -3012,6 +3090,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "mounts": {"type": "object"},
             "qbit": {"type": "object"},
             "daily_candidates": {"type": "object"},
+            "docker_compose": {"type": "object"},
             "agent_summary": {"type": "object"},
         },
     }
@@ -3063,6 +3142,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                         {"name": "config", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "base_dir", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "downloads_path", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "compose_file", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "client", "in": "query", "required": False, "schema": {"type": "string"}},
                     ],
                     "responses": {"200": {"description": "Local deployment readiness report.", "content": {"application/json": {"schema": deployment_response_schema}}}},

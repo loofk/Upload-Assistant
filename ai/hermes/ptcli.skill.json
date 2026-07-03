@@ -94,6 +94,9 @@
           "downloads_path": {
             "type": "string"
           },
+          "compose_file": {
+            "type": "string"
+          },
           "client": {
             "type": "string",
             "default": "default"
@@ -113,6 +116,7 @@
           "mounts",
           "qbit",
           "daily_candidates",
+          "docker_compose",
           "agent_summary"
         ],
         "agent_summary_fields": [
@@ -121,7 +125,8 @@
           "ready_for_daily_candidates",
           "missing_mounts",
           "qbit_configured",
-          "daily_candidates_configured"
+          "daily_candidates_configured",
+          "docker_compose_daily_ready"
         ]
       },
       "safety": {
