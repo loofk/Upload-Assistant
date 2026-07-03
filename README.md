@@ -44,13 +44,14 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 ## AI 友好输出
 
 - 关键命令支持 `--json`。
-- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`、每日候选 `/v1/candidates/daily`/`/v1/candidates/daily/schedule`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/retorrent/from-url`、`/v1/jobs/retorrent/submit`、`/v1/jobs/candidates/daily`、`/v1/jobs`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
+- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`、每日候选 `/v1/candidates/daily`/`/v1/candidates/daily/schedule`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/retorrent/from-url`、`/v1/jobs/retorrent/submit`、`/v1/jobs/candidates/daily`、`/v1/jobs`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`、`/v1/jobs/{job_id}/cancel`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
 - `sites --json` 暴露每个站点的 `source_info`、`source_info_adapter`、`source_download`、`source_download_adapter`、`credential_requirements`、`target_upload`、`full_live_closure_to_mteam` 能力。
 - `rule-check --json` 暴露 `rule_obligations[].review_scope.required_confirmations`，供 agent 在 live 前逐项提示人工确认。
 - `flow-check --json` 暴露 `source_capability`、`target_capabilities` 和去重后的 `credential_requirements`，供盒子脚本在 live 前检查配置缺口。
 - `pipeline` 和 `retorrent --execute` 返回 `requested_actions`、`effective_actions`、`closure`、`evidence`、`artifacts`、`resume_commands`、`resume_state`、`next_actions`；`requested_actions` 会区分 `source_torrent_file`、`uploaded_torrent_id` 和 `uploaded_torrent_file` 等恢复输入，`evidence.target.mode` / `summary.target.mode` 会标明目标侧是 `live_upload`、`resumed_uploaded_id` 还是 `resumed_uploaded_torrent`。
 - 任务式 API 的 job 状态和 summary 会暴露 `agent_decision`、`resume_plan` 和 `resume_lineage`，直接给出 `decision`、`recommended_action`、`stop_reason`、`duplicate_check`、`missing_confirmations`、`should_poll`、`should_resume`、续跑 endpoint、allowlist 判断、父任务来源和 `next_command_argv`，方便 agent 判断该停止、补确认、继续轮询还是续跑；同时暴露 `workflow_context`，把源站链接解析、目标站、查重 gate、规则 gate、素材/描述缺口、qBittorrent 做种证据、缺失确认、续跑 argv 和 blockers 汇总到固定路径。
 - `queued` / `running` job 会额外暴露 `runtime.should_poll`、`runtime.poll_after_seconds`、`runtime.status_endpoint`、`runtime.elapsed_seconds` 等字段，方便 OpenClaw/Hermes 按服务建议轮询，不需要自行计算时间戳。
+- `/v1/jobs/{job_id}/cancel` 只允许取消仍处于 `queued` 的任务；`running` 任务会返回 409，不会强行中断 live tracker 或 qBittorrent 操作。
 - `ptcli serve` 启动时会把上次进程遗留的 `queued` / `running` job 标记为 `blocked` 并写入 `interruption`，避免容器重启后 agent 永久轮询；如存在 allowlisted `resume_state.next_command_argv`，`resume_plan` 会继续给出可审计续跑入口。
 - 转种 job 状态和 summary 也会暴露 `policy_coverage`；当 `accept_rules` / `confirm_upload` 已齐但源站或目标站缺少 fingerprint、限速或做种要求时，`agent_decision.decision=configure_policy`，避免 agent 直接进入 live 上传。
 - retorrent/manual job 会在未显式传入限速时，从 `PTCLI.SITE_POLICIES` 自动补齐 `qbit_download_limit`、`qbit_upload_limit`、`uploaded_qbit_upload_limit`、`uploaded_qbit_download_limit`；job 状态、summary 和 `agent_decision.policy_qbit_defaults` 会记录哪些值来自站点策略、哪些值由请求覆盖，resume job 的 `resume_context.inherited_policy` 也会保留父任务的策略上下文。
@@ -101,6 +102,7 @@ curl "http://127.0.0.1:8080/v1/jobs?status=blocked&limit=10"
 curl http://127.0.0.1:8080/v1/jobs/<job_id>
 curl http://127.0.0.1:8080/v1/jobs/<job_id>/summary
 curl -X POST http://127.0.0.1:8080/v1/jobs/<job_id>/resume
+curl -X POST http://127.0.0.1:8080/v1/jobs/<job_id>/cancel -d '{"reason":"submitted by mistake"}'
 
 # 每日候选推荐：指定源站和目标站，返回最多 10 条已评分排序的可转种候选；
 # 响应里的 digest.top_candidate / digest.push_items / digest.top_submit_request 适合 AI 或定时推送直接消费

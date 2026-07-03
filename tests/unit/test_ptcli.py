@@ -5,6 +5,7 @@ import io
 import json
 import shlex
 import subprocess
+from http import HTTPStatus
 from pathlib import Path
 
 import pytest
@@ -12420,6 +12421,82 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert any("Poll running jobs" in action for action in payload["next_actions"])
 
 
+def test_job_store_cancels_queued_jobs_and_runner_respects_terminal_state(tmp_path) -> None:
+    job_id = "c" * 32
+    queued = {
+        "schema_version": 1,
+        "job_id": job_id,
+        "kind": "ptcli.retorrent",
+        "status": "queued",
+        "ok": False,
+        "request": {"source_reference": {"tracker": "U2", "source_id": "60635"}, "target_trackers": ["MTEAM"]},
+        "command_argv": ["ptcli", "retorrent", "--json"],
+        "created_at": 100,
+        "updated_at": 105,
+        "started_at": None,
+        "completed_at": None,
+        "blockers": [],
+        "next_actions": [],
+        "summary_file": None,
+        "resume_state": None,
+        "agent_summary": None,
+        "agent_decision": None,
+        "duplicate_check": None,
+        "result": None,
+    }
+    (tmp_path / f"{job_id}.json").write_text(json.dumps(queued), encoding="utf-8")
+    store = ptcli_service.JobStore(tmp_path, run_inline=True, recover_interrupted=False)
+
+    cancelled = store.cancel(job_id, {"reason": "submitted by mistake"})
+
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["ok"] is False
+    assert cancelled["cancellation"]["reason"] == "submitted by mistake"
+    assert cancelled["cancellation"]["previous_status"] == "queued"
+    assert cancelled["runtime"]["terminal"] is True
+    assert cancelled["agent_decision"]["decision"] == "stop"
+    assert cancelled["agent_decision"]["stop_reason"] == "job_cancelled"
+    assert cancelled["agent_decision"]["can_attempt_live"] is False
+
+    ran = {"value": False}
+    store._run(job_id, lambda: ran.update(value=True) or {"status": "ok"})  # noqa: SLF001
+    assert ran["value"] is False
+    assert store.get(job_id)["status"] == "cancelled"
+
+
+def test_job_store_cancel_rejects_running_jobs(tmp_path) -> None:
+    job_id = "d" * 32
+    running = {
+        "schema_version": 1,
+        "job_id": job_id,
+        "kind": "ptcli.retorrent",
+        "status": "running",
+        "ok": False,
+        "request": {},
+        "command_argv": ["ptcli", "retorrent", "--json"],
+        "created_at": 100,
+        "updated_at": 105,
+        "started_at": 105,
+        "completed_at": None,
+        "blockers": [],
+        "next_actions": [],
+        "summary_file": None,
+        "resume_state": None,
+        "agent_summary": None,
+        "agent_decision": None,
+        "duplicate_check": None,
+        "result": None,
+    }
+    (tmp_path / f"{job_id}.json").write_text(json.dumps(running), encoding="utf-8")
+    store = ptcli_service.JobStore(tmp_path, run_inline=True, recover_interrupted=False)
+
+    with pytest.raises(ptcli_service.ServiceError) as exc_info:
+        store.cancel(job_id)
+
+    assert exc_info.value.status == HTTPStatus.CONFLICT
+    assert "Only queued jobs can be cancelled" in str(exc_info.value)
+
+
 def test_job_store_recovers_interrupted_running_jobs_on_startup(tmp_path) -> None:
     job_id = "a" * 32
     interrupted = {
@@ -12875,6 +12952,48 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
     assert job_list["jobs"][0]["status_endpoint"] == f"/v1/jobs/{payload['job_id']}"
     assert job_list["jobs"][0]["summary_endpoint"] == f"/v1/jobs/{payload['job_id']}/summary"
     assert job_list["jobs"][0]["resume_endpoint"] == f"/v1/jobs/{payload['job_id']}/resume"
+
+
+def test_http_cancel_job_endpoint_requires_auth_and_only_cancels_queued(tmp_path) -> None:
+    queued_id = "e" * 32
+    running_id = "f" * 32
+    base_job = {
+        "schema_version": 1,
+        "kind": "ptcli.retorrent",
+        "ok": False,
+        "request": {},
+        "command_argv": ["ptcli", "retorrent", "--json"],
+        "created_at": 100,
+        "updated_at": 105,
+        "started_at": None,
+        "completed_at": None,
+        "blockers": [],
+        "next_actions": [],
+        "summary_file": None,
+        "resume_state": None,
+        "agent_summary": None,
+        "agent_decision": None,
+        "duplicate_check": None,
+        "result": None,
+    }
+    (tmp_path / f"{queued_id}.json").write_text(json.dumps({**base_job, "job_id": queued_id, "status": "queued"}), encoding="utf-8")
+    (tmp_path / f"{running_id}.json").write_text(json.dumps({**base_job, "job_id": running_id, "status": "running", "started_at": 105}), encoding="utf-8")
+    store = ptcli_service.JobStore(tmp_path, run_inline=True, recover_interrupted=False)
+    handler_class = ptcli_service._handler_class("secret", store)
+
+    unauthorized_status, unauthorized_body = _service_json_request(handler_class, "POST", f"/v1/jobs/{queued_id}/cancel", payload={"reason": "mistake"})
+    assert unauthorized_status == 401
+    assert unauthorized_body["message"] == "Unauthorized."
+
+    status, payload = _service_json_request(handler_class, "POST", f"/v1/jobs/{queued_id}/cancel", payload={"reason": "mistake"}, api_token="secret")
+    assert status == 200
+    assert payload["status"] == "cancelled"
+    assert payload["cancellation"]["reason"] == "mistake"
+    assert payload["agent_decision"]["stop_reason"] == "job_cancelled"
+
+    status, conflict = _service_json_request(handler_class, "POST", f"/v1/jobs/{running_id}/cancel", payload={"reason": "mistake"}, api_token="secret")
+    assert status == 409
+    assert "Only queued jobs can be cancelled" in conflict["message"]
 
 
 def test_manual_retorrent_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
@@ -13416,6 +13535,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/{job_id}" in paths
     assert "/v1/jobs/{job_id}/summary" in paths
     assert "/v1/jobs/{job_id}/resume" in paths
+    assert "/v1/jobs/{job_id}/cancel" in paths
     assert "/.well-known/ptcli-agent.json" in paths
     tool_by_name = {tool["name"]: tool for tool in tools["tools"]}
     assert tool_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
@@ -13443,6 +13563,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "runtime" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "runtime" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "runtime.poll_after_seconds" in tool_by_name["get_job_status"]["response_contract"]["running_fields"]
+    assert tool_by_name["cancel_job"]["path"] == "/v1/jobs/{job_id}/cancel"
+    assert "cancelled" in tool_by_name["cancel_job"]["response_contract"]["status_values"]
+    assert "cancellation" in tool_by_name["cancel_job"]["response_contract"]["required_fields"]
+    assert "cancellation" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "workflow_context" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -13503,6 +13627,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/{job_id}" in openapi["paths"]
     assert "/v1/jobs/{job_id}/summary" in openapi["paths"]
     assert "/v1/jobs/{job_id}/resume" in openapi["paths"]
+    assert "/v1/jobs/{job_id}/cancel" in openapi["paths"]
     assert openapi["paths"]["/v1/jobs/retorrent"]["post"]["security"] == [{"bearerAuth": []}]
     summary_schema = openapi["paths"]["/v1/jobs/{job_id}/summary"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "agent_decision" in summary_schema["properties"]
@@ -13519,6 +13644,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     job_schema = openapi["paths"]["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "interruption" in job_schema["properties"]
     assert "runtime" in job_schema["properties"]
+    assert "cancelled" in job_schema["properties"]["status"]["enum"]
+    assert "cancellation" in job_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
     schedule_jobs_schema = openapi["paths"]["/v1/jobs/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -13544,7 +13671,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
-    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
@@ -13569,7 +13696,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job"}
+        assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -13609,9 +13736,13 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "interruption" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "runtime" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "runtime" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert tools_by_name["cancel_job"]["path"] == "/v1/jobs/{job_id}/cancel"
+        assert "cancelled" in tools_by_name["cancel_job"]["response_contract"]["status_values"]
+        assert "cancellation" in tools_by_name["cancel_job"]["response_contract"]["required_fields"]
         assert tools_by_name["list_jobs"]["path"] == "/v1/jobs"
         assert "jobs" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
         assert "interruption" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "cancellation" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "runtime" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_endpoint" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]

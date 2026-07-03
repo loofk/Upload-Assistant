@@ -34,6 +34,7 @@ DEFAULT_JOB_POLL_AFTER_SECONDS = 5
 DAILY_CANDIDATE_SCHEDULE_ENV = "PTCLI_DAILY_CANDIDATE_SCHEDULES"
 JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 RESUME_COMMAND_ALLOWLIST = {"pipeline", "target-upload", "doctor", "summary-check", "retorrent"}
+JOB_STATUS_VALUES = ["queued", "running", "blocked", "failed", "complete", "cancelled"]
 AGENT_MANIFEST_PATHS = {
     "/.well-known/ptcli-agent.json",
     "/v1/agent-manifest",
@@ -207,6 +208,7 @@ class JobStore:
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
+            "cancellation": job.get("cancellation") if isinstance(job.get("cancellation"), dict) else None,
         }
 
     def resume(self, job_id: str) -> dict[str, Any]:
@@ -250,8 +252,41 @@ class JobStore:
             )
         return self.create("ptcli.resume", request, argv or [], lambda: _run_resume_command(argv or [], parent_job_id=job_id))
 
+    def cancel(self, job_id: str, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        request = request or {}
+        job = self._read(job_id)
+        status = str(job.get("status") or "")
+        if status != "queued":
+            raise ServiceError(f"Only queued jobs can be cancelled; job {job_id} is {status}.", status=HTTPStatus.CONFLICT)
+        now = int(time.time())
+        reason = str(request.get("reason") or "").strip() or "cancelled by API request"
+        cancellation = {"cancelled_at": now, "reason": reason, "previous_status": status}
+        next_actions = ["Submit a new job when you are ready; cancelled jobs are terminal and cannot be resumed."]
+        job.update(
+            {
+                "status": "cancelled",
+                "ok": False,
+                "updated_at": now,
+                "completed_at": now,
+                "cancellation": cancellation,
+                "blockers": [],
+                "next_actions": next_actions,
+                "result": {
+                    "status": "cancelled",
+                    "ok": False,
+                    "cancellation": cancellation,
+                    "next_actions": next_actions,
+                },
+            }
+        )
+        job["agent_decision"] = _agent_decision(job)
+        self._write(job)
+        return self.get(job_id)
+
     def _run(self, job_id: str, runner: Callable[[], dict[str, Any]]) -> None:
         job = self._read(job_id)
+        if job.get("status") != "queued":
+            return
         now = int(time.time())
         job.update({"status": "running", "updated_at": now, "started_at": now})
         self._write(job)
@@ -411,6 +446,12 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 except ServiceError as exc:
                     self._send_json(exc.status, {"status": "error", "message": str(exc)})
                 return
+            if path.startswith("/v1/jobs/") and path.endswith("/cancel"):
+                try:
+                    self._send_json(HTTPStatus.OK, self._job_cancel(path, self._read_optional_json()))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
             handler = handlers.get(path)
             if handler is None:
                 self._send_json(HTTPStatus.NOT_FOUND, {"status": "error", "message": "Endpoint not found."})
@@ -436,6 +477,12 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 return job_store.resume(parts[2])
             raise ServiceError("Job resume endpoint not found.", status=HTTPStatus.NOT_FOUND)
 
+        def _job_cancel(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[:2] == ["v1", "jobs"] and parts[3] == "cancel":
+                return job_store.cancel(parts[2], payload)
+            raise ServiceError("Job cancel endpoint not found.", status=HTTPStatus.NOT_FOUND)
+
         def log_message(self, _format: str, *_args: Any) -> None:
             return
 
@@ -448,6 +495,20 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             length = int(self.headers.get("Content-Length", "0") or "0")
             if length <= 0:
                 raise ServiceError("JSON request body is required.")
+            if length > 1024 * 1024:
+                raise ServiceError("JSON request body is too large.", status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            except json.JSONDecodeError as exc:
+                raise ServiceError(f"Invalid JSON request body: {exc.msg}") from exc
+            if not isinstance(payload, dict):
+                raise ServiceError("JSON request body must be an object.")
+            return payload
+
+        def _read_optional_json(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            if length <= 0:
+                return {}
             if length > 1024 * 1024:
                 raise ServiceError("JSON request body is too large.", status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             try:
@@ -1697,6 +1758,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "blockers": _string_list(job.get("blockers")),
         "next_actions": _string_list(job.get("next_actions")),
         "interruption": job.get("interruption") if isinstance(job.get("interruption"), dict) else None,
+        "cancellation": job.get("cancellation") if isinstance(job.get("cancellation"), dict) else None,
         "summary_file": _job_summary_file(job),
         "source_reference": _job_source_reference(job),
         "target_trackers": (job.get("request") or {}).get("target_trackers") if isinstance(job.get("request"), dict) else None,
@@ -1737,6 +1799,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "blockers": _string_list(job.get("blockers")),
         "next_actions": _string_list(job.get("next_actions")),
         "interruption": job.get("interruption") if isinstance(job.get("interruption"), dict) else None,
+        "cancellation": job.get("cancellation") if isinstance(job.get("cancellation"), dict) else None,
         "duplicate_check": job.get("duplicate_check"),
         "summary_file": job.get("summary_file"),
         "resume_state": job.get("resume_state"),
@@ -2055,7 +2118,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     resume_available = bool(resume_plan.get("available"))
     should_poll = status in {"queued", "running"}
     should_resume = bool(resume_plan.get("recommended")) and not duplicate_exists and not missing_confirmations and not policy_coverage_incomplete
-    can_attempt_live = not duplicate_exists and not missing_confirmations and not policy_coverage_incomplete and status not in {"queued", "running"}
+    can_attempt_live = not duplicate_exists and not missing_confirmations and not policy_coverage_incomplete and status not in {"queued", "running", "cancelled"}
 
     if should_poll:
         decision = "wait"
@@ -2073,6 +2136,10 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         decision = "done"
         stop_reason = None
         recommended_action = "Retorrent workflow is complete; inspect summary_file and seeding evidence."
+    elif status == "cancelled":
+        decision = "stop"
+        stop_reason = "job_cancelled"
+        recommended_action = "Submit a new job if the work is still needed; cancelled jobs are terminal."
     elif policy_coverage_incomplete:
         decision = "configure_policy"
         stop_reason = "policy_coverage_incomplete"
@@ -2103,6 +2170,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "policy_qbit_defaults": policy_qbit_defaults,
         "policy_coverage_ready": policy_coverage_ready,
         "runtime": _job_runtime(job),
+        "cancellation": job.get("cancellation") if isinstance(job.get("cancellation"), dict) else None,
         "can_attempt_live": can_attempt_live,
         "should_poll": should_poll,
         "should_resume": should_resume,
@@ -2689,6 +2757,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     job_id_schema = _job_id_tool_request_schema()
+    job_cancel_schema = _job_cancel_tool_request_schema()
     job_list_schema = _job_list_tool_request_schema()
     return [
         {
@@ -2830,6 +2899,15 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": _job_response_contract(),
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
             "safety": {"mutates_state": True, "live_upload": "inherits_from_resume_command", "requires_confirmation": ["existing allowlisted next_command_argv"]},
+        },
+        {
+            "name": "cancel_job",
+            "method": "POST",
+            "path": "/v1/jobs/{job_id}/cancel",
+            "description": "Cancel a queued job before it starts. Running jobs are not force-stopped and return 409 so live tracker/qBittorrent work is not interrupted unsafely.",
+            "input_schema": job_cancel_schema,
+            "response_contract": _job_response_contract(),
+            "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": ["job must still be queued"]},
         },
         {
             "name": "agent_manifest",
@@ -3012,12 +3090,18 @@ def _job_id_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _job_cancel_tool_request_schema() -> dict[str, Any]:
+    schema = json.loads(json.dumps(_job_id_tool_request_schema()))
+    schema["properties"]["reason"] = {"type": "string", "description": "Optional audit reason for cancelling a queued job."}
+    return schema
+
+
 def _job_list_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "required": [],
         "properties": {
-            "status": {"type": "string", "enum": ["queued", "running", "blocked", "failed", "complete"]},
+            "status": {"type": "string", "enum": JOB_STATUS_VALUES},
             "kind": {"type": "string"},
             "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
         },
@@ -3043,10 +3127,11 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context"],
-        "status_values": ["queued", "running", "blocked", "failed", "complete"],
-        "blocked_fields": ["blockers", "next_actions", "interruption", "runtime", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context"],
+        "status_values": JOB_STATUS_VALUES,
+        "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
+        "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
     }
 
@@ -3054,7 +3139,7 @@ def _job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "runtime", "summary_file", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
     }
 
@@ -3240,7 +3325,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     job_response_schema = {
         "type": "object",
         "properties": {
-            "status": {"type": "string", "enum": ["queued", "running", "blocked", "failed", "complete"]},
+            "status": {"type": "string", "enum": JOB_STATUS_VALUES},
             "ok": {"type": "boolean"},
             "job_id": {"type": "string"},
             "kind": {"type": "string"},
@@ -3250,6 +3335,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
             "interruption": {"type": ["object", "null"]},
+            "cancellation": {"type": ["object", "null"]},
             "runtime": {"type": "object"},
             "duplicate_check": {"type": "object"},
             "summary_file": {"type": ["string", "null"]},
@@ -3289,6 +3375,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "result": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
+            "cancellation": {"type": ["object", "null"]},
         },
     }
     job_list_response_schema = {
@@ -3584,7 +3671,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "operationId": "listPtcliJobs",
                     "security": token_security,
                     "parameters": [
-                        {"name": "status", "in": "query", "required": False, "schema": {"type": "string", "enum": ["queued", "running", "blocked", "failed", "complete"]}},
+                        {"name": "status", "in": "query", "required": False, "schema": {"type": "string", "enum": JOB_STATUS_VALUES}},
                         {"name": "kind", "in": "query", "required": False, "schema": {"type": "string"}},
                         {"name": "limit", "in": "query", "required": False, "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}},
                     ],
@@ -3613,6 +3700,18 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
                     "responses": {"202": {"description": "Queued resume job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                }
+            },
+            "/v1/jobs/{job_id}/cancel": {
+                "post": {
+                    "operationId": "cancelPtcliJob",
+                    "security": token_security,
+                    "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": {"type": "object", "properties": {"reason": {"type": "string"}}}}}},
+                    "responses": {
+                        "200": {"description": "Cancelled queued job.", "content": {"application/json": {"schema": job_response_schema}}},
+                        "409": {"description": "Job is already running or terminal and cannot be cancelled safely."},
+                    },
                 }
             },
         },

@@ -700,7 +700,8 @@
               "running",
               "blocked",
               "failed",
-              "complete"
+              "complete",
+              "cancelled"
             ]
           },
           "kind": {
@@ -733,6 +734,7 @@
           "blockers",
           "next_actions",
           "interruption",
+          "cancellation",
           "runtime",
           "summary_file",
           "source_reference",
@@ -778,6 +780,7 @@
           "blockers",
           "next_actions",
           "interruption",
+          "cancellation",
           "runtime",
           "summary_file",
           "resume_state",
@@ -831,6 +834,64 @@
         "live_upload": "inherits_from_resume_command",
         "requires_confirmation": [
           "existing allowlisted next_command_argv"
+        ]
+      }
+    },
+    {
+      "name": "cancel_job",
+      "method": "POST",
+      "path": "/v1/jobs/{job_id}/cancel",
+      "description": "Cancel a queued job before it starts. Running jobs are not force-stopped and return 409 so live tracker/qBittorrent work is not interrupted unsafely.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "summary_file",
+          "resume_state",
+          "agent_summary",
+          "agent_decision",
+          "candidate_digest",
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "resume_plan",
+          "resume_lineage",
+          "resume_context",
+          "source_reference",
+          "workflow_context"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete",
+          "cancelled"
+        ]
+      },
+      "safety": {
+        "live_upload": false,
+        "requires_confirmation": [
+          "job must still be queued"
         ]
       }
     },
