@@ -12764,6 +12764,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
     assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
     assert "top_submit_request" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
+    assert "policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_job_endpoint" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "response_contract" in tool_by_name["get_job_status"]
@@ -12836,6 +12837,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "digest" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
         assert "candidate_digest" in tools_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
         assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "candidate_digest" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert tools_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
@@ -12965,7 +12967,12 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
 
     config = {
         "TRACKERS": {"MTEAM": {"api_key": "fake"}},
-        "PTCLI": {"SITE_POLICIES": {"MTEAM": {"upload_rate_limit": "2MiB/s"}, "U2": {"download_rate_limit": "20MiB/s"}}},
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "MTEAM": {"upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+                "U2": {"download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+            }
+        },
     }
     result = await ptcli_candidates.build_daily_candidates(config, "U2", "MTEAM", limit=1, accept_rules=True)
 
@@ -12980,6 +12987,9 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["push_items"][0]["source_id"] == "60635"
     assert result["digest"]["push_items"][0]["decision"] == "submit_when_confirmed"
+    assert result["digest"]["push_items"][0]["policy_summary"]["manual_review_ready"] is True
+    assert result["digest"]["push_items"][0]["policy_summary"]["qbit_limits"]["source"]["download_limit"] == 20 * 1024 * 1024
+    assert result["digest"]["push_items"][0]["policy_summary"]["qbit_limits"]["target"]["upload_limit"] == 2 * 1024 * 1024
     candidate = result["candidates"][0]
     assert candidate["status"] == "ready"
     assert candidate["ranking"]["tier"] == "ready"
@@ -12990,6 +13000,15 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["duplicate_check"]["status"] == "not_found"
     assert candidate["source_policy"]["tracker"] == "U2"
     assert candidate["target_policies"][0]["tracker"] == "MTEAM"
+    assert candidate["policy_summary"]["manual_review_ready"] is True
+    assert candidate["policy_summary"]["automation"]["source_download"] is True
+    assert candidate["policy_summary"]["automation"]["target_upload"] is True
+    assert candidate["policy_summary"]["qbit_limits"]["source"]["download_limit"] == 20 * 1024 * 1024
+    assert candidate["policy_summary"]["qbit_limits"]["target"]["upload_limit"] == 2 * 1024 * 1024
+    assert candidate["policy_summary"]["seeding_requirements"]["source"]["min_seed_time_hours"] == 72
+    assert candidate["policy_summary"]["seeding_requirements"]["targets"][0]["min_ratio"] == 1.0
+    assert candidate["policy_summary"]["rules"]["source_fingerprint"] == "u2-review"
+    assert candidate["policy_summary"]["rules"]["target_fingerprints"] == ["mteam-review"]
     assert candidate["agent_workflow"]["tool"] == "manual_retorrent_job"
     assert candidate["agent_workflow"]["decision"] == "submit_when_confirmed"
     assert candidate["submit_tool"] == "manual_retorrent_job"

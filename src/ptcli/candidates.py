@@ -194,6 +194,7 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
     target_policies = [build_site_policy(config, target).to_dict() for target in targets]
     blockers = _candidate_blockers(seed, source_info_payload, source_info_error, duplicate_check, source_policy, target_policies, accept_rules=accept_rules)
     execute_request = _candidate_execute_request(config, seed, targets, accept_rules=accept_rules)
+    policy_summary = _candidate_policy_summary(source_policy, target_policies, execute_request, accept_rules=accept_rules)
     status = "ready" if not blockers else "blocked"
     ranking = _candidate_ranking(seed, source_info_payload, duplicate_check, blockers)
     return {
@@ -204,6 +205,7 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "duplicate_check": duplicate_check,
         "source_policy": source_policy,
         "target_policies": target_policies,
+        "policy_summary": policy_summary,
         "ranking": ranking,
         "recommendation": _candidate_recommendation(seed, source_info_payload, duplicate_check, blockers, ranking),
         "blockers": blockers,
@@ -293,6 +295,61 @@ def _candidate_execute_request(config: dict[str, Any], seed: CandidateSeed, targ
         if target_limits.get("download_limit") is not None:
             request["uploaded_qbit_download_limit"] = target_limits["download_limit"]
     return request
+
+
+def _candidate_policy_summary(source_policy: dict[str, Any], target_policies: list[dict[str, Any]], execute_request: dict[str, Any], *, accept_rules: bool) -> dict[str, Any]:
+    policies = [source_policy, *target_policies]
+    return {
+        "accept_rules": bool(accept_rules),
+        "manual_review_ready": bool(accept_rules) or not any(policy.get("manual_review_required") is True for policy in policies),
+        "automation": {
+            "source_download": source_policy.get("allow_auto_download"),
+            "source_retorrent": source_policy.get("allow_retorrent"),
+            "target_upload": all(policy.get("allow_auto_upload") is True for policy in target_policies),
+            "target_retorrent": all(policy.get("allow_retorrent") is True for policy in target_policies),
+        },
+        "qbit_limits": {
+            "source": {
+                "upload_limit": execute_request.get("qbit_upload_limit"),
+                "download_limit": execute_request.get("qbit_download_limit"),
+                "policy_upload_limit_human": source_policy.get("upload_rate_limit_human"),
+                "policy_download_limit_human": source_policy.get("download_rate_limit_human"),
+            },
+            "target": {
+                "upload_limit": execute_request.get("uploaded_qbit_upload_limit"),
+                "download_limit": execute_request.get("uploaded_qbit_download_limit"),
+                "policy_upload_limit_human": _first_policy_value(target_policies, "upload_rate_limit_human"),
+                "policy_download_limit_human": _first_policy_value(target_policies, "download_rate_limit_human"),
+            },
+        },
+        "seeding_requirements": {
+            "source": _policy_seeding_requirements(source_policy),
+            "targets": [_policy_seeding_requirements(policy) for policy in target_policies],
+        },
+        "rules": {
+            "source_rules_url": source_policy.get("rules_url"),
+            "target_rules_urls": [policy.get("rules_url") for policy in target_policies if policy.get("rules_url")],
+            "source_fingerprint": source_policy.get("rule_review_fingerprint"),
+            "target_fingerprints": [policy.get("rule_review_fingerprint") for policy in target_policies if policy.get("rule_review_fingerprint")],
+        },
+    }
+
+
+def _policy_seeding_requirements(policy: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tracker": policy.get("tracker"),
+        "min_seed_time_hours": policy.get("min_seed_time_hours"),
+        "min_ratio": policy.get("min_ratio"),
+        "freeleech_required": policy.get("freeleech_required"),
+    }
+
+
+def _first_policy_value(policies: list[dict[str, Any]], key: str) -> Any:
+    for policy in policies:
+        value = policy.get(key)
+        if value is not None:
+            return value
+    return None
 
 
 def _candidate_agent_workflow(status: str, blockers: list[str]) -> dict[str, Any]:
@@ -462,6 +519,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
     ranking = candidate.get("ranking") if isinstance(candidate.get("ranking"), dict) else {}
     duplicate_check = candidate.get("duplicate_check") if isinstance(candidate.get("duplicate_check"), dict) else {}
     workflow = candidate.get("agent_workflow") if isinstance(candidate.get("agent_workflow"), dict) else {}
+    policy_summary = candidate.get("policy_summary") if isinstance(candidate.get("policy_summary"), dict) else {}
     return {
         "rank": rank,
         "status": candidate.get("status"),
@@ -476,8 +534,20 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "duplicate_status": duplicate_check.get("status"),
         "blocker_count": len(_string_list(candidate.get("blockers"))),
         "decision": workflow.get("decision"),
+        "policy_summary": _candidate_digest_policy_summary(policy_summary),
         "submit_job_endpoint": candidate.get("submit_job_endpoint"),
         "submit_tool": candidate.get("submit_tool"),
+    }
+
+
+def _candidate_digest_policy_summary(policy_summary: dict[str, Any]) -> dict[str, Any]:
+    qbit_limits = policy_summary.get("qbit_limits") if isinstance(policy_summary.get("qbit_limits"), dict) else {}
+    seeding = policy_summary.get("seeding_requirements") if isinstance(policy_summary.get("seeding_requirements"), dict) else {}
+    return {
+        "manual_review_ready": policy_summary.get("manual_review_ready"),
+        "automation": policy_summary.get("automation"),
+        "qbit_limits": qbit_limits,
+        "seeding_requirements": seeding,
     }
 
 

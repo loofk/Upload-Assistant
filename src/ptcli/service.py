@@ -2077,6 +2077,7 @@ def _candidate_response_contract() -> dict[str, Any]:
             "duplicate_check",
             "source_policy",
             "target_policies",
+            "policy_summary",
             "ranking",
             "recommendation",
             "blockers",

@@ -353,6 +353,7 @@
           "recommendation",
           "duplicate_check",
           "blockers",
+          "policy_summary",
           "agent_workflow",
           "submit_request",
           "submit_job_endpoint",
