@@ -13063,7 +13063,19 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     schedules_file = tmp_path / "schedules.json"
     schedules_file.write_text(json.dumps([{"name": "chd-to-mteam", "source_tracker": "CHD", "target": "MTEAM", "accept_rules": True}]), encoding="utf-8")
 
-    code = main(["daily-schedule", "--job-dir", str(tmp_path / "jobs"), "--schedules-file", str(schedules_file), "--json"])
+    code = main(
+        [
+            "daily-schedule",
+            "--job-dir",
+            str(tmp_path / "jobs"),
+            "--schedules-file",
+            str(schedules_file),
+            "--write-summary",
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
+            "--json",
+        ]
+    )
     payload = json.loads(capsys.readouterr().out)
 
     assert code == 0
@@ -13075,6 +13087,12 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert payload["schedule_digest"]["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
     assert payload["agent_decision"]["decision"] == "review_candidates"
     assert Path(payload["job_dir"]).is_dir()
+    summary_path = Path(payload["summary_file"])
+    assert summary_path == tmp_path / "summary" / "ptcli-daily-schedule-summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["kind"] == "ptcli.daily_schedule.summary"
+    assert summary["schedule_digest"]["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
+    assert summary["summary_file"] == str(summary_path)
 
 
 def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> None:

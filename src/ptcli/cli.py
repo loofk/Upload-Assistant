@@ -121,6 +121,8 @@ def build_parser() -> argparse.ArgumentParser:
     daily_schedule.add_argument("--job-dir", help="Directory for file-backed job evidence. Defaults to PTCLI_JOB_DIR or TMPDIR/ptcli-jobs.")
     daily_schedule.add_argument("--schedules-json", help="JSON array/object of daily candidate schedules. Defaults to PTCLI_DAILY_CANDIDATE_SCHEDULES.")
     daily_schedule.add_argument("--schedules-file", help="File containing a JSON array/object of daily candidate schedules.")
+    daily_schedule.add_argument("--write-summary", action="store_true", help="Write ptcli-daily-schedule-summary.json for cron/agent pickup.")
+    daily_schedule.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --job-dir or PTCLI_JOB_DIR/TMPDIR.")
     daily_schedule.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     rules = subparsers.add_parser("rules", help="Show rule review profiles for supported trackers.")
@@ -11454,7 +11456,7 @@ def daily_schedule_payload(args: argparse.Namespace) -> dict[str, Any]:
         request["schedules"] = json.loads(args.schedules_json)
     store = JobStore(args.job_dir, run_inline=True)
     payload = create_daily_candidate_schedule_jobs(store, request)
-    return {
+    result = {
         **payload,
         "kind": "ptcli.cli.daily_schedule",
         "job_dir": str(store.root),
@@ -11464,6 +11466,34 @@ def daily_schedule_payload(args: argparse.Namespace) -> dict[str, Any]:
             "uploads": False,
         },
     }
+    if args.write_summary:
+        result["summary_file"] = _write_daily_schedule_summary(result, args, store.root)
+    return result
+
+
+def _write_daily_schedule_summary(payload: dict[str, Any], args: argparse.Namespace, job_dir: Path) -> str:
+    destination_dir = Path(args.summary_output_dir or job_dir).expanduser()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / "ptcli-daily-schedule-summary.json"
+    summary_payload = {
+        "schema_version": SUMMARY_SCHEMA_VERSION,
+        "kind": "ptcli.daily_schedule.summary",
+        "status": payload.get("status"),
+        "ok": payload.get("ok"),
+        "job_dir": payload.get("job_dir"),
+        "execution": payload.get("execution"),
+        "plan": payload.get("plan"),
+        "job_count": payload.get("job_count"),
+        "jobs": payload.get("jobs", []),
+        "skipped": payload.get("skipped", []),
+        "schedule_digest": payload.get("schedule_digest"),
+        "agent_decision": payload.get("agent_decision"),
+        "blockers": payload.get("blockers", []),
+        "next_actions": payload.get("next_actions", []),
+        "summary_file": str(destination),
+    }
+    destination.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return str(destination)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
