@@ -477,6 +477,7 @@ def create_daily_candidate_schedule_jobs(job_store: JobStore, request: dict[str,
         )
     if not jobs and not blockers:
         blockers.append("No enabled daily candidate schedules were available to run.")
+    schedule_digest = _daily_candidate_schedule_job_digest(jobs, skipped, blockers)
     return {
         "kind": "ptcli.daily_candidate_schedule_jobs",
         "status": "ok" if jobs and not blockers else "partial" if jobs else "blocked",
@@ -485,6 +486,8 @@ def create_daily_candidate_schedule_jobs(job_store: JobStore, request: dict[str,
         "job_count": len(jobs),
         "jobs": jobs,
         "skipped": skipped,
+        "schedule_digest": schedule_digest,
+        "agent_decision": _daily_candidate_schedule_job_decision(schedule_digest, blockers),
         "blockers": blockers,
         "next_actions": _daily_candidate_schedule_run_next_actions(jobs, skipped, blockers),
     }
@@ -840,6 +843,105 @@ def _daily_candidate_schedule_next_actions(schedules: list[dict[str, Any]], bloc
     if any(schedule.get("enabled") is False for schedule in schedules):
         actions.append("Enable disabled schedules before expecting daily candidate output.")
     return actions
+
+
+def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: list[dict[str, Any]], blockers: list[str]) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    push_items: list[dict[str, Any]] = []
+    top_submit_requests: list[dict[str, Any]] = []
+    for job in jobs:
+        digest = job.get("candidate_digest") if isinstance(job.get("candidate_digest"), dict) else {}
+        decision = job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else {}
+        request = job.get("job_request") if isinstance(job.get("job_request"), dict) else {}
+        top_submit_request = digest.get("top_submit_request") if isinstance(digest.get("top_submit_request"), dict) else None
+        item = {
+            "schedule_name": job.get("schedule_name"),
+            "job_id": job.get("job_id"),
+            "status": job.get("status"),
+            "ok": job.get("ok"),
+            "source_tracker": request.get("source_tracker"),
+            "target_trackers": request.get("target_trackers"),
+            "status_endpoint": job.get("status_endpoint"),
+            "summary_endpoint": job.get("summary_endpoint"),
+            "recommendation": digest.get("recommendation"),
+            "ready_count": int(digest.get("ready_count") or decision.get("ready_count") or 0),
+            "top_candidate": digest.get("top_candidate"),
+            "top_submit_request": top_submit_request,
+            "top_submit_job_endpoint": digest.get("top_submit_job_endpoint"),
+            "top_submit_tool": digest.get("top_submit_tool"),
+            "agent_decision": decision.get("decision"),
+            "can_submit_job": bool(decision.get("can_submit_job")),
+            "missing_confirmations": _string_list(decision.get("missing_confirmations")),
+            "push_count": len(digest.get("push_items")) if isinstance(digest.get("push_items"), list) else 0,
+            "blockers": _string_list(decision.get("blockers") or digest.get("blockers")),
+            "next_actions": _string_list(digest.get("next_actions")),
+        }
+        items.append(item)
+        digest_push_items = digest.get("push_items") if isinstance(digest.get("push_items"), list) else []
+        push_items.extend(
+            {
+                "schedule_name": job.get("schedule_name"),
+                "job_id": job.get("job_id"),
+                "status_endpoint": job.get("status_endpoint"),
+                "summary_endpoint": job.get("summary_endpoint"),
+                **push_item,
+            }
+            for push_item in digest_push_items
+            if isinstance(push_item, dict)
+        )
+        if top_submit_request and item["can_submit_job"]:
+            top_submit_requests.append(
+                {
+                    "schedule_name": job.get("schedule_name"),
+                    "job_id": job.get("job_id"),
+                    "submit_tool": digest.get("top_submit_tool") or "source_url_retorrent_job",
+                    "submit_endpoint": digest.get("top_submit_job_endpoint") or "/v1/jobs/retorrent/from-url",
+                    "request": top_submit_request,
+                    "missing_confirmations": item["missing_confirmations"],
+                }
+            )
+    return {
+        "kind": "ptcli.daily_candidate_schedule_digest",
+        "job_count": len(jobs),
+        "ready_job_count": sum(1 for item in items if item.get("ready_count", 0) > 0),
+        "pending_job_count": sum(1 for item in items if item.get("status") in {"queued", "running"}),
+        "blocked_job_count": sum(1 for item in items if item.get("status") in {"blocked", "failed"} or item.get("blockers")),
+        "skipped_count": len(skipped),
+        "push_count": len(push_items),
+        "submit_request_count": len(top_submit_requests),
+        "items": items,
+        "push_items": push_items,
+        "top_submit_requests": top_submit_requests,
+        "skipped": skipped,
+        "blockers": blockers,
+    }
+
+
+def _daily_candidate_schedule_job_decision(schedule_digest: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    if schedule_digest.get("pending_job_count"):
+        decision = "wait"
+        recommended_action = "Poll schedule_digest.items[].status_endpoint until each daily candidate job completes, then read schedule_digest.push_items."
+    elif schedule_digest.get("submit_request_count"):
+        decision = "review_candidates"
+        recommended_action = "Review schedule_digest.top_submit_requests, add confirm_upload=true plus save_path or path, then submit approved requests to source_url_retorrent_job."
+    elif blockers or schedule_digest.get("blocked_job_count"):
+        decision = "blocked"
+        recommended_action = "Resolve schedule_digest.blockers and per-item blockers before rerunning the schedule job."
+    else:
+        decision = "inspect"
+        recommended_action = "Inspect schedule_digest.items and rerun later or adjust daily candidate schedules."
+    return {
+        "workflow": "ptcli.daily_candidate_schedule_jobs",
+        "decision": decision,
+        "recommended_action": recommended_action,
+        "can_submit_any": bool(schedule_digest.get("submit_request_count")),
+        "should_poll": bool(schedule_digest.get("pending_job_count")),
+        "job_count": schedule_digest.get("job_count", 0),
+        "ready_job_count": schedule_digest.get("ready_job_count", 0),
+        "submit_request_count": schedule_digest.get("submit_request_count", 0),
+        "push_count": schedule_digest.get("push_count", 0),
+        "blocker_count": len(blockers),
+    }
 
 
 def _daily_candidate_schedule_run_next_actions(jobs: list[dict[str, Any]], skipped: list[dict[str, Any]], blockers: list[str]) -> list[str]:
@@ -2294,8 +2396,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Create one daily-candidate discovery job per enabled schedule entry and return job_ids for polling. This only scans candidates and never uploads.",
             "input_schema": candidate_schedule_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "schedule_digest", "agent_decision", "blockers", "next_actions"],
                 "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
+                "digest_fields": ["items", "push_items", "top_submit_requests", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
             },
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
@@ -2810,6 +2913,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "job_count": {"type": "integer"},
             "jobs": {"type": "array", "items": {"type": "object"}},
             "skipped": {"type": "array", "items": {"type": "object"}},
+            "schedule_digest": {"type": "object"},
+            "agent_decision": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },

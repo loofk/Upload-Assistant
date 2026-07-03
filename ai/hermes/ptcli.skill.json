@@ -660,6 +660,8 @@
           "job_count",
           "jobs",
           "skipped",
+          "schedule_digest",
+          "agent_decision",
           "blockers",
           "next_actions"
         ],
@@ -671,6 +673,15 @@
           "job_request",
           "candidate_digest",
           "agent_decision"
+        ],
+        "digest_fields": [
+          "items",
+          "push_items",
+          "top_submit_requests",
+          "ready_job_count",
+          "submit_request_count",
+          "pending_job_count",
+          "blocked_job_count"
         ]
       },
       "workflow_hints": {

@@ -13023,6 +13023,15 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["jobs"][0]["status"] == "complete"
     assert payload["jobs"][0]["candidate_digest"]["top_submit_tool"] == "source_url_retorrent_job"
     assert payload["jobs"][0]["status_endpoint"].startswith("/v1/jobs/")
+    assert payload["schedule_digest"]["kind"] == "ptcli.daily_candidate_schedule_digest"
+    assert payload["schedule_digest"]["ready_job_count"] == 1
+    assert payload["schedule_digest"]["push_count"] == 1
+    assert payload["schedule_digest"]["push_items"][0]["schedule_name"] == "u2-to-mteam"
+    assert payload["schedule_digest"]["push_items"][0]["status_endpoint"].startswith("/v1/jobs/")
+    assert payload["schedule_digest"]["top_submit_requests"][0]["submit_tool"] == "source_url_retorrent_job"
+    assert payload["schedule_digest"]["top_submit_requests"][0]["request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert payload["agent_decision"]["decision"] == "review_candidates"
+    assert payload["agent_decision"]["can_submit_any"] is True
     assert payload["skipped"] == [{"name": "disabled", "blockers": ["schedule is disabled"]}]
     assert "Poll each jobs[].status_endpoint" in payload["next_actions"][0]
 
@@ -13150,6 +13159,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "schedule_fields" in tool_by_name["daily_candidates_schedule"]["response_contract"]
     assert tool_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"
     assert "job_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
+    assert "schedule_digest" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+    assert "top_submit_requests" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert tool_by_name["deployment_check"]["method"] == "GET"
     assert "qbit" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "mounts" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -13195,6 +13206,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "workflow_context" in summary_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
+    schedule_jobs_schema = openapi["paths"]["/v1/jobs/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "schedule_digest" in schedule_jobs_schema["properties"]
+    assert "agent_decision" in schedule_jobs_schema["properties"]
     deployment_schema = openapi["paths"]["/v1/deployment/check"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "mounts" in deployment_schema["properties"]
     assert "daily_candidates" in deployment_schema["properties"]
@@ -13249,6 +13263,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["daily_candidates_schedule"]["path"] == "/v1/candidates/daily/schedule"
         assert tools_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"
         assert "job_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
+        assert "schedule_digest" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+        assert "top_submit_requests" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "digest" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
         assert "candidate_digest" in tools_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
