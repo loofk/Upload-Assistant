@@ -129,6 +129,14 @@ def build_parser() -> argparse.ArgumentParser:
     rules.add_argument("--trackers", help="Optional comma-separated tracker codes. Defaults to all supported trackers.")
     rules.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
+    site_policies = subparsers.add_parser("site-policies", help="Audit configured site automation policies, rate limits, and seeding obligations.")
+    site_policies.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
+    site_policies.add_argument("--trackers", help="Optional comma-separated tracker codes.")
+    site_policies.add_argument("--from", dest="source_tracker", help="Source tracker code for role-aware policy coverage.")
+    site_policies.add_argument("--to", dest="target_trackers", help="Target tracker codes, comma-separated, for role-aware policy coverage.")
+    site_policies.add_argument("--accept-rules", action="store_true", help="Acknowledge that involved tracker rules have been manually reviewed.")
+    site_policies.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
     rule_check = subparsers.add_parser("rule-check", help="Run executable rule gates for a source/target workflow.")
     rule_check.add_argument("--from", dest="source_tracker", required=True, help="Source tracker code.")
     rule_check.add_argument("--to", dest="target_trackers", required=True, help="Target tracker codes, comma-separated.")
@@ -11544,6 +11552,19 @@ def _write_daily_schedule_summary(payload: dict[str, Any], args: argparse.Namesp
     return str(destination)
 
 
+def site_policies_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.service import site_policies_payload
+
+    request = {
+        "config": args.config,
+        "trackers": args.trackers,
+        "source_tracker": args.source_tracker,
+        "target": args.target_trackers,
+        "accept_rules": args.accept_rules,
+    }
+    return site_policies_payload({key: value for key, value in request.items() if value not in (None, "")})
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -11568,6 +11589,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "rules":
             _print_payload(build_rules_payload(args), json_output)
             return 0
+
+        if args.command == "site-policies":
+            payload = _with_captured_stdout(lambda: site_policies_cli_payload(args), json_output)
+            _print_payload(payload, json_output)
+            return 0 if payload.get("ready") is True else 1
 
         if args.command == "rule-check":
             payload = build_rule_check_payload(args)

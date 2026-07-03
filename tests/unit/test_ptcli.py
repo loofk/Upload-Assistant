@@ -13157,6 +13157,41 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert payload["policy_gap_summary"]["by_role"]["target"]["trackers"] == ["MTEAM"]
 
 
+def test_site_policies_cli_exposes_policy_gap_summary(monkeypatch, capsys) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "rule_review_fingerprint": "u2-review",
+                },
+                "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
+                    "upload_rate_limit": "2MiB/s",
+                    "min_ratio": 1.0,
+                    "rule_review_fingerprint": "mteam-review",
+                },
+            }
+        }
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+
+    code = main(["site-policies", "--from", "U2", "--to", "MTEAM", "--accept-rules", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["kind"] == "ptcli.site_policies"
+    assert payload["ready"] is True
+    assert payload["request"]["roles"] == {"U2": ["source"], "MTEAM": ["target"]}
+    assert payload["policy_gap_summary"]["ready"] is True
+    assert payload["policy_gap_summary"]["by_role"]["source"]["trackers"] == ["U2"]
+    assert payload["policy_gap_summary"]["by_role"]["target"]["trackers"] == ["MTEAM"]
+
+
 def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch) -> None:
     config = {
         "PTCLI": {

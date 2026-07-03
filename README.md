@@ -129,6 +129,7 @@ python3 ptcli.py summary-check --summary-file ./tmp/daily-candidates/ptcli-daily
 curl -X POST http://127.0.0.1:8080/v1/site-policies \
   -H "Content-Type: application/json" \
   -d '{"trackers":"U2,MTEAM","accept_rules":true}'
+python3 ptcli.py site-policies --from U2 --to MTEAM --accept-rules --json
 ```
 
 若需要把 API 暴露给其他容器或局域网工具，建议设置 `PTCLI_API_TOKEN`，调用时添加 `Authorization: Bearer <token>`。服务端点不会绕过站点规则；live 下载/上传仍依赖现有 rule gate、dupe gate 和 `confirm_upload`。
