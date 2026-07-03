@@ -30,6 +30,7 @@ from src.ptcli.source import resolve_source_reference
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
 DEFAULT_SERVICE_PORT = 8080
 JOB_SCHEMA_VERSION = 1
+DEFAULT_JOB_POLL_AFTER_SECONDS = 5
 DAILY_CANDIDATE_SCHEDULE_ENV = "PTCLI_DAILY_CANDIDATE_SCHEDULES"
 JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 RESUME_COMMAND_ALLOWLIST = {"pipeline", "target-upload", "doctor", "summary-check", "retorrent"}
@@ -197,6 +198,7 @@ class JobStore:
             "candidate_digest": _candidate_digest_from_payload(summary_payload) or _candidate_digest_from_payload(job.get("result")),
             "policy_coverage": _job_policy_coverage(job),
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
+            "runtime": _job_runtime(job),
             "resume_plan": _job_resume_plan(job),
             "resume_lineage": _job_resume_lineage(job),
             "resume_context": _job_resume_context(job),
@@ -1640,6 +1642,47 @@ def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int
     return max(minimum, min(maximum, parsed))
 
 
+def _timestamp(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _job_runtime(job: dict[str, Any]) -> dict[str, Any]:
+    status = str(job.get("status") or "unknown")
+    terminal = status not in {"queued", "running"}
+    now = int(time.time())
+    created_at = _timestamp(job.get("created_at"))
+    updated_at = _timestamp(job.get("updated_at"))
+    started_at = _timestamp(job.get("started_at"))
+    completed_at = _timestamp(job.get("completed_at"))
+    end_at = completed_at or now
+    elapsed_seconds = max(0, end_at - created_at) if created_at is not None else None
+    status_age_seconds = max(0, now - updated_at) if updated_at is not None and not terminal else None
+    queued_until = started_at or completed_at or now
+    queued_seconds = max(0, queued_until - created_at) if created_at is not None else None
+    running_seconds = max(0, end_at - started_at) if started_at is not None else None
+    job_id = job.get("job_id")
+    return {
+        "status": status,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "elapsed_seconds": elapsed_seconds,
+        "status_age_seconds": status_age_seconds,
+        "queued_seconds": queued_seconds,
+        "running_seconds": running_seconds,
+        "terminal": terminal,
+        "should_poll": not terminal,
+        "poll_after_seconds": DEFAULT_JOB_POLL_AFTER_SECONDS if not terminal else None,
+        "status_endpoint": f"/v1/jobs/{job_id}" if job_id else None,
+        "summary_endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
+        "resume_endpoint": f"/v1/jobs/{job_id}/resume" if job_id else None,
+    }
+
+
 def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
     job_id = job.get("job_id")
     return {
@@ -1650,6 +1693,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
         "completed_at": job.get("completed_at"),
+        "runtime": _job_runtime(job),
         "blockers": _string_list(job.get("blockers")),
         "next_actions": _string_list(job.get("next_actions")),
         "interruption": job.get("interruption") if isinstance(job.get("interruption"), dict) else None,
@@ -1689,6 +1733,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "updated_at": job.get("updated_at"),
         "started_at": job.get("started_at"),
         "completed_at": job.get("completed_at"),
+        "runtime": _job_runtime(job),
         "blockers": _string_list(job.get("blockers")),
         "next_actions": _string_list(job.get("next_actions")),
         "interruption": job.get("interruption") if isinstance(job.get("interruption"), dict) else None,
@@ -1974,6 +2019,7 @@ def _agent_candidate_decision(
         "ready_count": ready_count,
         "policy_coverage": policy_coverage or None,
         "policy_coverage_ready": policy_coverage_ready,
+        "runtime": _job_runtime(job),
         "missing_confirmations": _missing_live_confirmations(top_submit_request or request),
         "can_submit_job": bool(top_submit_request and ready_count > 0 and policy_coverage_ready is not False),
         "should_poll": status in {"queued", "running"},
@@ -2056,6 +2102,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "policy_coverage": policy_coverage,
         "policy_qbit_defaults": policy_qbit_defaults,
         "policy_coverage_ready": policy_coverage_ready,
+        "runtime": _job_runtime(job),
         "can_attempt_live": can_attempt_live,
         "should_poll": should_poll,
         "should_resume": should_resume,
@@ -2771,7 +2818,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "runtime", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -2996,9 +3043,10 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
-        "blocked_fields": ["blockers", "next_actions", "interruption", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
+        "blocked_fields": ["blockers", "next_actions", "interruption", "runtime", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
+        "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
     }
 
@@ -3006,7 +3054,7 @@ def _job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "summary_file", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "runtime", "summary_file", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
     }
 
@@ -3202,6 +3250,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
             "interruption": {"type": ["object", "null"]},
+            "runtime": {"type": "object"},
             "duplicate_check": {"type": "object"},
             "summary_file": {"type": ["string", "null"]},
             "resume_state": {"type": ["object", "null"]},
@@ -3231,6 +3280,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "candidate_digest": {"type": ["object", "null"]},
             "policy_coverage": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
+            "runtime": {"type": "object"},
             "resume_plan": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
