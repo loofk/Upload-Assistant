@@ -115,6 +115,7 @@ class JobStore:
             "agent_decision": _agent_decision(job),
             "candidate_digest": _candidate_digest_from_payload(summary_payload) or _candidate_digest_from_payload(job.get("result")),
             "policy_coverage": _job_policy_coverage(job),
+            "policy_qbit_defaults": _job_policy_qbit_defaults(job),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -133,6 +134,8 @@ class JobStore:
             "next_command_argv": argv,
             "resume_allowed": allowed,
             "resume_blocker": reason,
+            "parent_policy_coverage": _job_policy_coverage(parent),
+            "parent_policy_qbit_defaults": _job_policy_qbit_defaults(parent),
         }
         if not allowed:
             return self.create(
@@ -1381,6 +1384,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
         "candidate_digest": _candidate_digest_from_payload(job.get("result")),
         "policy_coverage": _job_policy_coverage(job),
+        "policy_qbit_defaults": _job_policy_qbit_defaults(job),
         "result_status": _nested_value(job.get("result"), "status"),
         "next_stage": _nested_value(job.get("result"), "next_stage"),
         "next_command": _nested_value(job.get("result"), "next_command"),
@@ -1394,6 +1398,13 @@ def _job_policy_coverage(job: dict[str, Any]) -> dict[str, Any] | None:
     request = job.get("request")
     if isinstance(request, dict) and isinstance(request.get("policy_coverage"), dict):
         return request["policy_coverage"]
+    return None
+
+
+def _job_policy_qbit_defaults(job: dict[str, Any]) -> dict[str, Any] | None:
+    request = job.get("request")
+    if isinstance(request, dict) and isinstance(request.get("policy_qbit_defaults"), dict):
+        return request["policy_qbit_defaults"]
     return None
 
 
@@ -1472,6 +1483,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     resume_state = job.get("resume_state") if isinstance(job.get("resume_state"), dict) else _result_resume_state(result)
     missing_confirmations = _missing_live_confirmations(request)
     policy_coverage = _job_policy_coverage(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
+    policy_qbit_defaults = _job_policy_qbit_defaults(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     policy_coverage_ready = policy_coverage.get("ready") if isinstance(policy_coverage, dict) and isinstance(policy_coverage.get("ready"), bool) else None
     policy_coverage_incomplete = policy_coverage_ready is False
     duplicate_exists = duplicate_check.get("exists") is True
@@ -1523,6 +1535,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "duplicate_check": duplicate_check,
         "missing_confirmations": missing_confirmations,
         "policy_coverage": policy_coverage,
+        "policy_qbit_defaults": policy_qbit_defaults,
         "policy_coverage_ready": policy_coverage_ready,
         "can_attempt_live": can_attempt_live,
         "should_poll": should_poll,
@@ -2023,7 +2036,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -2220,7 +2233,7 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
         "blocked_fields": ["blockers", "next_actions", "resume_state", "next_command_argv", "agent_decision"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
@@ -2407,6 +2420,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_summary": {"type": ["object", "null"]},
             "agent_decision": {"type": ["object", "null"]},
             "candidate_digest": {"type": ["object", "null"]},
+            "policy_qbit_defaults": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
         },
     }
@@ -2423,6 +2437,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_decision": {"type": ["object", "null"]},
             "candidate_digest": {"type": ["object", "null"]},
             "policy_coverage": {"type": ["object", "null"]},
+            "policy_qbit_defaults": {"type": ["object", "null"]},
             "result": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},

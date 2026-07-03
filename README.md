@@ -51,7 +51,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - `pipeline` 和 `retorrent --execute` 返回 `requested_actions`、`effective_actions`、`closure`、`evidence`、`artifacts`、`resume_commands`、`resume_state`、`next_actions`；`requested_actions` 会区分 `source_torrent_file`、`uploaded_torrent_id` 和 `uploaded_torrent_file` 等恢复输入，`evidence.target.mode` / `summary.target.mode` 会标明目标侧是 `live_upload`、`resumed_uploaded_id` 还是 `resumed_uploaded_torrent`。
 - 任务式 API 的 job 状态和 summary 会暴露 `agent_decision`，直接给出 `decision`、`recommended_action`、`stop_reason`、`duplicate_check`、`missing_confirmations`、`should_poll`、`should_resume` 和 `next_command_argv`，方便 agent 判断该停止、补确认、继续轮询还是续跑。
 - 转种 job 状态和 summary 也会暴露 `policy_coverage`；当 `accept_rules` / `confirm_upload` 已齐但源站或目标站缺少 fingerprint、限速或做种要求时，`agent_decision.decision=configure_policy`，避免 agent 直接进入 live 上传。
-- retorrent/manual job 会在未显式传入限速时，从 `PTCLI.SITE_POLICIES` 自动补齐 `qbit_download_limit`、`qbit_upload_limit`、`uploaded_qbit_upload_limit`、`uploaded_qbit_download_limit`；`request.policy_qbit_defaults` 会记录哪些值来自站点策略、哪些值由请求覆盖。
+- retorrent/manual job 会在未显式传入限速时，从 `PTCLI.SITE_POLICIES` 自动补齐 `qbit_download_limit`、`qbit_upload_limit`、`uploaded_qbit_upload_limit`、`uploaded_qbit_download_limit`；job 状态、summary 和 `agent_decision.policy_qbit_defaults` 会记录哪些值来自站点策略、哪些值由请求覆盖，resume job 也会保留父任务的策略上下文。
 - `pipeline --write-summary` 会在 `ptcli-run-summary.json` 顶层写入 `flow_check`，并在 `summary.flow` 中保留源站/目标站适配器和凭据要求。
 - 带执行动作的命令未闭环时返回 `status: blocked`、顶层 blockers 和非 0 退出码。
 - `--write-summary` 会写出带 `automation_handoff` 的 summary JSON，并在本次命令的 JSON 返回中同步给出该字段；其中 `resume_state.next_stage` / `resume_state.next_command` 可供 agent 或脚本直接续跑，`automation_handoff` 则给出检查和执行续跑的 `summary-check` command/argv。

@@ -226,7 +226,8 @@
           "agent_summary",
           "agent_decision",
           "candidate_digest",
-          "policy_coverage"
+          "policy_coverage",
+          "policy_qbit_defaults"
         ],
         "status_values": [
           "queued",
@@ -304,7 +305,8 @@
           "agent_summary",
           "agent_decision",
           "candidate_digest",
-          "policy_coverage"
+          "policy_coverage",
+          "policy_qbit_defaults"
         ]
       },
       "safety": {
@@ -358,7 +360,8 @@
           "blockers",
           "next_actions",
           "candidate_digest",
-          "policy_coverage"
+          "policy_coverage",
+          "policy_qbit_defaults"
         ],
         "result_fields": [
           "ranking",
@@ -589,7 +592,8 @@
           "agent_summary",
           "agent_decision",
           "candidate_digest",
-          "policy_coverage"
+          "policy_coverage",
+          "policy_qbit_defaults"
         ]
       },
       "safety": {
