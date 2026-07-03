@@ -164,7 +164,8 @@
           "summary_file",
           "resume_state",
           "agent_summary",
-          "agent_decision"
+          "agent_decision",
+          "candidate_digest"
         ],
         "status_values": [
           "queued",
@@ -240,7 +241,8 @@
           "summary_file",
           "resume_state",
           "agent_summary",
-          "agent_decision"
+          "agent_decision",
+          "candidate_digest"
         ]
       },
       "safety": {
@@ -292,7 +294,8 @@
           "ok",
           "job_id",
           "blockers",
-          "next_actions"
+          "next_actions",
+          "candidate_digest"
         ],
         "result_fields": [
           "ranking",
@@ -351,7 +354,8 @@
           "summary_file",
           "resume_state",
           "agent_summary",
-          "agent_decision"
+          "agent_decision",
+          "candidate_digest"
         ]
       },
       "safety": {

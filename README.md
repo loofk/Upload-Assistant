@@ -103,7 +103,7 @@ curl -X POST http://127.0.0.1:8080/v1/candidates/daily \
   -H "Content-Type: application/json" \
   -d '{"source_tracker":"U2","target":"MTEAM","limit":10}'
 
-# 长耗时/真实环境下也可用任务式候选接口
+# 长耗时/真实环境下也可用任务式候选接口；轮询 job 时可直接读取 candidate_digest 和 agent_decision
 curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/daily \
   -H "Content-Type: application/json" \
   -d '{"source_tracker":"U2","target":"MTEAM","limit":10}'

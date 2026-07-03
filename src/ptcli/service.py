@@ -110,6 +110,7 @@ class JobStore:
             "summary": summary_payload,
             "agent_summary": _agent_summary(summary_payload) or _agent_summary(job.get("result")),
             "agent_decision": _agent_decision(job),
+            "candidate_digest": _candidate_digest_from_payload(summary_payload) or _candidate_digest_from_payload(job.get("result")),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -729,6 +730,9 @@ def _result_blockers(result: dict[str, Any]) -> list[str]:
 def _agent_summary(payload: Any) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         return None
+    candidate_summary = _agent_candidate_summary(payload)
+    if candidate_summary:
+        return candidate_summary
     material = _nested_dict(payload, "material_diagnostics")
     target_preflight = _nested_dict(payload, "target_preflight_diagnostics")
     resume_state = _nested_dict(payload, "resume_state")
@@ -747,6 +751,33 @@ def _agent_summary(payload: Any) -> dict[str, Any] | None:
         "resume": _agent_resume_summary(resume_state, payload),
     }
     return summary if any(value for value in summary.values()) else None
+
+
+def _agent_candidate_summary(payload: dict[str, Any]) -> dict[str, Any] | None:
+    candidate_payload = _candidate_payload(payload)
+    if not candidate_payload:
+        return None
+    digest = _candidate_digest_from_payload(candidate_payload) or {}
+    push_items = digest.get("push_items") if isinstance(digest.get("push_items"), list) else []
+    nested_result = candidate_payload.get("result") if isinstance(candidate_payload.get("result"), dict) else {}
+    return {
+        "type": "daily_candidates",
+        "status": candidate_payload.get("status"),
+        "ok": candidate_payload.get("ok") if isinstance(candidate_payload.get("ok"), bool) else None,
+        "source_tracker": candidate_payload.get("source_tracker") or nested_result.get("source_tracker"),
+        "target_trackers": candidate_payload.get("target_trackers") or nested_result.get("target_trackers"),
+        "count": candidate_payload.get("count") or nested_result.get("count"),
+        "ready_count": candidate_payload.get("ready_count") or nested_result.get("ready_count"),
+        "recommendation": digest.get("recommendation"),
+        "top_candidate": digest.get("top_candidate"),
+        "top_submit_request": digest.get("top_submit_request"),
+        "top_submit_job_endpoint": digest.get("top_submit_job_endpoint"),
+        "top_submit_tool": digest.get("top_submit_tool"),
+        "push_count": len(push_items),
+        "digest": digest,
+        "blockers": _string_list(candidate_payload.get("blockers") or nested_result.get("blockers")),
+        "next_actions": _string_list(candidate_payload.get("next_actions") or nested_result.get("next_actions")),
+    }
 
 
 def _agent_metadata_summary(material: dict[str, Any]) -> dict[str, Any]:
@@ -850,6 +881,31 @@ def _agent_resume_summary(resume_state: dict[str, Any], payload: dict[str, Any])
     }
 
 
+def _candidate_payload(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    kind = str(payload.get("kind") or "")
+    if kind in {"ptcli.daily_candidates", "ptcli.service.daily_candidates"}:
+        return payload
+    nested = payload.get("result")
+    if isinstance(nested, dict) and str(nested.get("kind") or "") in {"ptcli.daily_candidates", "ptcli.service.daily_candidates"}:
+        return nested
+    return payload if isinstance(payload.get("digest"), dict) and isinstance(payload.get("candidates"), list) else None
+
+
+def _candidate_digest_from_payload(payload: Any) -> dict[str, Any] | None:
+    candidate_payload = _candidate_payload(payload)
+    if not candidate_payload:
+        return None
+    digest = candidate_payload.get("digest")
+    if isinstance(digest, dict):
+        return digest
+    nested = candidate_payload.get("result")
+    if isinstance(nested, dict) and isinstance(nested.get("digest"), dict):
+        return nested["digest"]
+    return None
+
+
 def _nested_dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
     value = _nested_value(payload, key)
     return value if isinstance(value, dict) else {}
@@ -913,6 +969,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "resume_state": job.get("resume_state"),
         "agent_summary": job.get("agent_summary") if isinstance(job.get("agent_summary"), dict) else _agent_summary(job.get("result")),
         "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
+        "candidate_digest": _candidate_digest_from_payload(job.get("result")),
         "result_status": _nested_value(job.get("result"), "status"),
         "next_stage": _nested_value(job.get("result"), "next_stage"),
         "next_command": _nested_value(job.get("result"), "next_command"),
@@ -922,12 +979,65 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _agent_candidate_decision(
+    job: dict[str, Any],
+    result: dict[str, Any],
+    request: dict[str, Any],
+    status: str,
+    blockers: list[str],
+    next_actions: list[str],
+) -> dict[str, Any] | None:
+    if str(job.get("kind") or "") != "ptcli.daily_candidates" and not _candidate_payload(result):
+        return None
+    digest = _candidate_digest_from_payload(result) or {}
+    top_submit_request = digest.get("top_submit_request") if isinstance(digest.get("top_submit_request"), dict) else None
+    ready_count = int(digest.get("ready_count") or 0)
+    if status in {"queued", "running"}:
+        decision = "wait"
+        stop_reason = None
+        recommended_action = "Poll get_job_status until the daily candidate job is complete."
+    elif top_submit_request and ready_count > 0:
+        decision = "submit_candidate_when_confirmed"
+        stop_reason = None
+        recommended_action = "Review digest.top_candidate and site rules, add confirm_upload=true plus a save_path or path, then submit digest.top_submit_request to manual_retorrent_job."
+    elif blockers or digest.get("recommendation") == "resolve_blockers":
+        decision = "blocked"
+        stop_reason = "candidate_blockers"
+        recommended_action = next_actions[0] if next_actions else "Resolve digest.blockers before submitting any candidate."
+    else:
+        decision = "inspect"
+        stop_reason = "no_ready_candidate"
+        recommended_action = "Inspect digest.push_items and rerun later or adjust source/target filters."
+    return {
+        "workflow": job.get("kind"),
+        "status": status,
+        "decision": decision,
+        "recommended_action": recommended_action,
+        "stop_reason": stop_reason,
+        "candidate_digest": digest,
+        "top_submit_request": top_submit_request,
+        "top_submit_job_endpoint": digest.get("top_submit_job_endpoint"),
+        "top_submit_tool": digest.get("top_submit_tool"),
+        "ready_count": ready_count,
+        "missing_confirmations": _missing_live_confirmations(top_submit_request or request),
+        "can_submit_job": bool(top_submit_request and ready_count > 0),
+        "should_poll": status in {"queued", "running"},
+        "should_resume": False,
+        "resume_available": False,
+        "summary_file": job.get("summary_file"),
+        "blocker_count": len(blockers),
+    }
+
+
 def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     result = job.get("result") if isinstance(job.get("result"), dict) else {}
     request = job.get("request") if isinstance(job.get("request"), dict) else {}
     status = str(job.get("status") or "unknown")
     blockers = _string_list(job.get("blockers"))
     next_actions = _string_list(job.get("next_actions"))
+    candidate_decision = _agent_candidate_decision(job, result, request, status, blockers, next_actions)
+    if candidate_decision:
+        return candidate_decision
     duplicate_check = _job_duplicate_check(job)
     next_command_argv = _result_next_command_argv(result)
     resume_state = job.get("resume_state") if isinstance(job.get("resume_state"), dict) else _result_resume_state(result)
@@ -1447,7 +1557,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -1584,7 +1694,7 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
         "blocked_fields": ["blockers", "next_actions", "resume_state", "next_command_argv", "agent_decision"],
     }
@@ -1766,6 +1876,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_state": {"type": ["object", "null"]},
             "agent_summary": {"type": ["object", "null"]},
             "agent_decision": {"type": ["object", "null"]},
+            "candidate_digest": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
         },
     }
@@ -1780,6 +1891,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "summary": {"type": ["object", "null"]},
             "agent_summary": {"type": ["object", "null"]},
             "agent_decision": {"type": ["object", "null"]},
+            "candidate_digest": {"type": ["object", "null"]},
             "result": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
