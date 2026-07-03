@@ -209,7 +209,8 @@
             "type": [
               "string",
               "integer"
-            ]
+            ],
+            "description": "Optional uploaded target torrent upload limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
           }
         }
       },

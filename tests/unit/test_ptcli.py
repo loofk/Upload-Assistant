@@ -12269,6 +12269,39 @@ def test_service_execute_builds_retorrent_args_with_live_confirmations() -> None
     assert "--uploaded-qbit-upload-limit" in argv
 
 
+def test_service_execute_applies_policy_qbit_defaults(monkeypatch) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True, "download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True, "upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+            }
+        }
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+
+    args, normalized, argv = ptcli_service._retorrent_execute_args(
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "execute": True,
+            "accept_rules": True,
+            "confirm_upload": True,
+            "uploaded_qbit_upload_limit": "1MiB/s",
+        }
+    )
+
+    assert args.qbit_download_limit == str(20 * 1024 * 1024)
+    assert args.uploaded_qbit_upload_limit == "1MiB/s"
+    assert normalized["qbit_download_limit"] == 20 * 1024 * 1024
+    assert normalized["uploaded_qbit_upload_limit"] == "1MiB/s"
+    assert normalized["policy_qbit_defaults"]["applied"] == {"qbit_download_limit": 20 * 1024 * 1024}
+    assert normalized["policy_qbit_defaults"]["sources"] == {"qbit_download_limit": "site_policy:U2"}
+    assert normalized["policy_qbit_defaults"]["request_overrides"] == {"uploaded_qbit_upload_limit": "1MiB/s"}
+    assert "--qbit-download-limit" in argv
+    assert "--uploaded-qbit-upload-limit" in argv
+
+
 def test_service_duplicate_check_summary_marks_existing_target_seed() -> None:
     summary = ptcli_service._duplicate_check(
         {
@@ -12486,16 +12519,26 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["request"]["execute"] is True
     assert job["request"]["execute_if_no_duplicate"] is True
     assert job["policy_coverage"]["ready"] is True
+    assert job["request"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert job["request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert job["request"]["policy_qbit_defaults"]["applied"] == {
+        "qbit_download_limit": 20 * 1024 * 1024,
+        "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+    }
     assert job["agent_decision"]["decision"] == "blocked"
     assert job["agent_decision"]["duplicate_check"]["status"] == "not_found"
     assert job["agent_decision"]["missing_confirmations"] == []
     assert job["agent_decision"]["policy_coverage_ready"] is True
     assert captured_request["execute"] is True
     assert captured_request["execute_if_no_duplicate"] is True
+    assert captured_request["qbit_download_limit"] == 20 * 1024 * 1024
+    assert captured_request["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert job["command_argv"][:2] == ["ptcli", "retorrent"]
     assert "--execute" in job["command_argv"]
     assert "--accept-rules" in job["command_argv"]
     assert "--confirm-upload" in job["command_argv"]
+    assert "--qbit-download-limit" in job["command_argv"]
+    assert "--uploaded-qbit-upload-limit" in job["command_argv"]
 
 
 def test_manual_retorrent_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
@@ -12915,6 +12958,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
     assert "policy_coverage" in tool_by_name["retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_coverage" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["request_fields"]
+    assert "uploaded_qbit_upload_limit" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]

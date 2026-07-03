@@ -24,7 +24,7 @@ from src.ptcli.cli import build_parser, pipeline_payload, retorrent_payload
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.mainland import parse_tracker_list
-from src.ptcli.policies import build_site_policy_coverage, build_site_policy_report
+from src.ptcli.policies import build_site_policy_coverage, build_site_policy_report, qbit_limits_for_tracker
 from src.ptcli.source import resolve_source_reference
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
@@ -383,6 +383,9 @@ def create_retorrent_check_job(job_store: JobStore, request: dict[str, Any]) -> 
 def create_retorrent_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
     execute = bool(request.get("execute") or request.get("execute_if_no_duplicate") or request.get("auto_retorrent"))
     if execute:
+        source = _resolve_request_source(request)
+        target_trackers = _target_trackers(request)
+        request = _request_with_policy_qbit_defaults(request, source, target_trackers)
         _, normalized_request, argv = _retorrent_execute_args(request)
         kind = "ptcli.retorrent"
     else:
@@ -399,6 +402,9 @@ def create_retorrent_job(job_store: JobStore, request: dict[str, Any]) -> dict[s
 def create_manual_retorrent_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
     """Create the AI-facing manual retorrent job: source URL + target, then execute if gates allow."""
     effective_request = {**request, "execute": True, "execute_if_no_duplicate": True, "manual_retorrent": True}
+    source = _resolve_request_source(effective_request)
+    target_trackers = _target_trackers(effective_request)
+    effective_request = _request_with_policy_qbit_defaults(effective_request, source, target_trackers)
     _, normalized_request, argv = _retorrent_execute_args(effective_request)
     normalized_request = {**normalized_request, "mode": "manual_retorrent", "execute_if_no_duplicate": True}
     return job_store.create(
@@ -609,6 +615,7 @@ def _pipeline_check_args(request: dict[str, Any]) -> tuple[argparse.Namespace, d
 def _retorrent_execute_args(request: dict[str, Any]) -> tuple[argparse.Namespace, dict[str, Any], list[str]]:
     source = _resolve_request_source(request)
     target_trackers = _target_trackers(request)
+    request = _request_with_policy_qbit_defaults(request, source, target_trackers)
     argv = [
         "retorrent",
         "--from",
@@ -963,8 +970,47 @@ def _normalized_request(request: dict[str, Any], source: dict[str, Any], target_
         "config": request.get("config"),
         "path": request.get("path") or request.get("content_path"),
         "save_path": request.get("save_path"),
+        "qbit_upload_limit": request.get("qbit_upload_limit"),
+        "qbit_download_limit": request.get("qbit_download_limit"),
+        "uploaded_qbit_upload_limit": request.get("uploaded_qbit_upload_limit"),
+        "uploaded_qbit_download_limit": request.get("uploaded_qbit_download_limit"),
+        "policy_qbit_defaults": request.get("policy_qbit_defaults"),
         "policy_coverage": _request_policy_coverage(request, source, target_trackers),
     }
+
+
+def _request_with_policy_qbit_defaults(request: dict[str, Any], source: dict[str, Any], target_trackers: str) -> dict[str, Any]:
+    enriched = dict(request)
+    if isinstance(enriched.get("policy_qbit_defaults"), dict):
+        return enriched
+    defaults: dict[str, Any] = {"applied": {}, "sources": {}, "request_overrides": {}, "errors": []}
+    try:
+        config = load_config(enriched.get("config"))
+        source_tracker = str(source.get("tracker") or "")
+        targets = parse_tracker_list(target_trackers)
+        source_limits = qbit_limits_for_tracker(config, source_tracker, role="source") if source_tracker else {}
+        _apply_policy_qbit_default(enriched, defaults, "qbit_upload_limit", source_limits.get("upload_limit"), source_tracker)
+        _apply_policy_qbit_default(enriched, defaults, "qbit_download_limit", source_limits.get("download_limit"), source_tracker)
+        if targets:
+            target = targets[0]
+            target_limits = qbit_limits_for_tracker(config, target, role="target")
+            _apply_policy_qbit_default(enriched, defaults, "uploaded_qbit_upload_limit", target_limits.get("upload_limit"), target)
+            _apply_policy_qbit_default(enriched, defaults, "uploaded_qbit_download_limit", target_limits.get("download_limit"), target)
+    except Exception as exc:
+        defaults["errors"].append(str(exc))
+    enriched["policy_qbit_defaults"] = defaults
+    return enriched
+
+
+def _apply_policy_qbit_default(enriched: dict[str, Any], defaults: dict[str, Any], key: str, value: Any, tracker: str) -> None:
+    if enriched.get(key) not in (None, ""):
+        defaults["request_overrides"][key] = enriched.get(key)
+        return
+    if value is None:
+        return
+    enriched[key] = value
+    defaults["applied"][key] = value
+    defaults["sources"][key] = f"site_policy:{tracker}"
 
 
 def _request_policy_coverage(request: dict[str, Any], source: dict[str, Any], target_trackers: str) -> dict[str, Any]:
@@ -2065,10 +2111,10 @@ def _retorrent_tool_request_schema() -> dict[str, Any]:
             "qbit_tags": {"type": "string"},
             "uploaded_qbit_category": {"type": "string"},
             "uploaded_qbit_tags": {"type": "string"},
-            "qbit_upload_limit": {"type": ["string", "integer"], "description": "Source torrent upload limit, e.g. 500KiB/s."},
-            "qbit_download_limit": {"type": ["string", "integer"], "description": "Source torrent download limit, e.g. 20MiB/s."},
-            "uploaded_qbit_upload_limit": {"type": ["string", "integer"], "description": "Uploaded target torrent upload limit, e.g. 2MiB/s."},
-            "uploaded_qbit_download_limit": {"type": ["string", "integer"]},
+            "qbit_upload_limit": {"type": ["string", "integer"], "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."},
+            "qbit_download_limit": {"type": ["string", "integer"], "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."},
+            "uploaded_qbit_upload_limit": {"type": ["string", "integer"], "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."},
+            "uploaded_qbit_download_limit": {"type": ["string", "integer"], "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."},
             "metadata_file": {"type": "string"},
             "ptgen_description_file": {"type": "string"},
             "imdb_id": {"type": "string"},
@@ -2177,6 +2223,7 @@ def _job_response_contract() -> dict[str, Any]:
         "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
         "blocked_fields": ["blockers", "next_actions", "resume_state", "next_command_argv", "agent_decision"],
+        "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
     }
 
 
@@ -2350,6 +2397,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "job_id": {"type": "string"},
             "kind": {"type": "string"},
             "request": {"type": "object"},
+            "policy_coverage": {"type": ["object", "null"]},
             "command_argv": {"type": "array", "items": {"type": "string"}},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
@@ -2359,7 +2407,6 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_summary": {"type": ["object", "null"]},
             "agent_decision": {"type": ["object", "null"]},
             "candidate_digest": {"type": ["object", "null"]},
-            "policy_coverage": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
         },
     }
