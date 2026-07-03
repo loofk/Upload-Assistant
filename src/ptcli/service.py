@@ -93,6 +93,41 @@ class JobStore:
     def get(self, job_id: str) -> dict[str, Any]:
         return _job_public_payload(self._read(job_id))
 
+    def list(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        request = request or {}
+        status_filter = str(request.get("status") or "").strip()
+        kind_filter = str(request.get("kind") or "").strip()
+        limit = _bounded_int(request.get("limit"), default=20, minimum=1, maximum=100)
+        jobs: list[dict[str, Any]] = []
+        status_counts: dict[str, int] = {}
+        total = 0
+        for path in sorted(self.root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+            try:
+                job = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            status = str(job.get("status") or "unknown")
+            kind = str(job.get("kind") or "")
+            status_counts[status] = status_counts.get(status, 0) + 1
+            if status_filter and status != status_filter:
+                continue
+            if kind_filter and kind != kind_filter:
+                continue
+            total += 1
+            if len(jobs) < limit:
+                jobs.append(_job_list_item(job))
+        return {
+            "status": "ok",
+            "ok": True,
+            "count": len(jobs),
+            "total": total,
+            "limit": limit,
+            "filters": {"status": status_filter or None, "kind": kind_filter or None},
+            "status_counts": status_counts,
+            "jobs": jobs,
+            "next_actions": _job_list_next_actions(jobs, total, limit),
+        }
+
     def summary(self, job_id: str) -> dict[str, Any]:
         job = self._read(job_id)
         summary_file = _job_summary_file(job)
@@ -285,6 +320,13 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                     self._send_json(HTTPStatus.OK, daily_candidate_schedule_payload({}))
                 except ServiceError as exc:
                     self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
+            if path == "/v1/jobs":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                self._send_json(HTTPStatus.OK, job_store.list(query))
                 return
             if path.startswith("/v1/jobs/"):
                 if not self._authorized():
@@ -1544,6 +1586,50 @@ def _validate_job_id(job_id: str) -> None:
         raise ServiceError("Invalid job id.", status=HTTPStatus.BAD_REQUEST)
 
 
+def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
+    job_id = job.get("job_id")
+    return {
+        "job_id": job_id,
+        "kind": job.get("kind"),
+        "status": job.get("status"),
+        "ok": job.get("status") == "complete",
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+        "completed_at": job.get("completed_at"),
+        "blockers": _string_list(job.get("blockers")),
+        "next_actions": _string_list(job.get("next_actions")),
+        "summary_file": _job_summary_file(job),
+        "source_reference": _job_source_reference(job),
+        "target_trackers": (job.get("request") or {}).get("target_trackers") if isinstance(job.get("request"), dict) else None,
+        "duplicate_check": _job_duplicate_check(job),
+        "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
+        "resume_plan": _job_resume_plan(job),
+        "resume_lineage": _job_resume_lineage(job),
+        "status_endpoint": f"/v1/jobs/{job_id}" if job_id else None,
+        "summary_endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
+        "resume_endpoint": f"/v1/jobs/{job_id}/resume" if job_id else None,
+    }
+
+
+def _job_list_next_actions(jobs: list[dict[str, Any]], total: int, limit: int) -> list[str]:
+    actions: list[str] = []
+    if total > limit:
+        actions.append("Increase limit or filter by status/kind to inspect additional jobs.")
+    if any(job.get("status") in {"queued", "running"} for job in jobs):
+        actions.append("Poll running jobs with jobs[].status_endpoint until they complete or block.")
+    if any((job.get("resume_plan") or {}).get("recommended") for job in jobs if isinstance(job.get("resume_plan"), dict)):
+        actions.append("Resume recommended blocked jobs with jobs[].resume_endpoint after reviewing blockers and site rules.")
+    return actions
+
+
 def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
     return {
         "status": job.get("status"),
@@ -2508,6 +2594,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     job_id_schema = _job_id_tool_request_schema()
+    job_list_schema = _job_list_tool_request_schema()
     return [
         {
             "name": "retorrent_check",
@@ -2611,6 +2698,15 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             },
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "list_jobs",
+            "method": "GET",
+            "path": "/v1/jobs",
+            "description": "List recent ptcli jobs with short AI-readable status, blockers, resume plan, lineage, and status/summary/resume endpoints. This endpoint never runs work.",
+            "input_schema": job_list_schema,
+            "response_contract": _job_list_response_contract(),
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
             "name": "get_job_status",
@@ -2821,6 +2917,18 @@ def _job_id_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _job_list_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": [],
+        "properties": {
+            "status": {"type": "string", "enum": ["queued", "running", "blocked", "failed", "complete"]},
+            "kind": {"type": "string"},
+            "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
+        },
+    }
+
+
 def _without_execute_fields(schema: dict[str, Any]) -> dict[str, Any]:
     copy = json.loads(json.dumps(schema))
     properties = copy.get("properties")
@@ -2844,6 +2952,14 @@ def _job_response_contract() -> dict[str, Any]:
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
         "blocked_fields": ["blockers", "next_actions", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
+    }
+
+
+def _job_list_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "jobs", "next_actions"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "summary_file", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "filters": ["status", "kind", "limit"],
     }
 
 
@@ -3073,6 +3189,20 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "workflow_context": {"type": ["object", "null"]},
             "result": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    job_list_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "count": {"type": "integer"},
+            "total": {"type": "integer"},
+            "limit": {"type": "integer"},
+            "filters": {"type": "object"},
+            "status_counts": {"type": "object"},
+            "jobs": {"type": "array", "items": {"type": "object"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
@@ -3348,6 +3478,18 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": False, "content": {"application/json": {"schema": candidate_schedule_request_schema}}},
                     "responses": {"200": {"description": "Queued daily-candidate jobs for each enabled schedule.", "content": {"application/json": {"schema": candidate_schedule_jobs_response_schema}}}},
+                }
+            },
+            "/v1/jobs": {
+                "get": {
+                    "operationId": "listPtcliJobs",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "status", "in": "query", "required": False, "schema": {"type": "string", "enum": ["queued", "running", "blocked", "failed", "complete"]}},
+                        {"name": "kind", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "limit", "in": "query", "required": False, "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}},
+                    ],
+                    "responses": {"200": {"description": "Recent ptcli jobs with AI-readable status and resume endpoints.", "content": {"application/json": {"schema": job_list_response_schema}}}},
                 }
             },
             "/v1/jobs/{job_id}": {

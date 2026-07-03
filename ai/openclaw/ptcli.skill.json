@@ -683,6 +683,74 @@
       }
     },
     {
+      "name": "list_jobs",
+      "method": "GET",
+      "path": "/v1/jobs",
+      "description": "List recent ptcli jobs with short AI-readable status, blockers, resume plan, lineage, and status/summary/resume endpoints. This endpoint never runs work.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "blocked",
+              "failed",
+              "complete"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "count",
+          "total",
+          "limit",
+          "filters",
+          "status_counts",
+          "jobs",
+          "next_actions"
+        ],
+        "job_fields": [
+          "job_id",
+          "kind",
+          "status",
+          "blockers",
+          "next_actions",
+          "summary_file",
+          "source_reference",
+          "duplicate_check",
+          "agent_decision",
+          "resume_plan",
+          "resume_lineage",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint"
+        ],
+        "filters": [
+          "status",
+          "kind",
+          "limit"
+        ]
+      },
+      "safety": {
+        "live_upload": false
+      }
+    },
+    {
       "name": "get_job_status",
       "method": "GET",
       "path": "/v1/jobs/{job_id}",

@@ -12532,6 +12532,40 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert parent["resume_plan"]["endpoint"] == f"/v1/jobs/{parent['job_id']}/resume"
 
 
+def test_job_store_lists_recent_jobs_with_filters(tmp_path) -> None:
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    complete = store.create("ptcli.complete", {"source_reference": {"tracker": "CHD", "source_id": "1"}}, ["ptcli", "sites"], lambda: {"status": "ok"})
+    blocked = store.create(
+        "ptcli.blocked",
+        {"source_reference": {"tracker": "U2", "source_id": "60635"}, "target_trackers": ["MTEAM"]},
+        ["ptcli", "retorrent"],
+        lambda: {"status": "blocked", "blockers": ["materials missing"], "next_command_argv": ["python3", "ptcli.py", "doctor", "--json"]},
+    )
+
+    payload = store.list({"status": "blocked", "limit": "10"})
+
+    assert payload["status"] == "ok"
+    assert payload["count"] == 1
+    assert payload["total"] == 1
+    assert payload["filters"] == {"status": "blocked", "kind": None}
+    assert payload["status_counts"]["complete"] == 1
+    assert payload["status_counts"]["blocked"] == 1
+    assert payload["jobs"][0]["job_id"] == blocked["job_id"]
+    assert payload["jobs"][0]["status_endpoint"] == f"/v1/jobs/{blocked['job_id']}"
+    assert payload["jobs"][0]["summary_endpoint"] == f"/v1/jobs/{blocked['job_id']}/summary"
+    assert payload["jobs"][0]["resume_endpoint"] == f"/v1/jobs/{blocked['job_id']}/resume"
+    assert payload["jobs"][0]["source_reference"] == {"tracker": "U2", "source_id": "60635"}
+    assert payload["jobs"][0]["target_trackers"] == ["MTEAM"]
+    assert payload["jobs"][0]["resume_plan"]["recommended"] is True
+    assert "Resume recommended blocked jobs" in payload["next_actions"][-1]
+
+    limited = store.list({"limit": "1"})
+    assert limited["count"] == 1
+    assert limited["total"] == 2
+    assert limited["jobs"][0]["job_id"] in {complete["job_id"], blocked["job_id"]}
+    assert any("Increase limit" in action for action in limited["next_actions"])
+
+
 def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, tmp_path) -> None:
     captured_request = {}
     config = {
@@ -12738,6 +12772,21 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
     assert job_status["source_reference"] == payload["source_reference"]
     assert job_status["workflow_context"] == payload["workflow_context"]
     assert job_status["command_argv"][:7] == ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to"]
+
+    unauthorized_status, unauthorized_body = _service_json_request(handler_class, "GET", "/v1/jobs?status=blocked&limit=10")
+    assert unauthorized_status == 401
+    assert unauthorized_body["message"] == "Unauthorized."
+
+    status, job_list = _service_json_request(handler_class, "GET", "/v1/jobs?status=blocked&limit=10", api_token="secret")
+    assert status == 200
+    assert job_list["status"] == "ok"
+    assert job_list["count"] == 1
+    assert job_list["filters"] == {"status": "blocked", "kind": None}
+    assert job_list["jobs"][0]["job_id"] == payload["job_id"]
+    assert job_list["jobs"][0]["source_reference"] == payload["source_reference"]
+    assert job_list["jobs"][0]["status_endpoint"] == f"/v1/jobs/{payload['job_id']}"
+    assert job_list["jobs"][0]["summary_endpoint"] == f"/v1/jobs/{payload['job_id']}/summary"
+    assert job_list["jobs"][0]["resume_endpoint"] == f"/v1/jobs/{payload['job_id']}/resume"
 
 
 def test_manual_retorrent_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
@@ -13275,6 +13324,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/candidates/daily/schedule" in paths
     assert "/v1/jobs/candidates/daily" in paths
     assert "/v1/jobs/candidates/daily/schedule" in paths
+    assert "/v1/jobs" in paths
     assert "/v1/jobs/{job_id}" in paths
     assert "/v1/jobs/{job_id}/summary" in paths
     assert "/v1/jobs/{job_id}/resume" in paths
@@ -13335,6 +13385,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_job_endpoint" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "response_contract" in tool_by_name["get_job_status"]
+    assert tool_by_name["list_jobs"]["method"] == "GET"
+    assert tool_by_name["list_jobs"]["path"] == "/v1/jobs"
+    assert "jobs" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
+    assert "resume_endpoint" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
 
     openapi = ptcli_service.openapi_payload(require_auth=True)
     assert "/.well-known/ptcli-agent.json" in openapi["paths"]
@@ -13351,6 +13405,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/candidates/daily/schedule" in openapi["paths"]
     assert "/v1/jobs/candidates/daily" in openapi["paths"]
     assert "/v1/jobs/candidates/daily/schedule" in openapi["paths"]
+    assert "/v1/jobs" in openapi["paths"]
     assert "/v1/jobs/{job_id}" in openapi["paths"]
     assert "/v1/jobs/{job_id}/summary" in openapi["paths"]
     assert "/v1/jobs/{job_id}/resume" in openapi["paths"]
@@ -13372,6 +13427,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     schedule_jobs_schema = openapi["paths"]["/v1/jobs/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "schedule_digest" in schedule_jobs_schema["properties"]
     assert "agent_decision" in schedule_jobs_schema["properties"]
+    job_list_schema = openapi["paths"]["/v1/jobs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "jobs" in job_list_schema["properties"]
+    assert "status_counts" in job_list_schema["properties"]
     deployment_schema = openapi["paths"]["/v1/deployment/check"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "mounts" in deployment_schema["properties"]
     assert "daily_candidates" in deployment_schema["properties"]
@@ -13389,7 +13447,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
-    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "get_job_summary", "resume_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
@@ -13414,7 +13472,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "get_job_summary", "resume_job"}
+        assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job"}
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -13451,6 +13509,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert tools_by_name["list_jobs"]["path"] == "/v1/jobs"
+        assert "jobs" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
+        assert "resume_endpoint" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "source_reference" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "workflow_context" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
