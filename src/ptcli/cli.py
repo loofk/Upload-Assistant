@@ -110,6 +110,19 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--job-dir", help="Directory for file-backed API jobs. Defaults to PTCLI_JOB_DIR or TMPDIR/ptcli-jobs.")
     serve.add_argument("--json", action="store_true", help="Accepted for consistency; serve writes HTTP JSON responses.")
 
+    daily_schedule = subparsers.add_parser(
+        "daily-schedule",
+        help="Run configured daily candidate schedules once for cron/seedbox automation.",
+        description=(
+            "Run configured daily candidate schedules once and return the same schedule_digest used by the HTTP schedule job endpoint. "
+            "This scans candidates only; it never uploads."
+        ),
+    )
+    daily_schedule.add_argument("--job-dir", help="Directory for file-backed job evidence. Defaults to PTCLI_JOB_DIR or TMPDIR/ptcli-jobs.")
+    daily_schedule.add_argument("--schedules-json", help="JSON array/object of daily candidate schedules. Defaults to PTCLI_DAILY_CANDIDATE_SCHEDULES.")
+    daily_schedule.add_argument("--schedules-file", help="File containing a JSON array/object of daily candidate schedules.")
+    daily_schedule.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
     rules = subparsers.add_parser("rules", help="Show rule review profiles for supported trackers.")
     rules.add_argument("--trackers", help="Optional comma-separated tracker codes. Defaults to all supported trackers.")
     rules.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
@@ -11431,6 +11444,28 @@ def _with_captured_stdout(factory: Any, json_output: bool) -> dict[str, Any]:
     return payload
 
 
+def daily_schedule_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.service import JobStore, create_daily_candidate_schedule_jobs
+
+    request: dict[str, Any] = {}
+    if args.schedules_file:
+        request["schedules"] = json.loads(Path(args.schedules_file).expanduser().read_text(encoding="utf-8"))
+    elif args.schedules_json:
+        request["schedules"] = json.loads(args.schedules_json)
+    store = JobStore(args.job_dir, run_inline=True)
+    payload = create_daily_candidate_schedule_jobs(store, request)
+    return {
+        **payload,
+        "kind": "ptcli.cli.daily_schedule",
+        "job_dir": str(store.root),
+        "execution": {
+            "mode": "inline",
+            "source": "schedules_file" if args.schedules_file else "schedules_json" if args.schedules_json else "env",
+            "uploads": False,
+        },
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -11446,6 +11481,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             run_service(args.host, args.port, api_token=args.api_token or os.environ.get("PTCLI_API_TOKEN"), job_dir=args.job_dir)
             return 0
+
+        if args.command == "daily-schedule":
+            payload = _with_captured_stdout(lambda: daily_schedule_payload(args), json_output)
+            _print_payload(payload, json_output)
+            return 0 if payload.get("status") in {"ok", "partial"} else 1
 
         if args.command == "rules":
             _print_payload(build_rules_payload(args), json_output)

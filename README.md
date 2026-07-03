@@ -120,6 +120,10 @@ curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/daily/schedule \
   -H "Content-Type: application/json" \
   -d '{"schedules":[{"name":"u2-to-mteam","source_tracker":"U2","target":"MTEAM","limit":10,"time":"09:00","accept_rules":true}]}'
 
+# 盒子/cron 本地触发：读取 PTCLI_DAILY_CANDIDATE_SCHEDULES 或传入 schedules 文件，inline 执行候选扫描并返回 schedule_digest；不会上传
+python3 ptcli.py daily-schedule --json
+docker compose --profile cli run --rm ptcli daily-schedule --json
+
 # 站点策略矩阵：审计自动化 gate、QB 限速、做种要求、规则 URL 和人工确认状态；不会联系站点
 curl -X POST http://127.0.0.1:8080/v1/site-policies \
   -H "Content-Type: application/json" \

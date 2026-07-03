@@ -13036,6 +13036,47 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert "Poll each jobs[].status_endpoint" in payload["next_actions"][0]
 
 
+def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, capsys) -> None:
+    digest = {
+        "kind": "ptcli.daily_candidates_digest",
+        "recommendation": "submit_top_candidate_when_confirmed",
+        "ready_count": 1,
+        "top_candidate": {"source_tracker": "CHD", "source_id": "12345"},
+        "top_submit_request": {"source": "https://chdbits.co/details.php?id=12345", "target": "MTEAM"},
+        "top_submit_job_endpoint": "/v1/jobs/retorrent/from-url",
+        "top_submit_tool": "source_url_retorrent_job",
+        "push_items": [{"rank": 1, "source_id": "12345", "title": "Example"}],
+    }
+
+    async def fake_daily_candidates(_request):
+        return {
+            "kind": "ptcli.service.daily_candidates",
+            "status": "ok",
+            "ok": True,
+            "digest": digest,
+            "candidates": [{"status": "ready"}],
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
+    schedules_file = tmp_path / "schedules.json"
+    schedules_file.write_text(json.dumps([{"name": "chd-to-mteam", "source_tracker": "CHD", "target": "MTEAM", "accept_rules": True}]), encoding="utf-8")
+
+    code = main(["daily-schedule", "--job-dir", str(tmp_path / "jobs"), "--schedules-file", str(schedules_file), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["kind"] == "ptcli.cli.daily_schedule"
+    assert payload["execution"]["mode"] == "inline"
+    assert payload["execution"]["source"] == "schedules_file"
+    assert payload["job_count"] == 1
+    assert payload["schedule_digest"]["push_items"][0]["schedule_name"] == "chd-to-mteam"
+    assert payload["schedule_digest"]["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
+    assert payload["agent_decision"]["decision"] == "review_candidates"
+    assert Path(payload["job_dir"]).is_dir()
+
+
 def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> None:
     config = {
         "PTCLI": {
