@@ -117,6 +117,7 @@ class JobStore:
             "policy_coverage": _job_policy_coverage(job),
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
             "resume_plan": _job_resume_plan(job),
+            "resume_lineage": _job_resume_lineage(job),
             "resume_context": _job_resume_context(job),
             "source_reference": _job_source_reference(job),
             "workflow_context": _job_workflow_context(job, summary_payload),
@@ -133,15 +134,21 @@ class JobStore:
         argv = _resume_argv_from_job(parent)
         allowed, reason = _resume_command_allowed(argv)
         resume_context = _resume_context(parent, parent_job_id=job_id, argv=argv, allowed=allowed, reason=reason)
+        resume_lineage = _resume_lineage(parent, parent_job_id=job_id, argv=argv, allowed=allowed, reason=reason)
         request = {
             "parent_job_id": job_id,
             "parent_status": parent.get("status"),
+            "parent_kind": parent.get("kind"),
+            "parent_summary_file": _job_summary_file(parent),
+            "parent_source_reference": _job_source_reference(parent),
+            "parent_workflow_context": resume_lineage.get("parent_workflow_context"),
             "next_command_argv": argv,
             "resume_allowed": allowed,
             "resume_blocker": reason,
             "parent_policy_coverage": _job_policy_coverage(parent),
             "parent_policy_qbit_defaults": _job_policy_qbit_defaults(parent),
             "resume_context": resume_context,
+            "resume_lineage": resume_lineage,
         }
         if not allowed:
             return self.create(
@@ -1560,6 +1567,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "policy_coverage": _job_policy_coverage(job),
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
         "resume_plan": _job_resume_plan(job),
+        "resume_lineage": _job_resume_lineage(job),
         "resume_context": _job_resume_context(job),
         "source_reference": _job_source_reference(job),
         "workflow_context": _job_workflow_context(job),
@@ -1593,12 +1601,21 @@ def _job_resume_context(job: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _job_resume_lineage(job: dict[str, Any]) -> dict[str, Any] | None:
+    request = job.get("request")
+    if isinstance(request, dict) and isinstance(request.get("resume_lineage"), dict):
+        return request["resume_lineage"]
+    return None
+
+
 def _job_source_reference(job: dict[str, Any]) -> dict[str, Any] | None:
     request = job.get("request")
     if not isinstance(request, dict):
         return None
     if isinstance(request.get("source_reference"), dict):
         return request["source_reference"]
+    if isinstance(request.get("parent_source_reference"), dict):
+        return request["parent_source_reference"]
     if isinstance(request.get("source"), dict):
         return request["source"]
     return None
@@ -1629,6 +1646,7 @@ def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = 
         "status": job.get("status"),
         "source_reference": _job_source_reference(job),
         "target_trackers": request.get("target_trackers"),
+        "resume_lineage": _job_resume_lineage(job),
         "summary_file": job.get("summary_file"),
         "blockers": _string_list(job.get("blockers")),
         "next_actions": _string_list(job.get("next_actions")),
@@ -1723,7 +1741,39 @@ def _job_resume_plan(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _resume_lineage(parent: dict[str, Any], *, parent_job_id: str, argv: list[str] | None, allowed: bool, reason: str | None) -> dict[str, Any]:
+    parent_workflow_context = _job_workflow_context(parent)
+    parent_duplicate_check = _job_duplicate_check(parent)
+    return {
+        "parent_job_id": parent_job_id,
+        "parent_kind": parent.get("kind"),
+        "parent_status": parent.get("status"),
+        "parent_summary_file": _job_summary_file(parent),
+        "parent_source_reference": _job_source_reference(parent),
+        "parent_target_trackers": (parent.get("request") or {}).get("target_trackers") if isinstance(parent.get("request"), dict) else None,
+        "parent_duplicate_check": parent_duplicate_check,
+        "parent_workflow_context": {
+            "workflow": parent_workflow_context.get("workflow"),
+            "mode": parent_workflow_context.get("mode"),
+            "status": parent_workflow_context.get("status"),
+            "source_reference": parent_workflow_context.get("source_reference"),
+            "target_trackers": parent_workflow_context.get("target_trackers"),
+            "summary_file": parent_workflow_context.get("summary_file"),
+            "gates": parent_workflow_context.get("gates"),
+        },
+        "inherited_policy": {
+            "policy_coverage": _job_policy_coverage(parent),
+            "policy_qbit_defaults": _job_policy_qbit_defaults(parent),
+        },
+        "resume_allowed": allowed,
+        "resume_blocker": reason,
+        "next_command_argv": argv,
+        "next_subcommand": _ptcli_subcommand(argv or []),
+    }
+
+
 def _resume_context(parent: dict[str, Any], *, parent_job_id: str, argv: list[str] | None, allowed: bool, reason: str | None) -> dict[str, Any]:
+    lineage = _resume_lineage(parent, parent_job_id=parent_job_id, argv=argv, allowed=allowed, reason=reason)
     return {
         "parent_job_id": parent_job_id,
         "parent_kind": parent.get("kind"),
@@ -1731,12 +1781,11 @@ def _resume_context(parent: dict[str, Any], *, parent_job_id: str, argv: list[st
         "resume_allowed": allowed,
         "resume_blocker": reason,
         "next_command_argv": argv,
-        "parent_summary_file": parent.get("summary_file"),
+        "parent_summary_file": _job_summary_file(parent),
+        "parent_source_reference": lineage.get("parent_source_reference"),
+        "parent_workflow_context": lineage.get("parent_workflow_context"),
         "parent_next_actions": _string_list(parent.get("next_actions")),
-        "inherited_policy": {
-            "policy_coverage": _job_policy_coverage(parent),
-            "policy_qbit_defaults": _job_policy_qbit_defaults(parent),
-        },
+        "inherited_policy": lineage.get("inherited_policy"),
     }
 
 
@@ -1813,6 +1862,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     duplicate_check = _job_duplicate_check(job)
     next_command_argv = _result_next_command_argv(result)
     resume_context = _job_resume_context(job)
+    resume_lineage = _job_resume_lineage(job)
     source_reference = _job_source_reference(job)
     workflow_context = _job_workflow_context(job)
     resume_plan = _job_resume_plan(job)
@@ -1877,6 +1927,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "should_resume": should_resume,
         "resume_available": resume_available,
         "resume_plan": resume_plan,
+        "resume_lineage": resume_lineage,
         "resume_context": resume_context,
         "source_reference": source_reference,
         "workflow_context": workflow_context,
@@ -2576,7 +2627,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_context", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -2789,7 +2840,7 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_context", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
         "blocked_fields": ["blockers", "next_actions", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
@@ -2994,6 +3045,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "candidate_digest": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "resume_plan": {"type": "object"},
+            "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
             "workflow_context": {"type": ["object", "null"]},
@@ -3015,6 +3067,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_coverage": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "resume_plan": {"type": "object"},
+            "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
             "workflow_context": {"type": ["object", "null"]},

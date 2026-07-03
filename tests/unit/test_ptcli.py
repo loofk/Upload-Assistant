@@ -12489,6 +12489,8 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     parent = store.create(
         "ptcli.test",
         {
+            "source_reference": {"tracker": "U2", "source_id": "60635", "url": "https://u2.dmhy.org/details.php?id=60635"},
+            "target_trackers": ["MTEAM"],
             "policy_coverage": {"ready": True},
             "policy_qbit_defaults": {"applied": {"qbit_download_limit": 20971520}},
         },
@@ -12511,8 +12513,18 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["request"]["resume_context"]["parent_job_id"] == parent["job_id"]
     assert resume["request"]["resume_context"]["resume_allowed"] is True
     assert resume["request"]["resume_context"]["inherited_policy"]["policy_coverage"] == {"ready": True}
+    assert resume["request"]["resume_lineage"]["parent_job_id"] == parent["job_id"]
+    assert resume["request"]["resume_lineage"]["parent_kind"] == "ptcli.test"
+    assert resume["request"]["resume_lineage"]["parent_source_reference"] == parent["source_reference"]
+    assert resume["request"]["resume_lineage"]["parent_target_trackers"] == ["MTEAM"]
+    assert resume["request"]["resume_lineage"]["parent_workflow_context"]["source_reference"] == parent["source_reference"]
+    assert resume["request"]["resume_lineage"]["next_subcommand"] == "doctor"
+    assert resume["resume_lineage"] == resume["request"]["resume_lineage"]
+    assert resume["source_reference"] == parent["source_reference"]
+    assert resume["workflow_context"]["resume_lineage"] == resume["resume_lineage"]
     assert resume["resume_context"] == resume["request"]["resume_context"]
     assert resume["agent_decision"]["resume_context"] == resume["resume_context"]
+    assert resume["agent_decision"]["resume_lineage"] == resume["resume_lineage"]
     assert parent["resume_plan"]["available"] is True
     assert parent["resume_plan"]["allowed"] is True
     assert parent["resume_plan"]["recommended"] is True
@@ -13283,6 +13295,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "resume_lineage" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "resume_lineage" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "resume_lineage" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -13348,6 +13363,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_gap_summary" in site_policy_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "resume_plan" in summary_schema["properties"]
+    assert "resume_lineage" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
     assert "source_reference" in summary_schema["properties"]
     assert "workflow_context" in summary_schema["properties"]
@@ -13383,6 +13399,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "uploaded_qbit_upload_limit" in retorrent_tool["input_schema"]["properties"]
     assert "resume_state" in retorrent_tool["response_contract"]["required_fields"]
     assert "resume_plan" in retorrent_tool["response_contract"]["required_fields"]
+    assert "resume_lineage" in retorrent_tool["response_contract"]["required_fields"]
     assert "agent_decision" in retorrent_tool["response_contract"]["required_fields"]
     assert "confirm_upload=true" in retorrent_tool["safety"]["requires_confirmation"]
     assert manifest["openclaw"]["manifest_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
@@ -13428,6 +13445,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "resume_lineage" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "resume_lineage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "resume_lineage" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]

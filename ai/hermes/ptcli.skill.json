@@ -270,6 +270,7 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_plan",
+          "resume_lineage",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -353,6 +354,7 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_plan",
+          "resume_lineage",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -434,6 +436,7 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_plan",
+          "resume_lineage",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -493,6 +496,7 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_plan",
+          "resume_lineage",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -740,6 +744,7 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_plan",
+          "resume_lineage",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -772,6 +777,7 @@
           "blockers",
           "next_actions",
           "resume_plan",
+          "resume_lineage",
           "resume_context",
           "source_reference",
           "workflow_context"
@@ -813,6 +819,7 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_plan",
+          "resume_lineage",
           "resume_context",
           "source_reference",
           "workflow_context",
