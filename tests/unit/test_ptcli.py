@@ -13264,6 +13264,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/candidates/daily" in paths
     assert "/v1/jobs/candidates/daily/schedule" in paths
     assert "/v1/jobs/{job_id}" in paths
+    assert "/v1/jobs/{job_id}/summary" in paths
     assert "/v1/jobs/{job_id}/resume" in paths
     assert "/.well-known/ptcli-agent.json" in paths
     tool_by_name = {tool["name"]: tool for tool in tools["tools"]}
@@ -13281,8 +13282,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_qbit_defaults" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "resume_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "resume_context" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "workflow_context" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -13370,7 +13373,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
-    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "get_job_summary", "resume_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
@@ -13394,7 +13397,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "resume_job"}
+        assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "get_job_status", "get_job_summary", "resume_job"}
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -13424,8 +13427,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_qbit_defaults" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "resume_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "resume_context" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "source_reference" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "workflow_context" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
