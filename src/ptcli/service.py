@@ -118,6 +118,7 @@ class JobStore:
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
             "resume_context": _job_resume_context(job),
             "source_reference": _job_source_reference(job),
+            "workflow_context": _job_workflow_context(job),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -1408,6 +1409,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
         "resume_context": _job_resume_context(job),
         "source_reference": _job_source_reference(job),
+        "workflow_context": _job_workflow_context(job),
         "result_status": _nested_value(job.get("result"), "status"),
         "next_stage": _nested_value(job.get("result"), "next_stage"),
         "next_command": _nested_value(job.get("result"), "next_command"),
@@ -1447,6 +1449,49 @@ def _job_source_reference(job: dict[str, Any]) -> dict[str, Any] | None:
     if isinstance(request.get("source"), dict):
         return request["source"]
     return None
+
+
+def _job_workflow_context(job: dict[str, Any]) -> dict[str, Any]:
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    duplicate_check = _job_duplicate_check(job)
+    policy_coverage = _job_policy_coverage(job)
+    resume_state = job.get("resume_state") if isinstance(job.get("resume_state"), dict) else _result_resume_state(result)
+    next_command_argv = _result_next_command_argv(result)
+    missing_confirmations = _missing_live_confirmations(request)
+    duplicate_exists = duplicate_check.get("exists") is True
+    duplicate_searched = duplicate_check.get("searched") is True
+    policy_ready = policy_coverage.get("ready") if isinstance(policy_coverage, dict) else None
+    resume_available = bool(next_command_argv or (isinstance(resume_state, dict) and resume_state.get("resume_available") is True))
+    return {
+        "workflow": job.get("kind"),
+        "mode": request.get("mode"),
+        "status": job.get("status"),
+        "source_reference": _job_source_reference(job),
+        "target_trackers": request.get("target_trackers"),
+        "summary_file": job.get("summary_file"),
+        "blockers": _string_list(job.get("blockers")),
+        "next_actions": _string_list(job.get("next_actions")),
+        "next_command_argv": next_command_argv,
+        "gates": {
+            "source_resolved": _job_source_reference(job) is not None,
+            "duplicate_check": {
+                "searched": duplicate_searched,
+                "exists": duplicate_check.get("exists"),
+                "status": duplicate_check.get("status"),
+                "count": duplicate_check.get("count"),
+                "clear": duplicate_searched and not duplicate_exists,
+            },
+            "policy_coverage_ready": policy_ready,
+            "confirmations_ready": not missing_confirmations,
+            "resume_available": resume_available,
+        },
+        "required_confirmations_missing": missing_confirmations,
+        "policy_coverage": policy_coverage,
+        "policy_qbit_defaults": _job_policy_qbit_defaults(job),
+        "resume_state": resume_state,
+        "resume_context": _job_resume_context(job),
+    }
 
 
 def _resume_context(parent: dict[str, Any], *, parent_job_id: str, argv: list[str] | None, allowed: bool, reason: str | None) -> dict[str, Any]:
@@ -1541,6 +1586,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     resume_state = job.get("resume_state") if isinstance(job.get("resume_state"), dict) else _result_resume_state(result)
     resume_context = _job_resume_context(job)
     source_reference = _job_source_reference(job)
+    workflow_context = _job_workflow_context(job)
     missing_confirmations = _missing_live_confirmations(request)
     policy_coverage = _job_policy_coverage(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     policy_qbit_defaults = _job_policy_qbit_defaults(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
@@ -1603,6 +1649,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "resume_available": resume_available,
         "resume_context": resume_context,
         "source_reference": source_reference,
+        "workflow_context": workflow_context,
         "next_command_argv": next_command_argv,
         "summary_file": job.get("summary_file"),
         "blocker_count": len(blockers),
@@ -2109,7 +2156,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_context", "source_reference", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_context", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -2319,7 +2366,7 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_context", "source_reference"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_context", "source_reference", "workflow_context"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
         "blocked_fields": ["blockers", "next_actions", "resume_state", "next_command_argv", "agent_decision"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
@@ -2525,6 +2572,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
+            "workflow_context": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
         },
     }
@@ -2544,6 +2592,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
+            "workflow_context": {"type": ["object", "null"]},
             "result": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},

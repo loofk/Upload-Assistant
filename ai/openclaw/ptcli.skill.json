@@ -206,7 +206,8 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_context",
-          "source_reference"
+          "source_reference",
+          "workflow_context"
         ],
         "status_values": [
           "queued",
@@ -288,7 +289,8 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_context",
-          "source_reference"
+          "source_reference",
+          "workflow_context"
         ]
       },
       "safety": {
@@ -367,7 +369,8 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_context",
-          "source_reference"
+          "source_reference",
+          "workflow_context"
         ]
       },
       "safety": {
@@ -424,7 +427,8 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_context",
-          "source_reference"
+          "source_reference",
+          "workflow_context"
         ],
         "result_fields": [
           "ranking",
@@ -659,7 +663,8 @@
           "policy_coverage",
           "policy_qbit_defaults",
           "resume_context",
-          "source_reference"
+          "source_reference",
+          "workflow_context"
         ]
       },
       "safety": {
@@ -690,7 +695,8 @@
           "blockers",
           "next_actions",
           "resume_context",
-          "source_reference"
+          "source_reference",
+          "workflow_context"
         ]
       },
       "safety": {

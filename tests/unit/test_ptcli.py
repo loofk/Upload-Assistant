@@ -12592,7 +12592,13 @@ def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path)
     assert job["request"]["source_reference"]["source_id"] == "60635"
     assert job["source_reference"] == job["request"]["source_reference"]
     assert job["agent_decision"]["source_reference"] == job["source_reference"]
+    assert job["workflow_context"]["source_reference"] == job["source_reference"]
+    assert job["workflow_context"]["gates"]["source_resolved"] is True
+    assert job["workflow_context"]["gates"]["duplicate_check"]["clear"] is True
+    assert job["workflow_context"]["required_confirmations_missing"] == ["accept_rules=true", "confirm_upload=true"]
+    assert job["agent_decision"]["workflow_context"]["gates"]["duplicate_check"]["status"] == "not_found"
     assert summary["source_reference"] == job["source_reference"]
+    assert summary["workflow_context"] == job["workflow_context"]
     assert captured_request["source_url"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
     assert captured_request["source"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
     assert job["command_argv"][:7] == ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to"]
@@ -12674,6 +12680,8 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
     assert payload["source_reference"]["tracker"] == "U2"
     assert payload["source_reference"]["source_id"] == "60635"
     assert payload["agent_decision"]["source_reference"] == payload["source_reference"]
+    assert payload["workflow_context"]["gates"]["source_resolved"] is True
+    assert payload["workflow_context"]["required_confirmations_missing"] == ["accept_rules=true", "confirm_upload=true"]
     assert captured_request["source"] == request["source_url"]
     assert captured_request["source_url"] == request["source_url"]
 
@@ -12681,6 +12689,7 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
     assert status == 200
     assert job_status["job_id"] == payload["job_id"]
     assert job_status["source_reference"] == payload["source_reference"]
+    assert job_status["workflow_context"] == payload["workflow_context"]
     assert job_status["command_argv"][:7] == ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to"]
 
 
@@ -13112,6 +13121,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "workflow_context" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "workflow_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["request_fields"]
     assert "uploaded_qbit_upload_limit" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
@@ -13159,6 +13170,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
     assert "source_reference" in summary_schema["properties"]
+    assert "workflow_context" in summary_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
 
@@ -13218,6 +13230,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "source_reference" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "workflow_context" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+        assert "workflow_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
