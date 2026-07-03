@@ -116,6 +116,7 @@ class JobStore:
             "candidate_digest": _candidate_digest_from_payload(summary_payload) or _candidate_digest_from_payload(job.get("result")),
             "policy_coverage": _job_policy_coverage(job),
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
+            "resume_context": _job_resume_context(job),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -128,6 +129,7 @@ class JobStore:
             raise ServiceError(f"Job {job_id} is still {status}; wait before resuming.", status=HTTPStatus.CONFLICT)
         argv = _resume_argv_from_job(parent)
         allowed, reason = _resume_command_allowed(argv)
+        resume_context = _resume_context(parent, parent_job_id=job_id, argv=argv, allowed=allowed, reason=reason)
         request = {
             "parent_job_id": job_id,
             "parent_status": parent.get("status"),
@@ -136,6 +138,7 @@ class JobStore:
             "resume_blocker": reason,
             "parent_policy_coverage": _job_policy_coverage(parent),
             "parent_policy_qbit_defaults": _job_policy_qbit_defaults(parent),
+            "resume_context": resume_context,
         }
         if not allowed:
             return self.create(
@@ -1385,6 +1388,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "candidate_digest": _candidate_digest_from_payload(job.get("result")),
         "policy_coverage": _job_policy_coverage(job),
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
+        "resume_context": _job_resume_context(job),
         "result_status": _nested_value(job.get("result"), "status"),
         "next_stage": _nested_value(job.get("result"), "next_stage"),
         "next_command": _nested_value(job.get("result"), "next_command"),
@@ -1406,6 +1410,30 @@ def _job_policy_qbit_defaults(job: dict[str, Any]) -> dict[str, Any] | None:
     if isinstance(request, dict) and isinstance(request.get("policy_qbit_defaults"), dict):
         return request["policy_qbit_defaults"]
     return None
+
+
+def _job_resume_context(job: dict[str, Any]) -> dict[str, Any] | None:
+    request = job.get("request")
+    if isinstance(request, dict) and isinstance(request.get("resume_context"), dict):
+        return request["resume_context"]
+    return None
+
+
+def _resume_context(parent: dict[str, Any], *, parent_job_id: str, argv: list[str] | None, allowed: bool, reason: str | None) -> dict[str, Any]:
+    return {
+        "parent_job_id": parent_job_id,
+        "parent_kind": parent.get("kind"),
+        "parent_status": parent.get("status"),
+        "resume_allowed": allowed,
+        "resume_blocker": reason,
+        "next_command_argv": argv,
+        "parent_summary_file": parent.get("summary_file"),
+        "parent_next_actions": _string_list(parent.get("next_actions")),
+        "inherited_policy": {
+            "policy_coverage": _job_policy_coverage(parent),
+            "policy_qbit_defaults": _job_policy_qbit_defaults(parent),
+        },
+    }
 
 
 def _agent_candidate_decision(
@@ -1481,6 +1509,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     duplicate_check = _job_duplicate_check(job)
     next_command_argv = _result_next_command_argv(result)
     resume_state = job.get("resume_state") if isinstance(job.get("resume_state"), dict) else _result_resume_state(result)
+    resume_context = _job_resume_context(job)
     missing_confirmations = _missing_live_confirmations(request)
     policy_coverage = _job_policy_coverage(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     policy_qbit_defaults = _job_policy_qbit_defaults(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
@@ -1541,6 +1570,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "should_poll": should_poll,
         "should_resume": should_resume,
         "resume_available": resume_available,
+        "resume_context": resume_context,
         "next_command_argv": next_command_argv,
         "summary_file": job.get("summary_file"),
         "blocker_count": len(blockers),
@@ -2036,7 +2066,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -2233,7 +2263,7 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_context"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
         "blocked_fields": ["blockers", "next_actions", "resume_state", "next_command_argv", "agent_decision"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
@@ -2421,6 +2451,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_decision": {"type": ["object", "null"]},
             "candidate_digest": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
+            "resume_context": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
         },
     }
@@ -2438,6 +2469,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "candidate_digest": {"type": ["object", "null"]},
             "policy_coverage": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
+            "resume_context": {"type": ["object", "null"]},
             "result": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},

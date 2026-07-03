@@ -12477,6 +12477,11 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["command_argv"] == ["python3", "ptcli.py", "doctor", "--json"]
     assert resume["request"]["parent_policy_coverage"] == {"ready": True}
     assert resume["request"]["parent_policy_qbit_defaults"] == {"applied": {"qbit_download_limit": 20971520}}
+    assert resume["request"]["resume_context"]["parent_job_id"] == parent["job_id"]
+    assert resume["request"]["resume_context"]["resume_allowed"] is True
+    assert resume["request"]["resume_context"]["inherited_policy"]["policy_coverage"] == {"ready": True}
+    assert resume["resume_context"] == resume["request"]["resume_context"]
+    assert resume["agent_decision"]["resume_context"] == resume["resume_context"]
 
 
 def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, tmp_path) -> None:
@@ -12972,6 +12977,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_coverage" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "resume_context" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["request_fields"]
     assert "uploaded_qbit_upload_limit" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
@@ -13016,6 +13023,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_digest" in summary_schema["properties"]
     assert "policy_coverage" in summary_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
+    assert "resume_context" in summary_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
 
@@ -13067,6 +13075,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_coverage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "policy_qbit_defaults" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "policy_qbit_defaults" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
