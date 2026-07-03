@@ -13151,6 +13151,10 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert payload["agent_summary"]["policy_coverage_ready"] is True
     assert payload["agent_summary"]["missing_policy_fields"] == {}
     assert payload["agent_summary"]["disabled_automation"] == {}
+    assert payload["policy_gap_summary"]["ready"] is True
+    assert payload["policy_gap_summary"]["missing_total"] == 0
+    assert payload["policy_gap_summary"]["by_role"]["source"]["trackers"] == ["U2"]
+    assert payload["policy_gap_summary"]["by_role"]["target"]["trackers"] == ["MTEAM"]
 
 
 def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch) -> None:
@@ -13180,7 +13184,16 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
         "U2": ["rule_review_fingerprint", "download_rate_limit", "min_seed_time_hours"],
         "MTEAM": ["rule_review_fingerprint", "upload_rate_limit", "min_ratio"],
     }
+    assert payload["policy_gap_summary"]["ready"] is False
+    assert payload["policy_gap_summary"]["missing_total"] == 6
+    assert payload["policy_gap_summary"]["by_role"]["source"]["missing_fields"]["U2"] == ["rule_review_fingerprint", "download_rate_limit", "min_seed_time_hours"]
+    assert payload["policy_gap_summary"]["by_role"]["target"]["missing_fields"]["MTEAM"] == ["rule_review_fingerprint", "upload_rate_limit", "min_ratio"]
+    assert {"tracker": "U2", "field": "download_rate_limit"} in payload["policy_gap_summary"]["missing_by_category"]["rate_limits"]
+    assert {"tracker": "MTEAM", "field": "upload_rate_limit"} in payload["policy_gap_summary"]["missing_by_category"]["rate_limits"]
+    assert {"tracker": "U2", "field": "min_seed_time_hours"} in payload["policy_gap_summary"]["missing_by_category"]["seeding_requirements"]
+    assert {"tracker": "MTEAM", "field": "min_ratio"} in payload["policy_gap_summary"]["missing_by_category"]["seeding_requirements"]
     assert payload["agent_summary"]["disabled_automation"] == {}
+    assert payload["agent_summary"]["policy_gap_summary"]["missing_total"] == 6
     assert any("U2: set download_rate_limit" in item for item in payload["agent_summary"]["policy_recommendations"])
     assert any("MTEAM: set upload_rate_limit" in item for item in payload["agent_summary"]["policy_recommendations"])
 
@@ -13225,6 +13238,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
+    assert "policy_gap_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "missing_by_category" in tool_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
     assert tool_by_name["daily_candidates_schedule"]["method"] == "POST"
     assert "schedule_fields" in tool_by_name["daily_candidates_schedule"]["response_contract"]
     assert tool_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"
@@ -13270,6 +13285,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "agent_decision" in summary_schema["properties"]
     assert "candidate_digest" in summary_schema["properties"]
     assert "policy_coverage" in summary_schema["properties"]
+    site_policy_schema = openapi["paths"]["/v1/site-policies"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "policy_gap_summary" in site_policy_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
     assert "source_reference" in summary_schema["properties"]
@@ -13327,6 +13344,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
+        assert "policy_gap_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "missing_by_category" in tools_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
         assert tools_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
         assert tools_by_name["source_url_retorrent_job"]["input_schema"]["required"] == ["source_url", "target"]

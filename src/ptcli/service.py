@@ -595,6 +595,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     report = build_site_policy_report(config, context["trackers"], accept_rules=bool(context.get("accept_rules")))
     roles = context.get("roles") if isinstance(context.get("roles"), dict) else {}
     matrix = [_site_policy_matrix_item(policy, roles=_string_list(roles.get(str(policy.get("tracker"))))) for policy in report.get("site_policies", []) if isinstance(policy, dict)]
+    policy_gap_summary = _site_policy_gap_summary(matrix)
     return {
         "kind": "ptcli.site_policies",
         "status": report.get("status", "ok"),
@@ -604,9 +605,10 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "policy_matrix": matrix,
         "site_policies": report.get("site_policies", []),
         "qbit_limits": report.get("qbit_limits", {}),
+        "policy_gap_summary": policy_gap_summary,
         "blockers": _string_list(report.get("blockers")),
         "next_actions": _string_list(report.get("next_actions")),
-        "agent_summary": _site_policy_agent_summary(matrix, report),
+        "agent_summary": _site_policy_agent_summary(matrix, report, policy_gap_summary),
         "report": report,
     }
 
@@ -987,7 +989,53 @@ def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None 
     return item
 
 
-def _site_policy_agent_summary(matrix: list[dict[str, Any]], report: dict[str, Any]) -> dict[str, Any]:
+def _site_policy_gap_summary(matrix: list[dict[str, Any]]) -> dict[str, Any]:
+    by_role: dict[str, dict[str, Any]] = {}
+    missing_by_category = {
+        "rule_review": [],
+        "rate_limits": [],
+        "seeding_requirements": [],
+        "automation": [],
+        "role": [],
+    }
+    for item in matrix:
+        tracker = str(item.get("tracker") or "")
+        coverage = item.get("policy_coverage") if isinstance(item.get("policy_coverage"), dict) else {}
+        missing_fields = _string_list(coverage.get("missing_fields"))
+        disabled = _string_list(coverage.get("disabled_automation"))
+        for role in _string_list(item.get("roles")) or ["unknown"]:
+            role_summary = by_role.setdefault(role, {"trackers": [], "missing_fields": {}, "disabled_automation": {}, "recommendations": []})
+            if tracker and tracker not in role_summary["trackers"]:
+                role_summary["trackers"].append(tracker)
+            if missing_fields:
+                role_summary["missing_fields"][tracker] = missing_fields
+            if disabled:
+                role_summary["disabled_automation"][tracker] = disabled
+            role_summary["recommendations"].extend(recommendation for recommendation in _string_list(coverage.get("recommendations")) if recommendation not in role_summary["recommendations"])
+        for field in missing_fields:
+            if field == "rule_review_fingerprint":
+                missing_by_category["rule_review"].append({"tracker": tracker, "field": field})
+            elif field in {"download_rate_limit", "upload_rate_limit"}:
+                missing_by_category["rate_limits"].append({"tracker": tracker, "field": field})
+            elif field in {"min_seed_time_hours", "min_ratio"}:
+                missing_by_category["seeding_requirements"].append({"tracker": tracker, "field": field})
+            elif field == "source_or_target_role":
+                missing_by_category["role"].append({"tracker": tracker, "field": field})
+        for automation in disabled:
+            missing_by_category["automation"].append({"tracker": tracker, "field": automation})
+    recommendations = list(dict.fromkeys(recommendation for item in matrix for recommendation in _string_list((item.get("policy_coverage") or {}).get("recommendations"))))
+    return {
+        "ready": all(bool((item.get("policy_coverage") or {}).get("complete")) for item in matrix),
+        "tracker_count": len(matrix),
+        "missing_total": sum(len(_string_list((item.get("policy_coverage") or {}).get("missing_fields"))) for item in matrix),
+        "disabled_total": sum(len(_string_list((item.get("policy_coverage") or {}).get("disabled_automation"))) for item in matrix),
+        "by_role": by_role,
+        "missing_by_category": missing_by_category,
+        "recommendations": recommendations,
+    }
+
+
+def _site_policy_agent_summary(matrix: list[dict[str, Any]], report: dict[str, Any], policy_gap_summary: dict[str, Any]) -> dict[str, Any]:
     missing_by_tracker = {
         str(item.get("tracker")): _string_list((item.get("policy_coverage") or {}).get("missing_fields"))
         for item in matrix
@@ -1015,6 +1063,7 @@ def _site_policy_agent_summary(matrix: list[dict[str, Any]], report: dict[str, A
         "policy_coverage_ready": all(bool((item.get("policy_coverage") or {}).get("complete")) for item in matrix),
         "missing_policy_fields": missing_by_tracker,
         "disabled_automation": disabled_by_tracker,
+        "policy_gap_summary": policy_gap_summary,
         "policy_recommendations": [recommendation for item in matrix for recommendation in _string_list((item.get("policy_coverage") or {}).get("recommendations"))],
         "blockers": _string_list(report.get("blockers")),
         "next_actions": _string_list(report.get("next_actions")),
@@ -2471,7 +2520,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "qbit_limits", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "qbit_limits", "policy_gap_summary", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -2483,6 +2532,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                     "rule_review_fingerprint",
                     "policy_coverage",
                 ],
+                "gap_summary_fields": ["ready", "missing_total", "disabled_total", "by_role", "missing_by_category", "recommendations"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
@@ -2930,6 +2980,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_matrix": {"type": "array", "items": {"type": "object"}},
             "site_policies": {"type": "array", "items": {"type": "object"}},
             "qbit_limits": {"type": "object"},
+            "policy_gap_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
             "agent_summary": {"type": "object"},

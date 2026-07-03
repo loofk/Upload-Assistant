@@ -167,6 +167,7 @@
           "ready",
           "policy_matrix",
           "qbit_limits",
+          "policy_gap_summary",
           "blockers",
           "next_actions",
           "agent_summary"
@@ -181,6 +182,14 @@
           "manual_review_required",
           "rule_review_fingerprint",
           "policy_coverage"
+        ],
+        "gap_summary_fields": [
+          "ready",
+          "missing_total",
+          "disabled_total",
+          "by_role",
+          "missing_by_category",
+          "recommendations"
         ]
       },
       "safety": {
