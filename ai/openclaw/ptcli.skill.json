@@ -201,7 +201,8 @@
           "resume_state",
           "agent_summary",
           "agent_decision",
-          "candidate_digest"
+          "candidate_digest",
+          "policy_coverage"
         ],
         "status_values": [
           "queued",
@@ -279,7 +280,8 @@
           "resume_state",
           "agent_summary",
           "agent_decision",
-          "candidate_digest"
+          "candidate_digest",
+          "policy_coverage"
         ]
       },
       "safety": {
@@ -332,7 +334,8 @@
           "job_id",
           "blockers",
           "next_actions",
-          "candidate_digest"
+          "candidate_digest",
+          "policy_coverage"
         ],
         "result_fields": [
           "ranking",
@@ -563,7 +566,8 @@
           "resume_state",
           "agent_summary",
           "agent_decision",
-          "candidate_digest"
+          "candidate_digest",
+          "policy_coverage"
         ]
       },
       "safety": {

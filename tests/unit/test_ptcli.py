@@ -12443,6 +12443,14 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
 
 def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, tmp_path) -> None:
     captured_request = {}
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True, "download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True, "upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+            }
+        }
+    }
 
     async def fake_retorrent(request):
         captured_request.update(request)
@@ -12456,6 +12464,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
         }
 
     monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
     store = ptcli_service.JobStore(tmp_path, run_inline=True)
 
     job = ptcli_service.create_manual_retorrent_job(
@@ -12476,15 +12485,63 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["request"]["mode"] == "manual_retorrent"
     assert job["request"]["execute"] is True
     assert job["request"]["execute_if_no_duplicate"] is True
+    assert job["policy_coverage"]["ready"] is True
     assert job["agent_decision"]["decision"] == "blocked"
     assert job["agent_decision"]["duplicate_check"]["status"] == "not_found"
     assert job["agent_decision"]["missing_confirmations"] == []
+    assert job["agent_decision"]["policy_coverage_ready"] is True
     assert captured_request["execute"] is True
     assert captured_request["execute_if_no_duplicate"] is True
     assert job["command_argv"][:2] == ["ptcli", "retorrent"]
     assert "--execute" in job["command_argv"]
     assert "--accept-rules" in job["command_argv"]
     assert "--confirm-upload" in job["command_argv"]
+
+
+def test_manual_retorrent_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True},
+            }
+        }
+    }
+
+    async def fake_retorrent(_request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["target duplicate check or live upload gate blocked execution."],
+            "next_actions": ["Review blockers and resume with explicit confirmations when safe."],
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_manual_retorrent_job(
+        store,
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+        },
+    )
+
+    assert job["status"] == "blocked"
+    assert job["policy_coverage"]["ready"] is False
+    assert job["policy_coverage"]["missing_policy_fields"] == {
+        "U2": ["rule_review_fingerprint", "download_rate_limit", "min_seed_time_hours"],
+        "MTEAM": ["rule_review_fingerprint", "upload_rate_limit", "min_ratio"],
+    }
+    assert job["agent_decision"]["decision"] == "configure_policy"
+    assert job["agent_decision"]["stop_reason"] == "policy_coverage_incomplete"
+    assert job["agent_decision"]["can_attempt_live"] is False
+    assert "rule_review_fingerprint" in job["agent_decision"]["policy_coverage"]["missing_policy_fields"]["U2"]
 
 
 def test_agent_decision_stops_manual_retorrent_when_duplicate_exists(monkeypatch, tmp_path) -> None:
@@ -12856,6 +12913,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
+    assert "policy_coverage" in tool_by_name["retorrent_job"]["response_contract"]["required_fields"]
+    assert "policy_coverage" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -12896,6 +12955,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     summary_schema = openapi["paths"]["/v1/jobs/{job_id}/summary"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "agent_decision" in summary_schema["properties"]
     assert "candidate_digest" in summary_schema["properties"]
+    assert "policy_coverage" in summary_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
 
@@ -12943,6 +13003,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "digest" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
         assert "candidate_digest" in tools_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
+        assert "policy_coverage" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "policy_coverage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]

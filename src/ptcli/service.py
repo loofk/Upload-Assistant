@@ -114,6 +114,7 @@ class JobStore:
             "agent_summary": _agent_summary(summary_payload) or _agent_summary(job.get("result")),
             "agent_decision": _agent_decision(job),
             "candidate_digest": _candidate_digest_from_payload(summary_payload) or _candidate_digest_from_payload(job.get("result")),
+            "policy_coverage": _job_policy_coverage(job),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -962,7 +963,51 @@ def _normalized_request(request: dict[str, Any], source: dict[str, Any], target_
         "config": request.get("config"),
         "path": request.get("path") or request.get("content_path"),
         "save_path": request.get("save_path"),
+        "policy_coverage": _request_policy_coverage(request, source, target_trackers),
     }
+
+
+def _request_policy_coverage(request: dict[str, Any], source: dict[str, Any], target_trackers: str) -> dict[str, Any]:
+    try:
+        config = load_config(request.get("config"))
+        source_tracker = str(source.get("tracker") or "")
+        targets = parse_tracker_list(target_trackers)
+        report = build_site_policy_report(config, [source_tracker, *targets], accept_rules=bool(request.get("accept_rules")))
+        policies = report.get("site_policies") if isinstance(report.get("site_policies"), list) else []
+        policies_by_tracker = {str(policy.get("tracker")): policy for policy in policies if isinstance(policy, dict) and policy.get("tracker")}
+        source_policy = policies_by_tracker.get(source_tracker)
+        target_policies = [policies_by_tracker.get(target) for target in targets]
+        source_coverage = build_site_policy_coverage(source_policy, roles=["source"]) if isinstance(source_policy, dict) else None
+        target_coverages = [build_site_policy_coverage(policy, roles=["target"]) for policy in target_policies if isinstance(policy, dict)]
+        coverages = [coverage for coverage in [source_coverage, *target_coverages] if isinstance(coverage, dict)]
+        return {
+            "ready": bool(report.get("ready")) and bool(coverages) and all(bool(coverage.get("complete")) for coverage in coverages),
+            "site_policy_ready": bool(report.get("ready")),
+            "accept_rules": bool(request.get("accept_rules")),
+            "source": source_coverage,
+            "targets": target_coverages,
+            "missing_policy_fields": _policy_coverage_fields(coverages, "missing_fields"),
+            "disabled_automation": _policy_coverage_fields(coverages, "disabled_automation"),
+            "recommendations": [recommendation for coverage in coverages for recommendation in _string_list(coverage.get("recommendations"))],
+            "blockers": _string_list(report.get("blockers")),
+            "next_actions": _string_list(report.get("next_actions")),
+        }
+    except Exception as exc:
+        return {
+            "ready": None,
+            "error": str(exc),
+            "recommendations": ["Run deployment_check or provide a readable data/config.py before relying on policy coverage."],
+        }
+
+
+def _policy_coverage_fields(coverages: list[dict[str, Any]], key: str) -> dict[str, list[str]]:
+    fields: dict[str, list[str]] = {}
+    for coverage in coverages:
+        tracker = str(coverage.get("tracker") or "UNKNOWN")
+        values = _string_list(coverage.get(key))
+        if values:
+            fields[tracker] = values
+    return fields
 
 
 def _service_result(kind: str, request: dict[str, Any], argv: list[str], result: dict[str, Any], started_at: float) -> dict[str, Any]:
@@ -1289,6 +1334,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "agent_summary": job.get("agent_summary") if isinstance(job.get("agent_summary"), dict) else _agent_summary(job.get("result")),
         "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
         "candidate_digest": _candidate_digest_from_payload(job.get("result")),
+        "policy_coverage": _job_policy_coverage(job),
         "result_status": _nested_value(job.get("result"), "status"),
         "next_stage": _nested_value(job.get("result"), "next_stage"),
         "next_command": _nested_value(job.get("result"), "next_command"),
@@ -1296,6 +1342,13 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "should_execute_next_command": _nested_value(job.get("result"), "should_execute_next_command"),
         "automation_action": _nested_value(job.get("result"), "automation_action"),
     }
+
+
+def _job_policy_coverage(job: dict[str, Any]) -> dict[str, Any] | None:
+    request = job.get("request")
+    if isinstance(request, dict) and isinstance(request.get("policy_coverage"), dict):
+        return request["policy_coverage"]
+    return None
 
 
 def _agent_candidate_decision(
@@ -1372,11 +1425,14 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     next_command_argv = _result_next_command_argv(result)
     resume_state = job.get("resume_state") if isinstance(job.get("resume_state"), dict) else _result_resume_state(result)
     missing_confirmations = _missing_live_confirmations(request)
+    policy_coverage = _job_policy_coverage(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
+    policy_coverage_ready = policy_coverage.get("ready") if isinstance(policy_coverage, dict) and isinstance(policy_coverage.get("ready"), bool) else None
+    policy_coverage_incomplete = policy_coverage_ready is False
     duplicate_exists = duplicate_check.get("exists") is True
     resume_available = bool(next_command_argv or (isinstance(resume_state, dict) and resume_state.get("resume_available") is True))
     should_poll = status in {"queued", "running"}
-    should_resume = status in {"blocked", "failed"} and resume_available and not duplicate_exists and not missing_confirmations
-    can_attempt_live = not duplicate_exists and not missing_confirmations and status not in {"queued", "running"}
+    should_resume = status in {"blocked", "failed"} and resume_available and not duplicate_exists and not missing_confirmations and not policy_coverage_incomplete
+    can_attempt_live = not duplicate_exists and not missing_confirmations and not policy_coverage_incomplete and status not in {"queued", "running"}
 
     if should_poll:
         decision = "wait"
@@ -1394,6 +1450,11 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         decision = "done"
         stop_reason = None
         recommended_action = "Retorrent workflow is complete; inspect summary_file and seeding evidence."
+    elif policy_coverage_incomplete:
+        decision = "configure_policy"
+        stop_reason = "policy_coverage_incomplete"
+        recommendations = _string_list(policy_coverage.get("recommendations")) if isinstance(policy_coverage, dict) else []
+        recommended_action = recommendations[0] if recommendations else "Complete policy_coverage missing fields before attempting live retorrent automation."
     elif should_resume:
         decision = "resume"
         stop_reason = None
@@ -1415,6 +1476,8 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "stop_reason": stop_reason,
         "duplicate_check": duplicate_check,
         "missing_confirmations": missing_confirmations,
+        "policy_coverage": policy_coverage,
+        "policy_coverage_ready": policy_coverage_ready,
         "can_attempt_live": can_attempt_live,
         "should_poll": should_poll,
         "should_resume": should_resume,
@@ -2111,7 +2174,7 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage"],
         "status_values": ["queued", "running", "blocked", "failed", "complete"],
         "blocked_fields": ["blockers", "next_actions", "resume_state", "next_command_argv", "agent_decision"],
     }
@@ -2296,6 +2359,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_summary": {"type": ["object", "null"]},
             "agent_decision": {"type": ["object", "null"]},
             "candidate_digest": {"type": ["object", "null"]},
+            "policy_coverage": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
         },
     }
@@ -2311,6 +2375,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_summary": {"type": ["object", "null"]},
             "agent_decision": {"type": ["object", "null"]},
             "candidate_digest": {"type": ["object", "null"]},
+            "policy_coverage": {"type": ["object", "null"]},
             "result": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
