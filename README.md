@@ -112,6 +112,11 @@ curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/daily \
 curl -X POST http://127.0.0.1:8080/v1/candidates/daily/schedule \
   -H "Content-Type: application/json" \
   -d '{"schedules":[{"name":"u2-to-mteam","source_tracker":"U2","target":"MTEAM","limit":10,"time":"09:00","accept_rules":true}]}'
+
+# 每日候选计划执行：只为每个 enabled schedule 创建候选扫描 job，返回 job_id；不会上传
+curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/daily/schedule \
+  -H "Content-Type: application/json" \
+  -d '{"schedules":[{"name":"u2-to-mteam","source_tracker":"U2","target":"MTEAM","limit":10,"time":"09:00","accept_rules":true}]}'
 ```
 
 若需要把 API 暴露给其他容器或局域网工具，建议设置 `PTCLI_API_TOKEN`，调用时添加 `Authorization: Bearer <token>`。服务端点不会绕过站点规则；live 下载/上传仍依赖现有 rule gate、dupe gate 和 `confirm_upload`。

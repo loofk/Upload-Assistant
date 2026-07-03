@@ -282,6 +282,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/jobs/retorrent": lambda payload: create_retorrent_job(job_store, payload),
                 "/v1/jobs/retorrent/submit": lambda payload: create_manual_retorrent_job(job_store, payload),
                 "/v1/jobs/candidates/daily": lambda payload: create_daily_candidates_job(job_store, payload),
+                "/v1/jobs/candidates/daily/schedule": lambda payload: create_daily_candidate_schedule_jobs(job_store, payload),
             }
             if path.startswith("/v1/jobs/") and path.endswith("/resume"):
                 try:
@@ -402,6 +403,49 @@ def create_daily_candidates_job(job_store: JobStore, request: dict[str, Any]) ->
         ["ptcli-service", "daily-candidates"],
         lambda: asyncio.run(daily_candidates(request)),
     )
+
+
+def create_daily_candidate_schedule_jobs(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
+    """Create daily candidate jobs for each enabled schedule entry; never performs uploads."""
+    plan = daily_candidate_schedule_payload(request)
+    jobs: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    blockers = _string_list(plan.get("blockers"))
+    for schedule in plan.get("schedules", []):
+        if not isinstance(schedule, dict):
+            continue
+        schedule_blockers = _string_list(schedule.get("blockers"))
+        if schedule.get("enabled") is not True or schedule_blockers:
+            skipped.append({"name": schedule.get("name"), "blockers": schedule_blockers or ["schedule is disabled"]})
+            continue
+        job = create_daily_candidates_job(job_store, schedule.get("job_request") if isinstance(schedule.get("job_request"), dict) else {})
+        jobs.append(
+            {
+                "schedule_name": schedule.get("name"),
+                "job_id": job.get("job_id"),
+                "status": job.get("status"),
+                "ok": job.get("ok"),
+                "job_endpoint": schedule.get("job_endpoint"),
+                "status_endpoint": f"/v1/jobs/{job.get('job_id')}",
+                "summary_endpoint": f"/v1/jobs/{job.get('job_id')}/summary",
+                "job_request": schedule.get("job_request"),
+                "candidate_digest": job.get("candidate_digest"),
+                "agent_decision": job.get("agent_decision"),
+            }
+        )
+    if not jobs and not blockers:
+        blockers.append("No enabled daily candidate schedules were available to run.")
+    return {
+        "kind": "ptcli.daily_candidate_schedule_jobs",
+        "status": "ok" if jobs and not blockers else "partial" if jobs else "blocked",
+        "ok": bool(jobs),
+        "plan": plan,
+        "job_count": len(jobs),
+        "jobs": jobs,
+        "skipped": skipped,
+        "blockers": blockers,
+        "next_actions": _daily_candidate_schedule_run_next_actions(jobs, skipped, blockers),
+    }
 
 
 async def retorrent_check(request: dict[str, Any]) -> dict[str, Any]:
@@ -675,6 +719,18 @@ def _daily_candidate_schedule_next_actions(schedules: list[dict[str, Any]], bloc
     actions = ["Create daily jobs by POSTing each enabled schedule.job_request to /v1/jobs/candidates/daily, then poll job status and read candidate_digest."]
     if any(schedule.get("enabled") is False for schedule in schedules):
         actions.append("Enable disabled schedules before expecting daily candidate output.")
+    return actions
+
+
+def _daily_candidate_schedule_run_next_actions(jobs: list[dict[str, Any]], skipped: list[dict[str, Any]], blockers: list[str]) -> list[str]:
+    if not jobs:
+        return ["Fix schedule blockers, then POST schedules to /v1/jobs/candidates/daily/schedule again."]
+    actions = ["Poll each jobs[].status_endpoint until complete, then read candidate_digest and agent_decision from the job status or summary."]
+    actions.append("If agent_decision.decision is submit_candidate_when_confirmed, review rules and submit candidate_digest.top_submit_request to manual_retorrent_job with confirm_upload=true and a save_path or path.")
+    if skipped:
+        actions.append("Inspect skipped schedules before expecting candidates from every configured source/target pair.")
+    if blockers:
+        actions.append("Resolve top-level schedule blockers before treating the run as complete.")
     return actions
 
 
@@ -1659,6 +1715,19 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
+            "name": "daily_candidates_schedule_job",
+            "method": "POST",
+            "path": "/v1/jobs/candidates/daily/schedule",
+            "description": "Create one daily-candidate discovery job per enabled schedule entry and return job_ids for polling. This only scans candidates and never uploads.",
+            "input_schema": candidate_schedule_request_schema,
+            "response_contract": {
+                "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "blockers", "next_actions"],
+                "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
+            },
+            "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
+            "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
+        },
+        {
             "name": "get_job_status",
             "method": "GET",
             "path": "/v1/jobs/{job_id}",
@@ -2080,6 +2149,19 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
+    candidate_schedule_jobs_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "plan": {"type": "object"},
+            "job_count": {"type": "integer"},
+            "jobs": {"type": "array", "items": {"type": "object"}},
+            "skipped": {"type": "array", "items": {"type": "object"}},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
     manifest_response_schema = {
         "type": "object",
         "properties": {
@@ -2231,6 +2313,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": candidate_request_schema}}},
                     "responses": {"200": {"description": "Queued daily-candidate discovery job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                }
+            },
+            "/v1/jobs/candidates/daily/schedule": {
+                "post": {
+                    "operationId": "createDailyRetorrentCandidateScheduleJobs",
+                    "security": token_security,
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": candidate_schedule_request_schema}}},
+                    "responses": {"200": {"description": "Queued daily-candidate jobs for each enabled schedule.", "content": {"application/json": {"schema": candidate_schedule_jobs_response_schema}}}},
                 }
             },
             "/v1/jobs/{job_id}": {

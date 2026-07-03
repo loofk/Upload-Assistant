@@ -411,6 +411,93 @@
       }
     },
     {
+      "name": "daily_candidates_schedule_job",
+      "method": "POST",
+      "path": "/v1/jobs/candidates/daily/schedule",
+      "description": "Create one daily-candidate discovery job per enabled schedule entry and return job_ids for polling. This only scans candidates and never uploads.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "schedules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "source_tracker",
+                "target"
+              ],
+              "properties": {
+                "source_tracker": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": [
+                    "string",
+                    "array"
+                  ]
+                },
+                "limit": {
+                  "type": "integer",
+                  "default": 10,
+                  "maximum": 10
+                },
+                "accept_rules": {
+                  "type": "boolean"
+                },
+                "check_dupes": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "name": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "time": {
+                  "type": "string",
+                  "default": "09:00"
+                },
+                "timezone": {
+                  "type": "string",
+                  "default": "Asia/Shanghai"
+                }
+              }
+            }
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_count",
+          "jobs",
+          "skipped",
+          "blockers",
+          "next_actions"
+        ],
+        "job_fields": [
+          "schedule_name",
+          "job_id",
+          "status_endpoint",
+          "summary_endpoint",
+          "job_request",
+          "candidate_digest",
+          "agent_decision"
+        ]
+      },
+      "workflow_hints": {
+        "poll_with": "get_job_status",
+        "summary_with": "get_job_summary"
+      },
+      "safety": {
+        "live_upload": false
+      }
+    },
+    {
       "name": "get_job_status",
       "method": "GET",
       "path": "/v1/jobs/{job_id}",
