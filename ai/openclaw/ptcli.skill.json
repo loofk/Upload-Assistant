@@ -3269,6 +3269,7 @@
           "automation",
           "qbit_limits",
           "seeding_requirements",
+          "transfer_rules",
           "manual_review_required",
           "rule_review_fingerprint",
           "policy_coverage",

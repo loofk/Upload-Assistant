@@ -253,14 +253,14 @@ def _candidate_blockers(
         blockers.append(f"{seed.tracker} policy: automatic source download is not enabled.")
     if source_policy.get("allow_retorrent") is not True:
         blockers.append(f"{seed.tracker} policy: retorrent automation is not enabled.")
+    blockers.extend(_candidate_transfer_rule_blockers(seed, source_policy))
     for target_policy in target_policies:
         target = str(target_policy.get("tracker") or "target")
         if target_policy.get("allow_auto_upload") is not True:
             blockers.append(f"{target} policy: automatic target upload is not enabled.")
         if target_policy.get("allow_retorrent") is not True:
             blockers.append(f"{target} policy: retorrent automation is not enabled.")
-        if target_policy.get("freeleech_required") is True and not _promotion_is_free(seed.promotion):
-            blockers.append(f"{target} policy: freeleech source candidate is required.")
+        blockers.extend(_candidate_transfer_rule_blockers(seed, target_policy))
     if not source_download_adapter(seed.tracker):
         blockers.append(f"{seed.tracker} source download adapter is not enabled.")
     if source_info_error:
@@ -273,6 +273,27 @@ def _candidate_blockers(
         blockers.append("target-duplicate: target tracker already has possible existing torrents.")
     if duplicate_check.get("searched") is False:
         blockers.append(f"target-duplicate: {duplicate_check.get('reason') or 'duplicate search did not run.'}")
+    return blockers
+
+
+def _candidate_transfer_rule_blockers(seed: CandidateSeed, policy: dict[str, Any]) -> list[str]:
+    tracker = str(policy.get("tracker") or seed.tracker)
+    transfer_rules = policy.get("transfer_rules") if isinstance(policy.get("transfer_rules"), dict) else {}
+    freeleech_required = bool(policy.get("freeleech_required") or transfer_rules.get("freeleech_required"))
+    required_promotions = _string_list(policy.get("required_promotions") or transfer_rules.get("required_promotions"))
+    forbidden_patterns = _string_list(policy.get("forbidden_title_patterns") or transfer_rules.get("forbidden_title_patterns"))
+    forbidden_groups = _string_list(policy.get("forbidden_release_groups") or transfer_rules.get("forbidden_release_groups"))
+    title = seed.title or ""
+    promotion = seed.promotion or ""
+    release_group = _release_group_from_title(title)
+    blockers: list[str] = []
+    if freeleech_required and not _promotion_is_free(promotion):
+        blockers.append(f"{tracker} policy: freeleech source candidate is required.")
+    if required_promotions and not _promotion_matches_any(promotion, required_promotions):
+        blockers.append(f"{tracker} policy: source promotion must match one of: {', '.join(required_promotions)}.")
+    blockers.extend(f"{tracker} policy: title matches forbidden pattern {pattern!r}." for pattern in forbidden_patterns if pattern and re.search(pattern, title, flags=re.IGNORECASE))
+    if release_group and any(release_group.lower() == group.lower() for group in forbidden_groups):
+        blockers.append(f"{tracker} policy: release group {release_group} is forbidden.")
     return blockers
 
 
@@ -332,6 +353,10 @@ def _candidate_policy_summary(source_policy: dict[str, Any], target_policies: li
             "source": _policy_seeding_requirements(source_policy),
             "targets": [_policy_seeding_requirements(policy) for policy in target_policies],
         },
+        "transfer_rules": {
+            "source": _policy_transfer_rules(source_policy),
+            "targets": [_policy_transfer_rules(policy) for policy in target_policies],
+        },
         "rules": {
             "source_rules_url": source_policy.get("rules_url"),
             "target_rules_urls": [policy.get("rules_url") for policy in target_policies if policy.get("rules_url")],
@@ -376,6 +401,17 @@ def _policy_seeding_requirements(policy: dict[str, Any]) -> dict[str, Any]:
         "min_seed_time_hours": policy.get("min_seed_time_hours"),
         "min_ratio": policy.get("min_ratio"),
         "freeleech_required": policy.get("freeleech_required"),
+    }
+
+
+def _policy_transfer_rules(policy: dict[str, Any]) -> dict[str, Any]:
+    transfer_rules = policy.get("transfer_rules") if isinstance(policy.get("transfer_rules"), dict) else {}
+    return {
+        "tracker": policy.get("tracker"),
+        "freeleech_required": bool(policy.get("freeleech_required") or transfer_rules.get("freeleech_required")),
+        "required_promotions": _string_list(policy.get("required_promotions") or transfer_rules.get("required_promotions")),
+        "forbidden_title_patterns": _string_list(policy.get("forbidden_title_patterns") or transfer_rules.get("forbidden_title_patterns")),
+        "forbidden_release_groups": _string_list(policy.get("forbidden_release_groups") or transfer_rules.get("forbidden_release_groups")),
     }
 
 
@@ -736,13 +772,27 @@ def _rule_blockers(rule_check: dict[str, Any]) -> list[str]:
 
 
 def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    if value in (None, ""):
         return []
-    return [str(item) for item in value]
+    return [str(value)]
 
 
 def _promotion_is_free(promotion: str | None) -> bool:
     return bool(promotion and re.search(r"\b(free|2x|50%|免费|免費|限免|freeleech)\b", promotion, flags=re.IGNORECASE))
+
+
+def _promotion_matches_any(promotion: str | None, required_promotions: list[str]) -> bool:
+    lower = str(promotion or "").lower()
+    return any(str(required).lower() in lower for required in required_promotions)
+
+
+def _release_group_from_title(title: str | None) -> str | None:
+    if not title:
+        return None
+    match = re.search(r"[-@]([A-Za-z0-9][A-Za-z0-9._-]{1,24})\s*$", title.strip())
+    return match.group(1) if match else None
 
 
 def _cookie_path(tracker: str, base_dir: str | None) -> str:

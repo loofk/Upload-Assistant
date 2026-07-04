@@ -385,6 +385,10 @@ def test_site_policy_overrides_parse_rate_limits() -> None:
                     "download_rate_limit": "20MiB/s",
                     "min_seed_time_hours": 72,
                     "min_ratio": 1.5,
+                    "freeleech_required": True,
+                    "required_promotions": ["free"],
+                    "forbidden_title_patterns": ["禁转"],
+                    "forbidden_release_groups": ["BADGRP"],
                 }
             }
         }
@@ -398,6 +402,11 @@ def test_site_policy_overrides_parse_rate_limits() -> None:
     assert policy.download_rate_limit == 20 * 1024 * 1024
     assert policy.min_seed_time_hours == 72
     assert policy.min_ratio == 1.5
+    assert policy.freeleech_required is True
+    assert policy.required_promotions == ("free",)
+    assert policy.forbidden_title_patterns == ("禁转",)
+    assert policy.forbidden_release_groups == ("BADGRP",)
+    assert policy.to_dict()["transfer_rules"]["forbidden_release_groups"] == ["BADGRP"]
     assert report["ready"] is True
     assert report["qbit_limits"]["MTEAM"]["upload_limit"] == 2 * 1024 * 1024
 
@@ -13689,6 +13698,8 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
                     "download_rate_limit": "20MiB/s",
                     "min_seed_time_hours": 72,
                     "rule_review_fingerprint": "u2-review",
+                    "required_promotions": ["free"],
+                    "forbidden_release_groups": ["BADGRP"],
                 },
                 "MTEAM": {
                     "allow_auto_upload": True,
@@ -13696,6 +13707,8 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
                     "upload_rate_limit": "2MiB/s",
                     "min_ratio": 1.0,
                     "rule_review_fingerprint": "mteam-review",
+                    "freeleech_required": True,
+                    "forbidden_title_patterns": ["Forbidden"],
                 },
             }
         }
@@ -13713,6 +13726,8 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["U2"]["automation"]["download"] is True
     assert matrix_by_tracker["U2"]["qbit_limits"]["download_limit"] == 20 * 1024 * 1024
     assert matrix_by_tracker["U2"]["seeding_requirements"]["min_seed_time_hours"] == 72
+    assert matrix_by_tracker["U2"]["transfer_rules"]["required_promotions"] == ["free"]
+    assert matrix_by_tracker["U2"]["execution_readiness"]["transfer_rules"]["forbidden_release_groups"] == ["BADGRP"]
     assert matrix_by_tracker["U2"]["policy_coverage"]["complete"] is True
     assert matrix_by_tracker["U2"]["execution_readiness"]["ready"] is True
     assert matrix_by_tracker["U2"]["execution_readiness"]["role_status"]["source"]["can_download"] is True
@@ -13720,6 +13735,8 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["MTEAM"]["automation"]["upload"] is True
     assert matrix_by_tracker["MTEAM"]["qbit_limits"]["upload_limit"] == 2 * 1024 * 1024
     assert matrix_by_tracker["MTEAM"]["seeding_requirements"]["min_ratio"] == 1.0
+    assert matrix_by_tracker["MTEAM"]["transfer_rules"]["freeleech_required"] is True
+    assert matrix_by_tracker["MTEAM"]["execution_readiness"]["transfer_rules"]["forbidden_title_patterns"] == ["Forbidden"]
     assert matrix_by_tracker["MTEAM"]["policy_coverage"]["complete"] is True
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["ready"] is True
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["role_status"]["target"]["can_upload"] is True
@@ -13891,6 +13908,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
+    assert "transfer_rules" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "blocked_trackers" in tool_by_name["site_policies"]["response_contract"]["execution_readiness_fields"]
@@ -14085,6 +14103,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
+        assert "transfer_rules" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert "blocked_trackers" in tools_by_name["site_policies"]["response_contract"]["execution_readiness_fields"]
@@ -14671,6 +14690,61 @@ async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers
     assert result["digest"]["push_items"][1]["action_label"] == "review_blockers"
     assert result["digest"]["push_items"][1]["submit_request"] is None
     assert any("target-duplicate" in blocker for blocker in result["digest"]["push_items"][1]["blockers"])
+
+
+async def test_daily_candidates_blocks_for_transfer_policy_rules(monkeypatch) -> None:
+    seed = ptcli_candidates.CandidateSeed("U2", "60635", "Forbidden.Release.2026-BADGRP", "https://u2.dmhy.org/details.php?id=60635", size="42 GiB", promotion="normal")
+
+    async def fake_fetch_recent_candidate_seeds(*_args, **_kwargs):
+        return [seed]
+
+    async def fake_fetch_source_info(*_args, **_kwargs):
+        return source_info_from_tuple("U2", "60635", (1234567, 999, "Forbidden.Release", "a" * 40, "desc"), {})
+
+    async def fake_search_mteam_duplicates(_config, _source_info):
+        return {"searched": True, "count": 0, "dupes": []}
+
+    monkeypatch.setattr(ptcli_candidates, "fetch_recent_candidate_seeds", fake_fetch_recent_candidate_seeds)
+    monkeypatch.setattr(ptcli_candidates, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_candidates, "search_mteam_duplicates", fake_search_mteam_duplicates)
+
+    config = {
+        "TRACKERS": {"MTEAM": {"api_key": "fake"}},
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "rule_review_fingerprint": "u2-review",
+                    "required_promotions": ["free"],
+                    "forbidden_release_groups": ["BADGRP"],
+                },
+                "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
+                    "upload_rate_limit": "2MiB/s",
+                    "min_ratio": 1.0,
+                    "rule_review_fingerprint": "mteam-review",
+                    "freeleech_required": True,
+                    "forbidden_title_patterns": ["Forbidden"],
+                },
+            }
+        },
+    }
+
+    result = await ptcli_candidates.build_daily_candidates(config, "U2", "MTEAM", limit=1, accept_rules=True)
+
+    blockers = result["candidates"][0]["blockers"]
+    assert result["ready_count"] == 0
+    assert result["digest"]["push_items"][0]["can_submit"] is False
+    assert any("source promotion must match" in blocker for blocker in blockers)
+    assert any("release group BADGRP is forbidden" in blocker for blocker in blockers)
+    assert any("freeleech source candidate is required" in blocker for blocker in blockers)
+    assert any("title matches forbidden pattern" in blocker for blocker in blockers)
+    assert result["candidates"][0]["policy_summary"]["transfer_rules"]["source"]["required_promotions"] == ["free"]
+    assert result["candidates"][0]["policy_summary"]["transfer_rules"]["targets"][0]["freeleech_required"] is True
 
 
 def test_source_info_from_tuple_includes_meta_side_effects() -> None:

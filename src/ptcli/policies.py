@@ -24,12 +24,18 @@ class SitePolicy:
     min_seed_time_hours: float | None = None
     min_ratio: float | None = None
     freeleech_required: bool = False
+    required_promotions: tuple[str, ...] = ()
+    forbidden_title_patterns: tuple[str, ...] = ()
+    forbidden_release_groups: tuple[str, ...] = ()
     rule_review_fingerprint: str | None = None
     notes: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["notes"] = list(self.notes)
+        payload["required_promotions"] = list(self.required_promotions)
+        payload["forbidden_title_patterns"] = list(self.forbidden_title_patterns)
+        payload["forbidden_release_groups"] = list(self.forbidden_release_groups)
         payload["download_rate_limit_human"] = format_rate_limit(self.download_rate_limit)
         payload["upload_rate_limit_human"] = format_rate_limit(self.upload_rate_limit)
         payload["automation"] = {
@@ -37,6 +43,12 @@ class SitePolicy:
             "upload": self.allow_auto_upload,
             "retorrent": self.allow_retorrent,
             "manual_review_required": self.manual_review_required,
+        }
+        payload["transfer_rules"] = {
+            "freeleech_required": self.freeleech_required,
+            "required_promotions": list(self.required_promotions),
+            "forbidden_title_patterns": list(self.forbidden_title_patterns),
+            "forbidden_release_groups": list(self.forbidden_release_groups),
         }
         return payload
 
@@ -102,6 +114,7 @@ def qbit_limits_for_tracker(config: dict[str, Any] | None, tracker: str, *, role
             "manual_review_required": policy.manual_review_required,
             "rules_url": policy.rules_url,
             "rule_review_fingerprint": policy.rule_review_fingerprint,
+            "transfer_rules": policy.to_dict().get("transfer_rules"),
         },
     }
 
@@ -166,6 +179,7 @@ def build_site_policy_coverage(policy: dict[str, Any], *, roles: list[str] | tup
         "roles": normalized_roles,
         "missing_fields": missing,
         "disabled_automation": disabled,
+        "transfer_rules": _policy_transfer_rules(policy),
         "recommendations": recommendations,
     }
 
@@ -268,6 +282,9 @@ def _apply_policy_override(policy: SitePolicy, override: dict[str, Any]) -> Site
     ):
         if key in override:
             fields[key] = override[key]
+    for key in ("required_promotions", "forbidden_title_patterns", "forbidden_release_groups"):
+        if key in override:
+            fields[key] = tuple(str(item) for item in _as_list(override[key]) if str(item).strip())
     for key in ("download_rate_limit", "download_limit"):
         if key in override:
             fields["download_rate_limit"] = parse_rate_limit(override[key])
@@ -280,6 +297,24 @@ def _apply_policy_override(policy: SitePolicy, override: dict[str, Any]) -> Site
         notes = override["notes"]
         fields["notes"] = tuple(str(item) for item in notes) if isinstance(notes, (list, tuple)) else (str(notes),)
     return replace(policy, **fields)
+
+
+def _policy_transfer_rules(policy: dict[str, Any]) -> dict[str, Any]:
+    nested = policy.get("transfer_rules") if isinstance(policy.get("transfer_rules"), dict) else {}
+    return {
+        "freeleech_required": bool(policy.get("freeleech_required") or nested.get("freeleech_required")),
+        "required_promotions": _string_list(policy.get("required_promotions") or nested.get("required_promotions")),
+        "forbidden_title_patterns": _string_list(policy.get("forbidden_title_patterns") or nested.get("forbidden_title_patterns")),
+        "forbidden_release_groups": _string_list(policy.get("forbidden_release_groups") or nested.get("forbidden_release_groups")),
+    }
+
+
+def _as_list(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    if value in (None, ""):
+        return []
+    return [value]
 
 
 def _policy_blockers(policies: list[SitePolicy], *, accept_rules: bool) -> list[str]:

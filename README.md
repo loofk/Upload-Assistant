@@ -175,6 +175,8 @@ OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/opencla
               "download_rate_limit": "20MiB/s",
               "upload_rate_limit": "500KiB/s",
               "min_seed_time_hours": 72,
+              "required_promotions": ["free"],
+              "forbidden_release_groups": ["BADGRP"],
               "rule_review_fingerprint": "manual-review-2026-07",
           },
           "MTEAM": {
@@ -182,13 +184,15 @@ OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/opencla
               "allow_retorrent": True,
               "upload_rate_limit": "2MiB/s",
               "min_ratio": 1.0,
+              "freeleech_required": True,
+              "forbidden_title_patterns": ["禁转", "Do\\.Not\\.Repost"],
               "rule_review_fingerprint": "manual-review-2026-07",
           },
       }
   }
   ```
   CLI/API 显式传入的 `qbit_upload_limit`、`qbit_download_limit`、`uploaded_qbit_upload_limit`、`uploaded_qbit_download_limit` 会覆盖站点策略默认值。
-  HTTP 服务也提供 `/v1/site-policies`，可直接读取 `policy_matrix[].automation`、`policy_matrix[].qbit_limits`、`policy_matrix[].seeding_requirements`、`policy_matrix[].policy_coverage` 和 `policy_matrix[].execution_readiness` 供 AI 或部署脚本审计；其中 `policy_coverage` 会按源站/目标站角色列出缺失的 fingerprint、限速和做种要求，顶层 `policy_gap_summary` 会按 `source`/`target` 角色和 `rate_limits`、`seeding_requirements`、`rule_review` 分类聚合缺口，`execution_readiness` 则给出每个站点按角色是否可下载/上传/转种以及 blockers。
+  `required_promotions`、`freeleech_required`、`forbidden_title_patterns`、`forbidden_release_groups` 是本地自动化 gate，会在每日候选和策略审计中暴露/执行；无法程序化判断的站规仍必须通过 `rule_review_fingerprint` 和 `accept_rules` 人工确认。HTTP 服务也提供 `/v1/site-policies`，可直接读取 `policy_matrix[].automation`、`policy_matrix[].qbit_limits`、`policy_matrix[].seeding_requirements`、`policy_matrix[].transfer_rules`、`policy_matrix[].policy_coverage` 和 `policy_matrix[].execution_readiness` 供 AI 或部署脚本审计；其中 `policy_coverage` 会按源站/目标站角色列出缺失的 fingerprint、限速和做种要求，顶层 `policy_gap_summary` 会按 `source`/`target` 角色和 `rate_limits`、`seeding_requirements`、`rule_review` 分类聚合缺口，`execution_readiness` 则给出每个站点按角色是否可下载/上传/转种以及 blockers。
 - 任务式 API 默认把 job 文件写入 `PTCLI_JOB_DIR`，未设置时写入 `TMPDIR/ptcli-jobs`；Docker Compose 默认设置为 `/Upload-Assistant/tmp/ptcli-jobs`。
 - `Dockerfile.ptcli` 是 focused CLI 镜像，只安装 `requirements-ptcli.txt` 和 ptcli 需要的系统依赖；旧 `Dockerfile` 保留给 legacy/full UA 入口。
 - 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；release 工作流会额外发布 `*-legacy-webui` 标签给旧 Web UI 镜像。

@@ -1854,6 +1854,12 @@ def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None 
             "min_ratio": policy.get("min_ratio"),
             "freeleech_required": policy.get("freeleech_required"),
         },
+        "transfer_rules": policy.get("transfer_rules") if isinstance(policy.get("transfer_rules"), dict) else {
+            "freeleech_required": policy.get("freeleech_required"),
+            "required_promotions": policy.get("required_promotions") or [],
+            "forbidden_title_patterns": policy.get("forbidden_title_patterns") or [],
+            "forbidden_release_groups": policy.get("forbidden_release_groups") or [],
+        },
         "notes": _string_list(policy.get("notes")),
     }
     item["policy_coverage"] = build_site_policy_coverage(policy, roles=policy_roles)
@@ -1868,6 +1874,7 @@ def _site_policy_item_execution_readiness(item: dict[str, Any]) -> dict[str, Any
     automation = item.get("automation") if isinstance(item.get("automation"), dict) else {}
     qbit_limits = item.get("qbit_limits") if isinstance(item.get("qbit_limits"), dict) else {}
     seeding = item.get("seeding_requirements") if isinstance(item.get("seeding_requirements"), dict) else {}
+    transfer_rules = item.get("transfer_rules") if isinstance(item.get("transfer_rules"), dict) else {}
     blockers = _string_list(coverage.get("missing_fields")) + _string_list(coverage.get("disabled_automation"))
     role_status: dict[str, dict[str, Any]] = {}
     for role in roles:
@@ -1890,6 +1897,7 @@ def _site_policy_item_execution_readiness(item: dict[str, Any]) -> dict[str, Any
         "role_status": role_status,
         "qbit_limits": qbit_limits,
         "seeding_requirements": seeding,
+        "transfer_rules": transfer_rules,
     }
 
 
@@ -3986,6 +3994,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                     "automation",
                     "qbit_limits",
                     "seeding_requirements",
+                    "transfer_rules",
                     "manual_review_required",
                     "rule_review_fingerprint",
                     "policy_coverage",
