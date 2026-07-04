@@ -13084,12 +13084,53 @@ def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path)
     assert job["workflow_context"]["gates"]["source_resolved"] is True
     assert job["workflow_context"]["gates"]["duplicate_check"]["clear"] is True
     assert job["workflow_context"]["required_confirmations_missing"] == ["accept_rules=true", "confirm_upload=true"]
+    assert job["manual_retorrent_handoff"]["action"] == "collect_confirmations"
+    assert job["manual_retorrent_handoff"]["duplicate_clear"] is True
+    assert job["manual_retorrent_handoff"]["missing_confirmations"] == ["accept_rules=true", "confirm_upload=true"]
+    assert job["manual_retorrent_handoff"]["can_attempt_live"] is False
+    assert job["agent_decision"]["manual_retorrent_handoff"] == job["manual_retorrent_handoff"]
+    assert job["workflow_context"]["manual_retorrent_handoff"] == job["manual_retorrent_handoff"]
     assert job["agent_decision"]["workflow_context"]["gates"]["duplicate_check"]["status"] == "not_found"
     assert summary["source_reference"] == job["source_reference"]
     assert summary["workflow_context"] == job["workflow_context"]
+    assert summary["manual_retorrent_handoff"] == job["manual_retorrent_handoff"]
     assert captured_request["source_url"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
     assert captured_request["source"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
     assert job["command_argv"][:7] == ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to"]
+
+
+def test_source_url_retorrent_job_handoff_stops_on_duplicate(monkeypatch, tmp_path) -> None:
+    async def fake_retorrent(_request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["target duplicate exists."],
+            "next_actions": ["Do not upload."],
+            "duplicate_check": {"searched": True, "status": "exists", "exists": True, "count": 1, "dupes": [{"id": "999", "name": "Existing"}]},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_source_url_retorrent_job(
+        store,
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+        },
+    )
+
+    assert job["agent_decision"]["decision"] == "stop"
+    assert job["manual_retorrent_handoff"]["action"] == "stop_duplicate"
+    assert job["manual_retorrent_handoff"]["reason"] == "target_duplicate_exists"
+    assert job["manual_retorrent_handoff"]["duplicate_check"]["dupes"] == [{"id": "999", "name": "Existing"}]
+    assert job["manual_retorrent_handoff"]["duplicate_clear"] is False
+    assert job["manual_retorrent_handoff"]["can_attempt_live"] is False
+    assert "Do not upload" in job["manual_retorrent_handoff"]["next_actions"][0]
 
 
 class _NonClosingBytesIO(io.BytesIO):
@@ -13170,6 +13211,9 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
     assert payload["agent_decision"]["source_reference"] == payload["source_reference"]
     assert payload["workflow_context"]["gates"]["source_resolved"] is True
     assert payload["workflow_context"]["required_confirmations_missing"] == ["accept_rules=true", "confirm_upload=true"]
+    assert payload["manual_retorrent_handoff"]["action"] == "collect_confirmations"
+    assert payload["manual_retorrent_handoff"]["status_endpoint"] == f"/v1/jobs/{payload['job_id']}"
+    assert payload["manual_retorrent_handoff"]["summary_endpoint"] == f"/v1/jobs/{payload['job_id']}/summary"
     assert captured_request["source"] == request["source_url"]
     assert captured_request["source_url"] == request["source_url"]
 
@@ -13178,6 +13222,7 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
     assert job_status["job_id"] == payload["job_id"]
     assert job_status["source_reference"] == payload["source_reference"]
     assert job_status["workflow_context"] == payload["workflow_context"]
+    assert job_status["manual_retorrent_handoff"] == payload["manual_retorrent_handoff"]
     assert job_status["command_argv"][:7] == ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to"]
 
     unauthorized_status, unauthorized_body = _service_json_request(handler_class, "GET", "/v1/jobs?status=blocked&limit=10")
@@ -13191,6 +13236,7 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
     assert job_list["filters"] == {"status": "blocked", "kind": None}
     assert job_list["jobs"][0]["job_id"] == payload["job_id"]
     assert job_list["jobs"][0]["source_reference"] == payload["source_reference"]
+    assert job_list["jobs"][0]["manual_retorrent_handoff"]["action"] == "collect_confirmations"
     assert job_list["jobs"][0]["status_endpoint"] == f"/v1/jobs/{payload['job_id']}"
     assert job_list["jobs"][0]["summary_endpoint"] == f"/v1/jobs/{payload['job_id']}/summary"
     assert job_list["jobs"][0]["resume_endpoint"] == f"/v1/jobs/{payload['job_id']}/resume"
@@ -13996,6 +14042,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_limit_audit" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "qbit_limit_audit" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "qbit_limit_audit" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "confirm_upload" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "save_path" in tool_by_name["resume_job"]["input_schema"]["properties"]
@@ -14029,6 +14079,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "uploaded_qbit_upload_limit" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
     assert "qbit_plan" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "qbit_limit_audit" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "manual_retorrent_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -14128,6 +14179,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "qbit_plan" in summary_schema["properties"]
     assert "qbit_limit_audit" in summary_schema["properties"]
+    assert "manual_retorrent_handoff" in summary_schema["properties"]
     assert "resume_plan" in summary_schema["properties"]
     assert "resume_lineage" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
@@ -14138,6 +14190,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "interruption" in job_schema["properties"]
     assert "runtime" in job_schema["properties"]
     assert "qbit_limit_audit" in job_schema["properties"]
+    assert "manual_retorrent_handoff" in job_schema["properties"]
     assert "cancelled" in job_schema["properties"]["status"]["enum"]
     assert "cancellation" in job_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -14179,7 +14232,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     assert [step["tool"] for step in source_url_workflow["runbook"]] == ["readiness_bundle", "site_policies", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
     assert source_url_workflow["runbook"][0]["continue_when"] == "live_readiness.ready_for_manual_retorrent=true"
-    assert "duplicate_check.exists=true" in source_url_workflow["runbook"][2]["stop_when"]
+    assert "manual_retorrent_handoff.action=stop_duplicate" in source_url_workflow["runbook"][2]["stop_when"]
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
     assert manual_workflow["tool"] == "manual_retorrent_job"
     assert manual_workflow["runbook_ref"] == "source_url_retorrent"
@@ -14264,6 +14317,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "qbit_limit_audit" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "qbit_limit_audit" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "qbit_limit_audit" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "manual_retorrent_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "manual_retorrent_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+        assert "manual_retorrent_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "manual_retorrent_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "confirm_upload" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "save_path" in tools_by_name["resume_job"]["input_schema"]["properties"]
@@ -14293,6 +14350,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_submission" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_plan" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_limit_audit" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "manual_retorrent_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "runtime" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_endpoint" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
