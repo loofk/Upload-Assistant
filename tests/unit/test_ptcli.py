@@ -12739,6 +12739,68 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert parent["resume_plan"]["endpoint"] == f"/v1/jobs/{parent['job_id']}/resume"
 
 
+def test_job_store_resume_applies_allowlisted_overrides(monkeypatch, tmp_path) -> None:
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    parent = store.create(
+        "ptcli.test",
+        {"source_reference": {"tracker": "U2", "source_id": "60635"}, "target_trackers": ["MTEAM"]},
+        ["ptcli", "retorrent"],
+        lambda: {
+            "status": "blocked",
+            "next_command_argv": [
+                "python3",
+                "ptcli.py",
+                "pipeline",
+                "--from",
+                "U2",
+                "--source-id",
+                "60635",
+                "--to",
+                "MTEAM",
+                "--save-path",
+                "/old",
+                "--screenshot-file",
+                "/old/screen.png",
+                "--json",
+            ],
+        },
+    )
+
+    def fake_run_resume_command(argv, *, parent_job_id):
+        return {"status": "ok", "parent_job_id": parent_job_id, "command_argv": argv}
+
+    monkeypatch.setattr(ptcli_service, "_run_resume_command", fake_run_resume_command)
+
+    resume = store.resume(
+        parent["job_id"],
+        {
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+            "uploaded_qbit_upload_limit": "2MiB/s",
+            "screenshot_files": ["/tmp/1.png", "/tmp/2.png"],
+            "dangerous_shell": "nope",
+        },
+    )
+
+    argv = resume["command_argv"]
+    assert resume["status"] == "complete"
+    assert "--accept-rules" in argv
+    assert "--confirm-upload" in argv
+    assert argv[argv.index("--save-path") + 1] == "/downloads"
+    assert argv[argv.index("--uploaded-qbit-upload-limit") + 1] == "2MiB/s"
+    screenshot_indexes = [index for index, item in enumerate(argv) if item == "--screenshot-file"]
+    assert [argv[index + 1] for index in screenshot_indexes] == ["/tmp/1.png", "/tmp/2.png"]
+    assert "/old" not in argv
+    assert "/old/screen.png" not in argv
+    assert resume["request"]["original_next_command_argv"] == parent["next_command_argv"]
+    assert resume["request"]["next_command_argv"] == argv
+    assert resume["request"]["applied_overrides"]
+    assert {"key": "dangerous_shell", "reason": "override is not allowlisted for resume commands"} in resume["request"]["ignored_overrides"]
+    assert resume["resume_context"]["applied_overrides"] == resume["request"]["applied_overrides"]
+    assert resume["resume_context"]["ignored_overrides"] == resume["request"]["ignored_overrides"]
+
+
 def test_job_store_lists_recent_jobs_with_filters(tmp_path) -> None:
     store = ptcli_service.JobStore(tmp_path, run_inline=True)
     complete = store.create("ptcli.complete", {"source_reference": {"tracker": "CHD", "source_id": "1"}}, ["ptcli", "sites"], lambda: {"status": "ok"})
@@ -13045,6 +13107,37 @@ def test_http_cancel_job_endpoint_requires_auth_and_only_cancels_queued(tmp_path
     status, conflict = _service_json_request(handler_class, "POST", f"/v1/jobs/{running_id}/cancel", payload={"reason": "mistake"}, api_token="secret")
     assert status == 409
     assert "Only queued jobs can be cancelled" in conflict["message"]
+
+
+def test_http_resume_job_endpoint_accepts_allowlisted_overrides(monkeypatch, tmp_path) -> None:
+    def fake_run_resume_command(argv, *, parent_job_id):
+        return {"status": "ok", "parent_job_id": parent_job_id, "command_argv": argv}
+
+    monkeypatch.setattr(ptcli_service, "_run_resume_command", fake_run_resume_command)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    parent = store.create(
+        "ptcli.test",
+        {},
+        ["ptcli", "retorrent"],
+        lambda: {"status": "blocked", "next_command_argv": ["python3", "ptcli.py", "doctor", "--json"]},
+    )
+    handler_class = ptcli_service._handler_class("secret", store)
+
+    status, payload = _service_json_request(
+        handler_class,
+        "POST",
+        f"/v1/jobs/{parent['job_id']}/resume",
+        payload={"confirm_upload": True, "uploaded_save_path": "/downloads/Example"},
+        api_token="secret",
+    )
+
+    assert status == 202
+    assert payload["kind"] == "ptcli.resume"
+    assert payload["status"] == "complete"
+    assert "--confirm-upload" in payload["command_argv"]
+    assert payload["command_argv"][payload["command_argv"].index("--uploaded-save-path") + 1] == "/downloads/Example"
+    assert payload["request"]["resume_overrides"] == {"confirm_upload": True, "uploaded_save_path": "/downloads/Example"}
+    assert payload["resume_context"]["parent_job_id"] == parent["job_id"]
 
 
 def test_manual_retorrent_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
@@ -13760,6 +13853,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "qbit_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "confirm_upload" in tool_by_name["resume_job"]["input_schema"]["properties"]
+    assert "save_path" in tool_by_name["resume_job"]["input_schema"]["properties"]
+    assert "screenshot_files" in tool_by_name["resume_job"]["input_schema"]["properties"]
+    assert "uploaded_qbit_upload_limit" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "resume_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
@@ -13868,6 +13965,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/{job_id}/resume" in openapi["paths"]
     assert "/v1/jobs/{job_id}/cancel" in openapi["paths"]
     assert openapi["paths"]["/v1/jobs/retorrent"]["post"]["security"] == [{"bearerAuth": []}]
+    resume_schema = openapi["paths"]["/v1/jobs/{job_id}/resume"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert "confirm_upload" in resume_schema["properties"]
+    assert "save_path" in resume_schema["properties"]
+    assert "job_id" not in resume_schema["properties"]
     summary_schema = openapi["paths"]["/v1/jobs/{job_id}/summary"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "agent_decision" in summary_schema["properties"]
     assert "candidate_digest" in summary_schema["properties"]
@@ -14006,6 +14107,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "qbit_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "qbit_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "confirm_upload" in tools_by_name["resume_job"]["input_schema"]["properties"]
+        assert "save_path" in tools_by_name["resume_job"]["input_schema"]["properties"]
+        assert "screenshot_files" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "resume_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["resume_job"]["response_contract"]["required_fields"]

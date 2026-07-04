@@ -37,6 +37,47 @@ DAILY_CANDIDATE_SCHEDULE_ENV = "PTCLI_DAILY_CANDIDATE_SCHEDULES"
 JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 RESUME_COMMAND_ALLOWLIST = {"pipeline", "target-upload", "doctor", "summary-check", "retorrent"}
 JOB_STATUS_VALUES = ["queued", "running", "blocked", "failed", "complete", "cancelled"]
+RESUME_BOOLEAN_FLAG_OVERRIDES = {
+    "accept_rules": "--accept-rules",
+    "confirm_upload": "--confirm-upload",
+    "target_execute": "--target-execute",
+    "download_uploaded_torrent": "--download-uploaded-torrent",
+    "inject_uploaded_torrent": "--inject-uploaded-torrent",
+    "wait_uploaded_complete": "--wait-uploaded-complete",
+}
+RESUME_VALUE_FLAG_OVERRIDES = {
+    "path": "--path",
+    "content_path": "--path",
+    "save_path": "--save-path",
+    "source_torrent_file": "--source-torrent-file",
+    "package_dir": "--package-dir",
+    "target_torrent_file": "--target-torrent-file",
+    "uploaded_torrent_file": "--uploaded-torrent-file",
+    "uploaded_torrent_id": "--uploaded-torrent-id",
+    "uploaded_save_path": "--uploaded-save-path",
+    "qbit_category": "--qbit-category",
+    "qbit_tags": "--qbit-tags",
+    "qbit_upload_limit": "--qbit-upload-limit",
+    "qbit_download_limit": "--qbit-download-limit",
+    "uploaded_qbit_category": "--uploaded-qbit-category",
+    "uploaded_qbit_tags": "--uploaded-qbit-tags",
+    "uploaded_qbit_upload_limit": "--uploaded-qbit-upload-limit",
+    "uploaded_qbit_download_limit": "--uploaded-qbit-download-limit",
+    "target_output_dir": "--target-output-dir",
+    "target_torrent_output_dir": "--target-torrent-output-dir",
+    "uploaded_output_dir": "--uploaded-output-dir",
+    "summary_output_dir": "--summary-output-dir",
+    "metadata_file": "--metadata-file",
+    "ptgen_description_file": "--ptgen-description-file",
+    "mediainfo_file": "--mediainfo-file",
+    "bdinfo_file": "--bdinfo-file",
+    "image_host_file": "--image-host-file",
+    "screenshot_count": "--screenshot-count",
+}
+RESUME_REPEATABLE_FLAG_OVERRIDES = {
+    "screenshot_file": "--screenshot-file",
+    "screenshot_files": "--screenshot-file",
+}
 AGENT_MANIFEST_PATHS = {
     "/.well-known/ptcli-agent.json",
     "/v1/agent-manifest",
@@ -218,14 +259,20 @@ class JobStore:
             "cancellation": job.get("cancellation") if isinstance(job.get("cancellation"), dict) else None,
         }
 
-    def resume(self, job_id: str) -> dict[str, Any]:
+    def resume(self, job_id: str, request_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         parent = self._read(job_id)
         status = str(parent.get("status") or "")
         if status in {"queued", "running"}:
             raise ServiceError(f"Job {job_id} is still {status}; wait before resuming.", status=HTTPStatus.CONFLICT)
-        argv = _resume_argv_from_job(parent)
+        original_argv = _resume_argv_from_job(parent)
+        override_result = _apply_resume_overrides(original_argv, request_overrides or {})
+        argv = override_result["argv"]
         allowed, reason = _resume_command_allowed(argv)
         resume_context = _resume_context(parent, parent_job_id=job_id, argv=argv, allowed=allowed, reason=reason)
+        resume_context["original_next_command_argv"] = original_argv
+        resume_context["resume_overrides"] = override_result["provided"]
+        resume_context["applied_overrides"] = override_result["applied"]
+        resume_context["ignored_overrides"] = override_result["ignored"]
         resume_lineage = _resume_lineage(parent, parent_job_id=job_id, argv=argv, allowed=allowed, reason=reason)
         request = {
             "parent_job_id": job_id,
@@ -234,7 +281,11 @@ class JobStore:
             "parent_summary_file": _job_summary_file(parent),
             "parent_source_reference": _job_source_reference(parent),
             "parent_workflow_context": resume_lineage.get("parent_workflow_context"),
+            "original_next_command_argv": original_argv,
             "next_command_argv": argv,
+            "resume_overrides": override_result["provided"],
+            "applied_overrides": override_result["applied"],
+            "ignored_overrides": override_result["ignored"],
             "resume_allowed": allowed,
             "resume_blocker": reason,
             "parent_policy_coverage": _job_policy_coverage(parent),
@@ -467,7 +518,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 return
             if path.startswith("/v1/jobs/") and path.endswith("/resume"):
                 try:
-                    self._send_json(HTTPStatus.ACCEPTED, self._job_resume(path))
+                    self._send_json(HTTPStatus.ACCEPTED, self._job_resume(path, self._read_optional_json()))
                 except ServiceError as exc:
                     self._send_json(exc.status, {"status": "error", "message": str(exc)})
                 return
@@ -496,10 +547,10 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 return job_store.summary(parts[2])
             raise ServiceError("Job endpoint not found.", status=HTTPStatus.NOT_FOUND)
 
-        def _job_resume(self, path: str) -> dict[str, Any]:
+        def _job_resume(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
             parts = path.strip("/").split("/")
             if len(parts) == 4 and parts[:2] == ["v1", "jobs"] and parts[3] == "resume":
-                return job_store.resume(parts[2])
+                return job_store.resume(parts[2], payload)
             raise ServiceError("Job resume endpoint not found.", status=HTTPStatus.NOT_FOUND)
 
         def _job_cancel(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -3072,6 +3123,71 @@ def _resume_argv_from_job(job: dict[str, Any]) -> list[str] | None:
     return None
 
 
+def _apply_resume_overrides(argv: list[str] | None, overrides: dict[str, Any]) -> dict[str, Any]:
+    provided = {key: value for key, value in overrides.items() if key != "job_id"} if isinstance(overrides, dict) else {}
+    patched = list(argv or [])
+    applied: list[dict[str, Any]] = []
+    ignored: list[dict[str, Any]] = []
+    if not patched:
+        return {"argv": None, "provided": provided, "applied": applied, "ignored": [{"key": key, "reason": "no_resume_command"} for key in provided]}
+
+    for key, value in provided.items():
+        if key in RESUME_BOOLEAN_FLAG_OVERRIDES:
+            flag = RESUME_BOOLEAN_FLAG_OVERRIDES[key]
+            if _truthy(value):
+                patched = _argv_ensure_boolean_flag(patched, flag)
+                applied.append({"key": key, "flag": flag, "value": True})
+            else:
+                ignored.append({"key": key, "flag": flag, "reason": "boolean override must be true to add a live-action flag"})
+        elif key in RESUME_VALUE_FLAG_OVERRIDES:
+            flag = RESUME_VALUE_FLAG_OVERRIDES[key]
+            if value in (None, ""):
+                ignored.append({"key": key, "flag": flag, "reason": "empty value"})
+            else:
+                patched = _argv_set_value_flag(patched, flag, str(value))
+                applied.append({"key": key, "flag": flag, "value": str(value)})
+        elif key in RESUME_REPEATABLE_FLAG_OVERRIDES:
+            flag = RESUME_REPEATABLE_FLAG_OVERRIDES[key]
+            values = _list_value(value)
+            if not values:
+                ignored.append({"key": key, "flag": flag, "reason": "empty repeatable value"})
+            else:
+                patched = _argv_set_repeatable_flag(patched, flag, [str(item) for item in values])
+                applied.append({"key": key, "flag": flag, "value": [str(item) for item in values]})
+        else:
+            ignored.append({"key": key, "reason": "override is not allowlisted for resume commands"})
+    return {"argv": patched, "provided": provided, "applied": applied, "ignored": ignored}
+
+
+def _argv_ensure_boolean_flag(argv: list[str], flag: str) -> list[str]:
+    return argv if flag in argv else [*argv, flag]
+
+
+def _argv_set_value_flag(argv: list[str], flag: str, value: str) -> list[str]:
+    cleaned = _argv_without_flag(argv, flag, has_value=True)
+    return [*cleaned, flag, value]
+
+
+def _argv_set_repeatable_flag(argv: list[str], flag: str, values: list[str]) -> list[str]:
+    cleaned = _argv_without_flag(argv, flag, has_value=True)
+    for value in values:
+        cleaned.extend([flag, value])
+    return cleaned
+
+
+def _argv_without_flag(argv: list[str], flag: str, *, has_value: bool) -> list[str]:
+    result: list[str] = []
+    index = 0
+    while index < len(argv):
+        item = argv[index]
+        if item == flag:
+            index += 2 if has_value and index + 1 < len(argv) else 1
+            continue
+        result.append(item)
+        index += 1
+    return result
+
+
 def _argv_list(value: Any) -> list[str] | None:
     if not isinstance(value, list):
         return None
@@ -3609,6 +3725,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     job_id_schema = _job_id_tool_request_schema()
+    job_resume_schema = _job_resume_tool_request_schema()
     job_cancel_schema = _job_cancel_tool_request_schema()
     job_list_schema = _job_list_tool_request_schema()
     return [
@@ -3757,11 +3874,11 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "name": "resume_job",
             "method": "POST",
             "path": "/v1/jobs/{job_id}/resume",
-            "description": "Create a follow-up job from the allowlisted next_command_argv generated by a blocked or failed job.",
-            "input_schema": job_id_schema,
+            "description": "Create a follow-up job from the allowlisted next_command_argv generated by a blocked or failed job. Optional allowlisted overrides can add missing confirmations, paths, qBittorrent limits, or material files before the resume job is queued.",
+            "input_schema": job_resume_schema,
             "response_contract": _job_response_contract(),
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
-            "safety": {"mutates_state": True, "live_upload": "inherits_from_resume_command", "requires_confirmation": ["existing allowlisted next_command_argv"]},
+            "safety": {"mutates_state": True, "live_upload": "inherits_from_resume_command", "requires_confirmation": ["existing allowlisted next_command_argv", "unknown overrides are ignored"]},
         },
         {
             "name": "cancel_job",
@@ -4002,6 +4119,18 @@ def _job_id_tool_request_schema() -> dict[str, Any]:
         "required": ["job_id"],
         "properties": {"job_id": {"type": "string", "description": "32-character ptcli job id returned by a job creation endpoint."}},
     }
+
+
+def _job_resume_tool_request_schema() -> dict[str, Any]:
+    schema = json.loads(json.dumps(_job_id_tool_request_schema()))
+    properties = schema["properties"]
+    for key in RESUME_BOOLEAN_FLAG_OVERRIDES:
+        properties[key] = {"type": "boolean", "description": f"Optional resume override for {RESUME_BOOLEAN_FLAG_OVERRIDES[key]}; only true values are applied."}
+    for key in RESUME_VALUE_FLAG_OVERRIDES:
+        properties[key] = {"type": "string", "description": f"Optional resume override for {RESUME_VALUE_FLAG_OVERRIDES[key]}."}
+    properties["screenshot_file"] = {"type": "string", "description": "Optional single screenshot file override; use screenshot_files for multiple files."}
+    properties["screenshot_files"] = {"type": "array", "items": {"type": "string"}, "description": "Optional repeatable --screenshot-file override."}
+    return schema
 
 
 def _job_cancel_tool_request_schema() -> dict[str, Any]:
@@ -4249,7 +4378,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "step": "summary_or_resume",
                     "tool": "get_job_summary",
                     "read": ["summary", "evidence", "resume_plan", "resume_lineage", "qbit_plan", "candidate_submission"],
-                    "resume_with": "resume_job when resume_plan.runnable=true",
+                    "resume_with": "resume_job when resume_plan.allowed=true; pass only allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
                     "complete_when": "status=complete and uploaded torrent injection/seeding evidence is present",
                 },
             ],
@@ -4303,13 +4432,13 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "step": "inspect",
                     "tool": "get_job_status",
                     "read": ["resume_plan", "resume_state", "next_command_argv", "blockers", "next_actions"],
-                    "continue_when": "resume_plan.runnable=true",
-                    "stop_when": ["resume_plan.runnable=false", "next_command_argv not allowlisted"],
+                    "continue_when": "resume_plan.allowed=true",
+                    "stop_when": ["resume_plan.allowed=false", "next_command_argv not allowlisted"],
                 },
                 {
                     "step": "resume",
                     "tool": "resume_job",
-                    "read": ["job_id", "resume_lineage", "runtime.status_endpoint"],
+                    "read": ["job_id", "resume_lineage", "resume_context.applied_overrides", "runtime.status_endpoint"],
                     "then_follow": "source_url_retorrent.poll",
                 },
             ],
@@ -4364,6 +4493,9 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "description": "User-provided source tracker details/download URL. The service infers source_tracker and torrent id from this URL.",
         }
         source_url_properties["source"]["description"] = "Alias for source_url; source_url is preferred for this endpoint."
+    resume_request_schema = _job_resume_tool_request_schema()
+    resume_request_schema["required"] = []
+    resume_request_schema["properties"].pop("job_id", None)
     response_schema = {
         "type": "object",
         "properties": {
@@ -4809,6 +4941,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "operationId": "resumePtcliJob",
                     "security": token_security,
                     "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": resume_request_schema}}},
                     "responses": {"202": {"description": "Queued resume job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
