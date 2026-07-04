@@ -13567,6 +13567,12 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["candidate_submission"] == retorrent_job["request"]["candidate_submission"]
     assert retorrent_job["workflow_context"]["candidate_submission"] == retorrent_job["candidate_submission"]
     assert retorrent_job["agent_decision"]["candidate_submission"] == retorrent_job["candidate_submission"]
+    assert retorrent_job["candidate_submission_handoff"]["candidate_job_id"] == candidate_job["job_id"]
+    assert retorrent_job["candidate_submission_handoff"]["candidate_rank"] == 1
+    assert retorrent_job["candidate_submission_handoff"]["retorrent_job_id"] == retorrent_job["job_id"]
+    assert retorrent_job["candidate_submission_handoff"]["manual_retorrent_handoff"]["action"] == "configure_policy"
+    assert retorrent_job["workflow_context"]["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
+    assert retorrent_job["agent_decision"]["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
     assert retorrent_job["request"]["source_reference"]["tracker"] == "U2"
     assert retorrent_job["request"]["source_reference"]["source_id"] == "60635"
     assert retorrent_job["request"]["target_trackers"] == "MTEAM"
@@ -13578,8 +13584,10 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     summary = store.summary(retorrent_job["job_id"])
     listed = store.list({"kind": "ptcli.candidate_retorrent"})["jobs"][0]
     assert summary["candidate_submission"] == retorrent_job["candidate_submission"]
+    assert summary["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
     assert summary["workflow_context"]["candidate_submission"] == retorrent_job["candidate_submission"]
     assert listed["candidate_submission"] == retorrent_job["candidate_submission"]
+    assert listed["candidate_submission_handoff"]["retorrent_job_id"] == retorrent_job["job_id"]
 
 
 def test_submit_daily_candidate_job_rejects_blocked_candidate(monkeypatch, tmp_path) -> None:
@@ -13772,6 +13780,14 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["selector"] == {"rank": 1, "source_id": "60635"}
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["confirm_upload"] is True
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["save_path"] == "/downloads"
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["after_submit"]["read_fields"] == [
+        "candidate_submission_handoff",
+        "manual_retorrent_handoff",
+        "agent_decision",
+        "status_endpoint",
+        "summary_endpoint",
+    ]
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["after_submit"]["poll_with"] == "get_job_status"
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["identity_inherited_from_candidate"]["source_tracker"] == "U2"
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["identity_inherited_from_candidate"]["target_trackers"] == "MTEAM"
     assert payload["agent_decision"]["decision"] == "review_candidates"
@@ -14046,6 +14062,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "candidate_submission_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["required_fields"]
+    assert "candidate_submission_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "candidate_submission_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "confirm_upload" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "save_path" in tool_by_name["resume_job"]["input_schema"]["properties"]
@@ -14070,6 +14089,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "cancellation" in tool_by_name["cancel_job"]["response_contract"]["required_fields"]
     assert "cancellation" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "candidate_submission" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "candidate_submission_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "workflow_context" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -14184,6 +14204,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_lineage" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
     assert "candidate_submission" in summary_schema["properties"]
+    assert "candidate_submission_handoff" in summary_schema["properties"]
     assert "source_reference" in summary_schema["properties"]
     assert "workflow_context" in summary_schema["properties"]
     job_schema = openapi["paths"]["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -14191,6 +14212,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "runtime" in job_schema["properties"]
     assert "qbit_limit_audit" in job_schema["properties"]
     assert "manual_retorrent_handoff" in job_schema["properties"]
+    assert "candidate_submission_handoff" in job_schema["properties"]
     assert "cancelled" in job_schema["properties"]["status"]["enum"]
     assert "cancellation" in job_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -14321,6 +14343,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "manual_retorrent_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "candidate_submission_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["required_fields"]
+        assert "candidate_submission_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "candidate_submission_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "confirm_upload" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "save_path" in tools_by_name["resume_job"]["input_schema"]["properties"]
@@ -14348,6 +14373,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "interruption" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "cancellation" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "candidate_submission" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "candidate_submission_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_plan" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_limit_audit" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
