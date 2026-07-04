@@ -750,6 +750,8 @@ def create_daily_candidate_schedule_jobs(job_store: JobStore, request: dict[str,
     if not jobs and not blockers:
         blockers.append("No enabled daily candidate schedules were available to run.")
     schedule_digest = _daily_candidate_schedule_job_digest(jobs, skipped, blockers)
+    agent_decision = _daily_candidate_schedule_job_decision(schedule_digest, blockers)
+    notification_payload = _daily_candidate_schedule_notification_payload(schedule_digest, agent_decision)
     return {
         "kind": "ptcli.daily_candidate_schedule_jobs",
         "status": "ok" if jobs and not blockers else "partial" if jobs else "blocked",
@@ -759,7 +761,8 @@ def create_daily_candidate_schedule_jobs(job_store: JobStore, request: dict[str,
         "jobs": jobs,
         "skipped": skipped,
         "schedule_digest": schedule_digest,
-        "agent_decision": _daily_candidate_schedule_job_decision(schedule_digest, blockers),
+        "notification_payload": notification_payload,
+        "agent_decision": agent_decision,
         "blockers": blockers,
         "next_actions": _daily_candidate_schedule_run_next_actions(jobs, skipped, blockers),
     }
@@ -1724,6 +1727,60 @@ def _daily_candidate_schedule_push_payload(push_items: list[dict[str, Any]], ite
         "blockers": blockers,
         "next_actions": [recommended_action],
     }
+
+
+def _daily_candidate_schedule_notification_payload(schedule_digest: dict[str, Any], agent_decision: dict[str, Any]) -> dict[str, Any]:
+    push_payload = schedule_digest.get("push_payload") if isinstance(schedule_digest.get("push_payload"), dict) else {}
+    submission_handoff = schedule_digest.get("submission_handoff") if isinstance(schedule_digest.get("submission_handoff"), dict) else {}
+    top_item = push_payload.get("top_item") if isinstance(push_payload.get("top_item"), dict) else None
+    items = push_payload.get("items") if isinstance(push_payload.get("items"), list) else []
+    ready_items = [item for item in items if isinstance(item, dict) and item.get("can_submit") is True]
+    blocked_items = [item for item in items if isinstance(item, dict) and item.get("can_submit") is not True]
+    pending_count = int(schedule_digest.get("pending_job_count") or 0)
+    submit_items = submission_handoff.get("items") if isinstance(submission_handoff.get("items"), list) else []
+    submission_ready = bool(submission_handoff.get("ready"))
+    ready_count = len(ready_items) if ready_items else len(submit_items) if submission_ready else 0
+    return {
+        "kind": "ptcli.daily_candidate_notification_payload",
+        "channel": "daily_candidates",
+        "format": "text/plain",
+        "title": push_payload.get("title") or "Daily PT candidate schedule",
+        "summary": push_payload.get("summary") or "",
+        "message": push_payload.get("message") or "",
+        "status": "ready" if submission_ready and not schedule_digest.get("blockers") else "pending" if pending_count else "blocked" if schedule_digest.get("blockers") or blocked_items else "empty",
+        "ready": submission_ready and pending_count == 0 and not schedule_digest.get("blockers"),
+        "submission_ready": submission_ready,
+        "recommended_action": agent_decision.get("recommended_action") or push_payload.get("recommended_action"),
+        "decision": agent_decision.get("decision"),
+        "counts": {
+            "schedule_jobs": schedule_digest.get("job_count", 0),
+            "ready_jobs": schedule_digest.get("ready_job_count", 0),
+            "pending_jobs": pending_count,
+            "blocked_jobs": schedule_digest.get("blocked_job_count", 0),
+            "candidates": schedule_digest.get("push_count", 0),
+            "ready_candidates": ready_count,
+            "blocked_candidates": len(blocked_items),
+            "submit_requests": schedule_digest.get("submit_request_count", 0),
+        },
+        "top_item": top_item,
+        "items": items,
+        "submission_handoff": submission_handoff,
+        "submit_items": submit_items,
+        "top_submit_requests": schedule_digest.get("top_submit_requests", []),
+        "blockers": _string_list(schedule_digest.get("blockers")),
+        "next_actions": _daily_candidate_notification_next_actions(agent_decision, submission_handoff, pending_count),
+    }
+
+
+def _daily_candidate_notification_next_actions(agent_decision: dict[str, Any], submission_handoff: dict[str, Any], pending_count: int) -> list[str]:
+    actions = _string_list(agent_decision.get("recommended_action"))
+    if submission_handoff.get("ready"):
+        actions.append("Review notification_payload.submit_items, then POST an approved item request_template to submit_endpoint with explicit user confirmation.")
+    elif pending_count:
+        actions.append("Poll notification_payload.items[].status_endpoint until pending jobs finish, then refresh the daily schedule summary.")
+    elif not actions:
+        actions.append("Inspect notification_payload.items and rerun the daily schedule later.")
+    return list(dict.fromkeys(actions))
 
 
 def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict[str, Any], top_candidate: dict[str, Any], digest_item: dict[str, Any]) -> dict[str, Any]:
@@ -4250,10 +4307,11 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Create one daily-candidate discovery job per enabled schedule entry and return job_ids for polling. This only scans candidates and never uploads.",
             "input_schema": candidate_schedule_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "schedule_digest", "agent_decision", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "schedule_digest", "notification_payload", "agent_decision", "blockers", "next_actions"],
                 "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
                 "digest_fields": ["items", "push_items", "push_payload", "top_submit_requests", "submission_handoff", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
                 "push_payload_fields": ["title", "summary", "message", "format", "items", "top_item", "decision_summary", "submission_ready", "recommended_action"],
+                "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "submit_items", "submission_handoff", "next_actions"],
                 "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "items"],
             },
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
@@ -5084,6 +5142,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "jobs": {"type": "array", "items": {"type": "object"}},
             "skipped": {"type": "array", "items": {"type": "object"}},
             "schedule_digest": {"type": "object"},
+            "notification_payload": {"type": "object"},
             "agent_decision": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},

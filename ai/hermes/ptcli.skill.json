@@ -2317,6 +2317,7 @@
           "jobs",
           "skipped",
           "schedule_digest",
+          "notification_payload",
           "agent_decision",
           "blockers",
           "next_actions"
@@ -2351,6 +2352,20 @@
           "decision_summary",
           "submission_ready",
           "recommended_action"
+        ],
+        "notification_fields": [
+          "title",
+          "summary",
+          "message",
+          "status",
+          "ready",
+          "submission_ready",
+          "counts",
+          "top_item",
+          "items",
+          "submit_items",
+          "submission_handoff",
+          "next_actions"
         ],
         "submission_handoff_fields": [
           "ready",
