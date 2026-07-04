@@ -13493,8 +13493,19 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["push_items"][0]["status_endpoint"].startswith("/v1/jobs/")
     assert payload["schedule_digest"]["top_submit_requests"][0]["submit_tool"] == "source_url_retorrent_job"
     assert payload["schedule_digest"]["top_submit_requests"][0]["request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert payload["schedule_digest"]["submission_handoff"]["ready"] is True
+    assert payload["schedule_digest"]["submission_handoff"]["submit_tool"] == "submit_daily_candidate_job"
+    assert payload["schedule_digest"]["submission_handoff"]["submit_endpoint_template"] == "/v1/jobs/candidates/{candidate_job_id}/submit"
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["submit_endpoint"].startswith("/v1/jobs/candidates/")
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["selector"] == {"rank": 1, "source_id": "60635"}
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["confirm_upload"] is True
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["save_path"] == "/downloads"
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["identity_inherited_from_candidate"]["source_tracker"] == "U2"
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["identity_inherited_from_candidate"]["target_trackers"] == "MTEAM"
     assert payload["agent_decision"]["decision"] == "review_candidates"
     assert payload["agent_decision"]["can_submit_any"] is True
+    assert payload["agent_decision"]["submission_handoff_ready"] is True
+    assert payload["agent_decision"]["submit_tool"] == "submit_daily_candidate_job"
     assert payload["skipped"] == [{"name": "disabled", "blockers": ["schedule is disabled"]}]
     assert "Poll each jobs[].status_endpoint" in payload["next_actions"][0]
 
@@ -13548,6 +13559,7 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert payload["job_count"] == 1
     assert payload["schedule_digest"]["push_items"][0]["schedule_name"] == "chd-to-mteam"
     assert payload["schedule_digest"]["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["selector"] == {"rank": 1, "source_id": "12345"}
     assert payload["agent_decision"]["decision"] == "review_candidates"
     assert Path(payload["job_dir"]).is_dir()
     summary_path = Path(payload["summary_file"])
@@ -13555,6 +13567,7 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["kind"] == "ptcli.daily_schedule.summary"
     assert summary["schedule_digest"]["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
+    assert summary["schedule_digest"]["submission_handoff"]["items"][0]["submit_tool"] == "submit_daily_candidate_job"
     assert summary["summary_file"] == str(summary_path)
 
     check_code = main(["summary-check", "--summary-file", str(summary_path), "--json"])
@@ -13792,6 +13805,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "schedule_digest" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "top_submit_requests" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "submission_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "submit_endpoint_template" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
     assert tool_by_name["deployment_check"]["method"] == "GET"
     assert "qbit" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "mounts" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -13946,6 +13961,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "job_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "schedule_digest" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
         assert "top_submit_requests" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "submission_handoff" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "submit_endpoint_template" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "digest" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
         assert "candidate_digest" in tools_by_name["daily_candidates_job"]["response_contract"]["required_fields"]

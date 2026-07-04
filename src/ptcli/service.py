@@ -1140,10 +1140,12 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
     items: list[dict[str, Any]] = []
     push_items: list[dict[str, Any]] = []
     top_submit_requests: list[dict[str, Any]] = []
+    submission_items: list[dict[str, Any]] = []
     for job in jobs:
         digest = job.get("candidate_digest") if isinstance(job.get("candidate_digest"), dict) else {}
         decision = job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else {}
         request = job.get("job_request") if isinstance(job.get("job_request"), dict) else {}
+        top_candidate = digest.get("top_candidate") if isinstance(digest.get("top_candidate"), dict) else {}
         top_submit_request = digest.get("top_submit_request") if isinstance(digest.get("top_submit_request"), dict) else None
         item = {
             "schedule_name": job.get("schedule_name"),
@@ -1156,7 +1158,7 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
             "summary_endpoint": job.get("summary_endpoint"),
             "recommendation": digest.get("recommendation"),
             "ready_count": int(digest.get("ready_count") or decision.get("ready_count") or 0),
-            "top_candidate": digest.get("top_candidate"),
+            "top_candidate": top_candidate or None,
             "top_submit_request": top_submit_request,
             "top_submit_job_endpoint": digest.get("top_submit_job_endpoint"),
             "top_submit_tool": digest.get("top_submit_tool"),
@@ -1191,6 +1193,12 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
                     "missing_confirmations": item["missing_confirmations"],
                 }
             )
+            submission_source = {
+                **(digest_push_items[0] if digest_push_items and isinstance(digest_push_items[0], dict) else {}),
+                **top_candidate,
+            }
+            submission_items.append(_daily_candidate_schedule_submission_item(job, request, submission_source, item))
+    submission_handoff = _daily_candidate_schedule_submission_handoff(submission_items, blockers)
     return {
         "kind": "ptcli.daily_candidate_schedule_digest",
         "job_count": len(jobs),
@@ -1203,7 +1211,74 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
         "items": items,
         "push_items": push_items,
         "top_submit_requests": top_submit_requests,
+        "submission_handoff": submission_handoff,
         "skipped": skipped,
+        "blockers": blockers,
+    }
+
+
+def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict[str, Any], top_candidate: dict[str, Any], digest_item: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(job.get("job_id") or "")
+    selector = {
+        "rank": top_candidate.get("rank"),
+        "source_id": top_candidate.get("source_id"),
+    }
+    return {
+        "schedule_name": job.get("schedule_name"),
+        "candidate_job_id": job_id,
+        "submit_tool": "submit_daily_candidate_job",
+        "submit_endpoint": f"/v1/jobs/candidates/{job_id}/submit",
+        "method": "POST",
+        "selector": {key: value for key, value in selector.items() if value not in {None, ""}},
+        "request_template": {
+            **({key: value for key, value in selector.items() if value not in {None, ""}}),
+            "confirm_upload": True,
+            "save_path": "/downloads",
+            "overrides": {
+                "uploaded_qbit_category": request.get("target_trackers") or request.get("target"),
+                "uploaded_qbit_tags": "retorrent",
+            },
+        },
+        "identity_inherited_from_candidate": {
+            "source_tracker": digest_item.get("source_tracker"),
+            "target_trackers": digest_item.get("target_trackers"),
+            "source_id": top_candidate.get("source_id"),
+            "title": top_candidate.get("title"),
+        },
+        "required_overrides": ["confirm_upload=true", "save_path or path"],
+        "allowed_overrides": [
+            "confirm_upload",
+            "path",
+            "save_path",
+            "source_torrent_file",
+            "target_torrent_file",
+            "uploaded_torrent_file",
+            "qbit_category",
+            "qbit_tags",
+            "qbit_upload_limit",
+            "qbit_download_limit",
+            "uploaded_qbit_category",
+            "uploaded_qbit_tags",
+            "uploaded_qbit_upload_limit",
+            "uploaded_qbit_download_limit",
+            "metadata/imdb/tmdb/douban/material overrides",
+        ],
+        "missing_confirmations": _string_list(digest_item.get("missing_confirmations")),
+        "status_endpoint": job.get("status_endpoint"),
+        "summary_endpoint": job.get("summary_endpoint"),
+    }
+
+
+def _daily_candidate_schedule_submission_handoff(submission_items: list[dict[str, Any]], blockers: list[str]) -> dict[str, Any]:
+    return {
+        "kind": "ptcli.daily_candidate_submission_handoff",
+        "ready": bool(submission_items) and not blockers,
+        "submit_count": len(submission_items),
+        "submit_tool": "submit_daily_candidate_job",
+        "submit_endpoint_template": "/v1/jobs/candidates/{candidate_job_id}/submit",
+        "preferred_flow": "Poll daily candidate jobs until complete, review candidate rules, then submit via submit_daily_candidate_job so source/target identity is inherited from the candidate job.",
+        "required_overrides": ["confirm_upload=true", "save_path or path"],
+        "items": submission_items,
         "blockers": blockers,
     }
 
@@ -1214,7 +1289,7 @@ def _daily_candidate_schedule_job_decision(schedule_digest: dict[str, Any], bloc
         recommended_action = "Poll schedule_digest.items[].status_endpoint until each daily candidate job completes, then read schedule_digest.push_items."
     elif schedule_digest.get("submit_request_count"):
         decision = "review_candidates"
-        recommended_action = "Review schedule_digest.top_submit_requests, add confirm_upload=true plus save_path or path, then submit approved requests to source_url_retorrent_job."
+        recommended_action = "Review schedule_digest.submission_handoff.items, add confirm_upload=true plus save_path or path, then POST approved items to submit_daily_candidate_job."
     elif blockers or schedule_digest.get("blocked_job_count"):
         decision = "blocked"
         recommended_action = "Resolve schedule_digest.blockers and per-item blockers before rerunning the schedule job."
@@ -1230,6 +1305,8 @@ def _daily_candidate_schedule_job_decision(schedule_digest: dict[str, Any], bloc
         "job_count": schedule_digest.get("job_count", 0),
         "ready_job_count": schedule_digest.get("ready_job_count", 0),
         "submit_request_count": schedule_digest.get("submit_request_count", 0),
+        "submission_handoff_ready": bool((schedule_digest.get("submission_handoff") or {}).get("ready")) if isinstance(schedule_digest.get("submission_handoff"), dict) else False,
+        "submit_tool": "submit_daily_candidate_job" if schedule_digest.get("submit_request_count") else None,
         "push_count": schedule_digest.get("push_count", 0),
         "blocker_count": len(blockers),
     }
@@ -1239,7 +1316,7 @@ def _daily_candidate_schedule_run_next_actions(jobs: list[dict[str, Any]], skipp
     if not jobs:
         return ["Fix schedule blockers, then POST schedules to /v1/jobs/candidates/daily/schedule again."]
     actions = ["Poll each jobs[].status_endpoint until complete, then read candidate_digest and agent_decision from the job status or summary."]
-    actions.append("If agent_decision.decision is submit_candidate_when_confirmed, review rules and submit candidate_digest.top_submit_request to source_url_retorrent_job with confirm_upload=true and a save_path or path.")
+    actions.append("If schedule_digest.submission_handoff.ready is true, review rules and POST an approved handoff item to /v1/jobs/candidates/{candidate_job_id}/submit with confirm_upload=true and a save_path or path.")
     if skipped:
         actions.append("Inspect skipped schedules before expecting candidates from every configured source/target pair.")
     if blockers:
@@ -3155,7 +3232,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "schedule_digest", "agent_decision", "blockers", "next_actions"],
                 "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
-                "digest_fields": ["items", "push_items", "top_submit_requests", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
+                "digest_fields": ["items", "push_items", "top_submit_requests", "submission_handoff", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
+                "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "items"],
             },
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},

@@ -2031,10 +2031,18 @@
           "items",
           "push_items",
           "top_submit_requests",
+          "submission_handoff",
           "ready_job_count",
           "submit_request_count",
           "pending_job_count",
           "blocked_job_count"
+        ],
+        "submission_handoff_fields": [
+          "ready",
+          "submit_tool",
+          "submit_endpoint_template",
+          "required_overrides",
+          "items"
         ]
       },
       "workflow_hints": {
