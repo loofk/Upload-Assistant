@@ -203,6 +203,7 @@ class JobStore:
             "candidate_digest": _candidate_digest_from_payload(summary_payload) or _candidate_digest_from_payload(job.get("result")),
             "policy_coverage": _job_policy_coverage(job),
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
+            "qbit_plan": _job_qbit_plan(job),
             "runtime": _job_runtime(job),
             "resume_plan": _job_resume_plan(job),
             "resume_lineage": _job_resume_lineage(job),
@@ -1513,8 +1514,12 @@ def _normalized_request(request: dict[str, Any], source: dict[str, Any], target_
         "config": request.get("config"),
         "path": request.get("path") or request.get("content_path"),
         "save_path": request.get("save_path"),
+        "qbit_category": request.get("qbit_category"),
+        "qbit_tags": request.get("qbit_tags"),
         "qbit_upload_limit": request.get("qbit_upload_limit"),
         "qbit_download_limit": request.get("qbit_download_limit"),
+        "uploaded_qbit_category": request.get("uploaded_qbit_category"),
+        "uploaded_qbit_tags": request.get("uploaded_qbit_tags"),
         "uploaded_qbit_upload_limit": request.get("uploaded_qbit_upload_limit"),
         "uploaded_qbit_download_limit": request.get("uploaded_qbit_download_limit"),
         "policy_qbit_defaults": request.get("policy_qbit_defaults"),
@@ -1989,6 +1994,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "source_reference": _job_source_reference(job),
         "target_trackers": (job.get("request") or {}).get("target_trackers") if isinstance(job.get("request"), dict) else None,
         "duplicate_check": _job_duplicate_check(job),
+        "qbit_plan": _job_qbit_plan(job),
         "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
         "resume_plan": _job_resume_plan(job),
         "resume_lineage": _job_resume_lineage(job),
@@ -2035,6 +2041,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "candidate_digest": _candidate_digest_from_payload(job.get("result")),
         "policy_coverage": _job_policy_coverage(job),
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
+        "qbit_plan": _job_qbit_plan(job),
         "resume_plan": _job_resume_plan(job),
         "resume_lineage": _job_resume_lineage(job),
         "resume_context": _job_resume_context(job),
@@ -2061,6 +2068,43 @@ def _job_policy_qbit_defaults(job: dict[str, Any]) -> dict[str, Any] | None:
     request = job.get("request")
     if isinstance(request, dict) and isinstance(request.get("policy_qbit_defaults"), dict):
         return request["policy_qbit_defaults"]
+    return None
+
+
+def _job_qbit_plan(job: dict[str, Any]) -> dict[str, Any] | None:
+    request = job.get("request")
+    if not isinstance(request, dict):
+        return None
+    defaults = request.get("policy_qbit_defaults") if isinstance(request.get("policy_qbit_defaults"), dict) else {}
+    sources = defaults.get("sources") if isinstance(defaults.get("sources"), dict) else {}
+    overrides = defaults.get("request_overrides") if isinstance(defaults.get("request_overrides"), dict) else {}
+    return {
+        "client": request.get("client") or "default",
+        "source": {
+            "category": request.get("qbit_category"),
+            "tags": request.get("qbit_tags"),
+            "upload_limit": request.get("qbit_upload_limit"),
+            "download_limit": request.get("qbit_download_limit"),
+            "upload_limit_source": _qbit_plan_value_source("qbit_upload_limit", sources, overrides),
+            "download_limit_source": _qbit_plan_value_source("qbit_download_limit", sources, overrides),
+        },
+        "uploaded": {
+            "category": request.get("uploaded_qbit_category"),
+            "tags": request.get("uploaded_qbit_tags"),
+            "upload_limit": request.get("uploaded_qbit_upload_limit"),
+            "download_limit": request.get("uploaded_qbit_download_limit"),
+            "upload_limit_source": _qbit_plan_value_source("uploaded_qbit_upload_limit", sources, overrides),
+            "download_limit_source": _qbit_plan_value_source("uploaded_qbit_download_limit", sources, overrides),
+        },
+        "policy_defaults": defaults or None,
+    }
+
+
+def _qbit_plan_value_source(key: str, sources: dict[str, Any], overrides: dict[str, Any]) -> str | None:
+    if key in overrides:
+        return "request"
+    if key in sources:
+        return str(sources[key])
     return None
 
 
@@ -2187,6 +2231,7 @@ def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = 
         "required_confirmations_missing": missing_confirmations,
         "policy_coverage": policy_coverage,
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
+        "qbit_plan": _job_qbit_plan(job),
         "resume_plan": resume_plan,
         "resume_state": resume_state,
         "resume_context": _job_resume_context(job),
@@ -2348,6 +2393,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     missing_confirmations = _missing_live_confirmations(request)
     policy_coverage = _job_policy_coverage(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     policy_qbit_defaults = _job_policy_qbit_defaults(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
+    qbit_plan = _job_qbit_plan(job) if policy_qbit_defaults is not None else None
     policy_coverage_ready = policy_coverage.get("ready") if isinstance(policy_coverage, dict) and isinstance(policy_coverage.get("ready"), bool) else None
     policy_coverage_incomplete = policy_coverage_ready is False
     duplicate_exists = duplicate_check.get("exists") is True
@@ -2404,6 +2450,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "missing_confirmations": missing_confirmations,
         "policy_coverage": policy_coverage,
         "policy_qbit_defaults": policy_qbit_defaults,
+        "qbit_plan": qbit_plan,
         "policy_coverage_ready": policy_coverage_ready,
         "runtime": _job_runtime(job),
         "cancellation": job.get("cancellation") if isinstance(job.get("cancellation"), dict) else None,
@@ -3137,7 +3184,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "runtime", "resume_plan", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "runtime", "resume_plan", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -3399,12 +3446,12 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "resume_plan", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
-        "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
+        "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
     }
 
 
@@ -3425,7 +3472,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "source_reference", "duplicate_check", "qbit_plan", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -3663,6 +3710,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_decision": {"type": ["object", "null"]},
             "candidate_digest": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
+            "qbit_plan": {"type": ["object", "null"]},
             "resume_plan": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
@@ -3686,6 +3734,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "candidate_digest": {"type": ["object", "null"]},
             "policy_coverage": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
+            "qbit_plan": {"type": ["object", "null"]},
             "runtime": {"type": "object"},
             "resume_plan": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},

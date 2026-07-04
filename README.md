@@ -55,7 +55,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 - `/v1/jobs/{job_id}/cancel` 只允许取消仍处于 `queued` 的任务；`running` 任务会返回 409，不会强行中断 live tracker 或 qBittorrent 操作。
 - `ptcli serve` 启动时会把上次进程遗留的 `queued` / `running` job 标记为 `blocked` 并写入 `interruption`，避免容器重启后 agent 永久轮询；如存在 allowlisted `resume_state.next_command_argv`，`resume_plan` 会继续给出可审计续跑入口。
 - 转种 job 状态和 summary 也会暴露 `policy_coverage`；当 `accept_rules` / `confirm_upload` 已齐但源站或目标站缺少 fingerprint、限速或做种要求时，`agent_decision.decision=configure_policy`，避免 agent 直接进入 live 上传。
-- retorrent/manual job 会在未显式传入限速时，从 `PTCLI.SITE_POLICIES` 自动补齐 `qbit_download_limit`、`qbit_upload_limit`、`uploaded_qbit_upload_limit`、`uploaded_qbit_download_limit`；job 状态、summary 和 `agent_decision.policy_qbit_defaults` 会记录哪些值来自站点策略、哪些值由请求覆盖，resume job 的 `resume_context.inherited_policy` 也会保留父任务的策略上下文。
+- retorrent/manual job 会在未显式传入限速时，从 `PTCLI.SITE_POLICIES` 自动补齐 `qbit_download_limit`、`qbit_upload_limit`、`uploaded_qbit_upload_limit`、`uploaded_qbit_download_limit`；job 状态、summary 和 `agent_decision.policy_qbit_defaults` 会记录哪些值来自站点策略、哪些值由请求覆盖，`qbit_plan` 会汇总 source/uploaded 两侧最终的分类、标签、上传/下载限速和来源，resume job 的 `resume_context.inherited_policy` 也会保留父任务的策略上下文。
 - `pipeline --write-summary` 会在 `ptcli-run-summary.json` 顶层写入 `flow_check`，并在 `summary.flow` 中保留源站/目标站适配器和凭据要求。
 - 带执行动作的命令未闭环时返回 `status: blocked`、顶层 blockers 和非 0 退出码。
 - `--write-summary` 会写出带 `automation_handoff` 的 summary JSON，并在本次命令的 JSON 返回中同步给出该字段；其中 `resume_state.next_stage` / `resume_state.next_command` 可供 agent 或脚本直接续跑，`automation_handoff` 则给出检查和执行续跑的 `summary-check` command/argv。

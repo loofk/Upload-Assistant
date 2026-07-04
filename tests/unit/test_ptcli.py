@@ -12822,6 +12822,12 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
         "qbit_download_limit": 20 * 1024 * 1024,
         "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
     }
+    assert job["qbit_plan"]["source"]["download_limit"] == 20 * 1024 * 1024
+    assert job["qbit_plan"]["source"]["download_limit_source"] == "site_policy:U2"
+    assert job["qbit_plan"]["uploaded"]["category"] == "MTEAM"
+    assert job["qbit_plan"]["uploaded"]["tags"] == "retorrent"
+    assert job["qbit_plan"]["uploaded"]["upload_limit"] == 2 * 1024 * 1024
+    assert job["qbit_plan"]["uploaded"]["upload_limit_source"] == "site_policy:MTEAM"
     assert job["request"]["qbit_download_limit"] == 20 * 1024 * 1024
     assert job["request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert job["request"]["policy_qbit_defaults"]["applied"] == {
@@ -12833,8 +12839,11 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["agent_decision"]["missing_confirmations"] == []
     assert job["agent_decision"]["policy_coverage_ready"] is True
     assert job["agent_decision"]["policy_qbit_defaults"]["applied"] == job["policy_qbit_defaults"]["applied"]
+    assert job["agent_decision"]["qbit_plan"] == job["qbit_plan"]
+    assert job["workflow_context"]["qbit_plan"] == job["qbit_plan"]
     summary = store.summary(job["job_id"])
     assert summary["policy_qbit_defaults"]["applied"] == job["policy_qbit_defaults"]["applied"]
+    assert summary["qbit_plan"] == job["qbit_plan"]
     assert captured_request["execute"] is True
     assert captured_request["execute_if_no_duplicate"] is True
     assert captured_request["qbit_download_limit"] == 20 * 1024 * 1024
@@ -13734,6 +13743,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_coverage" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "qbit_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "qbit_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "qbit_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -13759,7 +13771,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "workflow_context" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "workflow_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["request_fields"]
+    assert "qbit_plan" in tool_by_name["retorrent_job"]["response_contract"]["request_fields"]
     assert "uploaded_qbit_upload_limit" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
+    assert "qbit_plan" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -13837,6 +13851,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     site_policy_schema = openapi["paths"]["/v1/site-policies"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_gap_summary" in site_policy_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
+    assert "qbit_plan" in summary_schema["properties"]
     assert "resume_plan" in summary_schema["properties"]
     assert "resume_lineage" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
@@ -13938,6 +13953,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_coverage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "policy_qbit_defaults" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "policy_qbit_defaults" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "qbit_plan" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "qbit_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "qbit_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -13962,6 +13980,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "interruption" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "cancellation" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "candidate_submission" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "qbit_plan" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "runtime" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_endpoint" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]

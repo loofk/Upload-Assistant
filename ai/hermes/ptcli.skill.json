@@ -514,6 +514,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "resume_plan",
           "resume_lineage",
           "resume_context",
@@ -554,10 +555,15 @@
         "request_fields": [
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "qbit_upload_limit",
           "qbit_download_limit",
           "uploaded_qbit_upload_limit",
-          "uploaded_qbit_download_limit"
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
         ]
       },
       "workflow_hints": {
@@ -709,6 +715,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "resume_plan",
           "resume_lineage",
           "resume_context",
@@ -749,10 +756,15 @@
         "request_fields": [
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "qbit_upload_limit",
           "qbit_download_limit",
           "uploaded_qbit_upload_limit",
-          "uploaded_qbit_download_limit"
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
         ]
       },
       "workflow_hints": {
@@ -914,6 +926,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "resume_plan",
           "resume_lineage",
           "resume_context",
@@ -954,10 +967,15 @@
         "request_fields": [
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "qbit_upload_limit",
           "qbit_download_limit",
           "uploaded_qbit_upload_limit",
-          "uploaded_qbit_download_limit"
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
         ]
       },
       "workflow_hints": {
@@ -1123,6 +1141,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "resume_plan",
           "resume_lineage",
           "resume_context",
@@ -1163,10 +1182,15 @@
         "request_fields": [
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "qbit_upload_limit",
           "qbit_download_limit",
           "uploaded_qbit_upload_limit",
-          "uploaded_qbit_download_limit"
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
         ]
       },
       "workflow_hints": {
@@ -1387,6 +1411,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "resume_plan",
           "resume_lineage",
           "resume_context",
@@ -1427,10 +1452,15 @@
         "request_fields": [
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "qbit_upload_limit",
           "qbit_download_limit",
           "uploaded_qbit_upload_limit",
-          "uploaded_qbit_download_limit"
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
         ],
         "result_fields": [
           "ranking",
@@ -1744,6 +1774,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "resume_plan",
           "resume_lineage",
           "resume_context",
@@ -1784,10 +1815,15 @@
         "request_fields": [
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "qbit_upload_limit",
           "qbit_download_limit",
           "uploaded_qbit_upload_limit",
-          "uploaded_qbit_download_limit"
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
         ]
       },
       "workflow_hints": {
@@ -2068,6 +2104,7 @@
           "candidate_submission",
           "source_reference",
           "duplicate_check",
+          "qbit_plan",
           "agent_decision",
           "resume_plan",
           "resume_lineage",
@@ -2131,6 +2168,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "resume_plan",
           "resume_lineage",
           "resume_context",
@@ -2171,10 +2209,15 @@
         "request_fields": [
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "qbit_upload_limit",
           "qbit_download_limit",
           "uploaded_qbit_upload_limit",
-          "uploaded_qbit_download_limit"
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
         ]
       },
       "safety": {
@@ -2212,6 +2255,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "runtime",
           "resume_plan",
           "resume_lineage",
@@ -2267,6 +2311,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "resume_plan",
           "resume_lineage",
           "resume_context",
@@ -2307,10 +2352,15 @@
         "request_fields": [
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "qbit_upload_limit",
           "qbit_download_limit",
           "uploaded_qbit_upload_limit",
-          "uploaded_qbit_download_limit"
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
         ]
       },
       "workflow_hints": {
@@ -2366,6 +2416,7 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "resume_plan",
           "resume_lineage",
           "resume_context",
@@ -2406,10 +2457,15 @@
         "request_fields": [
           "policy_coverage",
           "policy_qbit_defaults",
+          "qbit_plan",
           "qbit_upload_limit",
           "qbit_download_limit",
           "uploaded_qbit_upload_limit",
-          "uploaded_qbit_download_limit"
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
         ]
       },
       "safety": {
