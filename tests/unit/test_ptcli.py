@@ -13814,8 +13814,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "docker_compose" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_summary" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "agent_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "ready_for_daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "docker_compose_daily_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "manual_retorrent" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
     assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
@@ -13895,6 +13897,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidates" in deployment_schema["properties"]
     assert "docker_compose" in deployment_schema["properties"]
     assert "agent_summary" in deployment_schema["properties"]
+    assert "agent_handoff" in deployment_schema["properties"]
 
 
 def test_agent_manifest_exposes_ai_safe_workflows() -> None:
@@ -13939,8 +13942,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "docker_compose" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_summary" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "agent_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "ready_for_daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "docker_compose_daily_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "manual_retorrent" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -14083,6 +14088,16 @@ services:
     assert payload["agent_summary"]["ready_for_daily_candidates"] is True
     assert payload["agent_summary"]["docker_compose_daily_ready"] is True
     assert payload["agent_summary"]["daily_candidate_schedule_count"] == 1
+    assert payload["agent_handoff"]["ready"] is True
+    assert payload["agent_handoff"]["recommended_first_step"] == "site_policies"
+    assert payload["agent_handoff"]["manual_retorrent"]["ready"] is True
+    assert payload["agent_handoff"]["manual_retorrent"]["tool"] == "source_url_retorrent_job"
+    assert payload["agent_handoff"]["manual_retorrent"]["minimum_request"]["target"] == "MTEAM"
+    assert payload["agent_handoff"]["manual_retorrent"]["minimum_request"]["save_path"] == str(downloads_dir)
+    assert payload["agent_handoff"]["daily_candidates"]["ready"] is True
+    assert payload["agent_handoff"]["daily_candidates"]["tool"] == "daily_candidates_schedule_job"
+    assert payload["agent_handoff"]["daily_candidates"]["configured_schedule_count"] == 1
+    assert payload["agent_handoff"]["safety"]["live_upload_requires"] == ["accept_rules=true", "confirm_upload=true", "non-duplicate target", "ready site policy gate"]
     assert payload["qbit"]["configured"] is True
     assert payload["qbit"]["qbit_url"] == "http://host.docker.internal"
     assert payload["connectivity_checked"] is False
@@ -14103,6 +14118,12 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert payload["daily_candidates"]["configured"] is False
     assert payload["agent_summary"]["ready_for_ai"] is False
     assert payload["agent_summary"]["missing_mounts"]
+    assert payload["agent_handoff"]["ready"] is False
+    assert payload["agent_handoff"]["recommended_first_step"] == "fix_deployment"
+    assert payload["agent_handoff"]["manual_retorrent"]["ready"] is False
+    assert payload["agent_handoff"]["manual_retorrent"]["blocked_by"]
+    assert payload["agent_handoff"]["daily_candidates"]["ready"] is False
+    assert any("No daily candidate schedules configured" in blocker for blocker in payload["agent_handoff"]["daily_candidates"]["blocked_by"])
     assert any("config file is missing" in blocker for blocker in payload["blockers"])
     assert any("Mount or create data/config.py" in action for action in payload["next_actions"])
 

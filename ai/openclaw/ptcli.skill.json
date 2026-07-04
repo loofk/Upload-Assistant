@@ -2563,7 +2563,8 @@
           "qbit",
           "daily_candidates",
           "docker_compose",
-          "agent_summary"
+          "agent_summary",
+          "agent_handoff"
         ],
         "status_values": [
           "ok",
@@ -2577,6 +2578,16 @@
           "qbit_configured",
           "daily_candidates_configured",
           "docker_compose_daily_ready"
+        ],
+        "agent_handoff_fields": [
+          "ready",
+          "recommended_first_step",
+          "manual_retorrent",
+          "daily_candidates",
+          "qbit",
+          "docker_compose",
+          "safety",
+          "next_tools"
         ]
       },
       "safety": {

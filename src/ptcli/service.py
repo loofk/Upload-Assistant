@@ -2842,6 +2842,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "compose_file": str(compose_path),
     }
     mounts = _deployment_mount_summary(checks)
+    agent_summary = _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan, docker_compose)
     return {
         "kind": "ptcli.deployment_check",
         "status": "ok" if ready else "blocked",
@@ -2857,7 +2858,8 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "qbit": qbit,
         "daily_candidates": daily_candidate_plan,
         "docker_compose": docker_compose,
-        "agent_summary": _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan, docker_compose),
+        "agent_summary": agent_summary,
+        "agent_handoff": _deployment_agent_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings),
         "connectivity_checked": False,
     }
 
@@ -3064,6 +3066,72 @@ def _deployment_agent_summary(
         "qbit_client": qbit.get("client"),
         "daily_candidate_schedule_count": daily_candidate_plan.get("count", 0),
     }
+
+
+def _deployment_agent_handoff(
+    agent_summary: dict[str, Any],
+    paths: dict[str, str],
+    qbit: dict[str, Any],
+    daily_candidate_plan: dict[str, Any],
+    docker_compose: dict[str, Any],
+    blockers: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    manual_ready = bool(agent_summary.get("ready_for_manual_retorrent"))
+    daily_ready = bool(agent_summary.get("ready_for_daily_candidates"))
+    return {
+        "kind": "ptcli.deployment_agent_handoff",
+        "ready": bool(agent_summary.get("ready_for_ai")),
+        "recommended_first_step": "site_policies" if agent_summary.get("ready_for_ai") else "fix_deployment",
+        "manual_retorrent": {
+            "ready": manual_ready,
+            "tool": "source_url_retorrent_job",
+            "endpoint": "/v1/jobs/retorrent/from-url",
+            "minimum_request": {
+                "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                "target": "MTEAM",
+                "accept_rules": True,
+                "confirm_upload": True,
+                "save_path": paths.get("downloads_path") or "/downloads",
+            },
+            "required_confirmations": ["accept_rules=true", "confirm_upload=true", "rules reviewed for source and target"],
+            "blocked_by": [] if manual_ready else _deployment_handoff_blockers(agent_summary, blockers, require_daily=False),
+        },
+        "daily_candidates": {
+            "ready": daily_ready,
+            "tool": "daily_candidates_schedule_job",
+            "endpoint": "/v1/jobs/candidates/daily/schedule",
+            "configured_schedule_count": daily_candidate_plan.get("count", 0),
+            "submit_handoff": "Read schedule_digest.submission_handoff, then POST approved items to /v1/jobs/candidates/{candidate_job_id}/submit.",
+            "required_confirmations": ["accept_rules=true in schedule", "confirm_upload=true when submitting a selected candidate", "save_path or path when submitting"],
+            "blocked_by": [] if daily_ready else _deployment_handoff_blockers(agent_summary, blockers, require_daily=True),
+        },
+        "qbit": {
+            "configured": bool(qbit.get("configured")),
+            "client": qbit.get("client"),
+            "url": qbit.get("qbit_url"),
+            "connectivity_checked": bool(qbit.get("connectivity_checked")),
+        },
+        "docker_compose": {
+            "daily_schedule_ready": bool(docker_compose.get("daily_schedule_service_ready")),
+            "compose_file": docker_compose.get("path"),
+        },
+        "safety": {
+            "api_token_configured": bool(agent_summary.get("api_token_configured")),
+            "live_upload_requires": ["accept_rules=true", "confirm_upload=true", "non-duplicate target", "ready site policy gate"],
+            "warnings": warnings,
+        },
+        "next_tools": ["deployment_check", "site_policies", "source_url_retorrent_job", "daily_candidates_schedule_job", "get_job_status", "get_job_summary"],
+    }
+
+
+def _deployment_handoff_blockers(agent_summary: dict[str, Any], blockers: list[str], *, require_daily: bool) -> list[str]:
+    items = list(blockers)
+    if agent_summary.get("qbit_configured") is not True:
+        items.append("qBittorrent is not configured.")
+    if require_daily and agent_summary.get("daily_candidates_configured") is not True:
+        items.append(f"No daily candidate schedules configured. Set {DAILY_CANDIDATE_SCHEDULE_ENV}.")
+    return list(dict.fromkeys(item for item in items if item))
 
 
 def _deployment_next_actions(checks: list[dict[str, Any]]) -> list[str]:
@@ -3313,9 +3381,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "queue", "qbit", "daily_candidates", "docker_compose", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "queue", "qbit", "daily_candidates", "docker_compose", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
                 "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_daily_ready"],
+                "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "qbit", "docker_compose", "safety", "next_tools"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
@@ -3946,6 +4015,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidates": {"type": "object"},
             "docker_compose": {"type": "object"},
             "agent_summary": {"type": "object"},
+            "agent_handoff": {"type": "object"},
         },
     }
     return {

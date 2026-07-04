@@ -184,7 +184,7 @@ OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/opencla
 - 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；release 工作流会额外发布 `*-legacy-webui` 标签给旧 Web UI 镜像。
 - 旧 `upload.py` 需要显式覆盖 entrypoint、使用 legacy Dockerfile，或拉取 `*-legacy-webui` 标签才会运行。
 - `docker-compose.yml` 默认提供 `ptcli-api` 常驻 HTTP API 服务，使用项目内 `ptcli-net` 网络并带 `/health` healthcheck；一次性 CLI 服务放在 `cli` profile，可用 `docker compose --profile cli run --rm ptcli retorrent ...` 在盒子上执行；legacy Web UI 需要显式 `--profile legacy-webui`。
-- `/v1/deployment/check` 会输出 `mounts`、`qbit`、`daily_candidates`、`docker_compose` 和 `agent_summary`：AI 可以直接判断 config/cookies/tmp/job/downloads 挂载是否就绪、qBittorrent 是否配置、`PTCLI_DAILY_CANDIDATE_SCHEDULES` 是否已提供每日候选计划，以及 `docker-compose.yml` 是否包含可用的 `ptcli-daily-schedule` daily profile 服务；每日候选或 compose 定时服务未配置只作为 warning，不阻塞手动转种 API。
+- `/v1/deployment/check` 会输出 `mounts`、`qbit`、`daily_candidates`、`docker_compose`、`agent_summary` 和 `agent_handoff`：AI 可以直接判断 config/cookies/tmp/job/downloads 挂载是否就绪、qBittorrent 是否配置、`PTCLI_DAILY_CANDIDATE_SCHEDULES` 是否已提供每日候选计划，以及 `docker-compose.yml` 是否包含可用的 `ptcli-daily-schedule` daily profile 服务；`agent_handoff` 会给出手动转种和每日候选的推荐工具、端点、最小请求模板、必需确认和阻塞原因。每日候选或 compose 定时服务未配置只作为 warning，不阻塞手动转种 API。
 - 如果 qBittorrent 跑在宿主机上，容器内的 `data/config.py` 可把 `qbit_url` 写成 `http://host.docker.internal` 并保持对应 `qbit_port`；如果 qBittorrent 也是 Docker 容器，把两边放到同一个 Docker 网络后使用 qBittorrent 的服务名作为 host。
 - live 验证需要在真实盒子环境中提供有效 cookie、MTEAM API key、qBittorrent 连接和实际内容路径。
 
