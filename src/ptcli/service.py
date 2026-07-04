@@ -207,6 +207,7 @@ class JobStore:
             "resume_plan": _job_resume_plan(job),
             "resume_lineage": _job_resume_lineage(job),
             "resume_context": _job_resume_context(job),
+            "candidate_submission": _job_candidate_submission(job),
             "source_reference": _job_source_reference(job),
             "workflow_context": _job_workflow_context(job, summary_payload),
             "result": job.get("result"),
@@ -1910,6 +1911,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
         "resume_plan": _job_resume_plan(job),
         "resume_lineage": _job_resume_lineage(job),
+        "candidate_submission": _job_candidate_submission(job),
         "status_endpoint": f"/v1/jobs/{job_id}" if job_id else None,
         "summary_endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
         "resume_endpoint": f"/v1/jobs/{job_id}/resume" if job_id else None,
@@ -1955,6 +1957,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "resume_plan": _job_resume_plan(job),
         "resume_lineage": _job_resume_lineage(job),
         "resume_context": _job_resume_context(job),
+        "candidate_submission": _job_candidate_submission(job),
         "source_reference": _job_source_reference(job),
         "workflow_context": _job_workflow_context(job),
         "result_status": _nested_value(job.get("result"), "status"),
@@ -1991,6 +1994,13 @@ def _job_resume_lineage(job: dict[str, Any]) -> dict[str, Any] | None:
     request = job.get("request")
     if isinstance(request, dict) and isinstance(request.get("resume_lineage"), dict):
         return request["resume_lineage"]
+    return None
+
+
+def _job_candidate_submission(job: dict[str, Any]) -> dict[str, Any] | None:
+    request = job.get("request")
+    if isinstance(request, dict) and isinstance(request.get("candidate_submission"), dict):
+        return request["candidate_submission"]
     return None
 
 
@@ -2031,6 +2041,7 @@ def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = 
         "mode": request.get("mode"),
         "status": job.get("status"),
         "source_reference": _job_source_reference(job),
+        "candidate_submission": _job_candidate_submission(job),
         "target_trackers": request.get("target_trackers"),
         "resume_lineage": _job_resume_lineage(job),
         "summary_file": job.get("summary_file"),
@@ -2322,6 +2333,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "resume_plan": resume_plan,
         "resume_lineage": resume_lineage,
         "resume_context": resume_context,
+        "candidate_submission": _job_candidate_submission(job),
         "source_reference": source_reference,
         "workflow_context": workflow_context,
         "next_command_argv": next_command_argv,
@@ -3044,7 +3056,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "runtime", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "runtime", "resume_plan", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -3304,7 +3316,7 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "resume_plan", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -3330,7 +3342,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "source_reference", "duplicate_check", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -3571,6 +3583,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_plan": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
+            "candidate_submission": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
             "workflow_context": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
@@ -3594,6 +3607,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_plan": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
+            "candidate_submission": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
             "workflow_context": {"type": ["object", "null"]},
             "result": {"type": ["object", "null"]},

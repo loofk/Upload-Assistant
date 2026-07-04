@@ -13287,6 +13287,9 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["request"]["mode"] == "candidate_retorrent"
     assert retorrent_job["request"]["candidate_submission"]["candidate_job_id"] == candidate_job["job_id"]
     assert retorrent_job["request"]["candidate_submission"]["candidate_rank"] == 1
+    assert retorrent_job["candidate_submission"] == retorrent_job["request"]["candidate_submission"]
+    assert retorrent_job["workflow_context"]["candidate_submission"] == retorrent_job["candidate_submission"]
+    assert retorrent_job["agent_decision"]["candidate_submission"] == retorrent_job["candidate_submission"]
     assert retorrent_job["request"]["source_reference"]["tracker"] == "U2"
     assert retorrent_job["request"]["source_reference"]["source_id"] == "60635"
     assert retorrent_job["request"]["target_trackers"] == "MTEAM"
@@ -13295,6 +13298,11 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert captured_request["confirm_upload"] is True
     assert captured_request["save_path"] == "/downloads"
     assert captured_request["uploaded_qbit_tags"] == "retorrent"
+    summary = store.summary(retorrent_job["job_id"])
+    listed = store.list({"kind": "ptcli.candidate_retorrent"})["jobs"][0]
+    assert summary["candidate_submission"] == retorrent_job["candidate_submission"]
+    assert summary["workflow_context"]["candidate_submission"] == retorrent_job["candidate_submission"]
+    assert listed["candidate_submission"] == retorrent_job["candidate_submission"]
 
 
 def test_submit_daily_candidate_job_rejects_blocked_candidate(monkeypatch, tmp_path) -> None:
@@ -13720,6 +13728,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_context" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "candidate_submission" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "candidate_submission" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "interruption" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "runtime" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "runtime" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -13728,6 +13738,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "cancelled" in tool_by_name["cancel_job"]["response_contract"]["status_values"]
     assert "cancellation" in tool_by_name["cancel_job"]["response_contract"]["required_fields"]
     assert "cancellation" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "candidate_submission" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "workflow_context" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -13811,6 +13822,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_plan" in summary_schema["properties"]
     assert "resume_lineage" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
+    assert "candidate_submission" in summary_schema["properties"]
     assert "source_reference" in summary_schema["properties"]
     assert "workflow_context" in summary_schema["properties"]
     job_schema = openapi["paths"]["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -13914,6 +13926,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "candidate_submission" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "candidate_submission" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "interruption" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "runtime" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "runtime" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -13926,6 +13940,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "max_concurrent_jobs" in tools_by_name["list_jobs"]["response_contract"]["queue_fields"]
         assert "interruption" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "cancellation" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "candidate_submission" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "runtime" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_endpoint" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]

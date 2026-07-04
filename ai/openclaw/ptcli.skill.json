@@ -517,6 +517,7 @@
           "resume_plan",
           "resume_lineage",
           "resume_context",
+          "candidate_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -711,6 +712,7 @@
           "resume_plan",
           "resume_lineage",
           "resume_context",
+          "candidate_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -915,6 +917,7 @@
           "resume_plan",
           "resume_lineage",
           "resume_context",
+          "candidate_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -1123,6 +1126,7 @@
           "resume_plan",
           "resume_lineage",
           "resume_context",
+          "candidate_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -1386,6 +1390,7 @@
           "resume_plan",
           "resume_lineage",
           "resume_context",
+          "candidate_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -1742,6 +1747,7 @@
           "resume_plan",
           "resume_lineage",
           "resume_context",
+          "candidate_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -2059,6 +2065,7 @@
           "cancellation",
           "runtime",
           "summary_file",
+          "candidate_submission",
           "source_reference",
           "duplicate_check",
           "agent_decision",
@@ -2127,6 +2134,7 @@
           "resume_plan",
           "resume_lineage",
           "resume_context",
+          "candidate_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -2208,6 +2216,7 @@
           "resume_plan",
           "resume_lineage",
           "resume_context",
+          "candidate_submission",
           "source_reference",
           "workflow_context",
           "result",
@@ -2261,6 +2270,7 @@
           "resume_plan",
           "resume_lineage",
           "resume_context",
+          "candidate_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -2359,6 +2369,7 @@
           "resume_plan",
           "resume_lineage",
           "resume_context",
+          "candidate_submission",
           "source_reference",
           "workflow_context"
         ],
