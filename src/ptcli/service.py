@@ -246,6 +246,7 @@ class JobStore:
             "policy_coverage": _job_policy_coverage(job),
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
             "qbit_plan": _job_qbit_plan(job),
+            "qbit_limit_audit": _job_qbit_limit_audit(job, summary_payload),
             "runtime": _job_runtime(job),
             "resume_plan": _job_resume_plan(job),
             "resume_lineage": _job_resume_lineage(job),
@@ -2585,6 +2586,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "target_trackers": (job.get("request") or {}).get("target_trackers") if isinstance(job.get("request"), dict) else None,
         "duplicate_check": _job_duplicate_check(job),
         "qbit_plan": _job_qbit_plan(job),
+        "qbit_limit_audit": _job_qbit_limit_audit(job),
         "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
         "resume_plan": _job_resume_plan(job),
         "resume_lineage": _job_resume_lineage(job),
@@ -2632,6 +2634,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "policy_coverage": _job_policy_coverage(job),
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
         "qbit_plan": _job_qbit_plan(job),
+        "qbit_limit_audit": _job_qbit_limit_audit(job),
         "resume_plan": _job_resume_plan(job),
         "resume_lineage": _job_resume_lineage(job),
         "resume_context": _job_resume_context(job),
@@ -2688,6 +2691,128 @@ def _job_qbit_plan(job: dict[str, Any]) -> dict[str, Any] | None:
         },
         "policy_defaults": defaults or None,
     }
+
+
+def _job_qbit_limit_audit(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    qbit_plan = _job_qbit_plan(job)
+    if not qbit_plan:
+        return None
+    payloads = [payload for payload in (summary_payload, job.get("result")) if isinstance(payload, dict)]
+    source = _qbit_limit_role_audit("source", qbit_plan.get("source"), _qbit_limit_source_result(payloads))
+    uploaded = _qbit_limit_role_audit("uploaded", qbit_plan.get("uploaded"), _qbit_limit_uploaded_result(payloads))
+    blockers = [*source["blockers"], *uploaded["blockers"]]
+    return {
+        "ready": not blockers,
+        "source": source,
+        "uploaded": uploaded,
+        "blockers": blockers,
+        "next_actions": _qbit_limit_audit_next_actions(blockers),
+    }
+
+
+def _qbit_limit_source_result(payloads: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for payload in payloads:
+        stage = _stage_from_payload(payload, "inject-source")
+        result = stage.get("result") if isinstance(stage, dict) else None
+        if isinstance(result, dict):
+            return result
+    return None
+
+
+def _qbit_limit_uploaded_result(payloads: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for payload in payloads:
+        stage = _stage_from_payload(payload, "target-upload")
+        result = stage.get("result") if isinstance(stage, dict) else None
+        if isinstance(result, dict) and isinstance(result.get("injected_torrent"), dict):
+            return result["injected_torrent"]
+        direct = _nested_value(payload, "injected_torrent")
+        if isinstance(direct, dict):
+            return direct
+    return None
+
+
+def _stage_from_payload(payload: dict[str, Any], name: str) -> dict[str, Any] | None:
+    stages = payload.get("stages")
+    if not isinstance(stages, list):
+        pipeline = payload.get("pipeline")
+        stages = pipeline.get("stages") if isinstance(pipeline, dict) else None
+    if not isinstance(stages, list):
+        return None
+    for stage in stages:
+        if isinstance(stage, dict) and stage.get("stage") == name:
+            return stage
+    return None
+
+
+def _qbit_limit_role_audit(role: str, plan: Any, result: dict[str, Any] | None) -> dict[str, Any]:
+    plan = plan if isinstance(plan, dict) else {}
+    expected = {
+        key: value
+        for key, value in {
+            "upload_limit": plan.get("upload_limit"),
+            "download_limit": plan.get("download_limit"),
+        }.items()
+        if value is not None
+    }
+    if not expected:
+        return {
+            "role": role,
+            "status": "no_limits_requested",
+            "ready": True,
+            "expected": {},
+            "observed": None,
+            "evidence_present": isinstance(result, dict),
+            "blockers": [],
+        }
+    if not isinstance(result, dict):
+        blockers = [f"{role}.qbit_limit_evidence_missing"]
+        return {
+            "role": role,
+            "status": "pending",
+            "ready": False,
+            "expected": expected,
+            "observed": None,
+            "evidence_present": False,
+            "blockers": blockers,
+        }
+
+    rate_limits = result.get("rate_limits") if isinstance(result.get("rate_limits"), dict) else {}
+    requested = rate_limits.get("requested") if isinstance(rate_limits.get("requested"), dict) else {}
+    observed = {
+        "upload_limit": result.get("upload_limit", requested.get("upload_limit")),
+        "download_limit": result.get("download_limit", requested.get("download_limit")),
+        "rate_limits": rate_limits or None,
+    }
+    mismatches = [key for key, value in expected.items() if observed.get(key) != value]
+    missing_calls = _qbit_limit_missing_calls(expected, rate_limits)
+    blockers = [f"{role}.{key}_mismatch" for key in mismatches] + [f"{role}.{item}" for item in missing_calls]
+    applied = bool(rate_limits.get("applied")) and not blockers
+    return {
+        "role": role,
+        "status": "applied" if applied else "mismatch",
+        "ready": applied,
+        "expected": expected,
+        "observed": observed,
+        "evidence_present": True,
+        "blockers": blockers,
+    }
+
+
+def _qbit_limit_missing_calls(expected: dict[str, Any], rate_limits: dict[str, Any]) -> list[str]:
+    calls = rate_limits.get("calls") if isinstance(rate_limits.get("calls"), list) else []
+    methods = {str(call.get("method")) for call in calls if isinstance(call, dict)}
+    missing: list[str] = []
+    if "upload_limit" in expected and "torrents_set_upload_limit" not in methods:
+        missing.append("upload_limit_call_missing")
+    if "download_limit" in expected and "torrents_set_download_limit" not in methods:
+        missing.append("download_limit_call_missing")
+    return missing
+
+
+def _qbit_limit_audit_next_actions(blockers: list[str]) -> list[str]:
+    if not blockers:
+        return []
+    return ["Resume or rerun the qBittorrent injection step so configured per-site rate limits are applied and captured in job evidence."]
 
 
 def _qbit_plan_value_source(key: str, sources: dict[str, Any], overrides: dict[str, Any]) -> str | None:
@@ -2822,6 +2947,7 @@ def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = 
         "policy_coverage": policy_coverage,
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
         "qbit_plan": _job_qbit_plan(job),
+        "qbit_limit_audit": _job_qbit_limit_audit(job, payload if isinstance(payload, dict) else None),
         "resume_plan": resume_plan,
         "resume_state": resume_state,
         "resume_context": _job_resume_context(job),
@@ -2984,6 +3110,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     policy_coverage = _job_policy_coverage(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     policy_qbit_defaults = _job_policy_qbit_defaults(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     qbit_plan = _job_qbit_plan(job) if policy_qbit_defaults is not None else None
+    qbit_limit_audit = _job_qbit_limit_audit(job) if qbit_plan is not None else None
     policy_coverage_ready = policy_coverage.get("ready") if isinstance(policy_coverage, dict) and isinstance(policy_coverage.get("ready"), bool) else None
     policy_coverage_incomplete = policy_coverage_ready is False
     duplicate_exists = duplicate_check.get("exists") is True
@@ -3041,6 +3168,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "policy_coverage": policy_coverage,
         "policy_qbit_defaults": policy_qbit_defaults,
         "qbit_plan": qbit_plan,
+        "qbit_limit_audit": qbit_limit_audit,
         "policy_coverage_ready": policy_coverage_ready,
         "runtime": _job_runtime(job),
         "cancellation": job.get("cancellation") if isinstance(job.get("cancellation"), dict) else None,
@@ -3911,7 +4039,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "runtime", "resume_plan", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "runtime", "resume_plan", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -4225,7 +4353,7 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "resume_plan", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "resume_plan", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -4252,7 +4380,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "source_reference", "duplicate_check", "qbit_plan", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "source_reference", "duplicate_check", "qbit_plan", "qbit_limit_audit", "agent_decision", "resume_plan", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -4580,6 +4708,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "candidate_digest": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "qbit_plan": {"type": ["object", "null"]},
+            "qbit_limit_audit": {"type": ["object", "null"]},
             "resume_plan": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
@@ -4604,6 +4733,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_coverage": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "qbit_plan": {"type": ["object", "null"]},
+            "qbit_limit_audit": {"type": ["object", "null"]},
             "runtime": {"type": "object"},
             "resume_plan": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},

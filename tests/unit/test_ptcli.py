@@ -12927,6 +12927,126 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert "--uploaded-qbit-upload-limit" in job["command_argv"]
 
 
+def test_manual_retorrent_job_audits_qbit_limit_application(monkeypatch, tmp_path) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True, "download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True, "upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+            }
+        }
+    }
+    source_hash = "a" * 40
+    uploaded_hash = "b" * 40
+
+    async def fake_retorrent(_request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "complete",
+            "ok": True,
+            "stages": [
+                {
+                    "stage": "inject-source",
+                    "ok": True,
+                    "result": {
+                        "hash": source_hash,
+                        "download_limit": 20 * 1024 * 1024,
+                        "rate_limits": {
+                            "applied": True,
+                            "requested": {"upload_limit": None, "download_limit": 20 * 1024 * 1024},
+                            "calls": [{"method": "torrents_set_download_limit", "torrent_hashes": source_hash, "limit": 20 * 1024 * 1024}],
+                        },
+                    },
+                },
+                {
+                    "stage": "target-upload",
+                    "ok": True,
+                    "result": {
+                        "status": "uploaded",
+                        "injected_torrent": {
+                            "hash": uploaded_hash,
+                            "upload_limit": 2 * 1024 * 1024,
+                            "rate_limits": {
+                                "applied": True,
+                                "requested": {"upload_limit": 2 * 1024 * 1024, "download_limit": None},
+                                "calls": [{"method": "torrents_set_upload_limit", "torrent_hashes": uploaded_hash, "limit": 2 * 1024 * 1024}],
+                            },
+                        },
+                    },
+                },
+            ],
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_manual_retorrent_job(
+        store,
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+        },
+    )
+    summary = store.summary(job["job_id"])
+
+    assert job["qbit_limit_audit"]["ready"] is True
+    assert job["qbit_limit_audit"]["source"]["status"] == "applied"
+    assert job["qbit_limit_audit"]["source"]["expected"] == {"download_limit": 20 * 1024 * 1024}
+    assert job["qbit_limit_audit"]["uploaded"]["status"] == "applied"
+    assert job["qbit_limit_audit"]["uploaded"]["expected"] == {"upload_limit": 2 * 1024 * 1024}
+    assert job["qbit_limit_audit"]["blockers"] == []
+    assert job["agent_decision"]["qbit_limit_audit"] == job["qbit_limit_audit"]
+    assert job["workflow_context"]["qbit_limit_audit"] == job["qbit_limit_audit"]
+    assert summary["qbit_limit_audit"] == job["qbit_limit_audit"]
+
+
+def test_manual_retorrent_job_marks_qbit_limit_audit_pending_without_injection_evidence(monkeypatch, tmp_path) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True, "download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True, "upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+            }
+        }
+    }
+
+    async def fake_retorrent(_request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["qBittorrent injection has not run yet."],
+            "next_actions": ["Resume qBittorrent injection."],
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_manual_retorrent_job(
+        store,
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+        },
+    )
+
+    assert job["qbit_limit_audit"]["ready"] is False
+    assert job["qbit_limit_audit"]["source"]["status"] == "pending"
+    assert job["qbit_limit_audit"]["uploaded"]["status"] == "pending"
+    assert job["qbit_limit_audit"]["blockers"] == ["source.qbit_limit_evidence_missing", "uploaded.qbit_limit_evidence_missing"]
+    assert "qBittorrent injection step" in job["qbit_limit_audit"]["next_actions"][0]
+
+
 def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path) -> None:
     captured_request = {}
 
@@ -13873,6 +13993,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "qbit_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "qbit_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "qbit_limit_audit" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "qbit_limit_audit" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "qbit_limit_audit" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "confirm_upload" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "save_path" in tool_by_name["resume_job"]["input_schema"]["properties"]
@@ -13905,6 +14028,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_plan" in tool_by_name["retorrent_job"]["response_contract"]["request_fields"]
     assert "uploaded_qbit_upload_limit" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
     assert "qbit_plan" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "qbit_limit_audit" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -14003,6 +14127,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_gap_summary" in site_policy_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "qbit_plan" in summary_schema["properties"]
+    assert "qbit_limit_audit" in summary_schema["properties"]
     assert "resume_plan" in summary_schema["properties"]
     assert "resume_lineage" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
@@ -14012,6 +14137,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     job_schema = openapi["paths"]["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "interruption" in job_schema["properties"]
     assert "runtime" in job_schema["properties"]
+    assert "qbit_limit_audit" in job_schema["properties"]
     assert "cancelled" in job_schema["properties"]["status"]["enum"]
     assert "cancellation" in job_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -14135,6 +14261,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "qbit_plan" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "qbit_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "qbit_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "qbit_limit_audit" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "qbit_limit_audit" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "qbit_limit_audit" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "confirm_upload" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "save_path" in tools_by_name["resume_job"]["input_schema"]["properties"]
@@ -14163,6 +14292,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "cancellation" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "candidate_submission" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_plan" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "qbit_limit_audit" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "runtime" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_endpoint" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
