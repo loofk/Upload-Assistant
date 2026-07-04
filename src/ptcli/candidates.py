@@ -210,6 +210,7 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "policy_coverage": policy_summary.get("policy_coverage"),
         "ranking": ranking,
         "recommendation": _candidate_recommendation(seed, source_info_payload, duplicate_check, blockers, ranking),
+        "decision_summary": _candidate_decision_summary(seed, source_info_payload, duplicate_check, blockers, ranking, policy_summary, status),
         "blockers": blockers,
         "risk_flags": blockers,
         "agent_workflow": _candidate_agent_workflow(status, blockers),
@@ -596,6 +597,7 @@ def _candidate_push_payload(push_summary: str, push_items: list[dict[str, Any] |
     ready_items = [item for item in items if item.get("can_submit") is True]
     blocked_items = [item for item in items if item.get("can_submit") is not True]
     lines = [push_summary, *[str(item.get("summary_text")) for item in items if item.get("summary_text")]]
+    decision_summary = _push_decision_summary(items, ready_items, blocked_items, recommendation)
     return {
         "kind": "ptcli.daily_candidates_push_payload",
         "title": "Daily PT retorrent candidates",
@@ -607,6 +609,7 @@ def _candidate_push_payload(push_summary: str, push_items: list[dict[str, Any] |
         "blocked_count": len(blocked_items),
         "recommendation": recommendation,
         "recommended_action": _candidate_digest_recommended_action(recommendation),
+        "decision_summary": decision_summary,
         "top_item": ready_items[0] if ready_items else items[0] if items else None,
         "items": items,
         "blockers": blockers,
@@ -623,6 +626,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
     duplicate_check = candidate.get("duplicate_check") if isinstance(candidate.get("duplicate_check"), dict) else {}
     workflow = candidate.get("agent_workflow") if isinstance(candidate.get("agent_workflow"), dict) else {}
     policy_summary = candidate.get("policy_summary") if isinstance(candidate.get("policy_summary"), dict) else {}
+    decision_summary = candidate.get("decision_summary") if isinstance(candidate.get("decision_summary"), dict) else {}
     blockers = _string_list(candidate.get("blockers"))
     status = str(candidate.get("status") or "")
     title = source.get("title") or source_info.get("name")
@@ -650,6 +654,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         },
         "duplicate_status": duplicate_check.get("status"),
         "duplicate_count": duplicate_check.get("count"),
+        "decision_summary": decision_summary,
         "blocker_count": len(blockers),
         "blockers": blockers,
         "next_actions": _candidate_push_next_actions(candidate, workflow),
@@ -664,6 +669,88 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "submit_request": submit_request if can_submit else None,
         "submit_job_endpoint": candidate.get("submit_job_endpoint"),
         "submit_tool": candidate.get("submit_tool"),
+    }
+
+
+def _candidate_decision_summary(
+    seed: CandidateSeed,
+    source_info: dict[str, Any] | None,
+    duplicate_check: dict[str, Any],
+    blockers: list[str],
+    ranking: dict[str, Any],
+    policy_summary: dict[str, Any],
+    status: str,
+) -> dict[str, Any]:
+    metadata = {
+        "imdb_id": source_info.get("imdb_id") if source_info else None,
+        "tmdb_id": source_info.get("tmdb_id") if source_info else None,
+        "douban_id": source_info.get("douban_id") if source_info else None,
+        "douban_url": source_info.get("douban_url") if source_info else None,
+        "name": source_info.get("name") if source_info else None,
+    }
+    metadata_keys = [key for key, value in metadata.items() if value]
+    policy_coverage = policy_summary.get("policy_coverage") if isinstance(policy_summary.get("policy_coverage"), dict) else {}
+    duplicate_status = str(duplicate_check.get("status") or "unknown")
+    duplicate_clear = duplicate_check.get("searched") is True and duplicate_check.get("exists") is False
+    can_submit = bool(status == "ready" and not blockers)
+    if can_submit:
+        action = "submit_when_confirmed"
+    elif duplicate_check.get("exists") is True:
+        action = "stop_duplicate"
+    elif policy_coverage.get("ready") is False:
+        action = "configure_policy"
+    else:
+        action = "review_blockers"
+    return {
+        "action": action,
+        "can_submit": can_submit,
+        "risk_level": _candidate_risk_level(blockers, duplicate_status, bool(metadata_keys), policy_coverage.get("ready")),
+        "score": ranking.get("score"),
+        "tier": ranking.get("tier"),
+        "metadata_ready": bool(metadata_keys),
+        "metadata_keys": metadata_keys,
+        "metadata": metadata,
+        "promotion": seed.promotion,
+        "freeleech_like": _promotion_is_free(seed.promotion),
+        "duplicate_status": duplicate_status,
+        "duplicate_clear": duplicate_clear,
+        "duplicate_count": duplicate_check.get("count"),
+        "policy_coverage_ready": policy_coverage.get("ready"),
+        "manual_review_ready": policy_summary.get("manual_review_ready"),
+        "blocker_count": len(blockers),
+        "primary_blocker": blockers[0] if blockers else None,
+        "reasons": _string_list(ranking.get("reasons")),
+        "penalties": _string_list(ranking.get("penalties")),
+    }
+
+
+def _candidate_risk_level(blockers: list[str], duplicate_status: str, metadata_ready: bool, policy_ready: Any) -> str:
+    if any("target-duplicate" in blocker for blocker in blockers) or duplicate_status == "exists":
+        return "high"
+    if blockers or policy_ready is False or not metadata_ready:
+        return "medium"
+    return "low"
+
+
+def _push_decision_summary(items: list[dict[str, Any]], ready_items: list[dict[str, Any]], blocked_items: list[dict[str, Any]], recommendation: str) -> dict[str, Any]:
+    review_items = [item for item in items if item.get("tier") == "review"]
+    risk_counts = {"low": 0, "medium": 0, "high": 0}
+    for item in items:
+        summary = item.get("decision_summary") if isinstance(item.get("decision_summary"), dict) else {}
+        risk = str(summary.get("risk_level") or "medium")
+        if risk not in risk_counts:
+            risk = "medium"
+        risk_counts[risk] += 1
+    return {
+        "recommendation": recommendation,
+        "top_action": ready_items[0].get("decision_summary", {}).get("action") if ready_items and isinstance(ready_items[0].get("decision_summary"), dict) else "review_blockers" if items else "no_candidates",
+        "ready_count": len(ready_items),
+        "review_count": len(review_items),
+        "blocked_count": len(blocked_items),
+        "risk_counts": risk_counts,
+        "ready_source_ids": [item.get("source_id") for item in ready_items if item.get("source_id")],
+        "blocked_source_ids": [item.get("source_id") for item in blocked_items if item.get("source_id")],
+        "submit_ready": bool(ready_items),
     }
 
 

@@ -14121,6 +14121,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "top_submit_requests" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "push_payload" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "submission_ready" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
+    assert "decision_summary" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "submission_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "submit_endpoint_template" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
     assert tool_by_name["deployment_check"]["method"] == "GET"
@@ -14146,13 +14147,17 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "top_submit_request" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "push_payload" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "message" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
+    assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
+    assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "push_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "recommended_action" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "policy_coverage" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_job_endpoint" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "summary_text" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
+    assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "can_submit" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "response_contract" in tool_by_name["get_job_status"]
     assert tool_by_name["list_jobs"]["method"] == "GET"
@@ -14324,6 +14329,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "top_submit_requests" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "push_payload" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "submission_ready" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
+        assert "decision_summary" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
         assert "submission_handoff" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "submit_endpoint_template" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
@@ -14386,12 +14392,16 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "push_payload" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "message" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
+        assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
         assert "push_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "recommended_action" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "summary_text" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
+        assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "can_submit" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "candidate_digest" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert tools_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
@@ -14809,6 +14819,9 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_payload"]["kind"] == "ptcli.daily_candidates_push_payload"
     assert result["digest"]["push_payload"]["ready_count"] == 1
     assert result["digest"]["push_payload"]["top_item"]["source_id"] == "60635"
+    assert result["digest"]["push_payload"]["decision_summary"]["submit_ready"] is True
+    assert result["digest"]["push_payload"]["decision_summary"]["top_action"] == "submit_when_confirmed"
+    assert result["digest"]["push_payload"]["decision_summary"]["risk_counts"] == {"low": 1, "medium": 0, "high": 0}
     assert "#1 [ready] U2-60635" in result["digest"]["push_payload"]["message"]
     assert result["digest"]["recommended_action"].startswith("Review digest.top_candidate")
     assert result["digest"]["push_count"] == 1
@@ -14821,6 +14834,11 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["summary_text"].startswith("#1 [ready] U2-60635")
     assert result["digest"]["push_items"][0]["metadata"]["imdb_id"] == 1234567
     assert result["digest"]["push_items"][0]["metadata"]["tmdb_id"] == 999
+    assert result["digest"]["push_items"][0]["decision_summary"]["action"] == "submit_when_confirmed"
+    assert result["digest"]["push_items"][0]["decision_summary"]["risk_level"] == "low"
+    assert result["digest"]["push_items"][0]["decision_summary"]["metadata_ready"] is True
+    assert result["digest"]["push_items"][0]["decision_summary"]["duplicate_clear"] is True
+    assert result["digest"]["push_items"][0]["decision_summary"]["freeleech_like"] is True
     assert result["digest"]["push_items"][0]["can_submit"] is True
     assert result["digest"]["push_items"][0]["action_label"] == "submit_when_confirmed"
     assert result["digest"]["push_items"][0]["action_endpoint"] == "/v1/jobs/retorrent/from-url"
@@ -14837,6 +14855,9 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["ranking"]["score"] >= 90
     assert candidate["ranking"]["signals"]["duplicate_status"] == "not_found"
     assert candidate["ranking"]["signals"]["metadata_ready"] is True
+    assert candidate["decision_summary"]["action"] == "submit_when_confirmed"
+    assert candidate["decision_summary"]["risk_level"] == "low"
+    assert candidate["decision_summary"]["policy_coverage_ready"] is True
     assert candidate["recommendation"]["score"] == candidate["ranking"]["score"]
     assert candidate["duplicate_check"]["status"] == "not_found"
     assert candidate["source_policy"]["tracker"] == "U2"
@@ -14903,6 +14924,11 @@ async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers
     assert result["digest"]["push_items"][1]["can_submit"] is False
     assert result["digest"]["push_items"][1]["action_label"] == "review_blockers"
     assert result["digest"]["push_items"][1]["submit_request"] is None
+    assert result["digest"]["push_items"][1]["decision_summary"]["action"] == "stop_duplicate"
+    assert result["digest"]["push_items"][1]["decision_summary"]["risk_level"] == "high"
+    assert result["digest"]["push_payload"]["decision_summary"]["ready_source_ids"] == ["60636"]
+    assert result["digest"]["push_payload"]["decision_summary"]["blocked_source_ids"] == ["60635"]
+    assert result["digest"]["push_payload"]["decision_summary"]["risk_counts"]["high"] == 1
     assert any("target-duplicate" in blocker for blocker in result["digest"]["push_items"][1]["blockers"])
 
 
