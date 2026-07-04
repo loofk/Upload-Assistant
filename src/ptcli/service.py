@@ -1043,6 +1043,8 @@ def _readiness_bundle_agent_decision(live_readiness: dict[str, Any]) -> dict[str
         "workflow": "ptcli.readiness_bundle",
         "decision": decision,
         "recommended_action": recommended_action,
+        "runbook_ref": "source_url_retorrent" if decision == "ready_for_manual_retorrent" else "daily_candidates" if decision == "ready_for_daily_candidates" else None,
+        "next_tool": "source_url_retorrent_job" if decision == "ready_for_manual_retorrent" else "daily_candidates_schedule_job" if decision == "ready_for_daily_candidates" else "readiness_bundle",
         "can_create_manual_job": bool(live_readiness.get("ready_for_manual_retorrent")),
         "can_run_daily_candidates": bool(live_readiness.get("ready_for_daily_candidates")),
         "should_fix_deployment": decision == "fix_deployment",
@@ -3863,7 +3865,7 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_readiness", "agent_decision", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "doctor_template", "manual_job_template", "blockers", "warnings"],
-        "agent_decision_fields": ["decision", "recommended_action", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
+        "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
     }
 
@@ -4009,35 +4011,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             "never_skip": ["site rule gates", "target duplicate check", "uploaded torrent injection/seeding evidence"],
             "blocked_contract": "When rules, duplicate checks, qBittorrent evidence, or required confirmations are missing, APIs return status=blocked with blockers and next_actions.",
         },
-        "default_workflows": [
-            {
-                "name": "source_url_retorrent",
-                "tool": "source_url_retorrent_job",
-                "description": "Recommended flow when a user sends one source tracker link and a target tracker. The service infers tracker/torrent id, checks duplicates, then proceeds only when rules and confirmations allow.",
-                "required_fields": ["source_url", "target"],
-                "recommended_fields": ["save_path", "accept_rules", "confirm_upload", "uploaded_qbit_category", "uploaded_qbit_tags"],
-            },
-            {
-                "name": "manual_retorrent",
-                "tool": "manual_retorrent_job",
-                "description": "Create the primary source URL plus target tracker job. It checks duplicates and only proceeds when rule, duplicate, and confirmation gates allow.",
-                "required_fields": ["source", "target"],
-                "recommended_fields": ["save_path", "accept_rules", "confirm_upload", "uploaded_qbit_category", "uploaded_qbit_tags"],
-            },
-            {
-                "name": "daily_candidates",
-                "tool": "daily_candidates_job",
-                "description": "Find up to 10 ranked source/target retorrent candidates with duplicate checks, policy blockers, risk signals, and executable request templates.",
-                "required_fields": ["source_tracker", "target"],
-                "read_result": ["digest", "candidates", "ready_count"],
-            },
-            {
-                "name": "resume_blocked_job",
-                "tool": "resume_job",
-                "description": "Resume a blocked/failed job using allowlisted next_command_argv emitted by ptcli summaries.",
-                "required_fields": ["job_id"],
-            },
-        ],
+        "default_workflows": _agent_default_workflows(),
         "tools": tools,
         "tool_count": len(tools),
         "openclaw": {
@@ -4051,6 +4025,117 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             "manifest_url": f"{public_base_url}/v1/hermes/skill.json",
         },
     }
+
+
+def _agent_default_workflows() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "source_url_retorrent",
+            "tool": "source_url_retorrent_job",
+            "description": "Recommended flow when a user sends one source tracker link and a target tracker. The service infers tracker/torrent id, checks duplicates, then proceeds only when rules and confirmations allow.",
+            "required_fields": ["source_url", "target"],
+            "recommended_fields": ["save_path", "accept_rules", "confirm_upload", "uploaded_qbit_category", "uploaded_qbit_tags"],
+            "runbook": [
+                {
+                    "step": "preflight",
+                    "tool": "readiness_bundle",
+                    "read": ["live_readiness.ready_for_manual_retorrent", "live_readiness.blockers", "live_readiness.manual_job_template.request"],
+                    "continue_when": "live_readiness.ready_for_manual_retorrent=true",
+                    "stop_when": ["deployment.ready=false", "site policy not ready", "accept_rules or confirm_upload missing"],
+                },
+                {
+                    "step": "policy_audit",
+                    "tool": "site_policies",
+                    "read": ["ready", "policy_gap_summary", "execution_readiness", "agent_summary.policy_recommendations"],
+                    "continue_when": "ready=true and execution_readiness.ready=true",
+                    "stop_when": ["missing rule_review_fingerprint", "missing qBittorrent rate limits", "missing seeding requirements", "automation disabled"],
+                },
+                {
+                    "step": "submit_job",
+                    "tool": "source_url_retorrent_job",
+                    "request_from": "readiness_bundle.live_readiness.manual_job_template.request",
+                    "read": ["job_id", "status", "runtime.status_endpoint", "agent_decision", "workflow_context"],
+                    "continue_when": "job_id is present",
+                    "stop_when": ["duplicate_check.exists=true", "agent_decision.decision=configure_policy", "missing_confirmations is not empty"],
+                },
+                {
+                    "step": "poll",
+                    "tool": "get_job_status",
+                    "read": ["status", "runtime.should_poll", "runtime.poll_after_seconds", "agent_decision", "blockers", "next_actions"],
+                    "continue_when": "status=complete",
+                    "repeat_when": "status in queued,running and runtime.should_poll=true",
+                    "stop_when": ["status=blocked", "status=failed", "status=cancelled"],
+                },
+                {
+                    "step": "summary_or_resume",
+                    "tool": "get_job_summary",
+                    "read": ["summary", "evidence", "resume_plan", "resume_lineage", "qbit_plan", "candidate_submission"],
+                    "resume_with": "resume_job when resume_plan.runnable=true",
+                    "complete_when": "status=complete and uploaded torrent injection/seeding evidence is present",
+                },
+            ],
+        },
+        {
+            "name": "manual_retorrent",
+            "tool": "manual_retorrent_job",
+            "description": "Create the primary source URL plus target tracker job. It checks duplicates and only proceeds when rule, duplicate, and confirmation gates allow.",
+            "required_fields": ["source", "target"],
+            "recommended_fields": ["save_path", "accept_rules", "confirm_upload", "uploaded_qbit_category", "uploaded_qbit_tags"],
+            "runbook_ref": "source_url_retorrent",
+        },
+        {
+            "name": "daily_candidates",
+            "tool": "daily_candidates_schedule_job",
+            "description": "Find up to 10 ranked source/target retorrent candidates, then submit approved candidates through the inherited-identity handoff.",
+            "required_fields": ["source_tracker", "target"],
+            "read_result": ["schedule_digest", "candidate_digest", "digest", "candidates", "ready_count"],
+            "runbook": [
+                {
+                    "step": "preflight",
+                    "tool": "readiness_bundle",
+                    "read": ["live_readiness.ready_for_daily_candidates", "daily_schedule.schedules", "agent_decision"],
+                    "continue_when": "live_readiness.ready_for_daily_candidates=true",
+                    "stop_when": ["deployment.ready=false", "daily schedule missing", "site policy not ready"],
+                },
+                {
+                    "step": "create_candidate_jobs",
+                    "tool": "daily_candidates_schedule_job",
+                    "read": ["schedule_digest.items", "schedule_digest.push_items", "schedule_digest.submission_handoff"],
+                    "continue_when": "schedule_digest.pending_job_count=0 and schedule_digest.submission_handoff.ready=true",
+                    "repeat_when": "schedule_digest.pending_job_count>0",
+                },
+                {
+                    "step": "submit_approved_candidate",
+                    "tool": "submit_daily_candidate_job",
+                    "request_from": "schedule_digest.submission_handoff.items[].request_template after human rule review",
+                    "read": ["job_id", "candidate_submission", "agent_decision", "qbit_plan"],
+                    "stop_when": ["candidate can_submit=false", "confirm_upload missing", "save_path/path missing"],
+                    "then_follow": "source_url_retorrent.poll",
+                },
+            ],
+        },
+        {
+            "name": "resume_blocked_job",
+            "tool": "resume_job",
+            "description": "Resume a blocked/failed job using allowlisted next_command_argv emitted by ptcli summaries.",
+            "required_fields": ["job_id"],
+            "runbook": [
+                {
+                    "step": "inspect",
+                    "tool": "get_job_status",
+                    "read": ["resume_plan", "resume_state", "next_command_argv", "blockers", "next_actions"],
+                    "continue_when": "resume_plan.runnable=true",
+                    "stop_when": ["resume_plan.runnable=false", "next_command_argv not allowlisted"],
+                },
+                {
+                    "step": "resume",
+                    "tool": "resume_job",
+                    "read": ["job_id", "resume_lineage", "runtime.status_endpoint"],
+                    "then_follow": "source_url_retorrent.poll",
+                },
+            ],
+        },
+    ]
 
 
 def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:

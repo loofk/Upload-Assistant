@@ -98,6 +98,11 @@ curl -X POST http://127.0.0.1:8080/v1/jobs/retorrent/from-url \
   -H "Content-Type: application/json" \
   -d '{"source_url":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM","accept_rules":true,"confirm_upload":true,"save_path":"/downloads","uploaded_qbit_category":"MTEAM","uploaded_qbit_tags":"retorrent","uploaded_qbit_upload_limit":"2MiB/s"}'
 
+# AI 端到端推荐顺序：先读 readiness bundle，再按返回的 manual_job_template 提交任务
+curl -X POST http://127.0.0.1:8080/v1/readiness/bundle \
+  -H "Content-Type: application/json" \
+  -d '{"source_url":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM","accept_rules":true,"confirm_upload":true,"save_path":"/downloads"}'
+
 # 轮询状态、读取 summary、按生成的 allowlisted next_command_argv 续跑
 curl "http://127.0.0.1:8080/v1/jobs?status=blocked&limit=10"
 curl http://127.0.0.1:8080/v1/jobs/<job_id>
@@ -144,6 +149,8 @@ python3 ptcli.py site-policies --from U2 --to MTEAM --accept-rules --json
 ```
 
 若需要把 API 暴露给其他容器或局域网工具，建议设置 `PTCLI_API_TOKEN`，调用时添加 `Authorization: Bearer <token>`。服务端点不会绕过站点规则；live 下载/上传仍依赖现有 rule gate、dupe gate 和 `confirm_upload`。
+
+手动源链接转种的 AI runbook 固定为：先调用 `readiness_bundle` 读取 `live_readiness.ready_for_manual_retorrent` 和 `manual_job_template.request`；再调用 `site_policies` 确认 `ready=true` 与 `execution_readiness.ready=true`；然后提交 `source_url_retorrent_job`；按 `runtime.status_endpoint` 轮询 `get_job_status`，当 `status=queued/running` 且 `runtime.should_poll=true` 时继续轮询；完成后读 `get_job_summary`。若返回 duplicate、规则/策略未 ready、`confirm_upload` 缺失、上传后新种无法注入做种，或 `resume_plan.runnable=false`，AI 必须停止并向用户报告 blockers；只有 `resume_plan.runnable=true` 时才调用 `resume_job`。
 
 每日候选响应会按“ready 优先、score 0-100 降序、源站列表顺序兜底”排序。每条候选包含 `ranking.score`、`ranking.tier`、`ranking.reasons`、`ranking.penalties` 和 `ranking.signals`，方便 AI 先选择无重复、元数据完整、规则风险低的候选；有阻塞项时仍会保留 `blockers` 和 `next_actions`，不会静默跳过规则或查重。候选还会给出 `policy_summary` 和 `policy_coverage`，汇总站点自动化 gate、QB 限速、做种要求、规则审查 fingerprint 以及缺失策略字段；`digest.push_summary`、`digest.recommended_action` 和 `digest.push_items[].summary_text` 可直接用于每日推送，`digest.push_items[]` 还会包含 `metadata`、`duplicate_status`、`duplicate_count`、`blockers`、`next_actions`、`can_submit`、`action_label`、`action_endpoint` 和可执行的 `submit_request`。候选 job 的 `agent_decision` 会在 coverage 不完整时返回 `configure_policy`，避免 agent 直接进入 live 提交。候选还会给出 `agent_workflow`、`submit_request`、`submit_tool=source_url_retorrent_job` 和 `submit_job_endpoint=/v1/jobs/retorrent/from-url`；AI 既可以自己提交 `submit_request`，也可以调用 `/v1/jobs/candidates/{job_id}/submit` 按 `rank` 或 `source_id` 选择候选并只补 `confirm_upload`、`save_path`、QB 分类/标签/限速和素材文件等执行参数，源站和目标站身份会从候选继承，避免误改。
 `/v1/jobs/candidates/daily/schedule` 会额外返回顶层 `schedule_digest` 和 `agent_decision`，把多个 schedule job 的 `push_items`、`top_submit_requests`、`submission_handoff`、状态端点和缺失确认聚合到一个批次结果里，方便 OpenClaw/Hermes 或外部 cron 直接生成“今日可转种候选”推送；`submission_handoff.items[]` 优先指向 `/v1/jobs/candidates/{candidate_job_id}/submit`，只要求补 `confirm_upload=true` 和 `save_path`/`path` 等执行参数，源站/目标站身份从候选 job 继承。
