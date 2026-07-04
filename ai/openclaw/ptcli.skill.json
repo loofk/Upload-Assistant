@@ -12,6 +12,7 @@
     "type": "bearer",
     "header": "Authorization",
     "format": "Bearer <PTCLI_API_TOKEN>",
+    "required_when": "PTCLI_API_TOKEN is configured on the service.",
     "env": "PTCLI_API_TOKEN"
   },
   "discovery": {
@@ -33,103 +34,169 @@
     ],
     "blocked_contract": "When rules, duplicate checks, qBittorrent evidence, or required confirmations are missing, APIs return status=blocked with blockers and next_actions."
   },
-  "tools": [
+  "default_workflows": [
     {
-      "name": "deployment_check",
-      "method": "GET",
-      "path": "/v1/deployment/check",
-      "description": "Check local ptcli deployment readiness: runtime imports, config mount, cookies/tmp/job/download paths, API token warning, and qBittorrent config presence. This does not contact trackers or qBittorrent.",
-      "input_schema": {
-        "type": "object",
-        "required": [],
-        "properties": {
-          "config": {
-            "type": "string"
-          },
-          "base_dir": {
-            "type": "string"
-          },
-          "cookies_dir": {
-            "type": "string"
-          },
-          "job_dir": {
-            "type": "string"
-          },
-          "max_concurrent_jobs": {
-            "type": "integer",
-            "default": 1
-          },
-          "downloads_path": {
-            "type": "string"
-          },
-          "compose_file": {
-            "type": "string"
-          },
-          "client": {
-            "type": "string",
-            "default": "default"
-          }
-        }
-      },
-      "response_contract": {
-        "required_fields": [
-          "status",
-          "ok",
-          "ready",
-          "checks",
-          "blockers",
-          "warnings",
-          "next_actions",
-          "paths",
-          "mounts",
-          "queue",
-          "qbit",
-          "daily_candidates",
-          "docker_compose",
-          "agent_summary"
-        ],
-        "agent_summary_fields": [
-          "ready_for_ai",
-          "ready_for_manual_retorrent",
-          "ready_for_daily_candidates",
-          "missing_mounts",
-          "qbit_configured",
-          "daily_candidates_configured",
-          "docker_compose_daily_ready"
-        ]
-      },
-      "safety": {
-        "live_upload": false
-      }
+      "name": "source_url_retorrent",
+      "tool": "source_url_retorrent_job",
+      "description": "Recommended flow when a user sends one source tracker link and a target tracker. The service infers tracker/torrent id, checks duplicates, then proceeds only when rules and confirmations allow.",
+      "required_fields": [
+        "source_url",
+        "target"
+      ],
+      "recommended_fields": [
+        "save_path",
+        "accept_rules",
+        "confirm_upload",
+        "uploaded_qbit_category",
+        "uploaded_qbit_tags"
+      ]
     },
     {
-      "name": "site_policies",
+      "name": "manual_retorrent",
+      "tool": "manual_retorrent_job",
+      "description": "Create the primary source URL plus target tracker job. It checks duplicates and only proceeds when rule, duplicate, and confirmation gates allow.",
+      "required_fields": [
+        "source",
+        "target"
+      ],
+      "recommended_fields": [
+        "save_path",
+        "accept_rules",
+        "confirm_upload",
+        "uploaded_qbit_category",
+        "uploaded_qbit_tags"
+      ]
+    },
+    {
+      "name": "daily_candidates",
+      "tool": "daily_candidates_job",
+      "description": "Find up to 10 ranked source/target retorrent candidates with duplicate checks, policy blockers, risk signals, and executable request templates.",
+      "required_fields": [
+        "source_tracker",
+        "target"
+      ],
+      "read_result": [
+        "digest",
+        "candidates",
+        "ready_count"
+      ]
+    },
+    {
+      "name": "resume_blocked_job",
+      "tool": "resume_job",
+      "description": "Resume a blocked/failed job using allowlisted next_command_argv emitted by ptcli summaries.",
+      "required_fields": [
+        "job_id"
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "retorrent_check",
       "method": "POST",
-      "path": "/v1/site-policies",
-      "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
+      "path": "/v1/retorrent/check",
+      "description": "Resolve a source tracker URL, fetch source metadata, and check whether the target already has duplicates. This endpoint never uploads.",
       "input_schema": {
         "type": "object",
-        "required": [],
+        "required": [
+          "source",
+          "target"
+        ],
         "properties": {
-          "trackers": {
-            "type": [
-              "string",
-              "array"
-            ]
+          "source": {
+            "type": "string",
+            "description": "Source tracker details URL or torrent id. URL inference supports known Chinese PT trackers."
           },
           "source_tracker": {
-            "type": "string"
+            "type": "string",
+            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
           },
           "target": {
             "type": [
               "string",
               "array"
-            ]
+            ],
+            "description": "Target tracker code(s), currently live upload closure is MTEAM-focused."
           },
           "accept_rules": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
           },
-          "config": {
+          "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
             "type": "string"
           }
         }
@@ -138,36 +205,369 @@
         "required_fields": [
           "status",
           "ok",
-          "ready",
-          "policy_matrix",
-          "qbit_limits",
-          "policy_gap_summary",
+          "request",
+          "duplicate_check",
           "blockers",
           "next_actions",
-          "agent_summary"
+          "command_argv",
+          "result"
         ],
-        "policy_fields": [
-          "tracker",
-          "roles",
-          "rules_url",
-          "automation",
-          "qbit_limits",
-          "seeding_requirements",
-          "manual_review_required",
-          "rule_review_fingerprint",
-          "policy_coverage"
+        "status_values": [
+          "ok",
+          "blocked",
+          "error",
+          "complete"
         ],
-        "gap_summary_fields": [
-          "ready",
-          "missing_total",
-          "disabled_total",
-          "by_role",
-          "missing_by_category",
-          "recommendations"
+        "blocked_fields": [
+          "blockers",
+          "next_actions"
         ]
       },
       "safety": {
-        "live_upload": false
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
+      "name": "retorrent_execute_if_no_duplicate",
+      "method": "POST",
+      "path": "/v1/retorrent",
+      "description": "Run the live retorrent closure when execute=true. The existing rule and duplicate gates block unsafe uploads.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Source tracker details URL or torrent id. URL inference supports known Chinese PT trackers."
+          },
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Target tracker code(s), currently live upload closure is MTEAM-focused."
+          },
+          "execute": {
+            "type": "boolean",
+            "description": "Set true for live retorrent execution; omit or false for check-only behavior."
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Required before live target upload."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "request",
+          "duplicate_check",
+          "blockers",
+          "next_actions",
+          "command_argv",
+          "result"
+        ],
+        "status_values": [
+          "ok",
+          "blocked",
+          "error",
+          "complete"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions"
+        ]
+      },
+      "safety": {
+        "mutates_state": true,
+        "live_upload": true,
+        "requires_confirmation": [
+          "accept_rules=true",
+          "confirm_upload=true"
+        ],
+        "must_stop_when": [
+          "duplicate_check.exists=true",
+          "rule gate not ready",
+          "site policy not ready",
+          "uploaded target torrent cannot be injected for seeding"
+        ]
+      }
+    },
+    {
+      "name": "retorrent_check_job",
+      "method": "POST",
+      "path": "/v1/jobs/retorrent/check",
+      "description": "Create an asynchronous duplicate-check job and return a job_id for polling.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Source tracker details URL or torrent id. URL inference supports known Chinese PT trackers."
+          },
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Target tracker code(s), currently live upload closure is MTEAM-focused."
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "kind",
+          "request",
+          "command_argv",
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "summary_file",
+          "resume_state",
+          "agent_summary",
+          "agent_decision",
+          "candidate_digest",
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "resume_plan",
+          "resume_lineage",
+          "resume_context",
+          "source_reference",
+          "workflow_context"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete",
+          "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit"
+        ]
+      },
+      "workflow_hints": {
+        "poll_with": "get_job_status",
+        "summary_with": "get_job_summary",
+        "resume_with": "resume_job"
+      },
+      "safety": {
+        "mutates_state": true,
+        "live_upload": false,
+        "requires_confirmation": []
       }
     },
     {
@@ -184,11 +584,11 @@
         "properties": {
           "source": {
             "type": "string",
-            "description": "Source tracker details URL or torrent id."
+            "description": "Source tracker details URL or torrent id. URL inference supports known Chinese PT trackers."
           },
           "source_tracker": {
             "type": "string",
-            "description": "Optional tracker code when source is only an id."
+            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
           },
           "target": {
             "type": [
@@ -198,18 +598,33 @@
             "description": "Target tracker code(s), currently live upload closure is MTEAM-focused."
           },
           "execute": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Set true for live retorrent execution; omit or false for check-only behavior."
           },
           "accept_rules": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
           },
           "confirm_upload": {
-            "type": "boolean"
-          },
-          "save_path": {
-            "type": "string"
+            "type": "boolean",
+            "description": "Required before live target upload."
           },
           "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
             "type": "string"
           },
           "uploaded_qbit_category": {
@@ -218,12 +633,58 @@
           "uploaded_qbit_tags": {
             "type": "string"
           },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
           "uploaded_qbit_upload_limit": {
             "type": [
               "string",
               "integer"
             ],
-            "description": "Optional uploaded target torrent upload limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
           }
         }
       },
@@ -232,8 +693,14 @@
           "status",
           "ok",
           "job_id",
+          "kind",
+          "request",
+          "command_argv",
           "blockers",
           "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
           "summary_file",
           "resume_state",
           "agent_summary",
@@ -241,7 +708,6 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
-          "runtime",
           "resume_plan",
           "resume_lineage",
           "resume_context",
@@ -253,14 +719,57 @@
           "running",
           "blocked",
           "failed",
-          "complete"
+          "complete",
+          "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit"
         ]
       },
+      "workflow_hints": {
+        "poll_with": "get_job_status",
+        "summary_with": "get_job_summary",
+        "resume_with": "resume_job"
+      },
       "safety": {
+        "mutates_state": true,
         "live_upload": true,
         "requires_confirmation": [
           "accept_rules=true",
           "confirm_upload=true"
+        ],
+        "must_stop_when": [
+          "duplicate_check.exists=true",
+          "rule gate not ready",
+          "site policy not ready",
+          "uploaded target torrent cannot be injected for seeding"
         ]
       }
     },
@@ -268,7 +777,7 @@
       "name": "manual_retorrent_job",
       "method": "POST",
       "path": "/v1/jobs/retorrent/submit",
-      "description": "Submit the primary source URL plus target tracker job. It checks duplicates and only proceeds when rule, duplicate, and confirmation gates allow.",
+      "description": "Submit the primary AI workflow: source tracker URL plus target tracker. It creates a retorrent job that checks duplicates and only proceeds when rule, duplicate, and confirmation gates allow.",
       "input_schema": {
         "type": "object",
         "required": [
@@ -278,27 +787,43 @@
         "properties": {
           "source": {
             "type": "string",
-            "description": "Source tracker details URL or torrent id."
+            "description": "Source tracker details URL or torrent id. URL inference supports known Chinese PT trackers."
           },
           "source_tracker": {
-            "type": "string"
+            "type": "string",
+            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
           },
           "target": {
             "type": [
               "string",
               "array"
-            ]
+            ],
+            "description": "Target tracker code(s), currently live upload closure is MTEAM-focused."
           },
           "accept_rules": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
           },
           "confirm_upload": {
-            "type": "boolean"
-          },
-          "save_path": {
-            "type": "string"
+            "type": "boolean",
+            "description": "Required before live target upload."
           },
           "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
             "type": "string"
           },
           "uploaded_qbit_category": {
@@ -307,9 +832,63 @@
           "uploaded_qbit_tags": {
             "type": "string"
           },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          },
           "execute_if_no_duplicate": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work."
           }
         }
       },
@@ -318,8 +897,14 @@
           "status",
           "ok",
           "job_id",
+          "kind",
+          "request",
+          "command_argv",
           "blockers",
           "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
           "summary_file",
           "resume_state",
           "agent_summary",
@@ -327,19 +912,68 @@
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
-          "runtime",
           "resume_plan",
           "resume_lineage",
           "resume_context",
           "source_reference",
           "workflow_context"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete",
+          "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit"
         ]
       },
+      "workflow_hints": {
+        "poll_with": "get_job_status",
+        "summary_with": "get_job_summary",
+        "resume_with": "resume_job"
+      },
       "safety": {
+        "mutates_state": true,
         "live_upload": true,
         "requires_confirmation": [
           "accept_rules=true",
           "confirm_upload=true"
+        ],
+        "must_stop_when": [
+          "duplicate_check.exists=true",
+          "rule gate not ready",
+          "site policy not ready",
+          "uploaded target torrent cannot be injected for seeding"
         ]
       }
     },
@@ -355,33 +989,45 @@
           "target"
         ],
         "properties": {
-          "source_url": {
-            "type": "string",
-            "description": "User-provided source tracker details or download URL."
-          },
           "source": {
             "type": "string",
-            "description": "Alias for source_url."
+            "description": "Alias for source_url; source_url is preferred for this tool."
           },
           "source_tracker": {
-            "type": "string"
+            "type": "string",
+            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
           },
           "target": {
             "type": [
               "string",
               "array"
-            ]
+            ],
+            "description": "Target tracker code(s), currently live upload closure is MTEAM-focused."
           },
           "accept_rules": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
           },
           "confirm_upload": {
-            "type": "boolean"
-          },
-          "save_path": {
-            "type": "string"
+            "type": "boolean",
+            "description": "Required before live target upload."
           },
           "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
             "type": "string"
           },
           "uploaded_qbit_category": {
@@ -390,9 +1036,67 @@
           "uploaded_qbit_tags": {
             "type": "string"
           },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          },
           "execute_if_no_duplicate": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work."
+          },
+          "source_url": {
+            "type": "string",
+            "description": "User-provided source tracker details or download URL. The service infers tracker and torrent id from this URL."
           }
         }
       },
@@ -401,8 +1105,14 @@
           "status",
           "ok",
           "job_id",
+          "kind",
+          "request",
+          "command_argv",
           "blockers",
           "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
           "summary_file",
           "resume_state",
           "agent_summary",
@@ -415,21 +1125,71 @@
           "resume_context",
           "source_reference",
           "workflow_context"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete",
+          "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit"
         ]
       },
+      "workflow_hints": {
+        "poll_with": "get_job_status",
+        "summary_with": "get_job_summary",
+        "resume_with": "resume_job"
+      },
       "safety": {
+        "mutates_state": true,
         "live_upload": true,
         "requires_confirmation": [
           "accept_rules=true",
           "confirm_upload=true"
+        ],
+        "must_stop_when": [
+          "duplicate_check.exists=true",
+          "rule gate not ready",
+          "site policy not ready",
+          "uploaded target torrent cannot be injected for seeding"
         ]
       }
     },
     {
-      "name": "daily_candidates_job",
+      "name": "daily_candidates",
       "method": "POST",
-      "path": "/v1/jobs/candidates/daily",
-      "description": "Create an asynchronous ranked daily-candidate discovery job and return a job_id for polling.",
+      "path": "/v1/candidates/daily",
+      "description": "Return up to 10 ranked source/target retorrent candidates with metadata availability, duplicate status, policy blockers, risk signals, and an executable retorrent request template.",
       "input_schema": {
         "type": "object",
         "required": [
@@ -438,13 +1198,15 @@
         ],
         "properties": {
           "source_tracker": {
-            "type": "string"
+            "type": "string",
+            "description": "Source tracker code, e.g. U2 or CHD."
           },
           "target": {
             "type": [
               "string",
               "array"
-            ]
+            ],
+            "description": "Target tracker code(s), currently MTEAM duplicate checks are supported."
           },
           "limit": {
             "type": "integer",
@@ -452,11 +1214,152 @@
             "maximum": 10
           },
           "accept_rules": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
           },
           "check_dupes": {
             "type": "boolean",
             "default": true
+          },
+          "base_dir": {
+            "type": "string"
+          },
+          "config": {
+            "type": "string"
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "count",
+          "ready_count",
+          "site_policy",
+          "ranking",
+          "digest",
+          "candidates",
+          "blockers",
+          "next_actions"
+        ],
+        "digest_fields": [
+          "recommendation",
+          "recommended_action",
+          "push_title",
+          "push_summary",
+          "push_count",
+          "ready_count",
+          "review_count",
+          "blocked_count",
+          "top_candidate",
+          "top_submit_request",
+          "top_submit_job_endpoint",
+          "top_submit_tool",
+          "push_items",
+          "blockers",
+          "next_actions"
+        ],
+        "candidate_fields": [
+          "status",
+          "source",
+          "source_info",
+          "duplicate_check",
+          "source_policy",
+          "target_policies",
+          "policy_summary",
+          "policy_coverage",
+          "ranking",
+          "recommendation",
+          "blockers",
+          "agent_workflow",
+          "submit_request",
+          "submit_job_endpoint",
+          "submit_tool",
+          "execute_request",
+          "execute_job_endpoint"
+        ],
+        "push_item_fields": [
+          "rank",
+          "summary_text",
+          "source_tracker",
+          "source_id",
+          "source_url",
+          "title",
+          "size",
+          "published_at",
+          "promotion",
+          "metadata",
+          "duplicate_status",
+          "duplicate_count",
+          "score",
+          "tier",
+          "policy_summary",
+          "blockers",
+          "next_actions",
+          "can_submit",
+          "action_label",
+          "action_endpoint",
+          "submit_request",
+          "submit_job_endpoint",
+          "submit_tool"
+        ],
+        "ranking": {
+          "score_range": "0-100",
+          "tiers": [
+            "ready",
+            "review",
+            "blocked"
+          ],
+          "sort": "ready-first, then descending score"
+        }
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
+      "name": "daily_candidates_job",
+      "method": "POST",
+      "path": "/v1/jobs/candidates/daily",
+      "description": "Create an asynchronous daily-candidate discovery job and return a job_id for polling.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "source_tracker",
+          "target"
+        ],
+        "properties": {
+          "source_tracker": {
+            "type": "string",
+            "description": "Source tracker code, e.g. U2 or CHD."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Target tracker code(s), currently MTEAM duplicate checks are supported."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 10,
+            "maximum": 10
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
+          },
+          "check_dupes": {
+            "type": "boolean",
+            "default": true
+          },
+          "base_dir": {
+            "type": "string"
+          },
+          "config": {
+            "type": "string"
           }
         }
       },
@@ -465,8 +1368,18 @@
           "status",
           "ok",
           "job_id",
+          "kind",
+          "request",
+          "command_argv",
           "blockers",
           "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "summary_file",
+          "resume_state",
+          "agent_summary",
+          "agent_decision",
           "candidate_digest",
           "policy_coverage",
           "policy_qbit_defaults",
@@ -475,6 +1388,44 @@
           "resume_context",
           "source_reference",
           "workflow_context"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete",
+          "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit"
         ],
         "result_fields": [
           "ranking",
@@ -500,17 +1451,23 @@
           "next_actions"
         ],
         "candidate_fields": [
-          "ranking",
-          "recommendation",
+          "status",
+          "source",
+          "source_info",
           "duplicate_check",
-          "blockers",
+          "source_policy",
+          "target_policies",
           "policy_summary",
           "policy_coverage",
+          "ranking",
+          "recommendation",
+          "blockers",
           "agent_workflow",
           "submit_request",
           "submit_job_endpoint",
           "submit_tool",
-          "execute_request"
+          "execute_request",
+          "execute_job_endpoint"
         ],
         "push_item_fields": [
           "rank",
@@ -538,8 +1495,313 @@
           "submit_tool"
         ]
       },
+      "workflow_hints": {
+        "poll_with": "get_job_status",
+        "summary_with": "get_job_summary"
+      },
       "safety": {
-        "live_upload": false
+        "mutates_state": true,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
+      "name": "submit_daily_candidate_job",
+      "method": "POST",
+      "path": "/v1/jobs/candidates/{job_id}/submit",
+      "description": "Create a live retorrent job from a ranked item in a completed daily-candidates job. The candidate source/target identity is inherited from the digest; this endpoint only accepts execution overrides such as confirm_upload, save_path, qBittorrent tags, rate limits, and material files.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Completed daily_candidates_job id that contains candidate_digest.push_items."
+          },
+          "rank": {
+            "type": "integer",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Rank in candidate_digest.push_items to submit."
+          },
+          "source_id": {
+            "type": "string",
+            "description": "Optional source torrent id selector. When supplied, it is matched against candidate_digest.push_items[].source_id."
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Optional execution overrides. Source/target identity is ignored here and inherited from the selected candidate.",
+            "properties": {
+              "accept_rules": {
+                "type": "boolean",
+                "description": "Required for source download and live upload automation."
+              },
+              "confirm_upload": {
+                "type": "boolean",
+                "description": "Required before live target upload."
+              },
+              "path": {
+                "type": "string",
+                "description": "Existing completed content path on the seedbox."
+              },
+              "save_path": {
+                "type": "string",
+                "description": "qBittorrent save path for source torrent download/injection."
+              },
+              "uploaded_save_path": {
+                "type": "string",
+                "description": "qBittorrent save path for uploaded target torrent injection."
+              },
+              "qbit_category": {
+                "type": "string"
+              },
+              "qbit_tags": {
+                "type": "string"
+              },
+              "uploaded_qbit_category": {
+                "type": "string"
+              },
+              "uploaded_qbit_tags": {
+                "type": "string"
+              },
+              "qbit_upload_limit": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+              },
+              "qbit_download_limit": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+              },
+              "uploaded_qbit_upload_limit": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+              },
+              "uploaded_qbit_download_limit": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+              },
+              "metadata_file": {
+                "type": "string"
+              },
+              "ptgen_description_file": {
+                "type": "string"
+              },
+              "imdb_id": {
+                "type": "string"
+              },
+              "tmdb_id": {
+                "type": "string"
+              },
+              "tmdb_type": {
+                "type": "string",
+                "enum": [
+                  "movie",
+                  "tv"
+                ]
+              },
+              "douban_id": {
+                "type": "string"
+              },
+              "douban_url": {
+                "type": "string"
+              },
+              "execute_if_no_duplicate": {
+                "type": "boolean",
+                "default": true,
+                "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work."
+              }
+            }
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Required before live target upload."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          },
+          "execute_if_no_duplicate": {
+            "type": "boolean",
+            "default": true,
+            "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "kind",
+          "request",
+          "command_argv",
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "summary_file",
+          "resume_state",
+          "agent_summary",
+          "agent_decision",
+          "candidate_digest",
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "resume_plan",
+          "resume_lineage",
+          "resume_context",
+          "source_reference",
+          "workflow_context"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete",
+          "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit"
+        ]
+      },
+      "workflow_hints": {
+        "poll_with": "get_job_status",
+        "summary_with": "get_job_summary",
+        "resume_with": "resume_job"
+      },
+      "safety": {
+        "mutates_state": true,
+        "live_upload": true,
+        "requires_confirmation": [
+          "accept_rules=true",
+          "confirm_upload=true"
+        ],
+        "must_stop_when": [
+          "duplicate_check.exists=true",
+          "rule gate not ready",
+          "site policy not ready",
+          "uploaded target torrent cannot be injected for seeding"
+        ]
       }
     },
     {
@@ -561,13 +1823,15 @@
               ],
               "properties": {
                 "source_tracker": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Source tracker code, e.g. U2 or CHD."
                 },
                 "target": {
                   "type": [
                     "string",
                     "array"
-                  ]
+                  ],
+                  "description": "Target tracker code(s), currently MTEAM duplicate checks are supported."
                 },
                 "limit": {
                   "type": "integer",
@@ -575,11 +1839,18 @@
                   "maximum": 10
                 },
                 "accept_rules": {
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
                 },
                 "check_dupes": {
                   "type": "boolean",
                   "default": true
+                },
+                "base_dir": {
+                  "type": "string"
+                },
+                "config": {
+                  "type": "string"
                 },
                 "name": {
                   "type": "string"
@@ -620,7 +1891,9 @@
         ]
       },
       "safety": {
-        "live_upload": false
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
       }
     },
     {
@@ -642,13 +1915,15 @@
               ],
               "properties": {
                 "source_tracker": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Source tracker code, e.g. U2 or CHD."
                 },
                 "target": {
                   "type": [
                     "string",
                     "array"
-                  ]
+                  ],
+                  "description": "Target tracker code(s), currently MTEAM duplicate checks are supported."
                 },
                 "limit": {
                   "type": "integer",
@@ -656,11 +1931,18 @@
                   "maximum": 10
                 },
                 "accept_rules": {
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
                 },
                 "check_dupes": {
                   "type": "boolean",
                   "default": true
+                },
+                "base_dir": {
+                  "type": "string"
+                },
+                "config": {
+                  "type": "string"
                 },
                 "name": {
                   "type": "string"
@@ -718,7 +2000,9 @@
         "summary_with": "get_job_summary"
       },
       "safety": {
-        "live_upload": false
+        "mutates_state": true,
+        "live_upload": false,
+        "requires_confirmation": []
       }
     },
     {
@@ -798,7 +2082,9 @@
         ]
       },
       "safety": {
-        "live_upload": false
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
       }
     },
     {
@@ -813,7 +2099,8 @@
         ],
         "properties": {
           "job_id": {
-            "type": "string"
+            "type": "string",
+            "description": "32-character ptcli job id returned by a job creation endpoint."
           }
         }
       },
@@ -822,90 +2109,9 @@
           "status",
           "ok",
           "job_id",
-          "blockers",
-          "next_actions",
-          "interruption",
-          "cancellation",
-          "runtime",
-          "summary_file",
-          "resume_state",
-          "agent_summary",
-          "agent_decision",
-          "candidate_digest",
-          "policy_coverage",
-          "policy_qbit_defaults",
-          "resume_plan",
-          "resume_lineage",
-          "resume_context",
-          "source_reference",
-          "workflow_context"
-        ]
-      },
-      "safety": {
-        "live_upload": false
-      }
-    },
-    {
-      "name": "resume_job",
-      "method": "POST",
-      "path": "/v1/jobs/{job_id}/resume",
-      "description": "Create a follow-up job from the allowlisted next_command_argv generated by a blocked or failed job.",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "job_id"
-        ],
-        "properties": {
-          "job_id": {
-            "type": "string"
-          }
-        }
-      },
-      "response_contract": {
-        "required_fields": [
-          "status",
-          "ok",
-          "job_id",
-          "blockers",
-          "next_actions",
-          "resume_plan",
-          "resume_lineage",
-          "resume_context",
-          "source_reference",
-          "workflow_context"
-        ]
-      },
-      "safety": {
-        "live_upload": "inherits_from_resume_command",
-        "requires_confirmation": [
-          "existing allowlisted next_command_argv"
-        ]
-      }
-    },
-    {
-      "name": "cancel_job",
-      "method": "POST",
-      "path": "/v1/jobs/{job_id}/cancel",
-      "description": "Cancel a queued job before it starts. Running jobs are not force-stopped and return 409 so live tracker/qBittorrent work is not interrupted unsafely.",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "job_id"
-        ],
-        "properties": {
-          "job_id": {
-            "type": "string"
-          },
-          "reason": {
-            "type": "string"
-          }
-        }
-      },
-      "response_contract": {
-        "required_fields": [
-          "status",
-          "ok",
-          "job_id",
+          "kind",
+          "request",
+          "command_argv",
           "blockers",
           "next_actions",
           "interruption",
@@ -931,20 +2137,49 @@
           "failed",
           "complete",
           "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit"
         ]
       },
       "safety": {
+        "mutates_state": false,
         "live_upload": false,
-        "requires_confirmation": [
-          "job must still be queued"
-        ]
+        "requires_confirmation": []
       }
     },
     {
       "name": "get_job_summary",
       "method": "GET",
       "path": "/v1/jobs/{job_id}/summary",
-      "description": "Return the parsed job summary file, full result, agent decision, resume plan, policy coverage, source reference, and workflow context.",
+      "description": "Return the job result and parsed summary-file payload when available.",
       "input_schema": {
         "type": "object",
         "required": [
@@ -952,7 +2187,8 @@
         ],
         "properties": {
           "job_id": {
-            "type": "string"
+            "type": "string",
+            "description": "32-character ptcli job id returned by a job creation endpoint."
           }
         }
       },
@@ -980,8 +2216,385 @@
         ]
       },
       "safety": {
-        "live_upload": false
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
+      "name": "resume_job",
+      "method": "POST",
+      "path": "/v1/jobs/{job_id}/resume",
+      "description": "Create a follow-up job from the allowlisted next_command_argv generated by a blocked or failed job.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "32-character ptcli job id returned by a job creation endpoint."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "kind",
+          "request",
+          "command_argv",
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "summary_file",
+          "resume_state",
+          "agent_summary",
+          "agent_decision",
+          "candidate_digest",
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "resume_plan",
+          "resume_lineage",
+          "resume_context",
+          "source_reference",
+          "workflow_context"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete",
+          "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit"
+        ]
+      },
+      "workflow_hints": {
+        "poll_with": "get_job_status",
+        "summary_with": "get_job_summary"
+      },
+      "safety": {
+        "mutates_state": true,
+        "live_upload": "inherits_from_resume_command",
+        "requires_confirmation": [
+          "existing allowlisted next_command_argv"
+        ]
+      }
+    },
+    {
+      "name": "cancel_job",
+      "method": "POST",
+      "path": "/v1/jobs/{job_id}/cancel",
+      "description": "Cancel a queued job before it starts. Running jobs are not force-stopped and return 409 so live tracker/qBittorrent work is not interrupted unsafely.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "32-character ptcli job id returned by a job creation endpoint."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional audit reason for cancelling a queued job."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "kind",
+          "request",
+          "command_argv",
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "summary_file",
+          "resume_state",
+          "agent_summary",
+          "agent_decision",
+          "candidate_digest",
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "resume_plan",
+          "resume_lineage",
+          "resume_context",
+          "source_reference",
+          "workflow_context"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete",
+          "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit"
+        ]
+      },
+      "safety": {
+        "mutates_state": true,
+        "live_upload": false,
+        "requires_confirmation": [
+          "job must still be queued"
+        ]
+      }
+    },
+    {
+      "name": "agent_manifest",
+      "method": "GET",
+      "path": "/.well-known/ptcli-agent.json",
+      "description": "Return an OpenClaw/Hermes-friendly skill manifest with OpenAPI, tool, auth, safety, and workflow metadata.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {}
+      },
+      "response_contract": {
+        "required_fields": [
+          "schema_version",
+          "base_url",
+          "auth",
+          "discovery",
+          "safety",
+          "tools",
+          "default_workflows"
+        ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
+      "name": "deployment_check",
+      "method": "GET",
+      "path": "/v1/deployment/check",
+      "description": "Check local ptcli deployment readiness: runtime imports, config mount, cookies/tmp/job/download paths, API token warning, and qBittorrent config presence. This does not contact trackers or qBittorrent.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "config": {
+            "type": "string"
+          },
+          "base_dir": {
+            "type": "string"
+          },
+          "cookies_dir": {
+            "type": "string"
+          },
+          "job_dir": {
+            "type": "string"
+          },
+          "max_concurrent_jobs": {
+            "type": "integer",
+            "default": 1
+          },
+          "downloads_path": {
+            "type": "string"
+          },
+          "compose_file": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string",
+            "default": "default"
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "checks",
+          "blockers",
+          "warnings",
+          "next_actions",
+          "paths",
+          "mounts",
+          "queue",
+          "qbit",
+          "daily_candidates",
+          "docker_compose",
+          "agent_summary"
+        ],
+        "status_values": [
+          "ok",
+          "blocked"
+        ],
+        "agent_summary_fields": [
+          "ready_for_ai",
+          "ready_for_manual_retorrent",
+          "ready_for_daily_candidates",
+          "missing_mounts",
+          "qbit_configured",
+          "daily_candidates_configured",
+          "docker_compose_daily_ready"
+        ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
+      "name": "site_policies",
+      "method": "POST",
+      "path": "/v1/site-policies",
+      "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "trackers": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Comma-separated tracker codes or an array, e.g. U2,MTEAM."
+          },
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional source tracker code when asking for a source/target pair."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional target tracker code(s) when asking for a source/target pair."
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Whether manual rule review obligations are acknowledged for this policy read."
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py inside the container."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "policy_matrix",
+          "qbit_limits",
+          "policy_gap_summary",
+          "blockers",
+          "next_actions",
+          "agent_summary"
+        ],
+        "policy_fields": [
+          "tracker",
+          "roles",
+          "rules_url",
+          "automation",
+          "qbit_limits",
+          "seeding_requirements",
+          "manual_review_required",
+          "rule_review_fingerprint",
+          "policy_coverage"
+        ],
+        "gap_summary_fields": [
+          "ready",
+          "missing_total",
+          "disabled_total",
+          "by_role",
+          "missing_by_category",
+          "recommendations"
+        ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
       }
     }
-  ]
+  ],
+  "tool_count": 19,
+  "openclaw": {
+    "skill_id": "ptcli-retorrent",
+    "entrypoint": "http://127.0.0.1:8080/openapi.json",
+    "manifest_url": "http://127.0.0.1:8080/v1/openclaw/skill.json"
+  },
+  "hermes": {
+    "skill_id": "ptcli-retorrent",
+    "entrypoint": "http://127.0.0.1:8080/openapi.json",
+    "manifest_url": "http://127.0.0.1:8080/v1/hermes/skill.json"
+  }
 }

@@ -44,7 +44,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 ## AI 友好输出
 
 - 关键命令支持 `--json`。
-- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`、每日候选 `/v1/candidates/daily`/`/v1/candidates/daily/schedule`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/retorrent/from-url`、`/v1/jobs/retorrent/submit`、`/v1/jobs/candidates/daily`、`/v1/jobs`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`、`/v1/jobs/{job_id}/cancel`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
+- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`、每日候选 `/v1/candidates/daily`/`/v1/candidates/daily/schedule`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/retorrent/from-url`、`/v1/jobs/retorrent/submit`、`/v1/jobs/candidates/daily`、`/v1/jobs/candidates/{job_id}/submit`、`/v1/jobs`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`、`/v1/jobs/{job_id}/cancel`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
 - `sites --json` 暴露每个站点的 `source_info`、`source_info_adapter`、`source_download`、`source_download_adapter`、`credential_requirements`、`target_upload`、`full_live_closure_to_mteam` 能力。
 - `rule-check --json` 暴露 `rule_obligations[].review_scope.required_confirmations`，供 agent 在 live 前逐项提示人工确认。
 - `flow-check --json` 暴露 `source_capability`、`target_capabilities` 和去重后的 `credential_requirements`，供盒子脚本在 live 前检查配置缺口。
@@ -116,6 +116,11 @@ curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/daily \
   -H "Content-Type: application/json" \
   -d '{"source_tracker":"U2","target":"MTEAM","limit":10}'
 
+# 从候选 job 中选择第 1 条创建正式转种 job；source/target 从候选继承，只补确认、路径、QB 分类/限速等执行参数
+curl -X POST http://127.0.0.1:8080/v1/jobs/candidates/<candidate_job_id>/submit \
+  -H "Content-Type: application/json" \
+  -d '{"rank":1,"confirm_upload":true,"save_path":"/downloads","uploaded_qbit_category":"MTEAM","uploaded_qbit_tags":"retorrent","uploaded_qbit_upload_limit":"2MiB/s"}'
+
 # 每日候选计划预览：把请求或 PTCLI_DAILY_CANDIDATE_SCHEDULES 规范化成可由 cron/AI 执行的候选 job_request
 curl -X POST http://127.0.0.1:8080/v1/candidates/daily/schedule \
   -H "Content-Type: application/json" \
@@ -140,7 +145,7 @@ python3 ptcli.py site-policies --from U2 --to MTEAM --accept-rules --json
 
 若需要把 API 暴露给其他容器或局域网工具，建议设置 `PTCLI_API_TOKEN`，调用时添加 `Authorization: Bearer <token>`。服务端点不会绕过站点规则；live 下载/上传仍依赖现有 rule gate、dupe gate 和 `confirm_upload`。
 
-每日候选响应会按“ready 优先、score 0-100 降序、源站列表顺序兜底”排序。每条候选包含 `ranking.score`、`ranking.tier`、`ranking.reasons`、`ranking.penalties` 和 `ranking.signals`，方便 AI 先选择无重复、元数据完整、规则风险低的候选；有阻塞项时仍会保留 `blockers` 和 `next_actions`，不会静默跳过规则或查重。候选还会给出 `policy_summary` 和 `policy_coverage`，汇总站点自动化 gate、QB 限速、做种要求、规则审查 fingerprint 以及缺失策略字段；`digest.push_summary`、`digest.recommended_action` 和 `digest.push_items[].summary_text` 可直接用于每日推送，`digest.push_items[]` 还会包含 `metadata`、`duplicate_status`、`duplicate_count`、`blockers`、`next_actions`、`can_submit`、`action_label`、`action_endpoint` 和可执行的 `submit_request`。候选 job 的 `agent_decision` 会在 coverage 不完整时返回 `configure_policy`，避免 agent 直接进入 live 提交。候选还会给出 `agent_workflow`、`submit_request`、`submit_tool=source_url_retorrent_job` 和 `submit_job_endpoint=/v1/jobs/retorrent/from-url`，agent 补齐 `confirm_upload`、`save_path` 或 `path` 后即可走主路径提交；`/v1/jobs/retorrent/submit` 仍保留为兼容入口。
+每日候选响应会按“ready 优先、score 0-100 降序、源站列表顺序兜底”排序。每条候选包含 `ranking.score`、`ranking.tier`、`ranking.reasons`、`ranking.penalties` 和 `ranking.signals`，方便 AI 先选择无重复、元数据完整、规则风险低的候选；有阻塞项时仍会保留 `blockers` 和 `next_actions`，不会静默跳过规则或查重。候选还会给出 `policy_summary` 和 `policy_coverage`，汇总站点自动化 gate、QB 限速、做种要求、规则审查 fingerprint 以及缺失策略字段；`digest.push_summary`、`digest.recommended_action` 和 `digest.push_items[].summary_text` 可直接用于每日推送，`digest.push_items[]` 还会包含 `metadata`、`duplicate_status`、`duplicate_count`、`blockers`、`next_actions`、`can_submit`、`action_label`、`action_endpoint` 和可执行的 `submit_request`。候选 job 的 `agent_decision` 会在 coverage 不完整时返回 `configure_policy`，避免 agent 直接进入 live 提交。候选还会给出 `agent_workflow`、`submit_request`、`submit_tool=source_url_retorrent_job` 和 `submit_job_endpoint=/v1/jobs/retorrent/from-url`；AI 既可以自己提交 `submit_request`，也可以调用 `/v1/jobs/candidates/{job_id}/submit` 按 `rank` 或 `source_id` 选择候选并只补 `confirm_upload`、`save_path`、QB 分类/标签/限速和素材文件等执行参数，源站和目标站身份会从候选继承，避免误改。
 `/v1/jobs/candidates/daily/schedule` 会额外返回顶层 `schedule_digest` 和 `agent_decision`，把多个 schedule job 的 `push_items`、`top_submit_requests`、状态端点和缺失确认聚合到一个批次结果里，方便 OpenClaw/Hermes 或外部 cron 直接生成“今日可转种候选”推送。
 
 OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/openclaw/skill.json`、`/v1/hermes/skill.json`，其中包含 OpenAPI 地址、工具列表、鉴权方式、live 上传安全边界，以及每个关键工具的 `input_schema`、`response_contract`、`safety`。反向代理或容器内外地址不一致时，设置 `PTCLI_PUBLIC_BASE_URL=https://your-host.example` 让 manifest 输出外部可访问地址；仓库内也提供 `ai/openclaw/ptcli.skill.json` 和 `ai/hermes/ptcli.skill.json` 作为离线模板。

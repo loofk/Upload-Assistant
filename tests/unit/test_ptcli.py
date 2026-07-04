@@ -13207,6 +13207,125 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert summary["agent_decision"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/from-url"
 
 
+def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(monkeypatch, tmp_path) -> None:
+    captured_request = {}
+    digest = {
+        "kind": "ptcli.daily_candidates_digest",
+        "recommendation": "submit_top_candidate_when_confirmed",
+        "ready_count": 1,
+        "push_items": [
+            {
+                "rank": 1,
+                "source_id": "60635",
+                "title": "Example.Release",
+                "summary_text": "#1 [ready] U2-60635 Example.Release",
+                "can_submit": True,
+                "submit_request": {
+                    "source": "https://u2.dmhy.org/details.php?id=60635",
+                    "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                    "source_tracker": "U2",
+                    "target": "MTEAM",
+                    "execute_if_no_duplicate": True,
+                    "accept_rules": True,
+                    "confirm_upload": False,
+                },
+            }
+        ],
+        "blockers": [],
+        "next_actions": [],
+    }
+
+    async def fake_daily_candidates(_request):
+        return {
+            "kind": "ptcli.service.daily_candidates",
+            "status": "ok",
+            "ok": True,
+            "count": 1,
+            "ready_count": 1,
+            "digest": digest,
+            "result": {
+                "kind": "ptcli.daily_candidates",
+                "count": 1,
+                "ready_count": 1,
+                "digest": digest,
+                "candidates": [{"status": "ready"}],
+            },
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    async def fake_retorrent(request):
+        captured_request.update(request)
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["qBittorrent save path needs live validation."],
+            "next_actions": ["Poll or resume after checking qBittorrent."],
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+        }
+
+    monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    candidate_job = ptcli_service.create_daily_candidates_job(store, {"source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
+
+    retorrent_job = ptcli_service.create_candidate_retorrent_job(
+        store,
+        candidate_job["job_id"],
+        {
+            "rank": 1,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+            "source": "https://evil.invalid/details.php?id=1",
+            "target": "CHD",
+            "overrides": {"uploaded_qbit_tags": "retorrent", "target": "TTG"},
+        },
+    )
+
+    assert retorrent_job["kind"] == "ptcli.candidate_retorrent"
+    assert retorrent_job["request"]["mode"] == "candidate_retorrent"
+    assert retorrent_job["request"]["candidate_submission"]["candidate_job_id"] == candidate_job["job_id"]
+    assert retorrent_job["request"]["candidate_submission"]["candidate_rank"] == 1
+    assert retorrent_job["request"]["source_reference"]["tracker"] == "U2"
+    assert retorrent_job["request"]["source_reference"]["source_id"] == "60635"
+    assert retorrent_job["request"]["target_trackers"] == "MTEAM"
+    assert captured_request["source"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert captured_request["target"] == "MTEAM"
+    assert captured_request["confirm_upload"] is True
+    assert captured_request["save_path"] == "/downloads"
+    assert captured_request["uploaded_qbit_tags"] == "retorrent"
+
+
+def test_submit_daily_candidate_job_rejects_blocked_candidate(monkeypatch, tmp_path) -> None:
+    digest = {
+        "kind": "ptcli.daily_candidates_digest",
+        "ready_count": 0,
+        "push_items": [{"rank": 1, "source_id": "60635", "can_submit": False, "blockers": ["target-duplicate: exists"]}],
+    }
+
+    async def fake_daily_candidates(_request):
+        return {
+            "kind": "ptcli.service.daily_candidates",
+            "status": "ok",
+            "ok": True,
+            "digest": digest,
+            "result": {"kind": "ptcli.daily_candidates", "digest": digest, "candidates": [{"status": "blocked"}]},
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    candidate_job = ptcli_service.create_daily_candidates_job(store, {"source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
+
+    with pytest.raises(ptcli_service.ServiceError) as exc:
+        ptcli_service.create_candidate_retorrent_job(store, candidate_job["job_id"], {"rank": 1})
+
+    assert exc.value.status == HTTPStatus.CONFLICT
+    assert "not submittable" in str(exc.value)
+
+
 def test_daily_candidates_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
     digest = {
         "kind": "ptcli.daily_candidates_digest",
@@ -13622,6 +13741,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "missing_by_category" in tool_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
     assert tool_by_name["daily_candidates_schedule"]["method"] == "POST"
     assert "schedule_fields" in tool_by_name["daily_candidates_schedule"]["response_contract"]
+    assert tool_by_name["submit_daily_candidate_job"]["path"] == "/v1/jobs/candidates/{job_id}/submit"
+    assert tool_by_name["submit_daily_candidate_job"]["input_schema"]["required"] == ["job_id"]
+    assert "overrides" in tool_by_name["submit_daily_candidate_job"]["input_schema"]["properties"]
+    assert "confirm_upload=true" in tool_by_name["submit_daily_candidate_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"
     assert "job_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "schedule_digest" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
@@ -13697,6 +13820,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "cancellation" in job_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "digest" in candidates_schema["properties"]
+    candidate_submit_schema = openapi["paths"]["/v1/jobs/candidates/{job_id}/submit"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "job_id" in candidate_submit_schema["properties"]
     schedule_jobs_schema = openapi["paths"]["/v1/jobs/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "schedule_digest" in schedule_jobs_schema["properties"]
     assert "agent_decision" in schedule_jobs_schema["properties"]
@@ -13722,7 +13847,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
-    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
@@ -13747,7 +13872,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+        assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "queue" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -13765,6 +13890,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
         assert tools_by_name["source_url_retorrent_job"]["input_schema"]["required"] == ["source_url", "target"]
         assert tools_by_name["daily_candidates_schedule"]["path"] == "/v1/candidates/daily/schedule"
+        assert tools_by_name["submit_daily_candidate_job"]["path"] == "/v1/jobs/candidates/{job_id}/submit"
+        assert tools_by_name["submit_daily_candidate_job"]["input_schema"]["required"] == ["job_id"]
+        assert "overrides" in tools_by_name["submit_daily_candidate_job"]["input_schema"]["properties"]
+        assert "confirm_upload=true" in tools_by_name["submit_daily_candidate_job"]["safety"]["requires_confirmation"]
         assert tools_by_name["daily_candidates_schedule_job"]["path"] == "/v1/jobs/candidates/daily/schedule"
         assert "job_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "schedule_digest" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]

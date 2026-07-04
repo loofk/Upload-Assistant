@@ -448,6 +448,12 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/jobs/candidates/daily": lambda payload: create_daily_candidates_job(job_store, payload),
                 "/v1/jobs/candidates/daily/schedule": lambda payload: create_daily_candidate_schedule_jobs(job_store, payload),
             }
+            if path.startswith("/v1/jobs/candidates/") and path.endswith("/submit"):
+                try:
+                    self._send_json(HTTPStatus.OK, self._candidate_submit(path, self._read_json()))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
             if path.startswith("/v1/jobs/") and path.endswith("/resume"):
                 try:
                     self._send_json(HTTPStatus.ACCEPTED, self._job_resume(path))
@@ -490,6 +496,12 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             if len(parts) == 4 and parts[:2] == ["v1", "jobs"] and parts[3] == "cancel":
                 return job_store.cancel(parts[2], payload)
             raise ServiceError("Job cancel endpoint not found.", status=HTTPStatus.NOT_FOUND)
+
+        def _candidate_submit(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+            parts = path.strip("/").split("/")
+            if len(parts) == 5 and parts[:3] == ["v1", "jobs", "candidates"] and parts[4] == "submit":
+                return create_candidate_retorrent_job(job_store, parts[3], payload)
+            raise ServiceError("Candidate submit endpoint not found.", status=HTTPStatus.NOT_FOUND)
 
         def log_message(self, _format: str, *_args: Any) -> None:
             return
@@ -589,6 +601,31 @@ def create_source_url_retorrent_job(job_store: JobStore, request: dict[str, Any]
     return _create_ai_retorrent_job(job_store, effective, kind="ptcli.source_url_retorrent", mode="source_url_retorrent")
 
 
+def create_candidate_retorrent_job(job_store: JobStore, candidate_job_id: str, request: dict[str, Any]) -> dict[str, Any]:
+    """Create a retorrent job from a ranked item in a completed daily-candidates job."""
+    candidate_job = job_store._read(candidate_job_id)
+    candidate_status = str(candidate_job.get("status") or "")
+    if candidate_status in {"queued", "running"}:
+        raise ServiceError(f"Candidate job {candidate_job_id} is still {candidate_status}; poll it before submitting a candidate.", status=HTTPStatus.CONFLICT)
+    digest = _candidate_digest_from_payload(candidate_job.get("result"))
+    if not digest:
+        raise ServiceError(f"Job {candidate_job_id} does not contain a daily candidate digest.", status=HTTPStatus.BAD_REQUEST)
+    candidate_item = _candidate_submit_item(digest, request)
+    submit_request = candidate_item.get("submit_request") if isinstance(candidate_item.get("submit_request"), dict) else None
+    if not submit_request:
+        raise ServiceError("Selected candidate is not submittable; inspect push_items[].blockers before creating a live retorrent job.", status=HTTPStatus.CONFLICT)
+    effective_request = {**submit_request, **_candidate_submit_overrides(request)}
+    effective_request["candidate_submission"] = {
+        "candidate_job_id": candidate_job_id,
+        "candidate_rank": candidate_item.get("rank"),
+        "candidate_source_id": candidate_item.get("source_id"),
+        "candidate_title": candidate_item.get("title"),
+        "candidate_summary_text": candidate_item.get("summary_text"),
+        "candidate_digest_kind": digest.get("kind"),
+    }
+    return _create_ai_retorrent_job(job_store, effective_request, kind="ptcli.candidate_retorrent", mode="candidate_retorrent")
+
+
 def _create_ai_retorrent_job(job_store: JobStore, request: dict[str, Any], *, kind: str, mode: str) -> dict[str, Any]:
     effective_request = {**request, "execute": True, "execute_if_no_duplicate": True, "manual_retorrent": True}
     source = _resolve_request_source(effective_request)
@@ -596,6 +633,8 @@ def _create_ai_retorrent_job(job_store: JobStore, request: dict[str, Any], *, ki
     effective_request = _request_with_policy_qbit_defaults(effective_request, source, target_trackers)
     _, normalized_request, argv = _retorrent_execute_args(effective_request)
     normalized_request = {**normalized_request, "mode": mode, "execute_if_no_duplicate": True}
+    if isinstance(effective_request.get("candidate_submission"), dict):
+        normalized_request["candidate_submission"] = effective_request["candidate_submission"]
     return job_store.create(
         kind,
         normalized_request,
@@ -898,6 +937,85 @@ def _candidate_request_context(request: dict[str, Any]) -> dict[str, Any]:
         "accept_rules": bool(request.get("accept_rules")),
         "check_dupes": request.get("check_dupes", True) is not False,
     }
+
+
+def _candidate_submit_item(digest: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+    push_items = digest.get("push_items") if isinstance(digest.get("push_items"), list) else []
+    rank = _bounded_int(request.get("rank") or request.get("candidate_rank"), default=1, minimum=1, maximum=DEFAULT_CANDIDATE_LIMIT)
+    source_id = request.get("source_id") or request.get("candidate_source_id")
+    selected: dict[str, Any] | None = None
+    if source_id is not None:
+        source_id_text = str(source_id)
+        selected = next((item for item in push_items if isinstance(item, dict) and str(item.get("source_id") or "") == source_id_text), None)
+    if selected is None:
+        selected = next((item for item in push_items if isinstance(item, dict) and _candidate_item_rank(item) == rank), None)
+    if selected is None:
+        raise ServiceError(f"Candidate rank/source_id not found in digest: rank={rank}, source_id={source_id}", status=HTTPStatus.NOT_FOUND)
+    return selected
+
+
+def _candidate_item_rank(item: dict[str, Any]) -> int | None:
+    try:
+        return int(item.get("rank") or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _candidate_submit_overrides(request: dict[str, Any]) -> dict[str, Any]:
+    allowed_keys = {
+        "accept_rules",
+        "confirm_upload",
+        "path",
+        "content_path",
+        "save_path",
+        "output_dir",
+        "source_torrent_file",
+        "package_dir",
+        "target_output_dir",
+        "target_torrent_file",
+        "target_torrent_output_dir",
+        "uploaded_output_dir",
+        "uploaded_torrent_id",
+        "uploaded_torrent_file",
+        "uploaded_save_path",
+        "qbit_category",
+        "qbit_tags",
+        "qbit_upload_limit",
+        "qbit_download_limit",
+        "uploaded_qbit_category",
+        "uploaded_qbit_tags",
+        "uploaded_qbit_upload_limit",
+        "uploaded_qbit_download_limit",
+        "metadata_file",
+        "ptgen_description_file",
+        "mediainfo_file",
+        "bdinfo_file",
+        "image_host_file",
+        "image_host",
+        "bdinfo_playlist",
+        "screenshot_count",
+        "screenshot_file",
+        "screenshot_files",
+        "wait_timeout",
+        "wait_interval",
+        "uploaded_wait_timeout",
+        "uploaded_wait_interval",
+        "client",
+        "config",
+        "imdb_id",
+        "tmdb_id",
+        "tmdb_type",
+        "douban_id",
+        "douban_url",
+        "enrich_metadata",
+        "fetch_ptgen",
+    }
+    overrides: dict[str, Any] = {}
+    nested = request.get("overrides")
+    if isinstance(nested, dict):
+        overrides.update({key: value for key, value in nested.items() if key in allowed_keys})
+    overrides.update({key: value for key, value in request.items() if key in allowed_keys})
+    return overrides
 
 
 def _site_policy_request_context(request: dict[str, Any]) -> dict[str, Any]:
@@ -2783,6 +2901,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     source_url_retorrent_request_schema = _source_url_retorrent_tool_request_schema()
     candidate_request_schema = _daily_candidate_tool_request_schema()
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
+    candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     job_id_schema = _job_id_tool_request_schema()
     job_cancel_schema = _job_cancel_tool_request_schema()
@@ -2861,9 +2980,19 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/candidates/daily",
             "description": "Create an asynchronous daily-candidate discovery job and return a job_id for polling.",
             "input_schema": candidate_request_schema,
-            "response_contract": _job_response_contract(),
+            "response_contract": _daily_candidate_job_response_contract(),
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "submit_daily_candidate_job",
+            "method": "POST",
+            "path": "/v1/jobs/candidates/{job_id}/submit",
+            "description": "Create a live retorrent job from a ranked item in a completed daily-candidates job. The candidate source/target identity is inherited from the digest; this endpoint only accepts execution overrides such as confirm_upload, save_path, qBittorrent tags, rate limits, and material files.",
+            "input_schema": candidate_submit_request_schema,
+            "response_contract": _job_response_contract(),
+            "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "resume_with": "resume_job"},
+            "safety": _live_upload_safety_contract(),
         },
         {
             "name": "daily_candidates_schedule",
@@ -3097,6 +3226,25 @@ def _daily_candidate_schedule_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _candidate_submit_tool_request_schema() -> dict[str, Any]:
+    execution_properties = _source_url_retorrent_tool_request_schema()["properties"]
+    return {
+        "type": "object",
+        "required": ["job_id"],
+        "properties": {
+            "job_id": {"type": "string", "description": "Completed daily_candidates_job id that contains candidate_digest.push_items."},
+            "rank": {"type": "integer", "default": 1, "minimum": 1, "maximum": DEFAULT_CANDIDATE_LIMIT, "description": "Rank in candidate_digest.push_items to submit."},
+            "source_id": {"type": "string", "description": "Optional source torrent id selector. When supplied, it is matched against candidate_digest.push_items[].source_id."},
+            "overrides": {
+                "type": "object",
+                "description": "Optional execution overrides. Source/target identity is ignored here and inherited from the selected candidate.",
+                "properties": {key: value for key, value in execution_properties.items() if key not in {"source", "source_url", "source_tracker", "target"}},
+            },
+            **{key: value for key, value in execution_properties.items() if key not in {"source", "source_url", "source_tracker", "target"}},
+        },
+    }
+
+
 def _site_policy_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -3163,6 +3311,20 @@ def _job_response_contract() -> dict[str, Any]:
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"],
     }
+
+
+def _daily_candidate_job_response_contract() -> dict[str, Any]:
+    contract = _job_response_contract()
+    candidate_contract = _candidate_response_contract()
+    contract.update(
+        {
+            "result_fields": ["ranking", "digest", "candidates", "ready_count"],
+            "digest_fields": candidate_contract["digest_fields"],
+            "candidate_fields": candidate_contract["candidate_fields"],
+            "push_item_fields": candidate_contract["push_item_fields"],
+        }
+    )
+    return contract
 
 
 def _job_list_response_contract() -> dict[str, Any]:
@@ -3469,6 +3631,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
         },
     }
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
+    candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
         "properties": {
@@ -3720,6 +3883,15 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": candidate_request_schema}}},
                     "responses": {"200": {"description": "Queued daily-candidate discovery job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                }
+            },
+            "/v1/jobs/candidates/{job_id}/submit": {
+                "post": {
+                    "operationId": "submitDailyRetorrentCandidateJob",
+                    "security": token_security,
+                    "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": candidate_submit_request_schema}}},
+                    "responses": {"200": {"description": "Queued retorrent job from a selected daily candidate.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/jobs/candidates/daily/schedule": {
