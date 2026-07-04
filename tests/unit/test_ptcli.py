@@ -14220,6 +14220,69 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert payload["agent_decision"]["can_create_manual_job"] is True
 
 
+def test_readiness_bundle_cli_outputs_ai_handoff(tmp_path, monkeypatch, capsys) -> None:
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    tmp_dir = tmp_path / "tmp"
+    job_dir = tmp_path / "jobs"
+    downloads_dir = tmp_path / "downloads"
+    for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
+        directory.mkdir(parents=True)
+    (data_dir / "config.py").write_text("config = {}", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit", "qbit_url": "http://host.docker.internal", "qbit_port": "8080"}},
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "rule_review_fingerprint": "u2-review",
+                },
+                "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
+                    "upload_rate_limit": "2MiB/s",
+                    "min_ratio": 1.0,
+                    "rule_review_fingerprint": "mteam-review",
+                },
+            }
+        },
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    monkeypatch.setenv("TMPDIR", str(tmp_dir))
+
+    code = main(
+        [
+            "readiness-bundle",
+            "--base-dir",
+            str(tmp_path),
+            "--job-dir",
+            str(job_dir),
+            "--downloads-path",
+            str(downloads_dir),
+            "--from",
+            "U2",
+            "--source-id",
+            "60635",
+            "--target",
+            "MTEAM",
+            "--accept-rules",
+            "--confirm-upload",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["kind"] == "ptcli.readiness_bundle"
+    assert payload["live_readiness"]["manual_job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert payload["agent_decision"]["decision"] == "ready_for_manual_retorrent"
+    assert payload["agent_decision"]["next_tool"] == "source_url_retorrent_job"
+
+
 def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path, monkeypatch) -> None:
     (tmp_path / "data" / "cookies").mkdir(parents=True)
     (tmp_path / "tmp").mkdir()

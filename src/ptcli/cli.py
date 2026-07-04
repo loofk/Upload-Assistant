@@ -126,6 +126,41 @@ def build_parser() -> argparse.ArgumentParser:
     daily_schedule.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --job-dir or PTCLI_JOB_DIR/TMPDIR.")
     daily_schedule.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
+    readiness_bundle = subparsers.add_parser(
+        "readiness-bundle",
+        help="Build the AI live-readiness bundle without starting the HTTP service.",
+        description=(
+            "Build the same non-live readiness bundle exposed at /v1/readiness/bundle. "
+            "It aggregates deployment, site policies, daily schedules, doctor command templates, and source_url_retorrent_job request templates without contacting trackers or qBittorrent."
+        ),
+    )
+    readiness_bundle.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
+    readiness_bundle.add_argument("--base-dir", help="Project/base directory used for config/cookies/tmp checks.")
+    readiness_bundle.add_argument("--cookies-dir", help="Cookie directory for deployment checks.")
+    readiness_bundle.add_argument("--job-dir", help="Directory for file-backed API jobs. Defaults to PTCLI_JOB_DIR or TMPDIR/ptcli-jobs.")
+    readiness_bundle.add_argument("--downloads-path", help="Mounted qBittorrent downloads path. Defaults to /downloads.")
+    readiness_bundle.add_argument("--compose-file", help="docker-compose.yml path for deployment checks.")
+    readiness_bundle.add_argument("--max-concurrent-jobs", type=int, help="Maximum API jobs expected for the deployment check.")
+    readiness_bundle.add_argument("--client", default="default", help="Configured qBittorrent client name, defaults to config default.")
+    readiness_bundle.add_argument("--source-url", help="Source tracker details/download URL; preferred for AI handoff.")
+    readiness_bundle.add_argument("--source", help="Alias for --source-url.")
+    readiness_bundle.add_argument("--source-id", help="Source tracker torrent id when --from/--source-tracker is supplied.")
+    readiness_bundle.add_argument("--from", dest="source_tracker", help="Source tracker code when using --source-id.")
+    readiness_bundle.add_argument("--source-tracker", dest="source_tracker_alias", help="Alias for --from.")
+    readiness_bundle.add_argument("--target", help="Target tracker code(s), comma-separated.")
+    readiness_bundle.add_argument("--to", dest="target_trackers", help="Alias for --target.")
+    readiness_bundle.add_argument("--path", dest="content_path", help="Existing local content path on the seedbox.")
+    readiness_bundle.add_argument("--save-path", help="qBittorrent save path for source torrent injection when content is not already local.")
+    readiness_bundle.add_argument("--accept-rules", action="store_true", help="Acknowledge that source and target tracker rules have been manually reviewed.")
+    readiness_bundle.add_argument("--confirm-upload", action="store_true", help="Confirm manual rule review and live upload intent.")
+    readiness_bundle.add_argument("--uploaded-qbit-category", help="Optional qBittorrent category for uploaded target torrent injection.")
+    readiness_bundle.add_argument("--uploaded-qbit-tags", help="Optional qBittorrent tags for uploaded target torrent injection.")
+    readiness_bundle.add_argument("--uploaded-qbit-upload-limit", help="Optional uploaded target torrent qBittorrent upload limit.")
+    readiness_bundle.add_argument("--uploaded-qbit-download-limit", help="Optional uploaded target torrent qBittorrent download limit.")
+    readiness_bundle.add_argument("--schedules-json", help="JSON array/object of daily candidate schedules. Defaults to PTCLI_DAILY_CANDIDATE_SCHEDULES.")
+    readiness_bundle.add_argument("--schedules-file", help="File containing a JSON array/object of daily candidate schedules.")
+    readiness_bundle.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
     rules = subparsers.add_parser("rules", help="Show rule review profiles for supported trackers.")
     rules.add_argument("--trackers", help="Optional comma-separated tracker codes. Defaults to all supported trackers.")
     rules.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
@@ -11566,6 +11601,41 @@ def site_policies_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     return site_policies_payload({key: value for key, value in request.items() if value not in (None, "")})
 
 
+def readiness_bundle_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.service import readiness_bundle_payload
+
+    source = args.source_url or args.source
+    source_tracker = args.source_tracker or args.source_tracker_alias
+    target = args.target or args.target_trackers
+    request: dict[str, Any] = {
+        "config": args.config,
+        "base_dir": args.base_dir,
+        "cookies_dir": args.cookies_dir,
+        "job_dir": args.job_dir,
+        "downloads_path": args.downloads_path,
+        "compose_file": args.compose_file,
+        "max_concurrent_jobs": args.max_concurrent_jobs,
+        "client": args.client,
+        "source_url": source,
+        "source_id": args.source_id,
+        "source_tracker": source_tracker,
+        "target": target,
+        "path": args.content_path,
+        "save_path": args.save_path,
+        "accept_rules": args.accept_rules,
+        "confirm_upload": args.confirm_upload,
+        "uploaded_qbit_category": args.uploaded_qbit_category,
+        "uploaded_qbit_tags": args.uploaded_qbit_tags,
+        "uploaded_qbit_upload_limit": args.uploaded_qbit_upload_limit,
+        "uploaded_qbit_download_limit": args.uploaded_qbit_download_limit,
+    }
+    if args.schedules_file:
+        request["schedules"] = json.loads(Path(args.schedules_file).expanduser().read_text(encoding="utf-8"))
+    elif args.schedules_json:
+        request["schedules"] = json.loads(args.schedules_json)
+    return readiness_bundle_payload({key: value for key, value in request.items() if value not in (None, "")})
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -11593,6 +11663,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "site-policies":
             payload = _with_captured_stdout(lambda: site_policies_cli_payload(args), json_output)
+            _print_payload(payload, json_output)
+            return 0 if payload.get("ready") is True else 1
+
+        if args.command == "readiness-bundle":
+            payload = _with_captured_stdout(lambda: readiness_bundle_cli_payload(args), json_output)
             _print_payload(payload, json_output)
             return 0 if payload.get("ready") is True else 1
 

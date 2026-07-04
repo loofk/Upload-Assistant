@@ -103,6 +103,9 @@ curl -X POST http://127.0.0.1:8080/v1/readiness/bundle \
   -H "Content-Type: application/json" \
   -d '{"source_url":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM","accept_rules":true,"confirm_upload":true,"save_path":"/downloads"}'
 
+# 不启动 HTTP 服务时，也可以在盒子本地直接生成同一份 readiness bundle
+python3 ptcli.py readiness-bundle --from U2 --source-id 60635 --target MTEAM --accept-rules --confirm-upload --downloads-path /downloads --json
+
 # 轮询状态、读取 summary、按生成的 allowlisted next_command_argv 续跑
 curl "http://127.0.0.1:8080/v1/jobs?status=blocked&limit=10"
 curl http://127.0.0.1:8080/v1/jobs/<job_id>
@@ -213,6 +216,9 @@ docker compose ps ptcli-api
 
 # 检查 focused CLI 能力矩阵
 docker compose --profile cli run --rm ptcli sites --json
+
+# 本地 dry-run 预检：不联系站点/qBittorrent，输出 AI handoff 和下一步工具
+docker compose --profile cli run --rm ptcli readiness-bundle --from U2 --source-id 60635 --target MTEAM --accept-rules --confirm-upload --downloads-path /downloads --json
 
 # 执行一次每日候选扫描；适合放进宿主机 cron，结果写到挂载的 tmp/daily-candidates
 docker compose --profile daily run --rm ptcli-daily-schedule
