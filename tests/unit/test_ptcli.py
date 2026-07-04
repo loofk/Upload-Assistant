@@ -12664,7 +12664,13 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["resume_plan"]["allowed"] is True
     assert job["resume_plan"]["recommended"] is True
     assert job["resume_plan"]["endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
+    assert job["resume_requirements"]["can_call_resume"] is True
+    assert job["resume_requirements"]["resume_recommended"] is True
+    assert job["resume_requirements"]["subcommand"] == "pipeline"
+    assert job["resume_requirements"]["allowed_overrides"]["boolean"] == sorted(ptcli_service.RESUME_BOOLEAN_FLAG_OVERRIDES)
+    assert job["resume_requirements"]["current_flags"]["has_confirm_upload"] is False
     assert job["workflow_context"]["resume_plan"] == job["resume_plan"]
+    assert job["workflow_context"]["resume_requirements"] == job["resume_requirements"]
     assert job["workflow_context"]["gates"]["resume_allowed"] is True
     assert job["workflow_context"]["gates"]["resume_recommended"] is True
     assert job["workflow_context"]["metadata"]["tmdb_ready"] is False
@@ -12681,6 +12687,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["agent_summary"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["agent_summary"]["resume"]["materials_missing"] == ["metadata.tmdb"]
     assert summary["resume_plan"] == job["resume_plan"]
+    assert summary["resume_requirements"] == job["resume_requirements"]
     assert summary["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["workflow_context"]["target_preflight"]["missing"] == ["materials.metadata.tmdb"]
 
@@ -12729,6 +12736,7 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["request"]["resume_context"]["parent_job_id"] == parent["job_id"]
     assert resume["request"]["resume_context"]["resume_allowed"] is True
     assert resume["request"]["resume_context"]["inherited_policy"]["policy_coverage"] == {"ready": True}
+    assert resume["request"]["resume_context"]["parent_workflow_context"]["gates"]["resume_allowed"] is True
     assert resume["request"]["resume_lineage"]["parent_job_id"] == parent["job_id"]
     assert resume["request"]["resume_lineage"]["parent_kind"] == "ptcli.test"
     assert resume["request"]["resume_lineage"]["parent_source_reference"] == parent["source_reference"]
@@ -12741,6 +12749,7 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["resume_context"] == resume["request"]["resume_context"]
     assert resume["agent_decision"]["resume_context"] == resume["resume_context"]
     assert resume["agent_decision"]["resume_lineage"] == resume["resume_lineage"]
+    assert resume["agent_decision"]["resume_requirements"]["subcommand"] is None
     assert parent["resume_plan"]["available"] is True
     assert parent["resume_plan"]["allowed"] is True
     assert parent["resume_plan"]["recommended"] is True
@@ -12835,6 +12844,8 @@ def test_job_store_lists_recent_jobs_with_filters(tmp_path) -> None:
     assert payload["jobs"][0]["source_reference"] == {"tracker": "U2", "source_id": "60635"}
     assert payload["jobs"][0]["target_trackers"] == ["MTEAM"]
     assert payload["jobs"][0]["resume_plan"]["recommended"] is True
+    assert payload["jobs"][0]["resume_requirements"]["can_call_resume"] is True
+    assert payload["jobs"][0]["resume_requirements"]["subcommand"] == "doctor"
     assert "Resume recommended blocked jobs" in payload["next_actions"][-1]
 
     limited = store.list({"limit": "1"})
@@ -14066,12 +14077,17 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_submission_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "candidate_submission_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "resume_requirements" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "confirm_upload" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "save_path" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "screenshot_files" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "uploaded_qbit_upload_limit" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "resume_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "resume_requirements" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "resume_requirements" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "resume_requirements" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "resume_requirement_fields" in tool_by_name["resume_job"]["response_contract"]
     assert "resume_lineage" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -14206,6 +14222,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_limit_audit" in summary_schema["properties"]
     assert "manual_retorrent_handoff" in summary_schema["properties"]
     assert "resume_plan" in summary_schema["properties"]
+    assert "resume_requirements" in summary_schema["properties"]
     assert "resume_lineage" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
     assert "candidate_submission" in summary_schema["properties"]
@@ -14218,6 +14235,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_limit_audit" in job_schema["properties"]
     assert "manual_retorrent_handoff" in job_schema["properties"]
     assert "candidate_submission_handoff" in job_schema["properties"]
+    assert "resume_requirements" in job_schema["properties"]
     assert "cancelled" in job_schema["properties"]["status"]["enum"]
     assert "cancellation" in job_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -14353,11 +14371,16 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_submission_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "candidate_submission_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "resume_requirements" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "confirm_upload" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "save_path" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "screenshot_files" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "resume_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "resume_requirements" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "resume_requirements" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "resume_requirements" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "resume_requirement_fields" in tools_by_name["resume_job"]["response_contract"]
         assert "resume_lineage" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
