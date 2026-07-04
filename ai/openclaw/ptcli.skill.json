@@ -5,6 +5,7 @@
   "description": "AI-callable Chinese PT retorrent, upload, qBittorrent, and daily-candidate automation service.",
   "audience": [
     "OpenClaw",
+    "Hermes",
     "OpenAPI-compatible agents"
   ],
   "base_url": "http://127.0.0.1:8080",
@@ -2964,8 +2965,20 @@
           "deployment",
           "site_policies",
           "daily_schedule",
+          "live_verification",
           "live_readiness",
           "agent_decision",
+          "blockers",
+          "warnings",
+          "next_actions"
+        ],
+        "live_verification_fields": [
+          "ready",
+          "connectivity_checked",
+          "checks",
+          "credential_requirements",
+          "flow_check",
+          "materials",
           "blockers",
           "warnings",
           "next_actions"
@@ -2977,10 +2990,13 @@
           "source",
           "target_trackers",
           "site_policy_ready",
+          "live_verification_ready",
+          "credential_requirements",
           "doctor_template",
           "manual_job_template",
           "blockers",
-          "warnings"
+          "warnings",
+          "next_actions"
         ],
         "agent_decision_fields": [
           "decision",

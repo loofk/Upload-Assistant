@@ -13820,7 +13820,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
     assert tool_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
     assert "live_readiness" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "live_verification" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
+    assert "credential_requirements" in tool_by_name["readiness_bundle"]["response_contract"]["live_verification_fields"]
     assert "runbook_ref" in tool_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
@@ -13965,6 +13967,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "manual_retorrent" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
         assert tools_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
         assert "live_readiness" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "live_verification" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "credential_requirements" in tools_by_name["readiness_bundle"]["response_contract"]["live_verification_fields"]
         assert "runbook_ref" in tools_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
         source_url_workflow = next(workflow for workflow in payload["default_workflows"] if workflow["name"] == "source_url_retorrent")
         assert source_url_workflow["runbook"][0]["tool"] == "readiness_bundle"
@@ -14160,9 +14164,11 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
         directory.mkdir(parents=True)
     (data_dir / "config.py").write_text("config = {}", encoding="utf-8")
+    (cookies_dir / "U2.txt").write_text("uid=1; pass=token", encoding="utf-8")
     config = {
-        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg"},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit", "qbit_url": "http://host.docker.internal", "qbit_port": "8080"}},
+        "TRACKERS": {"U2": {"passkey": "source-passkey"}, "MTEAM": {"api_key": "mteam-token"}},
         "PTCLI": {
             "SITE_POLICIES": {
                 "U2": {
@@ -14206,7 +14212,11 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert payload["deployment"]["ready"] is True
     assert payload["site_policies"]["ready"] is True
     assert payload["daily_schedule"]["count"] == 1
+    assert payload["live_verification"]["ready"] is True
+    assert payload["live_verification"]["materials"]["image_host_ready"] is True
+    assert "data/cookies/U2.txt" in ",".join(payload["live_verification"]["credential_requirements"])
     assert payload["live_readiness"]["ready_for_manual_retorrent"] is True
+    assert payload["live_readiness"]["live_verification_ready"] is True
     assert payload["live_readiness"]["ready_for_daily_candidates"] is True
     assert payload["live_readiness"]["source"]["tracker"] == "U2"
     assert payload["live_readiness"]["manual_job_template"]["endpoint"] == "/v1/jobs/retorrent/from-url"
@@ -14229,9 +14239,11 @@ def test_readiness_bundle_cli_outputs_ai_handoff(tmp_path, monkeypatch, capsys) 
     for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
         directory.mkdir(parents=True)
     (data_dir / "config.py").write_text("config = {}", encoding="utf-8")
+    (cookies_dir / "U2.txt").write_text("uid=1; pass=token", encoding="utf-8")
     config = {
-        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg"},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit", "qbit_url": "http://host.docker.internal", "qbit_port": "8080"}},
+        "TRACKERS": {"U2": {"passkey": "source-passkey"}, "MTEAM": {"api_key": "mteam-token"}},
         "PTCLI": {
             "SITE_POLICIES": {
                 "U2": {
@@ -14278,6 +14290,7 @@ def test_readiness_bundle_cli_outputs_ai_handoff(tmp_path, monkeypatch, capsys) 
 
     assert code == 0
     assert payload["kind"] == "ptcli.readiness_bundle"
+    assert payload["live_verification"]["ready"] is True
     assert payload["live_readiness"]["manual_job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["agent_decision"]["decision"] == "ready_for_manual_retorrent"
     assert payload["agent_decision"]["next_tool"] == "source_url_retorrent_job"
@@ -14319,6 +14332,47 @@ def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path
     assert payload["agent_decision"]["decision"] == "collect_missing_inputs"
     assert payload["agent_decision"]["runbook_ref"] is None
     assert payload["agent_decision"]["next_tool"] == "readiness_bundle"
+
+
+def test_readiness_bundle_blocks_live_when_credentials_and_image_host_are_missing(tmp_path, monkeypatch) -> None:
+    (tmp_path / "data" / "cookies").mkdir(parents=True)
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "jobs").mkdir()
+    (tmp_path / "downloads").mkdir()
+    (tmp_path / "data" / "config.py").write_text("config = {}", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit", "qbit_url": "http://host.docker.internal", "qbit_port": "8080"}},
+        "TRACKERS": {"U2": {}, "MTEAM": {}},
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True, "rule_review_fingerprint": "u2-review"},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True, "rule_review_fingerprint": "mteam-review"},
+            }
+        },
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp"))
+
+    payload = ptcli_service.readiness_bundle_payload(
+        {
+            "base_dir": str(tmp_path),
+            "job_dir": str(tmp_path / "jobs"),
+            "downloads_path": str(tmp_path / "downloads"),
+            "source_tracker": "U2",
+            "source_id": "60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+        }
+    )
+
+    assert payload["live_verification"]["ready"] is False
+    assert payload["live_readiness"]["ready_for_manual_retorrent"] is False
+    check_names = {check["name"] for check in payload["live_verification"]["checks"] if check["ok"] is False}
+    assert {"U2.passkey", "U2.cookie", "MTEAM.api_key", "materials.image_host"} <= check_names
+    assert any("TRACKERS.MTEAM.api_key" in action for action in payload["next_actions"])
+    assert any("data/cookies/<TRACKER>.txt" in action for action in payload["next_actions"])
 
 
 def test_parse_recent_candidate_seeds_from_nexusphp_html() -> None:

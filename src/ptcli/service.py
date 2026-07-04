@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlparse
 from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, build_daily_candidates
 from src.ptcli.cli import build_parser, pipeline_payload, retorrent_payload
 from src.ptcli.config import load_config, resolve_client_config
+from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.mainland import parse_tracker_list
 from src.ptcli.policies import build_site_policy_coverage, build_site_policy_report, qbit_limits_for_tracker
@@ -839,7 +840,8 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
     target_trackers = _readiness_bundle_target(request)
     site_policies = _readiness_bundle_site_policies(request, source, target_trackers)
     daily_schedule = _readiness_bundle_daily_schedule(request)
-    live_readiness = _readiness_bundle_live_readiness(request, deployment, source, target_trackers, site_policies, daily_schedule)
+    live_verification = _readiness_bundle_live_verification(request, deployment, source, target_trackers)
+    live_readiness = _readiness_bundle_live_readiness(request, deployment, source, target_trackers, site_policies, daily_schedule, live_verification)
     agent_decision = _readiness_bundle_agent_decision(live_readiness)
     return {
         "kind": "ptcli.readiness_bundle",
@@ -850,6 +852,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
         "deployment": deployment,
         "site_policies": site_policies,
         "daily_schedule": daily_schedule,
+        "live_verification": live_verification,
         "live_readiness": live_readiness,
         "agent_decision": agent_decision,
         "blockers": _string_list(live_readiness.get("blockers")),
@@ -919,6 +922,174 @@ def _readiness_bundle_daily_schedule(request: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+def _readiness_bundle_live_verification(
+    request: dict[str, Any],
+    deployment: dict[str, Any],
+    source: dict[str, Any] | None,
+    target_trackers: str | None,
+) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    flow_check: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None
+    config_path = ((deployment.get("paths") or {}).get("config") if isinstance(deployment.get("paths"), dict) else None) or request.get("config")
+    if source and not source.get("error") and target_trackers:
+        try:
+            config = load_config(str(config_path) if config_path else None)
+            flow_check = build_flow_check(
+                config,
+                str(source.get("tracker")),
+                str(source.get("source_id")),
+                target_trackers,
+                str(request.get("client") or "default"),
+                base_dir=str(request.get("base_dir") or ((deployment.get("paths") or {}).get("base_dir") if isinstance(deployment.get("paths"), dict) else "") or os.getcwd()),
+            )
+            checks.extend(_readiness_bundle_check_items(flow_check.get("checks"), category="credentials"))
+        except Exception as exc:
+            checks.append(
+                {
+                    "name": "credentials.flow_check",
+                    "category": "credentials",
+                    "ok": False,
+                    "blocking": True,
+                    "message": f"Flow credential check could not run: {exc}",
+                }
+            )
+    else:
+        checks.append(
+            {
+                "name": "credentials.flow_check",
+                "category": "credentials",
+                "ok": False,
+                "blocking": True,
+                "message": "source and target are required before checking live credentials.",
+            }
+        )
+
+    if config is None and config_path:
+        try:
+            config = load_config(str(config_path))
+        except Exception:
+            config = None
+    checks.extend(_readiness_bundle_material_checks(config, request))
+    blockers = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking", True) is not False]
+    warnings = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking") is False]
+    return {
+        "kind": "ptcli.live_verification_checklist",
+        "status": "ok" if not blockers else "blocked",
+        "ok": not blockers,
+        "ready": not blockers,
+        "connectivity_checked": False,
+        "checks": checks,
+        "credential_requirements": _string_list(flow_check.get("credential_requirements")) if isinstance(flow_check, dict) else [],
+        "flow_check": flow_check,
+        "materials": _readiness_bundle_material_summary(checks),
+        "blockers": list(dict.fromkeys(blockers)),
+        "warnings": list(dict.fromkeys(warnings)),
+        "next_actions": _readiness_bundle_live_verification_next_actions(checks),
+    }
+
+
+def _readiness_bundle_check_items(items: Any, *, category: str) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    if not isinstance(items, list):
+        return checks
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        check = dict(item)
+        check.setdefault("category", category)
+        check.setdefault("blocking", True)
+        checks.append(check)
+    return checks
+
+
+def _readiness_bundle_material_checks(config: dict[str, Any] | None, request: dict[str, Any]) -> list[dict[str, Any]]:
+    default_config = config.get("DEFAULT", {}) if isinstance(config, dict) and isinstance(config.get("DEFAULT"), dict) else {}
+    image_hosts = [str(default_config.get(f"img_host_{index}") or "").strip() for index in range(1, 7)]
+    configured_image_hosts = [host for host in image_hosts if host]
+    upload_screenshots = not _truthy(request.get("no_upload_screenshots"))
+    checks = [
+        {
+            "name": "materials.image_host",
+            "category": "materials",
+            "ok": bool(configured_image_hosts) or not upload_screenshots,
+            "blocking": upload_screenshots,
+            "message": "Image host is configured for screenshot upload." if configured_image_hosts else "No DEFAULT.img_host_1..6 configured; screenshot upload will be blocked unless upload_screenshots is disabled or hosted screenshot files are supplied.",
+            "configured_hosts": configured_image_hosts,
+        },
+        {
+            "name": "materials.metadata_chain",
+            "category": "materials",
+            "ok": True,
+            "blocking": False,
+            "message": "IMDb/TMDb/豆瓣/PTGen metadata is collected during prepare-target; provide explicit metadata files/ids only when automatic lookup is blocked.",
+            "runtime_required": True,
+        },
+        {
+            "name": "materials.media_info",
+            "category": "materials",
+            "ok": True,
+            "blocking": False,
+            "message": "MediaInfo/BDInfo and screenshot generation are runtime checks; use doctor or the job summary for concrete file evidence.",
+            "runtime_required": True,
+        },
+    ]
+    if request.get("path") or request.get("content_path"):
+        checks.append(
+            {
+                "name": "materials.content_path",
+                "category": "materials",
+                "ok": True,
+                "blocking": False,
+                "message": "Existing content path was provided; runtime job will verify it before material generation.",
+                "path": request.get("path") or request.get("content_path"),
+            }
+        )
+    else:
+        checks.append(
+            {
+                "name": "materials.content_path",
+                "category": "materials",
+                "ok": True,
+                "blocking": False,
+                "message": "No content path provided; live job must download or match source content through qBittorrent before material generation.",
+                "runtime_required": True,
+            }
+        )
+    return checks
+
+
+def _readiness_bundle_material_summary(checks: list[dict[str, Any]]) -> dict[str, Any]:
+    material_checks = [check for check in checks if check.get("category") == "materials"]
+    return {
+        "ready": not any(check.get("ok") is False and check.get("blocking", True) is not False for check in material_checks),
+        "image_host_ready": any(check.get("name") == "materials.image_host" and check.get("ok") is True for check in material_checks),
+        "runtime_material_generation_required": any(check.get("runtime_required") for check in material_checks),
+        "checks": material_checks,
+    }
+
+
+def _readiness_bundle_live_verification_next_actions(checks: list[dict[str, Any]]) -> list[str]:
+    actions: list[str] = []
+    for check in checks:
+        if check.get("ok") is not False:
+            continue
+        name = str(check.get("name") or "")
+        if name.endswith(".cookie"):
+            actions.append("Place a fresh source tracker cookie file under data/cookies/<TRACKER>.txt.")
+        elif name.endswith(".passkey"):
+            actions.append("Add the source tracker passkey/announce URL to data/config.py.")
+        elif name == "MTEAM.api_key":
+            actions.append("Add TRACKERS.MTEAM.api_key to data/config.py.")
+        elif name == "qbit.client":
+            actions.append("Configure the qBittorrent client in data/config.py TORRENT_CLIENTS.")
+        elif name == "materials.image_host":
+            actions.append("Configure DEFAULT.img_host_1..6 or provide already hosted screenshot/material files before live upload.")
+        else:
+            actions.append(str(check.get("message") or f"Fix {name}."))
+    return list(dict.fromkeys(actions))
+
+
 def _readiness_bundle_live_readiness(
     request: dict[str, Any],
     deployment: dict[str, Any],
@@ -926,6 +1097,7 @@ def _readiness_bundle_live_readiness(
     target_trackers: str | None,
     site_policies: dict[str, Any] | None,
     daily_schedule: dict[str, Any],
+    live_verification: dict[str, Any],
 ) -> dict[str, Any]:
     blockers = _string_list(deployment.get("blockers"))
     warnings = _string_list(deployment.get("warnings"))
@@ -938,6 +1110,9 @@ def _readiness_bundle_live_readiness(
     if site_policies and site_policies.get("ready") is not True:
         blockers.extend(_string_list(site_policies.get("blockers")))
         blockers.extend(_string_list((site_policies.get("agent_summary") or {}).get("policy_recommendations")))
+    if live_verification.get("ready") is not True:
+        blockers.extend(_string_list(live_verification.get("blockers")))
+    warnings.extend(_string_list(live_verification.get("warnings")))
     accept_rules = _truthy(request.get("accept_rules"))
     confirm_upload = _truthy(request.get("confirm_upload"))
     if not accept_rules:
@@ -954,6 +1129,8 @@ def _readiness_bundle_live_readiness(
         "source": source,
         "target_trackers": target_trackers,
         "site_policy_ready": bool(site_policies.get("ready")) if isinstance(site_policies, dict) else False,
+        "live_verification_ready": bool(live_verification.get("ready")),
+        "credential_requirements": _string_list(live_verification.get("credential_requirements")),
         "accept_rules": accept_rules,
         "confirm_upload": confirm_upload,
         "doctor_template": doctor_template,
@@ -961,6 +1138,7 @@ def _readiness_bundle_live_readiness(
         "daily_schedule_ready": daily_ready,
         "blockers": list(dict.fromkeys(blockers)),
         "warnings": warnings,
+        "next_actions": _string_list(live_verification.get("next_actions")),
     }
 
 
@@ -1038,7 +1216,7 @@ def _readiness_bundle_agent_decision(live_readiness: dict[str, Any]) -> dict[str
     else:
         decision = "collect_missing_inputs"
         recommended_action = "Provide source_url, target, accept_rules=true, confirm_upload=true, and complete site policies before live execution."
-    next_actions = [recommended_action, *_string_list(live_readiness.get("blockers"))]
+    next_actions = [recommended_action, *_string_list(live_readiness.get("next_actions")), *_string_list(live_readiness.get("blockers"))]
     return {
         "workflow": "ptcli.readiness_bundle",
         "decision": decision,
@@ -3863,8 +4041,9 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_readiness", "agent_decision", "blockers", "warnings", "next_actions"],
-        "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "doctor_template", "manual_job_template", "blockers", "warnings"],
+        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "agent_decision", "blockers", "warnings", "next_actions"],
+        "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
+        "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
         "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
     }
