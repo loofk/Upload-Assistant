@@ -44,7 +44,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 ## AI 友好输出
 
 - 关键命令支持 `--json`。
-- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`、每日候选 `/v1/candidates/daily`/`/v1/candidates/daily/schedule`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/retorrent/from-url`、`/v1/jobs/retorrent/submit`、`/v1/jobs/candidates/daily`、`/v1/jobs/candidates/{job_id}/submit`、`/v1/jobs`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`、`/v1/jobs/{job_id}/cancel`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
+- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`、AI 预检 `/v1/deployment/check`/`/v1/readiness/bundle`、每日候选 `/v1/candidates/daily`/`/v1/candidates/daily/schedule`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/retorrent/from-url`、`/v1/jobs/retorrent/submit`、`/v1/jobs/candidates/daily`、`/v1/jobs/candidates/{job_id}/submit`、`/v1/jobs`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`、`/v1/jobs/{job_id}/cancel`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
 - `sites --json` 暴露每个站点的 `source_info`、`source_info_adapter`、`source_download`、`source_download_adapter`、`credential_requirements`、`target_upload`、`full_live_closure_to_mteam` 能力。
 - `rule-check --json` 暴露 `rule_obligations[].review_scope.required_confirmations`，供 agent 在 live 前逐项提示人工确认。
 - `flow-check --json` 暴露 `source_capability`、`target_capabilities` 和去重后的 `credential_requirements`，供盒子脚本在 live 前检查配置缺口。
@@ -184,7 +184,7 @@ OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/opencla
 - 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；release 工作流会额外发布 `*-legacy-webui` 标签给旧 Web UI 镜像。
 - 旧 `upload.py` 需要显式覆盖 entrypoint、使用 legacy Dockerfile，或拉取 `*-legacy-webui` 标签才会运行。
 - `docker-compose.yml` 默认提供 `ptcli-api` 常驻 HTTP API 服务，使用项目内 `ptcli-net` 网络并带 `/health` healthcheck；一次性 CLI 服务放在 `cli` profile，可用 `docker compose --profile cli run --rm ptcli retorrent ...` 在盒子上执行；legacy Web UI 需要显式 `--profile legacy-webui`。
-- `/v1/deployment/check` 会输出 `mounts`、`qbit`、`daily_candidates`、`docker_compose`、`agent_summary` 和 `agent_handoff`：AI 可以直接判断 config/cookies/tmp/job/downloads 挂载是否就绪、qBittorrent 是否配置、`PTCLI_DAILY_CANDIDATE_SCHEDULES` 是否已提供每日候选计划，以及 `docker-compose.yml` 是否包含可用的 `ptcli-daily-schedule` daily profile 服务；`agent_handoff` 会给出手动转种和每日候选的推荐工具、端点、最小请求模板、必需确认和阻塞原因。每日候选或 compose 定时服务未配置只作为 warning，不阻塞手动转种 API。
+- `/v1/deployment/check` 会输出 `mounts`、`qbit`、`daily_candidates`、`docker_compose`、`agent_summary` 和 `agent_handoff`：AI 可以直接判断 config/cookies/tmp/job/downloads 挂载是否就绪、qBittorrent 是否配置、`PTCLI_DAILY_CANDIDATE_SCHEDULES` 是否已提供每日候选计划，以及 `docker-compose.yml` 是否包含可用的 `ptcli-daily-schedule` daily profile 服务；`agent_handoff` 会给出手动转种和每日候选的推荐工具、端点、最小请求模板、必需确认和阻塞原因。`/v1/readiness/bundle` 会进一步把 deployment、site policies、daily schedule、doctor 命令模板和 `source_url_retorrent_job` 请求模板汇总到 `live_readiness`/`agent_decision`，用于 AI 在 live 前一次性判断是否还缺规则确认、目标站点、源站链接或盒子配置。每日候选或 compose 定时服务未配置只作为 warning，不阻塞手动转种 API。
 - 如果 qBittorrent 跑在宿主机上，容器内的 `data/config.py` 可把 `qbit_url` 写成 `http://host.docker.internal` 并保持对应 `qbit_port`；如果 qBittorrent 也是 Docker 容器，把两边放到同一个 Docker 网络后使用 qBittorrent 的服务名作为 host。
 - live 验证需要在真实盒子环境中提供有效 cookie、MTEAM API key、qBittorrent 连接和实际内容路径。
 

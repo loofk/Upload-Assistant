@@ -18,6 +18,7 @@
   "discovery": {
     "health": "http://127.0.0.1:8080/health",
     "deployment_check": "http://127.0.0.1:8080/v1/deployment/check",
+    "readiness_bundle": "http://127.0.0.1:8080/v1/readiness/bundle",
     "openapi": "http://127.0.0.1:8080/openapi.json",
     "tools": "http://127.0.0.1:8080/v1/tools",
     "manifest": "http://127.0.0.1:8080/.well-known/ptcli-agent.json"
@@ -2597,6 +2598,256 @@
       }
     },
     {
+      "name": "readiness_bundle",
+      "method": "POST",
+      "path": "/v1/readiness/bundle",
+      "description": "Aggregate deployment, site-policy, daily-schedule, and live doctor handoff signals before an AI agent attempts retorrent automation. This endpoint never contacts trackers or qBittorrent.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Alias for source_url; source_url is preferred for this tool."
+          },
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Target tracker code(s), currently live upload closure is MTEAM-focused."
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Required before live target upload."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          },
+          "execute_if_no_duplicate": {
+            "type": "boolean",
+            "default": true,
+            "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work."
+          },
+          "source_url": {
+            "type": "string",
+            "description": "User-provided source tracker details or download URL. The service infers tracker and torrent id from this URL."
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "source_tracker",
+                "target"
+              ],
+              "properties": {
+                "source_tracker": {
+                  "type": "string",
+                  "description": "Source tracker code, e.g. U2 or CHD."
+                },
+                "target": {
+                  "type": [
+                    "string",
+                    "array"
+                  ],
+                  "description": "Target tracker code(s), currently MTEAM duplicate checks are supported."
+                },
+                "limit": {
+                  "type": "integer",
+                  "default": 10,
+                  "maximum": 10
+                },
+                "accept_rules": {
+                  "type": "boolean",
+                  "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
+                },
+                "check_dupes": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "base_dir": {
+                  "type": "string"
+                },
+                "config": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "time": {
+                  "type": "string",
+                  "default": "09:00"
+                },
+                "timezone": {
+                  "type": "string",
+                  "default": "Asia/Shanghai"
+                }
+              }
+            }
+          },
+          "source_id": {
+            "type": "string",
+            "description": "Optional source torrent id when source_tracker is provided instead of a full source_url."
+          },
+          "cookies_dir": {
+            "type": "string"
+          },
+          "job_dir": {
+            "type": "string"
+          },
+          "downloads_path": {
+            "type": "string"
+          },
+          "compose_file": {
+            "type": "string"
+          },
+          "max_concurrent_jobs": {
+            "type": "integer",
+            "default": 1
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "request",
+          "deployment",
+          "site_policies",
+          "daily_schedule",
+          "live_readiness",
+          "agent_decision",
+          "blockers",
+          "warnings",
+          "next_actions"
+        ],
+        "live_readiness_fields": [
+          "ready_for_ai",
+          "ready_for_manual_retorrent",
+          "ready_for_daily_candidates",
+          "source",
+          "target_trackers",
+          "site_policy_ready",
+          "doctor_template",
+          "manual_job_template",
+          "blockers",
+          "warnings"
+        ],
+        "agent_decision_fields": [
+          "decision",
+          "recommended_action",
+          "can_create_manual_job",
+          "can_run_daily_candidates",
+          "should_fix_deployment",
+          "next_actions"
+        ],
+        "safety": [
+          "non_live",
+          "does_not_contact_trackers",
+          "does_not_contact_qbittorrent",
+          "live_upload_still_requires_accept_rules_and_confirm_upload"
+        ]
+      },
+      "workflow_hints": {
+        "manual_live_entrypoint": "source_url_retorrent_job",
+        "daily_entrypoint": "daily_candidates_schedule_job",
+        "policy_check": "site_policies"
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
       "name": "site_policies",
       "method": "POST",
       "path": "/v1/site-policies",
@@ -2682,7 +2933,7 @@
       }
     }
   ],
-  "tool_count": 19,
+  "tool_count": 20,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

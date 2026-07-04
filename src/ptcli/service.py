@@ -395,6 +395,13 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
                 self._send_json(HTTPStatus.OK, deployment_check_payload(query))
                 return
+            if path == "/v1/readiness/bundle":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                self._send_json(HTTPStatus.OK, readiness_bundle_payload(query))
+                return
             if path == "/v1/site-policies":
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -441,6 +448,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/retorrent/check": lambda payload: asyncio.run(retorrent_check(payload)),
                 "/v1/retorrent": lambda payload: asyncio.run(retorrent(payload)),
                 "/v1/site-policies": site_policies_payload,
+                "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
                 "/v1/candidates/daily/schedule": daily_candidate_schedule_payload,
                 "/v1/jobs/retorrent/check": lambda payload: create_retorrent_check_job(job_store, payload),
@@ -820,6 +828,237 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "next_actions": _string_list(report.get("next_actions")),
         "agent_summary": _site_policy_agent_summary(matrix, report, policy_gap_summary, execution_readiness),
         "report": report,
+    }
+
+
+def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Aggregate non-live readiness signals for AI/seedbox handoff."""
+    request = request or {}
+    deployment = deployment_check_payload(request)
+    source = _readiness_bundle_source(request)
+    target_trackers = _readiness_bundle_target(request)
+    site_policies = _readiness_bundle_site_policies(request, source, target_trackers)
+    daily_schedule = _readiness_bundle_daily_schedule(request)
+    live_readiness = _readiness_bundle_live_readiness(request, deployment, source, target_trackers, site_policies, daily_schedule)
+    agent_decision = _readiness_bundle_agent_decision(live_readiness)
+    return {
+        "kind": "ptcli.readiness_bundle",
+        "status": "ok" if live_readiness.get("ready_for_ai") else "blocked",
+        "ok": bool(live_readiness.get("ready_for_ai")),
+        "ready": bool(live_readiness.get("ready_for_ai")),
+        "request": _readiness_bundle_request_context(request, source, target_trackers),
+        "deployment": deployment,
+        "site_policies": site_policies,
+        "daily_schedule": daily_schedule,
+        "live_readiness": live_readiness,
+        "agent_decision": agent_decision,
+        "blockers": _string_list(live_readiness.get("blockers")),
+        "warnings": _string_list(live_readiness.get("warnings")),
+        "next_actions": _string_list(agent_decision.get("next_actions")),
+    }
+
+
+def _readiness_bundle_source(request: dict[str, Any]) -> dict[str, Any] | None:
+    source = request.get("source") or request.get("source_url") or request.get("source_link") or request.get("url") or request.get("source_id")
+    tracker = request.get("source_tracker") or request.get("from")
+    if not source:
+        return None
+    try:
+        return resolve_source_reference(str(source), str(tracker) if tracker else None)
+    except Exception as exc:
+        return {"error": str(exc), "requested_source": source, "tracker": tracker}
+
+
+def _readiness_bundle_target(request: dict[str, Any]) -> str | None:
+    try:
+        return _target_trackers(request)
+    except ServiceError:
+        return None
+
+
+def _readiness_bundle_site_policies(request: dict[str, Any], source: dict[str, Any] | None, target_trackers: str | None) -> dict[str, Any] | None:
+    if not source or source.get("error") or not target_trackers:
+        return None
+    policy_request = {
+        "source_tracker": source.get("tracker"),
+        "target": target_trackers,
+        "accept_rules": _truthy(request.get("accept_rules")),
+    }
+    if request.get("config"):
+        policy_request["config"] = request.get("config")
+    try:
+        return site_policies_payload(policy_request)
+    except Exception as exc:
+        return {
+            "kind": "ptcli.site_policies",
+            "status": "blocked",
+            "ok": False,
+            "ready": False,
+            "blockers": [str(exc)],
+            "next_actions": ["Fix site policy config before attempting live retorrent automation."],
+        }
+
+
+def _readiness_bundle_daily_schedule(request: dict[str, Any]) -> dict[str, Any]:
+    schedule_request: dict[str, Any] = {}
+    if "schedules" in request:
+        schedule_request["schedules"] = request.get("schedules")
+    elif "daily_candidate_schedules" in request:
+        schedule_request["schedules"] = request.get("daily_candidate_schedules")
+    try:
+        return daily_candidate_schedule_payload(schedule_request)
+    except Exception as exc:
+        return {
+            "kind": "ptcli.daily_candidate_schedule",
+            "status": "blocked",
+            "ok": False,
+            "count": 0,
+            "schedules": [],
+            "blockers": [str(exc)],
+            "next_actions": [f"Fix {DAILY_CANDIDATE_SCHEDULE_ENV} JSON or POST valid schedules."],
+        }
+
+
+def _readiness_bundle_live_readiness(
+    request: dict[str, Any],
+    deployment: dict[str, Any],
+    source: dict[str, Any] | None,
+    target_trackers: str | None,
+    site_policies: dict[str, Any] | None,
+    daily_schedule: dict[str, Any],
+) -> dict[str, Any]:
+    blockers = _string_list(deployment.get("blockers"))
+    warnings = _string_list(deployment.get("warnings"))
+    if source is None:
+        blockers.append("source_url or source/source_id with source_tracker is required for manual live readiness.")
+    elif source.get("error"):
+        blockers.append(f"Source could not be resolved: {source.get('error')}")
+    if not target_trackers:
+        blockers.append("target is required for manual live readiness.")
+    if site_policies and site_policies.get("ready") is not True:
+        blockers.extend(_string_list(site_policies.get("blockers")))
+        blockers.extend(_string_list((site_policies.get("agent_summary") or {}).get("policy_recommendations")))
+    accept_rules = _truthy(request.get("accept_rules"))
+    confirm_upload = _truthy(request.get("confirm_upload"))
+    if not accept_rules:
+        blockers.append("accept_rules=true is required before live execution.")
+    if not confirm_upload:
+        blockers.append("confirm_upload=true is required before live upload.")
+    doctor_template = _readiness_bundle_doctor_template(request, source, target_trackers)
+    manual_job_template = _readiness_bundle_manual_job_template(request, source, target_trackers)
+    daily_ready = bool(daily_schedule.get("ok")) and not bool(daily_schedule.get("blockers"))
+    return {
+        "ready_for_ai": bool(deployment.get("ready")),
+        "ready_for_manual_retorrent": not blockers and bool(source) and not bool(source.get("error")) and bool(target_trackers),
+        "ready_for_daily_candidates": bool(deployment.get("ready")) and daily_ready,
+        "source": source,
+        "target_trackers": target_trackers,
+        "site_policy_ready": bool(site_policies.get("ready")) if isinstance(site_policies, dict) else False,
+        "accept_rules": accept_rules,
+        "confirm_upload": confirm_upload,
+        "doctor_template": doctor_template,
+        "manual_job_template": manual_job_template,
+        "daily_schedule_ready": daily_ready,
+        "blockers": list(dict.fromkeys(blockers)),
+        "warnings": warnings,
+    }
+
+
+def _readiness_bundle_doctor_template(request: dict[str, Any], source: dict[str, Any] | None, target_trackers: str | None) -> dict[str, Any] | None:
+    if not source or source.get("error") or not target_trackers:
+        return None
+    argv = [
+        "ptcli",
+        "doctor",
+        "--from",
+        str(source.get("tracker")),
+        "--source-id",
+        str(source.get("source_id")),
+        "--to",
+        target_trackers,
+        "--target-execute",
+        "--download-uploaded-torrent",
+        "--inject-uploaded-torrent",
+        "--wait-uploaded-complete",
+        "--connect-qbit",
+        "--probe-source",
+        "--probe-target",
+        "--json",
+    ]
+    _append_common_options(argv, request)
+    if request.get("path") or request.get("content_path"):
+        _append_optional(argv, "--path", request.get("path") or request.get("content_path"))
+    else:
+        _append_optional(argv, "--save-path", request.get("save_path") or "/downloads")
+    if _truthy(request.get("accept_rules")):
+        argv.append("--accept-rules")
+    if _truthy(request.get("confirm_upload")):
+        argv.append("--confirm-upload")
+    _append_optional(argv, "--uploaded-qbit-category", request.get("uploaded_qbit_category") or target_trackers)
+    _append_optional(argv, "--uploaded-qbit-tags", request.get("uploaded_qbit_tags") or "retorrent")
+    return {
+        "tool": "ptcli doctor",
+        "argv": argv,
+        "requires_before_live": ["accept_rules=true", "confirm_upload=true", "site policy ready", "non-duplicate target"],
+    }
+
+
+def _readiness_bundle_manual_job_template(request: dict[str, Any], source: dict[str, Any] | None, target_trackers: str | None) -> dict[str, Any] | None:
+    if not source or source.get("error") or not target_trackers:
+        return None
+    template = {
+        "source_url": source.get("details_url") or source.get("requested_source"),
+        "target": target_trackers,
+        "accept_rules": True,
+        "confirm_upload": True,
+        "save_path": request.get("save_path") or "/downloads",
+        "uploaded_qbit_category": request.get("uploaded_qbit_category") or target_trackers,
+        "uploaded_qbit_tags": request.get("uploaded_qbit_tags") or "retorrent",
+    }
+    for key in ("path", "content_path", "source_torrent_file", "target_torrent_file", "uploaded_torrent_file"):
+        if request.get(key):
+            template[key] = request[key]
+    return {
+        "tool": "source_url_retorrent_job",
+        "endpoint": "/v1/jobs/retorrent/from-url",
+        "request": template,
+    }
+
+
+def _readiness_bundle_agent_decision(live_readiness: dict[str, Any]) -> dict[str, Any]:
+    if not live_readiness.get("ready_for_ai"):
+        decision = "fix_deployment"
+        recommended_action = "Resolve deployment blockers before asking an AI agent to run PT automation."
+    elif live_readiness.get("ready_for_manual_retorrent"):
+        decision = "ready_for_manual_retorrent"
+        recommended_action = "Run site_policies if needed, then submit manual_job_template.request to source_url_retorrent_job."
+    elif live_readiness.get("ready_for_daily_candidates"):
+        decision = "ready_for_daily_candidates"
+        recommended_action = "Create daily candidate schedule jobs, then submit approved candidates through submission_handoff."
+    else:
+        decision = "collect_missing_inputs"
+        recommended_action = "Provide source_url, target, accept_rules=true, confirm_upload=true, and complete site policies before live execution."
+    next_actions = [recommended_action, *_string_list(live_readiness.get("blockers"))]
+    return {
+        "workflow": "ptcli.readiness_bundle",
+        "decision": decision,
+        "recommended_action": recommended_action,
+        "can_create_manual_job": bool(live_readiness.get("ready_for_manual_retorrent")),
+        "can_run_daily_candidates": bool(live_readiness.get("ready_for_daily_candidates")),
+        "should_fix_deployment": decision == "fix_deployment",
+        "next_actions": list(dict.fromkeys(next_actions)),
+    }
+
+
+def _readiness_bundle_request_context(request: dict[str, Any], source: dict[str, Any] | None, target_trackers: str | None) -> dict[str, Any]:
+    return {
+        "source": source,
+        "target_trackers": target_trackers,
+        "accept_rules": _truthy(request.get("accept_rules")),
+        "confirm_upload": _truthy(request.get("confirm_upload")),
+        "config": request.get("config"),
+        "base_dir": request.get("base_dir"),
+        "client": request.get("client") or "default",
     }
 
 
@@ -3188,6 +3427,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
+    readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     job_id_schema = _job_id_tool_request_schema()
     job_cancel_schema = _job_cancel_tool_request_schema()
     job_list_schema = _job_list_tool_request_schema()
@@ -3389,6 +3629,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
+            "name": "readiness_bundle",
+            "method": "POST",
+            "path": "/v1/readiness/bundle",
+            "description": "Aggregate deployment, site-policy, daily-schedule, and live doctor handoff signals before an AI agent attempts retorrent automation. This endpoint never contacts trackers or qBittorrent.",
+            "input_schema": readiness_bundle_request_schema,
+            "response_contract": _readiness_bundle_response_contract(),
+            "workflow_hints": {"manual_live_entrypoint": "source_url_retorrent_job", "daily_entrypoint": "daily_candidates_schedule_job", "policy_check": "site_policies"},
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
             "name": "site_policies",
             "method": "POST",
             "path": "/v1/site-policies",
@@ -3548,6 +3798,24 @@ def _site_policy_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _readiness_bundle_tool_request_schema() -> dict[str, Any]:
+    properties = {
+        **_source_url_retorrent_tool_request_schema()["properties"],
+        **_daily_candidate_schedule_tool_request_schema()["properties"],
+        "source_id": {"type": "string", "description": "Optional source torrent id when source_tracker is provided instead of a full source_url."},
+        "cookies_dir": {"type": "string"},
+        "job_dir": {"type": "string"},
+        "downloads_path": {"type": "string"},
+        "compose_file": {"type": "string"},
+        "max_concurrent_jobs": {"type": "integer", "default": DEFAULT_MAX_CONCURRENT_JOBS},
+    }
+    return {
+        "type": "object",
+        "required": [],
+        "properties": properties,
+    }
+
+
 def _job_id_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -3588,6 +3856,15 @@ def _sync_response_contract() -> dict[str, Any]:
         "required_fields": ["status", "ok", "request", "duplicate_check", "blockers", "next_actions", "command_argv", "result"],
         "status_values": ["ok", "blocked", "error", "complete"],
         "blocked_fields": ["blockers", "next_actions"],
+    }
+
+
+def _readiness_bundle_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_readiness", "agent_decision", "blockers", "warnings", "next_actions"],
+        "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "doctor_template", "manual_job_template", "blockers", "warnings"],
+        "agent_decision_fields": ["decision", "recommended_action", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
+        "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
     }
 
 
@@ -3722,6 +3999,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
         "discovery": {
             "health": f"{public_base_url}/health",
             "deployment_check": f"{public_base_url}/v1/deployment/check",
+            "readiness_bundle": f"{public_base_url}/v1/readiness/bundle",
             "openapi": f"{public_base_url}/openapi.json",
             "tools": f"{public_base_url}/v1/tools",
             "manifest": f"{public_base_url}/.well-known/ptcli-agent.json",
@@ -4018,6 +4296,23 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_handoff": {"type": "object"},
         },
     }
+    readiness_bundle_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "request": {"type": "object"},
+            "deployment": {"type": "object"},
+            "site_policies": {"type": ["object", "null"]},
+            "daily_schedule": {"type": "object"},
+            "live_readiness": {"type": "object"},
+            "agent_decision": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "warnings": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
     return {
         "openapi": "3.1.0",
         "info": {"title": "ptcli Retorrent API", "version": "1.0.0"},
@@ -4071,6 +4366,27 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     ],
                     "responses": {"200": {"description": "Local deployment readiness report.", "content": {"application/json": {"schema": deployment_response_schema}}}},
                 }
+            },
+            "/v1/readiness/bundle": {
+                "get": {
+                    "operationId": "getPtcliReadinessBundle",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "source_url", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "source_tracker", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "source_id", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "target", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "accept_rules", "in": "query", "required": False, "schema": {"type": "boolean"}},
+                        {"name": "confirm_upload", "in": "query", "required": False, "schema": {"type": "boolean"}},
+                    ],
+                    "responses": {"200": {"description": "AI readiness bundle.", "content": {"application/json": {"schema": readiness_bundle_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "createPtcliReadinessBundle",
+                    "security": token_security,
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": _readiness_bundle_tool_request_schema()}}},
+                    "responses": {"200": {"description": "AI readiness bundle.", "content": {"application/json": {"schema": readiness_bundle_response_schema}}}},
+                },
             },
             "/v1/site-policies": {
                 "get": {

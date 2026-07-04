@@ -13818,6 +13818,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "ready_for_daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "docker_compose_daily_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "manual_retorrent" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
+    assert tool_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
+    assert "live_readiness" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
     assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
@@ -13846,6 +13849,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/openclaw/skill.json" in openapi["paths"]
     assert "/v1/hermes/skill.json" in openapi["paths"]
     assert "/v1/deployment/check" in openapi["paths"]
+    assert "/v1/readiness/bundle" in openapi["paths"]
     assert "/v1/site-policies" in openapi["paths"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent" in openapi["paths"]
@@ -13898,6 +13902,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "docker_compose" in deployment_schema["properties"]
     assert "agent_summary" in deployment_schema["properties"]
     assert "agent_handoff" in deployment_schema["properties"]
+    readiness_schema = openapi["paths"]["/v1/readiness/bundle"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "live_readiness" in readiness_schema["properties"]
+    assert "agent_decision" in readiness_schema["properties"]
 
 
 def test_agent_manifest_exposes_ai_safe_workflows() -> None:
@@ -13907,10 +13914,11 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["base_url"] == "http://ptcli.local:8080"
     assert manifest["discovery"]["openapi"] == "http://ptcli.local:8080/openapi.json"
     assert manifest["discovery"]["deployment_check"] == "http://ptcli.local:8080/v1/deployment/check"
+    assert manifest["discovery"]["readiness_bundle"] == "http://ptcli.local:8080/v1/readiness/bundle"
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
-    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
@@ -13934,8 +13942,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["auth"]["env"] == "PTCLI_API_TOKEN"
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
+        assert payload["discovery"]["readiness_bundle"].endswith("/v1/readiness/bundle")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"deployment_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+        assert set(tools_by_name) >= {"deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "queue" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -13946,6 +13955,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "ready_for_daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "docker_compose_daily_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "manual_retorrent" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
+        assert tools_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
+        assert "live_readiness" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -14126,6 +14137,109 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert any("No daily candidate schedules configured" in blocker for blocker in payload["agent_handoff"]["daily_candidates"]["blocked_by"])
     assert any("config file is missing" in blocker for blocker in payload["blockers"])
     assert any("Mount or create data/config.py" in action for action in payload["next_actions"])
+
+
+def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    tmp_dir = tmp_path / "tmp"
+    job_dir = tmp_path / "jobs"
+    downloads_dir = tmp_path / "downloads"
+    for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
+        directory.mkdir(parents=True)
+    (data_dir / "config.py").write_text("config = {}", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit", "qbit_url": "http://host.docker.internal", "qbit_port": "8080"}},
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "rule_review_fingerprint": "u2-review",
+                },
+                "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
+                    "upload_rate_limit": "2MiB/s",
+                    "min_ratio": 1.0,
+                    "rule_review_fingerprint": "mteam-review",
+                },
+            }
+        },
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    monkeypatch.setenv("TMPDIR", str(tmp_dir))
+    monkeypatch.setenv(
+        "PTCLI_DAILY_CANDIDATE_SCHEDULES",
+        '[{"name":"u2-to-mteam","source_tracker":"U2","target":"MTEAM","limit":10,"accept_rules":true}]',
+    )
+
+    payload = ptcli_service.readiness_bundle_payload(
+        {
+            "base_dir": str(tmp_path),
+            "job_dir": str(job_dir),
+            "downloads_path": str(downloads_dir),
+            "source_tracker": "U2",
+            "source_id": "60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+        }
+    )
+
+    assert payload["kind"] == "ptcli.readiness_bundle"
+    assert payload["deployment"]["ready"] is True
+    assert payload["site_policies"]["ready"] is True
+    assert payload["daily_schedule"]["count"] == 1
+    assert payload["live_readiness"]["ready_for_manual_retorrent"] is True
+    assert payload["live_readiness"]["ready_for_daily_candidates"] is True
+    assert payload["live_readiness"]["source"]["tracker"] == "U2"
+    assert payload["live_readiness"]["manual_job_template"]["endpoint"] == "/v1/jobs/retorrent/from-url"
+    assert payload["live_readiness"]["manual_job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert payload["live_readiness"]["manual_job_template"]["request"]["target"] == "MTEAM"
+    assert "--accept-rules" in payload["live_readiness"]["doctor_template"]["argv"]
+    assert "--confirm-upload" in payload["live_readiness"]["doctor_template"]["argv"]
+    assert payload["agent_decision"]["decision"] == "ready_for_manual_retorrent"
+    assert payload["agent_decision"]["can_create_manual_job"] is True
+
+
+def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path, monkeypatch) -> None:
+    (tmp_path / "data" / "cookies").mkdir(parents=True)
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "jobs").mkdir()
+    (tmp_path / "downloads").mkdir()
+    (tmp_path / "data" / "config.py").write_text("config = {}", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit", "qbit_url": "http://host.docker.internal", "qbit_port": "8080"}},
+        "PTCLI": {"SITE_POLICIES": {}},
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp"))
+
+    payload = ptcli_service.readiness_bundle_payload(
+        {
+            "base_dir": str(tmp_path),
+            "job_dir": str(tmp_path / "jobs"),
+            "downloads_path": str(tmp_path / "downloads"),
+            "source_tracker": "U2",
+            "source_id": "60635",
+            "target": "MTEAM",
+            "accept_rules": "false",
+            "confirm_upload": "false",
+        }
+    )
+
+    assert payload["live_readiness"]["accept_rules"] is False
+    assert payload["live_readiness"]["confirm_upload"] is False
+    assert "accept_rules=true is required before live execution." in payload["blockers"]
+    assert "confirm_upload=true is required before live upload." in payload["blockers"]
+    assert "--accept-rules" not in payload["live_readiness"]["doctor_template"]["argv"]
+    assert "--confirm-upload" not in payload["live_readiness"]["doctor_template"]["argv"]
+    assert payload["agent_decision"]["decision"] == "collect_missing_inputs"
 
 
 def test_parse_recent_candidate_seeds_from_nexusphp_html() -> None:
