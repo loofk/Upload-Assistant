@@ -13595,14 +13595,22 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["U2"]["qbit_limits"]["download_limit"] == 20 * 1024 * 1024
     assert matrix_by_tracker["U2"]["seeding_requirements"]["min_seed_time_hours"] == 72
     assert matrix_by_tracker["U2"]["policy_coverage"]["complete"] is True
+    assert matrix_by_tracker["U2"]["execution_readiness"]["ready"] is True
+    assert matrix_by_tracker["U2"]["execution_readiness"]["role_status"]["source"]["can_download"] is True
     assert matrix_by_tracker["MTEAM"]["roles"] == ["target"]
     assert matrix_by_tracker["MTEAM"]["automation"]["upload"] is True
     assert matrix_by_tracker["MTEAM"]["qbit_limits"]["upload_limit"] == 2 * 1024 * 1024
     assert matrix_by_tracker["MTEAM"]["seeding_requirements"]["min_ratio"] == 1.0
     assert matrix_by_tracker["MTEAM"]["policy_coverage"]["complete"] is True
+    assert matrix_by_tracker["MTEAM"]["execution_readiness"]["ready"] is True
+    assert matrix_by_tracker["MTEAM"]["execution_readiness"]["role_status"]["target"]["can_upload"] is True
+    assert payload["execution_readiness"]["ready"] is True
+    assert payload["execution_readiness"]["ready_trackers"] == ["U2", "MTEAM"]
+    assert payload["execution_readiness"]["blocked_trackers"] == []
     assert payload["agent_summary"]["qbit_limits_present"] == ["U2", "MTEAM"]
     assert payload["agent_summary"]["seeding_requirements_present"] == ["U2", "MTEAM"]
     assert payload["agent_summary"]["policy_coverage_ready"] is True
+    assert payload["agent_summary"]["execution_ready"] is True
     assert payload["agent_summary"]["missing_policy_fields"] == {}
     assert payload["agent_summary"]["disabled_automation"] == {}
     assert payload["policy_gap_summary"]["ready"] is True
@@ -13668,7 +13676,14 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     matrix_by_tracker = {item["tracker"]: item for item in payload["policy_matrix"]}
     assert matrix_by_tracker["U2"]["policy_coverage"]["complete"] is False
     assert matrix_by_tracker["MTEAM"]["policy_coverage"]["complete"] is False
+    assert matrix_by_tracker["U2"]["execution_readiness"]["ready"] is False
+    assert "download_rate_limit" in matrix_by_tracker["U2"]["execution_readiness"]["role_status"]["source"]["blockers"]
+    assert matrix_by_tracker["MTEAM"]["execution_readiness"]["ready"] is False
+    assert "upload_rate_limit" in matrix_by_tracker["MTEAM"]["execution_readiness"]["role_status"]["target"]["blockers"]
+    assert payload["execution_readiness"]["ready"] is False
+    assert payload["execution_readiness"]["blocked_trackers"] == ["U2", "MTEAM"]
     assert payload["agent_summary"]["policy_coverage_ready"] is False
+    assert payload["agent_summary"]["execution_ready"] is False
     assert payload["agent_summary"]["missing_policy_fields"] == {
         "U2": ["rule_review_fingerprint", "download_rate_limit", "min_seed_time_hours"],
         "MTEAM": ["rule_review_fingerprint", "upload_rate_limit", "min_ratio"],
@@ -13748,6 +13763,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
+    assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
+    assert "blocked_trackers" in tool_by_name["site_policies"]["response_contract"]["execution_readiness_fields"]
     assert "policy_gap_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "missing_by_category" in tool_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
     assert tool_by_name["daily_candidates_schedule"]["method"] == "POST"
@@ -13896,6 +13914,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
+        assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
+        assert "blocked_trackers" in tools_by_name["site_policies"]["response_contract"]["execution_readiness_fields"]
         assert "policy_gap_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "missing_by_category" in tools_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
