@@ -13582,6 +13582,10 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["kind"] == "ptcli.daily_candidate_schedule_digest"
     assert payload["schedule_digest"]["ready_job_count"] == 1
     assert payload["schedule_digest"]["push_count"] == 1
+    assert payload["schedule_digest"]["push_payload"]["kind"] == "ptcli.daily_candidate_schedule_push_payload"
+    assert payload["schedule_digest"]["push_payload"]["submission_ready"] is True
+    assert payload["schedule_digest"]["push_payload"]["top_item"]["source_id"] == "60635"
+    assert "1 candidate(s) across 1 schedule job(s)" in payload["schedule_digest"]["push_payload"]["message"]
     assert payload["schedule_digest"]["push_items"][0]["schedule_name"] == "u2-to-mteam"
     assert payload["schedule_digest"]["push_items"][0]["status_endpoint"].startswith("/v1/jobs/")
     assert payload["schedule_digest"]["top_submit_requests"][0]["submit_tool"] == "source_url_retorrent_job"
@@ -13902,6 +13906,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "schedule_digest" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "top_submit_requests" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "push_payload" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "submission_ready" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "submission_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "submit_endpoint_template" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
     assert tool_by_name["deployment_check"]["method"] == "GET"
@@ -13925,6 +13931,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
     assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
     assert "top_submit_request" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
+    assert "push_payload" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
+    assert "message" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "push_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "recommended_action" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
@@ -14094,6 +14102,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "job_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "schedule_digest" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
         assert "top_submit_requests" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "push_payload" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "submission_ready" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
         assert "submission_handoff" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "submit_endpoint_template" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
@@ -14141,6 +14151,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "workflow_context" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "workflow_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "push_payload" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "message" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
         assert "push_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "recommended_action" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
@@ -14561,6 +14573,10 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["ranking"]["selected_count"] == 1
     assert result["digest"]["recommendation"] == "submit_top_candidate_when_confirmed"
     assert result["digest"]["push_summary"] == "1 candidate(s): 1 ready, 0 need review, 0 blocked. Recommendation: submit_top_candidate_when_confirmed."
+    assert result["digest"]["push_payload"]["kind"] == "ptcli.daily_candidates_push_payload"
+    assert result["digest"]["push_payload"]["ready_count"] == 1
+    assert result["digest"]["push_payload"]["top_item"]["source_id"] == "60635"
+    assert "#1 [ready] U2-60635" in result["digest"]["push_payload"]["message"]
     assert result["digest"]["recommended_action"].startswith("Review digest.top_candidate")
     assert result["digest"]["push_count"] == 1
     assert result["digest"]["top_submit_tool"] == "source_url_retorrent_job"

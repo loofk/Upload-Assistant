@@ -1669,6 +1669,7 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
             }
             submission_items.append(_daily_candidate_schedule_submission_item(job, request, submission_source, item))
     submission_handoff = _daily_candidate_schedule_submission_handoff(submission_items, blockers)
+    push_payload = _daily_candidate_schedule_push_payload(push_items, items, submission_handoff, blockers)
     return {
         "kind": "ptcli.daily_candidate_schedule_digest",
         "job_count": len(jobs),
@@ -1677,6 +1678,7 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
         "blocked_job_count": sum(1 for item in items if item.get("status") in {"blocked", "failed"} or item.get("blockers")),
         "skipped_count": len(skipped),
         "push_count": len(push_items),
+        "push_payload": push_payload,
         "submit_request_count": len(top_submit_requests),
         "items": items,
         "push_items": push_items,
@@ -1684,6 +1686,39 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
         "submission_handoff": submission_handoff,
         "skipped": skipped,
         "blockers": blockers,
+    }
+
+
+def _daily_candidate_schedule_push_payload(push_items: list[dict[str, Any]], items: list[dict[str, Any]], submission_handoff: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    ready_items = [item for item in push_items if item.get("can_submit") is True]
+    blocked_items = [item for item in push_items if item.get("can_submit") is not True]
+    pending_count = sum(1 for item in items if item.get("status") in {"queued", "running"})
+    title = "Daily PT candidate schedule"
+    summary = f"{len(push_items)} candidate(s) across {len(items)} schedule job(s): {len(ready_items)} ready, {len(blocked_items)} blocked/review, {pending_count} pending."
+    lines = [summary, *[str(item.get("summary_text")) for item in push_items if item.get("summary_text")]]
+    if submission_handoff.get("ready"):
+        recommended_action = "Review push_payload.items and submit approved entries through submission_handoff.items[].submit_endpoint."
+    elif pending_count:
+        recommended_action = "Poll pending schedule jobs, then read schedule_digest.push_payload again."
+    else:
+        recommended_action = "Resolve blockers or adjust daily candidate schedules before submitting."
+    return {
+        "kind": "ptcli.daily_candidate_schedule_push_payload",
+        "title": title,
+        "summary": summary,
+        "message": "\n".join(lines),
+        "format": "text/plain",
+        "schedule_job_count": len(items),
+        "item_count": len(push_items),
+        "ready_count": len(ready_items),
+        "blocked_count": len(blocked_items),
+        "pending_job_count": pending_count,
+        "submission_ready": bool(submission_handoff.get("ready")),
+        "recommended_action": recommended_action,
+        "top_item": ready_items[0] if ready_items else push_items[0] if push_items else None,
+        "items": push_items,
+        "blockers": blockers,
+        "next_actions": [recommended_action],
     }
 
 
@@ -3791,7 +3826,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "name": "daily_candidates",
             "method": "POST",
             "path": "/v1/candidates/daily",
-            "description": "Return up to 10 ranked source/target retorrent candidates with metadata availability, duplicate status, policy blockers, risk signals, and an executable retorrent request template.",
+            "description": "Return up to 10 ranked source/target retorrent candidates with metadata availability, duplicate status, policy blockers, risk signals, push_payload, and an executable retorrent request template.",
             "input_schema": candidate_request_schema,
             "response_contract": _candidate_response_contract(),
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
@@ -3837,7 +3872,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "schedule_digest", "agent_decision", "blockers", "next_actions"],
                 "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
-                "digest_fields": ["items", "push_items", "top_submit_requests", "submission_handoff", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
+                "digest_fields": ["items", "push_items", "push_payload", "top_submit_requests", "submission_handoff", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
+                "push_payload_fields": ["title", "summary", "message", "format", "items", "top_item", "submission_ready", "recommended_action"],
                 "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "items"],
             },
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
@@ -4198,6 +4234,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
             "digest_fields": candidate_contract["digest_fields"],
             "candidate_fields": candidate_contract["candidate_fields"],
             "push_item_fields": candidate_contract["push_item_fields"],
+            "push_payload_fields": candidate_contract["push_payload_fields"],
         }
     )
     return contract
@@ -4220,6 +4257,7 @@ def _candidate_response_contract() -> dict[str, Any]:
             "recommended_action",
             "push_title",
             "push_summary",
+            "push_payload",
             "push_count",
             "ready_count",
             "review_count",
@@ -4232,6 +4270,7 @@ def _candidate_response_contract() -> dict[str, Any]:
             "blockers",
             "next_actions",
         ],
+        "push_payload_fields": ["title", "summary", "message", "format", "item_count", "ready_count", "blocked_count", "recommended_action", "top_item", "items", "blockers", "next_actions"],
         "candidate_fields": [
             "status",
             "source",

@@ -1381,7 +1381,7 @@
       "name": "daily_candidates",
       "method": "POST",
       "path": "/v1/candidates/daily",
-      "description": "Return up to 10 ranked source/target retorrent candidates with metadata availability, duplicate status, policy blockers, risk signals, and an executable retorrent request template.",
+      "description": "Return up to 10 ranked source/target retorrent candidates with metadata availability, duplicate status, policy blockers, risk signals, push_payload, and an executable retorrent request template.",
       "input_schema": {
         "type": "object",
         "required": [
@@ -1439,6 +1439,7 @@
           "recommended_action",
           "push_title",
           "push_summary",
+          "push_payload",
           "push_count",
           "ready_count",
           "review_count",
@@ -1448,6 +1449,20 @@
           "top_submit_job_endpoint",
           "top_submit_tool",
           "push_items",
+          "blockers",
+          "next_actions"
+        ],
+        "push_payload_fields": [
+          "title",
+          "summary",
+          "message",
+          "format",
+          "item_count",
+          "ready_count",
+          "blocked_count",
+          "recommended_action",
+          "top_item",
+          "items",
           "blockers",
           "next_actions"
         ],
@@ -1637,6 +1652,7 @@
           "recommended_action",
           "push_title",
           "push_summary",
+          "push_payload",
           "push_count",
           "ready_count",
           "review_count",
@@ -1692,6 +1708,20 @@
           "submit_request",
           "submit_job_endpoint",
           "submit_tool"
+        ],
+        "push_payload_fields": [
+          "title",
+          "summary",
+          "message",
+          "format",
+          "item_count",
+          "ready_count",
+          "blocked_count",
+          "recommended_action",
+          "top_item",
+          "items",
+          "blockers",
+          "next_actions"
         ]
       },
       "workflow_hints": {
@@ -2194,12 +2224,23 @@
         "digest_fields": [
           "items",
           "push_items",
+          "push_payload",
           "top_submit_requests",
           "submission_handoff",
           "ready_job_count",
           "submit_request_count",
           "pending_job_count",
           "blocked_job_count"
+        ],
+        "push_payload_fields": [
+          "title",
+          "summary",
+          "message",
+          "format",
+          "items",
+          "top_item",
+          "submission_ready",
+          "recommended_action"
         ],
         "submission_handoff_fields": [
           "ready",

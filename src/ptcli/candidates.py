@@ -531,6 +531,7 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
         recommendation = "no_candidates"
     push_items = [_candidate_digest_item(candidate, rank=index + 1) for index, candidate in enumerate(candidates)]
     push_summary = _candidate_push_summary(len(candidates), len(ready_candidates), review_count, blocked_count, recommendation)
+    push_payload = _candidate_push_payload(push_summary, push_items, recommendation, blockers, next_actions)
     return {
         "kind": "ptcli.daily_candidates_digest",
         "limit": limit,
@@ -540,6 +541,7 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
         "blocked_count": blocked_count,
         "push_title": "Daily PT retorrent candidates",
         "push_summary": push_summary,
+        "push_payload": push_payload,
         "push_count": len(push_items),
         "recommended_action": _candidate_digest_recommended_action(recommendation),
         "top_candidate": _candidate_digest_item(top_candidate, rank=1) if top_candidate else None,
@@ -548,6 +550,29 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
         "top_submit_tool": top_candidate.get("submit_tool") if isinstance(top_candidate, dict) and top_candidate.get("status") == "ready" else None,
         "recommendation": recommendation,
         "push_items": push_items,
+        "blockers": blockers,
+        "next_actions": next_actions,
+    }
+
+
+def _candidate_push_payload(push_summary: str, push_items: list[dict[str, Any] | None], recommendation: str, blockers: list[str], next_actions: list[str]) -> dict[str, Any]:
+    items = [item for item in push_items if isinstance(item, dict)]
+    ready_items = [item for item in items if item.get("can_submit") is True]
+    blocked_items = [item for item in items if item.get("can_submit") is not True]
+    lines = [push_summary, *[str(item.get("summary_text")) for item in items if item.get("summary_text")]]
+    return {
+        "kind": "ptcli.daily_candidates_push_payload",
+        "title": "Daily PT retorrent candidates",
+        "summary": push_summary,
+        "message": "\n".join(lines),
+        "format": "text/plain",
+        "item_count": len(items),
+        "ready_count": len(ready_items),
+        "blocked_count": len(blocked_items),
+        "recommendation": recommendation,
+        "recommended_action": _candidate_digest_recommended_action(recommendation),
+        "top_item": ready_items[0] if ready_items else items[0] if items else None,
+        "items": items,
         "blockers": blockers,
         "next_actions": next_actions,
     }
