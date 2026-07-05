@@ -696,6 +696,7 @@
           "resume_requirements",
           "resume_lineage",
           "resume_context",
+          "material_resolution",
           "candidate_submission",
           "source_reference",
           "workflow_context"
@@ -754,6 +755,14 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
         ]
       },
       "workflow_hints": {
@@ -915,6 +924,7 @@
           "resume_requirements",
           "resume_lineage",
           "resume_context",
+          "material_resolution",
           "candidate_submission",
           "source_reference",
           "workflow_context"
@@ -973,6 +983,14 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
         ]
       },
       "workflow_hints": {
@@ -1144,6 +1162,7 @@
           "resume_requirements",
           "resume_lineage",
           "resume_context",
+          "material_resolution",
           "candidate_submission",
           "source_reference",
           "workflow_context"
@@ -1202,6 +1221,14 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
         ]
       },
       "workflow_hints": {
@@ -1377,6 +1404,7 @@
           "resume_requirements",
           "resume_lineage",
           "resume_context",
+          "material_resolution",
           "candidate_submission",
           "source_reference",
           "workflow_context"
@@ -1435,6 +1463,14 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
         ]
       },
       "workflow_hints": {
@@ -1684,6 +1720,7 @@
           "resume_requirements",
           "resume_lineage",
           "resume_context",
+          "material_resolution",
           "candidate_submission",
           "source_reference",
           "workflow_context"
@@ -1742,6 +1779,14 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
         ],
         "result_fields": [
           "ranking",
@@ -2084,6 +2129,7 @@
           "resume_requirements",
           "resume_lineage",
           "resume_context",
+          "material_resolution",
           "candidate_submission",
           "source_reference",
           "workflow_context"
@@ -2142,6 +2188,14 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
         ]
       },
       "workflow_hints": {
@@ -2467,6 +2521,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "material_resolution",
           "status_endpoint",
           "summary_endpoint",
           "resume_endpoint"
@@ -2537,6 +2592,7 @@
           "resume_requirements",
           "resume_lineage",
           "resume_context",
+          "material_resolution",
           "candidate_submission",
           "source_reference",
           "workflow_context"
@@ -2595,6 +2651,14 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
         ]
       },
       "safety": {
@@ -2643,6 +2707,7 @@
           "resume_requirements",
           "resume_lineage",
           "resume_context",
+          "material_resolution",
           "candidate_submission",
           "source_reference",
           "workflow_context",
@@ -2847,6 +2912,7 @@
           "resume_requirements",
           "resume_lineage",
           "resume_context",
+          "material_resolution",
           "candidate_submission",
           "source_reference",
           "workflow_context"
@@ -2905,6 +2971,14 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
         ]
       },
       "workflow_hints": {
@@ -2971,6 +3045,7 @@
           "resume_requirements",
           "resume_lineage",
           "resume_context",
+          "material_resolution",
           "candidate_submission",
           "source_reference",
           "workflow_context"
@@ -3029,6 +3104,14 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
         ]
       },
       "safety": {

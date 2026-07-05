@@ -12765,6 +12765,7 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["source_reference"] == parent["source_reference"]
     assert resume["workflow_context"]["resume_lineage"] == resume["resume_lineage"]
     assert resume["resume_context"] == resume["request"]["resume_context"]
+    assert resume["material_resolution"] is None
     assert resume["agent_decision"]["resume_context"] == resume["resume_context"]
     assert resume["agent_decision"]["resume_lineage"] == resume["resume_lineage"]
     assert resume["agent_decision"]["resume_requirements"]["subcommand"] is None
@@ -12799,6 +12800,26 @@ def test_job_store_resume_applies_allowlisted_overrides(monkeypatch, tmp_path) -
                 "/old/screen.png",
                 "--json",
             ],
+            "material_diagnostics": {
+                "present": True,
+                "ready_for_mteam_upload": False,
+                "critical_ready": False,
+                "critical_missing": ["metadata.tmdb", "description.content"],
+                "metadata_fields": {
+                    "tmdb_id": {"ready": False},
+                    "ptgen_description": {"ready": False},
+                },
+                "description": {
+                    "ready": False,
+                    "has_ptgen_description": False,
+                    "has_mediainfo_or_bdinfo": True,
+                    "has_screenshot_bbcode": False,
+                    "external_id_readiness": {"tmdb": False},
+                    "external_id_missing": ["tmdb"],
+                },
+                "upload_material_blockers": ["materials.assets.image_host_uploads"],
+            },
+            "target_preflight_diagnostics": {"ready": False, "payload_ready": False, "description_ready": False},
         },
     )
 
@@ -12813,8 +12834,11 @@ def test_job_store_resume_applies_allowlisted_overrides(monkeypatch, tmp_path) -
             "accept_rules": True,
             "confirm_upload": True,
             "save_path": "/downloads",
+            "metadata_file": "/tmp/metadata.json",
+            "ptgen_description_file": "/tmp/ptgen.txt",
             "uploaded_qbit_upload_limit": "2MiB/s",
             "screenshot_files": ["/tmp/1.png", "/tmp/2.png"],
+            "image_host_file": "/tmp/image-host.json",
             "dangerous_shell": "nope",
         },
     )
@@ -12824,7 +12848,10 @@ def test_job_store_resume_applies_allowlisted_overrides(monkeypatch, tmp_path) -
     assert "--accept-rules" in argv
     assert "--confirm-upload" in argv
     assert argv[argv.index("--save-path") + 1] == "/downloads"
+    assert argv[argv.index("--metadata-file") + 1] == "/tmp/metadata.json"
+    assert argv[argv.index("--ptgen-description-file") + 1] == "/tmp/ptgen.txt"
     assert argv[argv.index("--uploaded-qbit-upload-limit") + 1] == "2MiB/s"
+    assert argv[argv.index("--image-host-file") + 1] == "/tmp/image-host.json"
     screenshot_indexes = [index for index, item in enumerate(argv) if item == "--screenshot-file"]
     assert [argv[index + 1] for index in screenshot_indexes] == ["/tmp/1.png", "/tmp/2.png"]
     assert "/old" not in argv
@@ -12833,6 +12860,24 @@ def test_job_store_resume_applies_allowlisted_overrides(monkeypatch, tmp_path) -
     assert resume["request"]["next_command_argv"] == argv
     assert resume["request"]["applied_overrides"]
     assert {"key": "dangerous_shell", "reason": "override is not allowlisted for resume commands"} in resume["request"]["ignored_overrides"]
+    material_resolution = resume["resume_context"]["material_resolution"]
+    assert material_resolution["kind"] == "ptcli.resume_material_resolution"
+    assert material_resolution["ready_before_resume"] is False
+    assert material_resolution["covered_recommended_inputs"] == [
+        "path_or_save_path",
+        "metadata_file",
+        "ptgen_description_file",
+        "screenshot_files",
+        "image_host_file",
+    ]
+    assert material_resolution["unresolved_recommended_inputs"] == []
+    assert "metadata_file" in material_resolution["applied_override_keys"]
+    assert "dangerous_shell" in material_resolution["ignored_override_keys"]
+    assert resume["request"]["material_resolution"] == material_resolution
+    assert resume["request"]["parent_materials_handoff"]["blockers"]
+    assert resume["material_resolution"] == material_resolution
+    assert resume["workflow_context"]["material_resolution"] == material_resolution
+    assert resume["agent_decision"]["material_resolution"] == material_resolution
     assert resume["resume_context"]["applied_overrides"] == resume["request"]["applied_overrides"]
     assert resume["resume_context"]["ignored_overrides"] == resume["request"]["ignored_overrides"]
 
@@ -14160,6 +14205,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_context" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "material_resolution" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "material_resolution" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "material_resolution" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "material_resolution_fields" in tool_by_name["resume_job"]["response_contract"]
     assert "candidate_submission" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "candidate_submission" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "interruption" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -14184,6 +14233,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "materials_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "material_resolution" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "config_templates" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
@@ -14301,6 +14351,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_requirements" in summary_schema["properties"]
     assert "resume_lineage" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
+    assert "material_resolution" in summary_schema["properties"]
     assert "candidate_submission" in summary_schema["properties"]
     assert "candidate_submission_handoff" in summary_schema["properties"]
     assert "source_reference" in summary_schema["properties"]
@@ -14314,6 +14365,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_handoff" in job_schema["properties"]
     assert "candidate_submission_handoff" in job_schema["properties"]
     assert "resume_requirements" in job_schema["properties"]
+    assert "material_resolution" in job_schema["properties"]
     assert "cancelled" in job_schema["properties"]["status"]["enum"]
     assert "cancellation" in job_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -14478,6 +14530,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "material_resolution" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "material_resolution" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "material_resolution" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "material_resolution_fields" in tools_by_name["resume_job"]["response_contract"]
         assert "candidate_submission" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "candidate_submission" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "interruption" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -14499,6 +14555,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "qbit_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "materials_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "material_resolution" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "runtime" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_endpoint" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "source_reference" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]

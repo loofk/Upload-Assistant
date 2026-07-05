@@ -255,6 +255,7 @@ class JobStore:
             "resume_requirements": _job_resume_requirements(job, summary_payload),
             "resume_lineage": _job_resume_lineage(job),
             "resume_context": _job_resume_context(job),
+            "material_resolution": _job_material_resolution(job),
             "candidate_submission": _job_candidate_submission(job),
             "candidate_submission_handoff": _job_candidate_submission_handoff(job, summary_payload),
             "source_reference": _job_source_reference(job),
@@ -275,10 +276,12 @@ class JobStore:
         argv = override_result["argv"]
         allowed, reason = _resume_command_allowed(argv)
         resume_context = _resume_context(parent, parent_job_id=job_id, argv=argv, allowed=allowed, reason=reason)
+        material_resolution = _resume_material_resolution(parent, override_result)
         resume_context["original_next_command_argv"] = original_argv
         resume_context["resume_overrides"] = override_result["provided"]
         resume_context["applied_overrides"] = override_result["applied"]
         resume_context["ignored_overrides"] = override_result["ignored"]
+        resume_context["material_resolution"] = material_resolution
         resume_lineage = _resume_lineage(parent, parent_job_id=job_id, argv=argv, allowed=allowed, reason=reason)
         request = {
             "parent_job_id": job_id,
@@ -296,6 +299,8 @@ class JobStore:
             "resume_blocker": reason,
             "parent_policy_coverage": _job_policy_coverage(parent),
             "parent_policy_qbit_defaults": _job_policy_qbit_defaults(parent),
+            "parent_materials_handoff": _job_materials_handoff(parent),
+            "material_resolution": material_resolution,
             "resume_context": resume_context,
             "resume_lineage": resume_lineage,
         }
@@ -2761,6 +2766,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "resume_plan": _job_resume_plan(job),
         "resume_requirements": _job_resume_requirements(job),
         "resume_lineage": _job_resume_lineage(job),
+        "material_resolution": _job_material_resolution(job),
         "candidate_submission": _job_candidate_submission(job),
         "candidate_submission_handoff": _job_candidate_submission_handoff(job),
         "status_endpoint": f"/v1/jobs/{job_id}" if job_id else None,
@@ -2814,6 +2820,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "resume_requirements": _job_resume_requirements(job),
         "resume_lineage": _job_resume_lineage(job),
         "resume_context": _job_resume_context(job),
+        "material_resolution": _job_material_resolution(job),
         "candidate_submission": _job_candidate_submission(job),
         "candidate_submission_handoff": _job_candidate_submission_handoff(job),
         "source_reference": _job_source_reference(job),
@@ -2950,6 +2957,8 @@ def _job_materials_handoff(job: dict[str, Any], summary_payload: dict[str, Any] 
     preflight_missing = _string_list(target_preflight.get("missing"))
     preflight_description_missing = _string_list(target_preflight.get("description_missing"))
     preflight_blockers = _string_list(target_preflight.get("blockers"))
+    if not _materials_handoff_has_signal(metadata, materials, target_preflight, critical_missing, upload_material_blockers, preflight_missing, preflight_description_missing, preflight_blockers):
+        return None
     blockers = list(dict.fromkeys(_string_list(metadata.get("missing")) + critical_missing + upload_material_blockers + preflight_missing + preflight_description_missing + preflight_blockers))
     recommended_inputs = _materials_handoff_recommended_inputs(request, metadata, materials, target_preflight, blockers)
     ready = _materials_handoff_ready(metadata, materials, target_preflight, blockers)
@@ -2996,6 +3005,37 @@ def _job_materials_handoff(job: dict[str, Any], summary_payload: dict[str, Any] 
         "blockers": blockers,
         "next_actions": _materials_handoff_next_actions(ready, recommended_inputs, blockers),
     }
+
+
+def _materials_handoff_has_signal(
+    metadata: dict[str, Any],
+    materials: dict[str, Any],
+    target_preflight: dict[str, Any],
+    critical_missing: list[str],
+    upload_material_blockers: list[str],
+    preflight_missing: list[str],
+    preflight_description_missing: list[str],
+    preflight_blockers: list[str],
+) -> bool:
+    metadata_signal = any(
+        [
+            bool(metadata.get("fields") if isinstance(metadata.get("fields"), dict) else {}),
+            bool(metadata.get("missing")),
+            bool(metadata.get("external_links") if isinstance(metadata.get("external_links"), dict) else {}),
+            any(isinstance(metadata.get(key), bool) for key in ("ready", "imdb_ready", "tmdb_ready", "douban_ready")),
+        ]
+    )
+    material_keys = ("ready_for_mteam_upload", "critical_ready", "mediainfo_or_bdinfo_ready", "screenshots_ready", "description_ready")
+    preflight_keys = ("ready", "payload_ready", "materials_ready", "metadata_ready", "assets_ready", "description_ready")
+    return any(
+        [
+            materials.get("present") is True,
+            metadata_signal,
+            any(isinstance(materials.get(key), bool) for key in material_keys),
+            any(isinstance(target_preflight.get(key), bool) for key in preflight_keys),
+            bool(critical_missing or upload_material_blockers or preflight_missing or preflight_description_missing or preflight_blockers),
+        ]
+    )
 
 
 def _materials_handoff_ready(metadata: dict[str, Any], materials: dict[str, Any], target_preflight: dict[str, Any], blockers: list[str]) -> bool:
@@ -3167,6 +3207,16 @@ def _job_resume_context(job: dict[str, Any]) -> dict[str, Any] | None:
     request = job.get("request")
     if isinstance(request, dict) and isinstance(request.get("resume_context"), dict):
         return request["resume_context"]
+    return None
+
+
+def _job_material_resolution(job: dict[str, Any]) -> dict[str, Any] | None:
+    request = job.get("request")
+    if isinstance(request, dict) and isinstance(request.get("material_resolution"), dict):
+        return request["material_resolution"]
+    resume_context = _job_resume_context(job)
+    if isinstance(resume_context, dict) and isinstance(resume_context.get("material_resolution"), dict):
+        return resume_context["material_resolution"]
     return None
 
 
@@ -3440,6 +3490,7 @@ def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = 
         "resume_requirements": _job_resume_requirements(job, payload if isinstance(payload, dict) else None),
         "resume_state": resume_state,
         "resume_context": _job_resume_context(job),
+        "material_resolution": _job_material_resolution(job),
     }
 
 
@@ -3566,6 +3617,7 @@ def _resume_lineage(parent: dict[str, Any], *, parent_job_id: str, argv: list[st
             "summary_file": parent_workflow_context.get("summary_file"),
             "gates": parent_workflow_context.get("gates"),
         },
+        "parent_materials_handoff": _job_materials_handoff(parent),
         "inherited_policy": {
             "policy_coverage": _job_policy_coverage(parent),
             "policy_qbit_defaults": _job_policy_qbit_defaults(parent),
@@ -3589,9 +3641,61 @@ def _resume_context(parent: dict[str, Any], *, parent_job_id: str, argv: list[st
         "parent_summary_file": _job_summary_file(parent),
         "parent_source_reference": lineage.get("parent_source_reference"),
         "parent_workflow_context": lineage.get("parent_workflow_context"),
+        "parent_materials_handoff": lineage.get("parent_materials_handoff"),
         "parent_next_actions": _string_list(parent.get("next_actions")),
         "inherited_policy": lineage.get("inherited_policy"),
     }
+
+
+def _resume_material_resolution(parent: dict[str, Any], override_result: dict[str, Any]) -> dict[str, Any] | None:
+    materials_handoff = _job_materials_handoff(parent)
+    if not isinstance(materials_handoff, dict):
+        return None
+    recommended_inputs = materials_handoff.get("recommended_inputs") if isinstance(materials_handoff.get("recommended_inputs"), list) else []
+    applied_keys = [
+        str(item.get("key"))
+        for item in override_result.get("applied", [])
+        if isinstance(item, dict) and item.get("key")
+    ]
+    ignored_keys = [
+        str(item.get("key"))
+        for item in override_result.get("ignored", [])
+        if isinstance(item, dict) and item.get("key")
+    ]
+    covered: list[str] = []
+    unresolved: list[dict[str, Any]] = []
+    for item in recommended_inputs:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "")
+        accepted_keys = [str(value) for value in _string_list(item.get("accepted_keys"))]
+        if key in applied_keys or any(accepted_key in applied_keys for accepted_key in accepted_keys):
+            covered.append(key)
+        else:
+            unresolved.append(item)
+    return {
+        "kind": "ptcli.resume_material_resolution",
+        "ready_before_resume": materials_handoff.get("ready"),
+        "parent_materials_handoff": materials_handoff,
+        "recommended_inputs": recommended_inputs,
+        "applied_override_keys": applied_keys,
+        "ignored_override_keys": ignored_keys,
+        "covered_recommended_inputs": covered,
+        "unresolved_recommended_inputs": unresolved,
+        "blockers_before_resume": _string_list(materials_handoff.get("blockers")),
+        "next_actions": _resume_material_resolution_next_actions(unresolved, applied_keys, ignored_keys),
+    }
+
+
+def _resume_material_resolution_next_actions(unresolved: list[dict[str, Any]], applied_keys: list[str], ignored_keys: list[str]) -> list[str]:
+    if unresolved:
+        keys = ", ".join(str(item.get("key")) for item in unresolved if isinstance(item, dict) and item.get("key"))
+        return [f"Resume was accepted, but these recommended material inputs were not provided yet: {keys}."]
+    if applied_keys:
+        return ["Resume command includes material overrides; poll the resumed job and inspect materials_handoff/target_preflight for validation."]
+    if ignored_keys:
+        return ["Resume ignored some provided material overrides; inspect ignored_override_keys and retry with allowed override names."]
+    return []
 
 
 def _agent_candidate_decision(
@@ -3669,6 +3773,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     next_command_argv = _result_next_command_argv(result)
     resume_context = _job_resume_context(job)
     resume_lineage = _job_resume_lineage(job)
+    material_resolution = _job_material_resolution(job)
     source_reference = _job_source_reference(job)
     workflow_context = _job_workflow_context(job)
     manual_retorrent_handoff = _job_manual_retorrent_handoff(job)
@@ -3753,6 +3858,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "resume_requirements": resume_requirements,
         "resume_lineage": resume_lineage,
         "resume_context": resume_context,
+        "material_resolution": material_resolution,
         "candidate_submission": _job_candidate_submission(job),
         "source_reference": source_reference,
         "workflow_context": workflow_context,
@@ -4616,7 +4722,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "material_resolution", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -4932,13 +5038,14 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "material_resolution", "candidate_submission", "source_reference", "workflow_context"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "recommended_inputs", "allowed_overrides", "current_flags"],
+        "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
     }
 
 
@@ -4960,7 +5067,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "candidate_submission_handoff", "source_reference", "duplicate_check", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "candidate_submission_handoff", "source_reference", "duplicate_check", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_lineage", "material_resolution", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -5314,6 +5421,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_requirements": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
+            "material_resolution": {"type": ["object", "null"]},
             "candidate_submission": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
             "workflow_context": {"type": ["object", "null"]},
@@ -5345,6 +5453,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_requirements": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
+            "material_resolution": {"type": ["object", "null"]},
             "candidate_submission": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
             "workflow_context": {"type": ["object", "null"]},
