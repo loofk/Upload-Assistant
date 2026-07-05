@@ -12660,6 +12660,22 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["agent_summary"]["materials"]["screenshot_count"] == 2
     assert job["agent_summary"]["target_preflight"]["description_ready"] is False
     assert job["agent_summary"]["resume"]["next_stage"] == "resume-target-package"
+    assert job["materials_handoff"]["kind"] == "ptcli.materials_handoff"
+    assert job["materials_handoff"]["ready"] is False
+    assert job["materials_handoff"]["can_prepare_upload_payload"] is False
+    assert job["materials_handoff"]["metadata"]["tmdb_ready"] is False
+    assert job["materials_handoff"]["metadata"]["ptgen_description_ready"] is False
+    assert job["materials_handoff"]["materials"]["mediainfo_or_bdinfo_ready"] is True
+    assert job["materials_handoff"]["materials"]["screenshots_ready"] is True
+    assert job["materials_handoff"]["materials"]["screenshot_count"] == 2
+    assert job["materials_handoff"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
+    assert job["materials_handoff"]["target_preflight"]["description_ready"] is False
+    assert job["materials_handoff"]["target_preflight"]["missing"] == ["materials.metadata.tmdb"]
+    assert "metadata.tmdb" in job["materials_handoff"]["blockers"]
+    recommended_input_keys = {item["key"] for item in job["materials_handoff"]["recommended_inputs"]}
+    assert {"metadata_file", "ptgen_description_file"}.issubset(recommended_input_keys)
+    assert "Provide missing upload materials" in job["materials_handoff"]["next_actions"][0]
+    assert job["agent_decision"]["materials_handoff"] == job["materials_handoff"]
     assert job["resume_plan"]["available"] is True
     assert job["resume_plan"]["allowed"] is True
     assert job["resume_plan"]["recommended"] is True
@@ -12677,6 +12693,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert job["workflow_context"]["materials"]["next_step"] == "metadata"
     assert job["workflow_context"]["target_preflight"]["description_ready"] is False
+    assert job["workflow_context"]["materials_handoff"] == job["materials_handoff"]
     assert job["workflow_context"]["qbit"]["source"]["torrent_hash"] == "a" * 40
     assert job["workflow_context"]["qbit"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert job["workflow_context"]["gates"]["materials_ready"] is False
@@ -12686,6 +12703,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["workflow_context"]["gates"]["uploaded_seeding_evidence"] is False
     assert summary["agent_summary"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["agent_summary"]["resume"]["materials_missing"] == ["metadata.tmdb"]
+    assert summary["materials_handoff"] == job["materials_handoff"]
     assert summary["resume_plan"] == job["resume_plan"]
     assert summary["resume_requirements"] == job["resume_requirements"]
     assert summary["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
@@ -13812,6 +13830,7 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["after_submit"]["read_fields"] == [
         "candidate_submission_handoff",
         "manual_retorrent_handoff",
+        "materials_handoff",
         "agent_decision",
         "status_endpoint",
         "summary_endpoint",
@@ -14112,6 +14131,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "qbit_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "qbit_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "materials_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "materials_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "materials_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "materials_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -14159,6 +14182,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_plan" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "qbit_limit_audit" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "qbit_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "materials_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
@@ -14271,6 +14295,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_plan" in summary_schema["properties"]
     assert "qbit_limit_audit" in summary_schema["properties"]
     assert "qbit_handoff" in summary_schema["properties"]
+    assert "materials_handoff" in summary_schema["properties"]
     assert "manual_retorrent_handoff" in summary_schema["properties"]
     assert "resume_plan" in summary_schema["properties"]
     assert "resume_requirements" in summary_schema["properties"]
@@ -14285,6 +14310,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "runtime" in job_schema["properties"]
     assert "qbit_limit_audit" in job_schema["properties"]
     assert "qbit_handoff" in job_schema["properties"]
+    assert "materials_handoff" in job_schema["properties"]
     assert "manual_retorrent_handoff" in job_schema["properties"]
     assert "candidate_submission_handoff" in job_schema["properties"]
     assert "resume_requirements" in job_schema["properties"]
@@ -14424,6 +14450,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "qbit_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "qbit_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "qbit_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "materials_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "materials_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+        assert "materials_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "materials_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -14467,6 +14497,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "qbit_plan" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_limit_audit" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "materials_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "runtime" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_endpoint" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
