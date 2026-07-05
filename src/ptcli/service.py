@@ -247,6 +247,7 @@ class JobStore:
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
             "qbit_plan": _job_qbit_plan(job),
             "qbit_limit_audit": _job_qbit_limit_audit(job, summary_payload),
+            "qbit_handoff": _job_qbit_handoff(job, summary_payload),
             "manual_retorrent_handoff": _job_manual_retorrent_handoff(job, summary_payload),
             "runtime": _job_runtime(job),
             "resume_plan": _job_resume_plan(job),
@@ -2752,6 +2753,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "duplicate_check": _job_duplicate_check(job),
         "qbit_plan": _job_qbit_plan(job),
         "qbit_limit_audit": _job_qbit_limit_audit(job),
+        "qbit_handoff": _job_qbit_handoff(job),
         "manual_retorrent_handoff": _job_manual_retorrent_handoff(job),
         "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
         "resume_plan": _job_resume_plan(job),
@@ -2803,6 +2805,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
         "qbit_plan": _job_qbit_plan(job),
         "qbit_limit_audit": _job_qbit_limit_audit(job),
+        "qbit_handoff": _job_qbit_handoff(job),
         "manual_retorrent_handoff": _job_manual_retorrent_handoff(job),
         "resume_plan": _job_resume_plan(job),
         "resume_requirements": _job_resume_requirements(job),
@@ -2879,6 +2882,54 @@ def _job_qbit_limit_audit(job: dict[str, Any], summary_payload: dict[str, Any] |
         "blockers": blockers,
         "next_actions": _qbit_limit_audit_next_actions(blockers),
     }
+
+
+def _job_qbit_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    plan = _job_qbit_plan(job)
+    if not isinstance(plan, dict):
+        return None
+    audit = _job_qbit_limit_audit(job, summary_payload)
+    source_plan = plan.get("source") if isinstance(plan.get("source"), dict) else {}
+    uploaded_plan = plan.get("uploaded") if isinstance(plan.get("uploaded"), dict) else {}
+    source_audit = audit.get("source") if isinstance(audit, dict) and isinstance(audit.get("source"), dict) else {}
+    uploaded_audit = audit.get("uploaded") if isinstance(audit, dict) and isinstance(audit.get("uploaded"), dict) else {}
+    blockers = _string_list(audit.get("blockers")) if isinstance(audit, dict) else []
+    return {
+        "kind": "ptcli.qbit_handoff",
+        "client": plan.get("client"),
+        "ready": bool(audit.get("ready")) if isinstance(audit, dict) else False,
+        "source": _qbit_handoff_role("source", source_plan, source_audit),
+        "uploaded": _qbit_handoff_role("uploaded", uploaded_plan, uploaded_audit),
+        "policy_defaults": plan.get("policy_defaults"),
+        "blockers": blockers,
+        "next_actions": _qbit_handoff_next_actions(blockers),
+    }
+
+
+def _qbit_handoff_role(role: str, plan: dict[str, Any], audit: dict[str, Any]) -> dict[str, Any]:
+    expected = audit.get("expected") if isinstance(audit.get("expected"), dict) else {}
+    observed = audit.get("observed") if isinstance(audit.get("observed"), dict) else None
+    return {
+        "role": role,
+        "category": plan.get("category"),
+        "tags": plan.get("tags"),
+        "upload_limit": plan.get("upload_limit"),
+        "download_limit": plan.get("download_limit"),
+        "upload_limit_source": plan.get("upload_limit_source"),
+        "download_limit_source": plan.get("download_limit_source"),
+        "expected_limits": expected,
+        "audit_status": audit.get("status") or "none",
+        "audit_ready": bool(audit.get("ready")),
+        "evidence_present": bool(audit.get("evidence_present")),
+        "observed_limits": observed,
+        "blockers": _string_list(audit.get("blockers")),
+    }
+
+
+def _qbit_handoff_next_actions(blockers: list[str]) -> list[str]:
+    if not blockers:
+        return []
+    return ["Review qbit_handoff.source/uploaded blockers, then resume or rerun the affected qBittorrent injection step with the listed category, tags, and rate limits."]
 
 
 def _qbit_limit_source_result(payloads: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -3261,6 +3312,7 @@ def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = 
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
         "qbit_plan": _job_qbit_plan(job),
         "qbit_limit_audit": _job_qbit_limit_audit(job, payload if isinstance(payload, dict) else None),
+        "qbit_handoff": _job_qbit_handoff(job, payload if isinstance(payload, dict) else None),
         "manual_retorrent_handoff": _job_manual_retorrent_handoff(job, payload if isinstance(payload, dict) else None),
         "candidate_submission_handoff": _job_candidate_submission_handoff(job, payload if isinstance(payload, dict) else None),
         "resume_plan": resume_plan,
@@ -3506,6 +3558,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     policy_qbit_defaults = _job_policy_qbit_defaults(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     qbit_plan = _job_qbit_plan(job) if policy_qbit_defaults is not None else None
     qbit_limit_audit = _job_qbit_limit_audit(job) if qbit_plan is not None else None
+    qbit_handoff = _job_qbit_handoff(job) if qbit_plan is not None else None
     policy_coverage_ready = policy_coverage.get("ready") if isinstance(policy_coverage, dict) and isinstance(policy_coverage.get("ready"), bool) else None
     policy_coverage_incomplete = policy_coverage_ready is False
     duplicate_exists = duplicate_check.get("exists") is True
@@ -3565,6 +3618,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "policy_qbit_defaults": policy_qbit_defaults,
         "qbit_plan": qbit_plan,
         "qbit_limit_audit": qbit_limit_audit,
+        "qbit_handoff": qbit_handoff,
         "policy_coverage_ready": policy_coverage_ready,
         "runtime": _job_runtime(job),
         "cancellation": job.get("cancellation") if isinstance(job.get("cancellation"), dict) else None,
@@ -4439,7 +4493,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "manual_retorrent_handoff", "candidate_submission_handoff", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -4755,7 +4809,7 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "manual_retorrent_handoff", "candidate_submission_handoff", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "candidate_submission", "source_reference", "workflow_context"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -4783,7 +4837,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "candidate_submission_handoff", "source_reference", "duplicate_check", "qbit_plan", "qbit_limit_audit", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "candidate_submission_handoff", "source_reference", "duplicate_check", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_lineage", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -5129,6 +5183,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "qbit_plan": {"type": ["object", "null"]},
             "qbit_limit_audit": {"type": ["object", "null"]},
+            "qbit_handoff": {"type": ["object", "null"]},
             "manual_retorrent_handoff": {"type": ["object", "null"]},
             "candidate_submission_handoff": {"type": ["object", "null"]},
             "resume_plan": {"type": "object"},
@@ -5157,6 +5212,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "qbit_plan": {"type": ["object", "null"]},
             "qbit_limit_audit": {"type": ["object", "null"]},
+            "qbit_handoff": {"type": ["object", "null"]},
             "manual_retorrent_handoff": {"type": ["object", "null"]},
             "candidate_submission_handoff": {"type": ["object", "null"]},
             "runtime": {"type": "object"},
