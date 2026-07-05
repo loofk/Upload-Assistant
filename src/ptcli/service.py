@@ -879,6 +879,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "ready": bool(report.get("ready")),
         "request": context,
         "policy_matrix": matrix,
+        "config_templates": _site_policy_config_templates(matrix),
         "site_policies": report.get("site_policies", []),
         "qbit_limits": report.get("qbit_limits", {}),
         "policy_gap_summary": policy_gap_summary,
@@ -1932,7 +1933,104 @@ def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None 
     }
     item["policy_coverage"] = build_site_policy_coverage(policy, roles=policy_roles)
     item["execution_readiness"] = _site_policy_item_execution_readiness(item)
+    item["policy_profile"] = _site_policy_profile(item)
     return item
+
+
+def _site_policy_profile(item: dict[str, Any]) -> dict[str, Any]:
+    tracker = str(item.get("tracker") or "")
+    roles = _string_list(item.get("roles")) or ["unknown"]
+    coverage = item.get("policy_coverage") if isinstance(item.get("policy_coverage"), dict) else {}
+    return {
+        "kind": "ptcli.site_policy_profile",
+        "tracker": tracker,
+        "roles": roles,
+        "purpose": "copyable local automation policy template for Chinese PT retorrent workflows",
+        "config_path": f'config["PTCLI"]["SITE_POLICIES"]["{tracker}"]',
+        "required_fields": _site_policy_required_fields_for_roles(roles),
+        "optional_fields": ["freeleech_required", "required_promotions", "forbidden_title_patterns", "forbidden_release_groups", "notes"],
+        "missing_fields": _string_list(coverage.get("missing_fields")),
+        "disabled_automation": _string_list(coverage.get("disabled_automation")),
+        "template": _site_policy_config_template(item),
+        "current_values": {
+            "rules_url": item.get("rules_url"),
+            "automation": item.get("automation"),
+            "qbit_limits": item.get("qbit_limits"),
+            "seeding_requirements": item.get("seeding_requirements"),
+            "transfer_rules": item.get("transfer_rules"),
+            "rule_review_fingerprint": item.get("rule_review_fingerprint"),
+        },
+        "next_actions": _site_policy_profile_next_actions(tracker, roles, coverage),
+    }
+
+
+def _site_policy_required_fields_for_roles(roles: list[str]) -> list[str]:
+    fields = ["rules_url", "rule_review_fingerprint", "allow_retorrent"]
+    if "source" in roles:
+        fields.extend(["allow_auto_download", "download_rate_limit", "min_seed_time_hours"])
+    if "target" in roles:
+        fields.extend(["allow_auto_upload", "upload_rate_limit", "min_ratio"])
+    if "unknown" in roles:
+        fields.append("source_or_target_role")
+    return list(dict.fromkeys(fields))
+
+
+def _site_policy_config_template(item: dict[str, Any]) -> dict[str, Any]:
+    tracker = str(item.get("tracker") or "")
+    roles = _string_list(item.get("roles")) or ["unknown"]
+    automation = item.get("automation") if isinstance(item.get("automation"), dict) else {}
+    qbit_limits = item.get("qbit_limits") if isinstance(item.get("qbit_limits"), dict) else {}
+    seeding = item.get("seeding_requirements") if isinstance(item.get("seeding_requirements"), dict) else {}
+    transfer_rules = item.get("transfer_rules") if isinstance(item.get("transfer_rules"), dict) else {}
+    template = {
+        "rules_url": item.get("rules_url") or "",
+        "manual_review_required": True,
+        "allow_retorrent": automation.get("retorrent") is True,
+        "rule_review_fingerprint": item.get("rule_review_fingerprint") or "manual-review-YYYY-MM-DD",
+    }
+    if "source" in roles:
+        template.update(
+            {
+                "allow_auto_download": automation.get("download") is True,
+                "download_rate_limit": qbit_limits.get("download_limit_human") or "20MiB/s",
+                "min_seed_time_hours": seeding.get("min_seed_time_hours") or 72,
+            }
+        )
+    if "target" in roles:
+        template.update(
+            {
+                "allow_auto_upload": automation.get("upload") is True,
+                "upload_rate_limit": qbit_limits.get("upload_limit_human") or "2MiB/s",
+                "min_ratio": seeding.get("min_ratio") or 1.0,
+            }
+        )
+    if transfer_rules.get("freeleech_required") is True:
+        template["freeleech_required"] = True
+    if _string_list(transfer_rules.get("required_promotions")):
+        template["required_promotions"] = _string_list(transfer_rules.get("required_promotions"))
+    if _string_list(transfer_rules.get("forbidden_title_patterns")):
+        template["forbidden_title_patterns"] = _string_list(transfer_rules.get("forbidden_title_patterns"))
+    if _string_list(transfer_rules.get("forbidden_release_groups")):
+        template["forbidden_release_groups"] = _string_list(transfer_rules.get("forbidden_release_groups"))
+    template["notes"] = [f"Verify {tracker} rules manually before enabling live automation."]
+    return template
+
+
+def _site_policy_config_templates(matrix: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "kind": "ptcli.site_policy_config_templates",
+        "config_path": 'config["PTCLI"]["SITE_POLICIES"]',
+        "trackers": {str(item.get("tracker")): (item.get("policy_profile") or {}).get("template") for item in matrix if item.get("tracker")},
+    }
+
+
+def _site_policy_profile_next_actions(tracker: str, roles: list[str], coverage: dict[str, Any]) -> list[str]:
+    actions = _string_list(coverage.get("recommendations"))
+    if not actions:
+        actions.append(f"{tracker}: keep SITE_POLICIES current when site upload/download rules change.")
+    if "unknown" in roles:
+        actions.append(f"{tracker}: rerun site-policies with --from/--to so the profile can apply source/target requirements.")
+    return list(dict.fromkeys(actions))
 
 
 def _site_policy_item_execution_readiness(item: dict[str, Any]) -> dict[str, Any]:
@@ -4416,7 +4514,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "qbit_limits", "policy_gap_summary", "execution_readiness", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "config_templates", "qbit_limits", "policy_gap_summary", "execution_readiness", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -4425,11 +4523,13 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                     "qbit_limits",
                     "seeding_requirements",
                     "transfer_rules",
+                    "policy_profile",
                     "manual_review_required",
                     "rule_review_fingerprint",
                     "policy_coverage",
                     "execution_readiness",
                 ],
+                "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "missing_fields", "disabled_automation", "template", "current_values", "next_actions"],
                 "gap_summary_fields": ["ready", "missing_total", "disabled_total", "by_role", "missing_by_category", "recommendations"],
                 "execution_readiness_fields": ["ready", "accepted_rules", "ready_trackers", "blocked_trackers", "by_tracker", "blockers"],
             },
@@ -5157,6 +5257,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "ready": {"type": "boolean"},
             "request": {"type": "object"},
             "policy_matrix": {"type": "array", "items": {"type": "object"}},
+            "config_templates": {"type": "object"},
             "site_policies": {"type": "array", "items": {"type": "object"}},
             "qbit_limits": {"type": "object"},
             "policy_gap_summary": {"type": "object"},

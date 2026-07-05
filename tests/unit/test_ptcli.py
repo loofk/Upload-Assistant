@@ -13932,6 +13932,10 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["U2"]["transfer_rules"]["required_promotions"] == ["free"]
     assert matrix_by_tracker["U2"]["execution_readiness"]["transfer_rules"]["forbidden_release_groups"] == ["BADGRP"]
     assert matrix_by_tracker["U2"]["policy_coverage"]["complete"] is True
+    assert matrix_by_tracker["U2"]["policy_profile"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]["U2"]'
+    assert "download_rate_limit" in matrix_by_tracker["U2"]["policy_profile"]["required_fields"]
+    assert matrix_by_tracker["U2"]["policy_profile"]["template"]["download_rate_limit"] == "20 MiB/s"
+    assert matrix_by_tracker["U2"]["policy_profile"]["template"]["required_promotions"] == ["free"]
     assert matrix_by_tracker["U2"]["execution_readiness"]["ready"] is True
     assert matrix_by_tracker["U2"]["execution_readiness"]["role_status"]["source"]["can_download"] is True
     assert matrix_by_tracker["MTEAM"]["roles"] == ["target"]
@@ -13941,11 +13945,16 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["MTEAM"]["transfer_rules"]["freeleech_required"] is True
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["transfer_rules"]["forbidden_title_patterns"] == ["Forbidden"]
     assert matrix_by_tracker["MTEAM"]["policy_coverage"]["complete"] is True
+    assert "upload_rate_limit" in matrix_by_tracker["MTEAM"]["policy_profile"]["required_fields"]
+    assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["upload_rate_limit"] == "2 MiB/s"
+    assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["freeleech_required"] is True
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["ready"] is True
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["role_status"]["target"]["can_upload"] is True
     assert payload["execution_readiness"]["ready"] is True
     assert payload["execution_readiness"]["ready_trackers"] == ["U2", "MTEAM"]
     assert payload["execution_readiness"]["blocked_trackers"] == []
+    assert payload["config_templates"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]'
+    assert payload["config_templates"]["trackers"]["MTEAM"]["min_ratio"] == 1.0
     assert payload["agent_summary"]["qbit_limits_present"] == ["U2", "MTEAM"]
     assert payload["agent_summary"]["seeding_requirements_present"] == ["U2", "MTEAM"]
     assert payload["agent_summary"]["policy_coverage_ready"] is True
@@ -14015,6 +14024,9 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     matrix_by_tracker = {item["tracker"]: item for item in payload["policy_matrix"]}
     assert matrix_by_tracker["U2"]["policy_coverage"]["complete"] is False
     assert matrix_by_tracker["MTEAM"]["policy_coverage"]["complete"] is False
+    assert matrix_by_tracker["U2"]["policy_profile"]["template"]["download_rate_limit"] == "20MiB/s"
+    assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["upload_rate_limit"] == "2MiB/s"
+    assert "rule_review_fingerprint" in matrix_by_tracker["U2"]["policy_profile"]["missing_fields"]
     assert matrix_by_tracker["U2"]["execution_readiness"]["ready"] is False
     assert "download_rate_limit" in matrix_by_tracker["U2"]["execution_readiness"]["role_status"]["source"]["blockers"]
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["ready"] is False
@@ -14128,8 +14140,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "config_templates" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "transfer_rules" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
+    assert "policy_profile" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
+    assert "template" in tool_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "blocked_trackers" in tool_by_name["site_policies"]["response_contract"]["execution_readiness_fields"]
@@ -14229,6 +14244,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_coverage" in summary_schema["properties"]
     site_policy_schema = openapi["paths"]["/v1/site-policies"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_gap_summary" in site_policy_schema["properties"]
+    assert "config_templates" in site_policy_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "qbit_plan" in summary_schema["properties"]
     assert "qbit_limit_audit" in summary_schema["properties"]
@@ -14339,8 +14355,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert source_url_workflow["runbook"][3]["repeat_when"] == "status in queued,running and runtime.should_poll=true"
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "config_templates" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert "transfer_rules" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
+        assert "policy_profile" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
+        assert "template" in tools_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert "blocked_trackers" in tools_by_name["site_policies"]["response_contract"]["execution_readiness_fields"]

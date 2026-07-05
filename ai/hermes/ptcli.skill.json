@@ -3436,6 +3436,7 @@
           "ok",
           "ready",
           "policy_matrix",
+          "config_templates",
           "qbit_limits",
           "policy_gap_summary",
           "execution_readiness",
@@ -3451,10 +3452,21 @@
           "qbit_limits",
           "seeding_requirements",
           "transfer_rules",
+          "policy_profile",
           "manual_review_required",
           "rule_review_fingerprint",
           "policy_coverage",
           "execution_readiness"
+        ],
+        "policy_profile_fields": [
+          "config_path",
+          "required_fields",
+          "optional_fields",
+          "missing_fields",
+          "disabled_automation",
+          "template",
+          "current_values",
+          "next_actions"
         ],
         "gap_summary_fields": [
           "ready",
