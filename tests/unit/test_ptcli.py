@@ -14001,6 +14001,7 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
             "--write-summary",
             "--summary-output-dir",
             str(tmp_path / "summary"),
+            "--write-notification",
             "--json",
         ]
     )
@@ -14024,7 +14025,14 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert summary["schedule_digest"]["submission_handoff"]["items"][0]["submit_tool"] == "submit_daily_candidate_job"
     assert summary["notification_payload"]["top_item"]["source_id"] == "12345"
     assert summary["notification_payload"]["ready"] is True
+    assert summary["notification_files"] == payload["notification_files"]
     assert summary["summary_file"] == str(summary_path)
+    notification_json = Path(payload["notification_files"]["json"])
+    notification_text = Path(payload["notification_files"]["text"])
+    assert notification_json == tmp_path / "summary" / "ptcli-daily-candidates-notification.json"
+    assert notification_text == tmp_path / "summary" / "ptcli-daily-candidates-notification.txt"
+    assert json.loads(notification_json.read_text(encoding="utf-8"))["notification_payload"]["top_item"]["source_id"] == "12345"
+    assert "Daily PT candidate schedule" in notification_text.read_text(encoding="utf-8")
 
     check_code = main(["summary-check", "--summary-file", str(summary_path), "--json"])
     check_payload = json.loads(capsys.readouterr().out)
@@ -14077,6 +14085,7 @@ def test_daily_scheduler_once_runs_schedule_and_writes_summary(monkeypatch, tmp_
             str(schedules_file),
             "--summary-output-dir",
             str(tmp_path / "summary"),
+            "--write-notification",
             "--json",
         ]
     )
@@ -14090,9 +14099,13 @@ def test_daily_scheduler_once_runs_schedule_and_writes_summary(monkeypatch, tmp_
     assert payload["scheduler"]["next_run"]["job_tool"] == "daily_candidates_job"
     assert payload["last_run"]["kind"] == "ptcli.cli.daily_schedule"
     assert payload["last_run"]["schedule_digest"]["push_items"][0]["source_id"] == "60635"
+    assert Path(payload["last_run"]["notification_files"]["json"]).exists()
+    assert Path(payload["last_run"]["notification_files"]["text"]).exists()
     summary_path = Path(payload["summary_file"])
     assert summary_path == tmp_path / "summary" / "ptcli-daily-schedule-summary.json"
-    assert json.loads(summary_path.read_text(encoding="utf-8"))["notification_payload"]["top_item"]["source_id"] == "60635"
+    summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary_payload["notification_payload"]["top_item"]["source_id"] == "60635"
+    assert summary_payload["notification_files"] == payload["last_run"]["notification_files"]
 
 
 def test_daily_scheduler_plan_calculates_next_run(tmp_path) -> None:
@@ -14895,7 +14908,7 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     assert "PTCLI_MAX_CONCURRENT_JOBS=${PTCLI_MAX_CONCURRENT_JOBS:-1}" in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}" in compose
     assert "- daily" in compose
-    assert 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]' in compose
+    assert 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]' in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=" in env_example
     assert "PTCLI_MAX_CONCURRENT_JOBS=1" in env_example
     assert "name: ${PTCLI_DOCKER_NETWORK:-upload-assistant-ptcli}" in compose
@@ -14924,11 +14937,11 @@ services:
   ptcli-daily-schedule:
     profiles:
       - daily
-    command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]
+    command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
   ptcli-daily-scheduler:
     profiles:
       - daily
-    command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]
+    command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
 """,
         encoding="utf-8",
     )

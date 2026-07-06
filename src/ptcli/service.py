@@ -5131,8 +5131,8 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
                 "daily_schedule_service_ready": False,
                 "daily_scheduler_service_ready": False,
             }
-    scheduler_command = 'command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]'
-    schedule_command = 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]'
+    scheduler_command = 'command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
+    schedule_command = 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
     return {
         "present": exists,
         "readable": exists,
