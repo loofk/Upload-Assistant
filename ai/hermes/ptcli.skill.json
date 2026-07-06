@@ -5944,6 +5944,274 @@
       }
     },
     {
+      "name": "qbit_inject_torrent",
+      "method": "POST",
+      "path": "/v1/qbit/inject",
+      "description": "Add a local .torrent file to qBittorrent with explicit save path, optional category/tags/rate limits, and return verified hash/path evidence. This mutates qBittorrent but never uploads to a tracker.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "torrent_file",
+          "save_path"
+        ],
+        "properties": {
+          "client": {
+            "type": "string",
+            "default": "default"
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py inside the container."
+          },
+          "torrent_file": {
+            "type": "string",
+            "description": "Local .torrent file path visible to the ptcli service/container."
+          },
+          "torrent_path": {
+            "type": "string",
+            "description": "Alias for torrent_file."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for this torrent."
+          },
+          "category": {
+            "type": "string",
+            "description": "Optional qBittorrent category, e.g. MTEAM."
+          },
+          "tags": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional comma-separated string or array of qBittorrent tags."
+          },
+          "upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Optional upload limit, e.g. 2MiB/s or bytes per second."
+          },
+          "download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Optional download limit, e.g. 20MiB/s or bytes per second."
+          },
+          "paused": {
+            "type": "boolean",
+            "default": false
+          },
+          "skip_checking": {
+            "type": "boolean",
+            "default": false
+          },
+          "verify_timeout": {
+            "type": "number",
+            "default": 5.0,
+            "minimum": 0
+          },
+          "verify_interval": {
+            "type": "number",
+            "default": 0.5,
+            "exclusiveMinimum": 0
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "mutates_qbittorrent",
+          "live_upload",
+          "client",
+          "request",
+          "torrent_path",
+          "hash",
+          "save_path",
+          "category",
+          "tags",
+          "upload_limit",
+          "download_limit",
+          "rate_limits",
+          "paused",
+          "skip_checking",
+          "visible_in_client",
+          "verified_in_client",
+          "client_verification",
+          "client_matches",
+          "agent_summary",
+          "blockers",
+          "next_actions"
+        ],
+        "rate_limit_fields": [
+          "requested",
+          "applied",
+          "skipped",
+          "calls"
+        ],
+        "client_verification_fields": [
+          "visible",
+          "hash_matched",
+          "save_path_matched",
+          "category_matched",
+          "tags_matched",
+          "requested",
+          "observed"
+        ],
+        "agent_summary_fields": [
+          "ready",
+          "mutates_qbittorrent",
+          "client",
+          "hash",
+          "torrent_file",
+          "save_path",
+          "category",
+          "tags",
+          "visible_in_client",
+          "verified_in_client",
+          "rate_limits_requested",
+          "rate_limits_applied",
+          "blocker_count"
+        ],
+        "safety": [
+          "adds_torrent_to_qbittorrent",
+          "may_change_qbittorrent_rate_limits",
+          "does_not_upload"
+        ]
+      },
+      "safety": {
+        "mutates_state": true,
+        "mutates_qbittorrent": true,
+        "writes_files": false,
+        "live_upload": false,
+        "requires_confirmation": [
+          "torrent_file and save_path must be explicit",
+          "site rules and rate limits must already be reviewed for live workflows"
+        ]
+      }
+    },
+    {
+      "name": "qbit_wait_complete",
+      "method": "POST",
+      "path": "/v1/qbit/wait",
+      "description": "Wait for a qBittorrent torrent to complete by hash or content path and return completion evidence for source download or uploaded-seeding closure.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "client": {
+            "type": "string",
+            "default": "default"
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py inside the container."
+          },
+          "hash": {
+            "type": "string",
+            "description": "qBittorrent torrent hash/infohash to wait for. Either hash or path is required."
+          },
+          "torrent_hash": {
+            "type": "string",
+            "description": "Alias for hash."
+          },
+          "infohash": {
+            "type": "string",
+            "description": "Alias for hash."
+          },
+          "path": {
+            "type": "string",
+            "description": "Seedbox content/save path to wait for when hash is not known. Either hash or path is required."
+          },
+          "content_path": {
+            "type": "string",
+            "description": "Alias for path."
+          },
+          "timeout": {
+            "type": "number",
+            "default": 3600.0,
+            "minimum": 0
+          },
+          "interval": {
+            "type": "number",
+            "default": 30.0,
+            "exclusiveMinimum": 0
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "read_only",
+          "client",
+          "request",
+          "complete",
+          "query",
+          "matched_count",
+          "completion_verification",
+          "matches",
+          "agent_summary",
+          "blockers",
+          "next_actions"
+        ],
+        "completion_verification_fields": [
+          "matched_count",
+          "complete_count",
+          "seeding_state_count",
+          "all_matches_complete",
+          "any_complete",
+          "requested_hash_matched",
+          "requested_content_path_matched",
+          "observed_hashes",
+          "observed_content_paths",
+          "observed_save_paths",
+          "observed_states",
+          "observed_progress"
+        ],
+        "match_fields": [
+          "name",
+          "hash",
+          "save_path",
+          "content_path",
+          "size",
+          "progress",
+          "state",
+          "category",
+          "tags",
+          "tracker"
+        ],
+        "agent_summary_fields": [
+          "ready",
+          "read_only",
+          "client",
+          "hash",
+          "path",
+          "complete",
+          "matched_count",
+          "complete_count",
+          "observed_hashes",
+          "observed_content_paths",
+          "blocker_count"
+        ],
+        "safety": [
+          "read_only",
+          "does_not_add_torrents",
+          "does_not_upload",
+          "does_not_change_rate_limits"
+        ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "mutates_qbittorrent": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
       "name": "list_jobs",
       "method": "GET",
       "path": "/v1/jobs",
@@ -7985,7 +8253,7 @@
       }
     }
   ],
-  "tool_count": 27,
+  "tool_count": 29,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

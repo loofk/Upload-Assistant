@@ -14893,6 +14893,157 @@ async def test_service_qbit_export_payload_creates_mteam_candidate(monkeypatch, 
     assert "url-list" not in sanitized.metainfo
 
 
+async def test_service_qbit_inject_payload_adds_torrent_with_limits(monkeypatch) -> None:
+    class FakeQbitReadOnlyService:
+        def __init__(self, client_config):
+            self.client_config = client_config
+
+        async def add_torrent_file(
+            self,
+            torrent_path,
+            save_path,
+            category=None,
+            tags=None,
+            upload_limit=None,
+            download_limit=None,
+            paused=False,
+            skip_checking=False,
+            verify_timeout=5.0,
+            verify_interval=0.5,
+        ):
+            assert torrent_path == "/tmp/source/U2-60635.torrent"
+            assert save_path == "/downloads/Example.Release"
+            assert category == "MTEAM"
+            assert tags == "retorrent,uploaded"
+            assert upload_limit == 2 * 1024 * 1024
+            assert download_limit == 20 * 1024 * 1024
+            assert paused is True
+            assert skip_checking is False
+            assert verify_timeout == 0.0
+            assert verify_interval == 0.5
+            return {
+                "torrent_path": torrent_path,
+                "hash": "c" * 40,
+                "save_path": save_path,
+                "category": category,
+                "tags": tags,
+                "upload_limit": upload_limit,
+                "download_limit": download_limit,
+                "rate_limits": {
+                    "requested": {"upload_limit": upload_limit, "download_limit": download_limit},
+                    "applied": True,
+                    "skipped": False,
+                    "calls": [{"method": "torrents_set_upload_limit", "torrent_hashes": "c" * 40, "limit": upload_limit}],
+                },
+                "paused": paused,
+                "skip_checking": skip_checking,
+                "verification_attempts": 1,
+                "visible_in_client": True,
+                "verified_in_client": True,
+                "client_verification": {
+                    "visible": True,
+                    "hash_matched": True,
+                    "save_path_matched": True,
+                    "category_matched": True,
+                    "tags_matched": True,
+                    "requested": {"hash": "c" * 40, "save_path": save_path, "category": category, "tags": tags},
+                    "observed": [],
+                },
+                "client_matches": [],
+            }
+
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"DEFAULT": {"default_torrent_client": "qbit"}, "TORRENT_CLIENTS": {"qbit": {"torrent_client": "qbit", "qbit_url": "http://127.0.0.1", "qbit_port": 8080}}})
+    monkeypatch.setattr(ptcli_service, "QbitReadOnlyService", FakeQbitReadOnlyService)
+
+    payload = await ptcli_service.qbit_inject_payload(
+        {
+            "torrent_file": "/tmp/source/U2-60635.torrent",
+            "save_path": "/downloads/Example.Release",
+            "category": "MTEAM",
+            "tags": ["retorrent", "uploaded"],
+            "upload_limit": "2MiB/s",
+            "download_limit": "20MiB/s",
+            "paused": True,
+            "verify_timeout": 0,
+        }
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["ok"] is True
+    assert payload["mutates_qbittorrent"] is True
+    assert payload["live_upload"] is False
+    assert payload["client"] == "qbit"
+    assert payload["hash"] == "c" * 40
+    assert payload["visible_in_client"] is True
+    assert payload["verified_in_client"] is True
+    assert payload["rate_limits"]["applied"] is True
+    assert payload["agent_summary"]["ready"] is True
+    assert payload["agent_summary"]["rate_limits_applied"] is True
+    assert payload["blockers"] == []
+    assert "qbit_wait_complete" in payload["next_actions"][0]
+
+
+async def test_service_qbit_wait_payload_reports_completion(monkeypatch) -> None:
+    class FakeQbitReadOnlyService:
+        def __init__(self, client_config):
+            self.client_config = client_config
+
+        async def wait_for_completion(self, torrent_hash=None, content_path=None, timeout=3600.0, interval=30.0):
+            assert torrent_hash == "d" * 40
+            assert content_path is None
+            assert timeout == 1.5
+            assert interval == 0.2
+            return {
+                "complete": True,
+                "query": {"mode": "hash", "torrent_hash": torrent_hash, "content_path": content_path, "timeout": timeout, "interval": interval},
+                "matched_count": 1,
+                "completion_verification": {
+                    "matched_count": 1,
+                    "complete_count": 1,
+                    "seeding_state_count": 1,
+                    "all_matches_complete": True,
+                    "any_complete": True,
+                    "requested_hash_matched": True,
+                    "requested_content_path_matched": None,
+                    "observed_hashes": [torrent_hash],
+                    "observed_content_paths": ["/downloads/Example.Release"],
+                    "observed_save_paths": ["/downloads"],
+                    "observed_states": ["uploading"],
+                    "observed_progress": [1.0],
+                },
+                "matches": [
+                    {
+                        "name": "Example.Release",
+                        "hash": torrent_hash,
+                        "save_path": "/downloads",
+                        "content_path": "/downloads/Example.Release",
+                        "size": 1024,
+                        "progress": 1.0,
+                        "state": "uploading",
+                        "category": "MTEAM",
+                        "tags": "retorrent",
+                        "tracker": "https://tracker.example/announce",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"DEFAULT": {"default_torrent_client": "qbit"}, "TORRENT_CLIENTS": {"qbit": {"torrent_client": "qbit", "qbit_url": "http://127.0.0.1", "qbit_port": 8080}}})
+    monkeypatch.setattr(ptcli_service, "QbitReadOnlyService", FakeQbitReadOnlyService)
+
+    payload = await ptcli_service.qbit_wait_payload({"hash": "D" * 40, "timeout": 1.5, "interval": 0.2})
+
+    assert payload["status"] == "ok"
+    assert payload["ok"] is True
+    assert payload["read_only"] is True
+    assert payload["client"] == "qbit"
+    assert payload["complete"] is True
+    assert payload["matched_count"] == 1
+    assert payload["agent_summary"]["ready"] is True
+    assert payload["agent_summary"]["observed_hashes"] == ["d" * 40]
+    assert payload["blockers"] == []
+    assert "completion_verification" in payload["next_actions"][0]
+
+
 def test_site_policies_cli_exposes_policy_gap_summary(monkeypatch, capsys) -> None:
     config = {
         "PTCLI": {
@@ -15018,6 +15169,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/candidates/daily/schedule" in paths
     assert "/v1/jobs/candidates/daily" in paths
     assert "/v1/jobs/candidates/daily/schedule" in paths
+    assert "/v1/qbit/inject" in paths
+    assert "/v1/qbit/wait" in paths
     assert "/v1/jobs" in paths
     assert "/v1/jobs/{job_id}" in paths
     assert "/v1/jobs/{job_id}/summary" in paths
@@ -15262,6 +15415,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["qbit_export_target_torrent"]["input_schema"]["required"] == ["hash"]
     assert tool_by_name["qbit_export_target_torrent"]["safety"]["writes_files"] is True
     assert "target_upload_handoff_fields" in tool_by_name["qbit_export_target_torrent"]["response_contract"]
+    assert tool_by_name["qbit_inject_torrent"]["path"] == "/v1/qbit/inject"
+    assert tool_by_name["qbit_inject_torrent"]["input_schema"]["required"] == ["torrent_file", "save_path"]
+    assert tool_by_name["qbit_inject_torrent"]["safety"]["mutates_qbittorrent"] is True
+    assert tool_by_name["qbit_inject_torrent"]["safety"]["live_upload"] is False
+    assert "client_verification_fields" in tool_by_name["qbit_inject_torrent"]["response_contract"]
+    assert tool_by_name["qbit_wait_complete"]["path"] == "/v1/qbit/wait"
+    assert tool_by_name["qbit_wait_complete"]["input_schema"]["required"] == []
+    assert tool_by_name["qbit_wait_complete"]["safety"]["mutates_qbittorrent"] is False
+    assert "completion_verification_fields" in tool_by_name["qbit_wait_complete"]["response_contract"]
     assert tool_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
     assert "live_readiness" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "live_verification" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
@@ -15330,6 +15492,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/qbit/inspect" in openapi["paths"]
     assert "/v1/qbit/match" in openapi["paths"]
     assert "/v1/qbit/export" in openapi["paths"]
+    assert "/v1/qbit/inject" in openapi["paths"]
+    assert "/v1/qbit/wait" in openapi["paths"]
     assert "/v1/site-policies" in openapi["paths"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent/check/{job_id}/submit" in openapi["paths"]
@@ -15373,6 +15537,18 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     qbit_export_schema = openapi["paths"]["/v1/qbit/export"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "target_torrent_file" in qbit_export_schema["properties"]
     assert "target_upload_handoff" in qbit_export_schema["properties"]
+    qbit_inject_request_schema = openapi["paths"]["/v1/qbit/inject"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert qbit_inject_request_schema["required"] == ["torrent_file", "save_path"]
+    assert "upload_limit" in qbit_inject_request_schema["properties"]
+    qbit_inject_schema = openapi["paths"]["/v1/qbit/inject"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "mutates_qbittorrent" in qbit_inject_schema["properties"]
+    assert "client_verification" in qbit_inject_schema["properties"]
+    qbit_wait_request_schema = openapi["paths"]["/v1/qbit/wait"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert "hash" in qbit_wait_request_schema["properties"]
+    assert "path" in qbit_wait_request_schema["properties"]
+    qbit_wait_schema = openapi["paths"]["/v1/qbit/wait"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "completion_verification" in qbit_wait_schema["properties"]
+    assert "matches" in qbit_wait_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "qbit_plan" in summary_schema["properties"]
     assert "qbit_limit_audit" in summary_schema["properties"]
@@ -15521,7 +15697,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["primary_field"] == "closure_handoff"
     assert manifest["closure_contract"]["complete_when"] == "closure_handoff.complete=true"
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
-    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "get_job_summary"]

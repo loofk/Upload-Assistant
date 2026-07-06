@@ -25,7 +25,7 @@ from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, parse_tracker_list
-from src.ptcli.policies import build_rule_obligations, build_site_policy_coverage, build_site_policy_report, qbit_limits_for_tracker
+from src.ptcli.policies import build_rule_obligations, build_site_policy_coverage, build_site_policy_report, parse_rate_limit, qbit_limits_for_tracker
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.source import resolve_source_reference
 from src.ptcli.target import create_mteam_upload_torrent_candidate
@@ -583,6 +583,8 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/qbit/inspect": lambda payload: asyncio.run(qbit_inspect_payload(payload)),
                 "/v1/qbit/match": lambda payload: asyncio.run(qbit_match_payload(payload)),
                 "/v1/qbit/export": lambda payload: asyncio.run(qbit_export_payload(payload)),
+                "/v1/qbit/inject": lambda payload: asyncio.run(qbit_inject_payload(payload)),
+                "/v1/qbit/wait": lambda payload: asyncio.run(qbit_wait_payload(payload)),
                 "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
                 "/v1/candidates/daily/schedule": daily_candidate_schedule_payload,
@@ -1338,6 +1340,76 @@ async def qbit_export_payload(request: dict[str, Any] | None = None) -> dict[str
         "agent_summary": _qbit_export_agent_summary(target_torrent_file, context, evidence),
         "blockers": [],
         "next_actions": ["Use target_torrent_file as target_torrent_file for source_url_retorrent_job, retorrent_job, pipeline, or target-upload after duplicate/rule gates are ready."],
+    }
+
+
+async def qbit_inject_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Add a .torrent file to qBittorrent and verify it is visible."""
+    request = request or {}
+    context = _qbit_inject_request_context(request)
+    client_name, client_config = resolve_client_config(load_config(context.get("config")), context["client"])
+    service = QbitReadOnlyService(client_config)
+    try:
+        result = await service.add_torrent_file(
+            torrent_path=context["torrent_file"],
+            save_path=context["save_path"],
+            category=context.get("category"),
+            tags=context.get("tags"),
+            upload_limit=context.get("upload_limit"),
+            download_limit=context.get("download_limit"),
+            paused=context["paused"],
+            skip_checking=context["skip_checking"],
+            verify_timeout=context["verify_timeout"],
+            verify_interval=context["verify_interval"],
+        )
+    except ValueError as exc:
+        raise ServiceError(str(exc), status=HTTPStatus.BAD_REQUEST) from exc
+
+    blockers = _qbit_inject_blockers(result)
+    return {
+        "kind": "ptcli.qbit_inject",
+        "status": "ok" if not blockers else "blocked",
+        "ok": not blockers,
+        "mutates_qbittorrent": True,
+        "live_upload": False,
+        "client": client_name,
+        "request": context,
+        **result,
+        "agent_summary": _qbit_inject_agent_summary(result, context, blockers),
+        "blockers": blockers,
+        "next_actions": _qbit_inject_next_actions(blockers),
+    }
+
+
+async def qbit_wait_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Wait for a qBittorrent torrent to complete by hash or content path."""
+    request = request or {}
+    context = _qbit_wait_request_context(request)
+    client_name, client_config = resolve_client_config(load_config(context.get("config")), context["client"])
+    service = QbitReadOnlyService(client_config)
+    try:
+        result = await service.wait_for_completion(
+            torrent_hash=context.get("hash"),
+            content_path=context.get("path"),
+            timeout=context["timeout"],
+            interval=context["interval"],
+        )
+    except ValueError as exc:
+        raise ServiceError(str(exc), status=HTTPStatus.BAD_REQUEST) from exc
+
+    blockers = _string_list(result.get("blockers"))
+    ready = result.get("complete") is True and not blockers
+    return {
+        "kind": "ptcli.qbit_wait",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "read_only": True,
+        "client": client_name,
+        "request": context,
+        **result,
+        "agent_summary": _qbit_wait_agent_summary(result, context, blockers),
+        "blockers": blockers,
+        "next_actions": _qbit_wait_next_actions(result, blockers),
     }
 
 
@@ -2307,6 +2379,44 @@ def _qbit_export_request_context(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _qbit_inject_request_context(request: dict[str, Any]) -> dict[str, Any]:
+    torrent_file = request.get("torrent_file") or request.get("torrent_path")
+    save_path = request.get("save_path")
+    if not torrent_file or not str(torrent_file).strip():
+        raise ServiceError("torrent_file is required for qBittorrent inject.", status=HTTPStatus.BAD_REQUEST)
+    if not save_path or not str(save_path).strip():
+        raise ServiceError("save_path is required for qBittorrent inject.", status=HTTPStatus.BAD_REQUEST)
+    return {
+        "config": request.get("config"),
+        "client": str(request.get("client") or "default"),
+        "torrent_file": str(torrent_file).strip(),
+        "save_path": str(save_path).strip(),
+        "category": _optional_nonempty_string(request.get("category")),
+        "tags": _optional_tags(request.get("tags")),
+        "upload_limit": _optional_rate_limit(request.get("upload_limit")),
+        "download_limit": _optional_rate_limit(request.get("download_limit")),
+        "paused": _truthy(request.get("paused")),
+        "skip_checking": _truthy(request.get("skip_checking")),
+        "verify_timeout": _bounded_float(request.get("verify_timeout"), default=5.0, minimum=0.0, maximum=3600.0),
+        "verify_interval": _bounded_float(request.get("verify_interval"), default=0.5, minimum=0.1, maximum=300.0),
+    }
+
+
+def _qbit_wait_request_context(request: dict[str, Any]) -> dict[str, Any]:
+    torrent_hash = request.get("hash") or request.get("torrent_hash") or request.get("infohash")
+    path = request.get("path") or request.get("content_path")
+    if (not torrent_hash or not str(torrent_hash).strip()) and (not path or not str(path).strip()):
+        raise ServiceError("hash or path is required for qBittorrent wait.", status=HTTPStatus.BAD_REQUEST)
+    return {
+        "config": request.get("config"),
+        "client": str(request.get("client") or "default"),
+        "hash": str(torrent_hash).strip().lower() if torrent_hash else None,
+        "path": str(path).strip() if path else None,
+        "timeout": _bounded_float(request.get("timeout"), default=3600.0, minimum=0.0, maximum=86400.0),
+        "interval": _bounded_float(request.get("interval"), default=30.0, minimum=0.1, maximum=3600.0),
+    }
+
+
 def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
     if value in (None, ""):
         return default
@@ -2315,6 +2425,39 @@ def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int
     except (TypeError, ValueError) as exc:
         raise ServiceError(f"Expected integer value, got {value!r}.", status=HTTPStatus.BAD_REQUEST) from exc
     return max(minimum, min(maximum, parsed))
+
+
+def _bounded_float(value: Any, *, default: float, minimum: float, maximum: float) -> float:
+    if value in (None, ""):
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ServiceError(f"Expected numeric value, got {value!r}.", status=HTTPStatus.BAD_REQUEST) from exc
+    return max(minimum, min(maximum, parsed))
+
+
+def _optional_nonempty_string(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_tags(value: Any) -> str | None:
+    if isinstance(value, list):
+        tags = [str(item).strip() for item in value if str(item).strip()]
+        return ",".join(tags) if tags else None
+    return _optional_nonempty_string(value)
+
+
+def _optional_rate_limit(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return parse_rate_limit(value)
+    except ValueError as exc:
+        raise ServiceError(str(exc), status=HTTPStatus.BAD_REQUEST) from exc
 
 
 def _qbit_inspect_agent_summary(torrents: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
@@ -2403,6 +2546,76 @@ def _qbit_export_agent_summary(target_torrent_file: str, context: dict[str, Any]
         "mteam_safe": evidence.get("candidate_mteam_safe"),
         "recommended_next_tool": "source_url_retorrent_job",
     }
+
+
+def _qbit_inject_blockers(result: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    if not result.get("visible_in_client"):
+        blockers.append("Injected torrent is not visible in qBittorrent.")
+    verification = result.get("client_verification") if isinstance(result.get("client_verification"), dict) else {}
+    if not result.get("verified_in_client"):
+        blockers.extend(
+            f"Injected torrent client verification failed: {key}."
+            for key in ("hash_matched", "save_path_matched", "category_matched", "tags_matched")
+            if verification.get(key) is False
+        )
+        if not blockers:
+            blockers.append("Injected torrent client metadata is not verified.")
+    rate_limits = result.get("rate_limits") if isinstance(result.get("rate_limits"), dict) else {}
+    requested_limits = rate_limits.get("requested") if isinstance(rate_limits.get("requested"), dict) else {}
+    if any(value is not None for value in requested_limits.values()) and not rate_limits.get("applied"):
+        blockers.append("Requested qBittorrent rate limits were not applied.")
+    return list(dict.fromkeys(blockers))
+
+
+def _qbit_inject_agent_summary(result: dict[str, Any], context: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    rate_limits = result.get("rate_limits") if isinstance(result.get("rate_limits"), dict) else {}
+    return {
+        "ready": not blockers,
+        "mutates_qbittorrent": True,
+        "client": context.get("client"),
+        "hash": result.get("hash"),
+        "torrent_file": result.get("torrent_path") or context.get("torrent_file"),
+        "save_path": result.get("save_path") or context.get("save_path"),
+        "category": result.get("category"),
+        "tags": result.get("tags"),
+        "visible_in_client": bool(result.get("visible_in_client")),
+        "verified_in_client": bool(result.get("verified_in_client")),
+        "rate_limits_requested": rate_limits.get("requested"),
+        "rate_limits_applied": bool(rate_limits.get("applied")),
+        "blocker_count": len(blockers),
+    }
+
+
+def _qbit_inject_next_actions(blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Inspect client_verification and qbit_inspect the returned hash before continuing the retorrent closure."]
+    return ["Use hash with qbit_wait_complete, qbit_inspect, or a retorrent resume step that needs qBittorrent evidence."]
+
+
+def _qbit_wait_agent_summary(result: dict[str, Any], context: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    verification = result.get("completion_verification") if isinstance(result.get("completion_verification"), dict) else {}
+    return {
+        "ready": result.get("complete") is True and not blockers,
+        "read_only": True,
+        "client": context.get("client"),
+        "hash": context.get("hash"),
+        "path": context.get("path"),
+        "complete": result.get("complete") is True,
+        "matched_count": result.get("matched_count", 0),
+        "complete_count": verification.get("complete_count"),
+        "observed_hashes": verification.get("observed_hashes", []),
+        "observed_content_paths": verification.get("observed_content_paths", []),
+        "blocker_count": len(blockers),
+    }
+
+
+def _qbit_wait_next_actions(result: dict[str, Any], blockers: list[str]) -> list[str]:
+    if result.get("complete") is True and not blockers:
+        return ["Use completion_verification and matches as qBittorrent evidence for the next retorrent or uploaded-seeding step."]
+    if blockers:
+        return ["Inspect completion_verification.observed_* and retry qbit_wait_complete with the observed hash/path if this was a query mismatch."]
+    return ["Poll qbit_wait_complete again or use qbit_inspect to inspect current progress."]
 
 
 def _path_evidence(path: Path | None) -> dict[str, Any]:
@@ -7314,6 +7527,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     qbit_inspect_request_schema = _qbit_inspect_tool_request_schema()
     qbit_match_request_schema = _qbit_match_tool_request_schema()
     qbit_export_request_schema = _qbit_export_tool_request_schema()
+    qbit_inject_request_schema = _qbit_inject_tool_request_schema()
+    qbit_wait_request_schema = _qbit_wait_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
@@ -7502,6 +7717,24 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "input_schema": qbit_export_request_schema,
             "response_contract": _qbit_export_response_contract(),
             "safety": {"mutates_state": True, "mutates_qbittorrent": False, "writes_files": True, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "qbit_inject_torrent",
+            "method": "POST",
+            "path": "/v1/qbit/inject",
+            "description": "Add a local .torrent file to qBittorrent with explicit save path, optional category/tags/rate limits, and return verified hash/path evidence. This mutates qBittorrent but never uploads to a tracker.",
+            "input_schema": qbit_inject_request_schema,
+            "response_contract": _qbit_inject_response_contract(),
+            "safety": {"mutates_state": True, "mutates_qbittorrent": True, "writes_files": False, "live_upload": False, "requires_confirmation": ["torrent_file and save_path must be explicit", "site rules and rate limits must already be reviewed for live workflows"]},
+        },
+        {
+            "name": "qbit_wait_complete",
+            "method": "POST",
+            "path": "/v1/qbit/wait",
+            "description": "Wait for a qBittorrent torrent to complete by hash or content path and return completion evidence for source download or uploaded-seeding closure.",
+            "input_schema": qbit_wait_request_schema,
+            "response_contract": _qbit_wait_response_contract(),
+            "safety": {"mutates_state": False, "mutates_qbittorrent": False, "live_upload": False, "requires_confirmation": []},
         },
         {
             "name": "list_jobs",
@@ -7851,6 +8084,46 @@ def _qbit_export_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _qbit_inject_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["torrent_file", "save_path"],
+        "properties": {
+            "client": {"type": "string", "default": "default"},
+            "config": {"type": "string", "description": "Path to data/config.py inside the container."},
+            "torrent_file": {"type": "string", "description": "Local .torrent file path visible to the ptcli service/container."},
+            "torrent_path": {"type": "string", "description": "Alias for torrent_file."},
+            "save_path": {"type": "string", "description": "qBittorrent save path for this torrent."},
+            "category": {"type": "string", "description": "Optional qBittorrent category, e.g. MTEAM."},
+            "tags": {"type": ["string", "array"], "description": "Optional comma-separated string or array of qBittorrent tags."},
+            "upload_limit": {"type": ["string", "integer"], "description": "Optional upload limit, e.g. 2MiB/s or bytes per second."},
+            "download_limit": {"type": ["string", "integer"], "description": "Optional download limit, e.g. 20MiB/s or bytes per second."},
+            "paused": {"type": "boolean", "default": False},
+            "skip_checking": {"type": "boolean", "default": False},
+            "verify_timeout": {"type": "number", "default": 5.0, "minimum": 0},
+            "verify_interval": {"type": "number", "default": 0.5, "exclusiveMinimum": 0},
+        },
+    }
+
+
+def _qbit_wait_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": [],
+        "properties": {
+            "client": {"type": "string", "default": "default"},
+            "config": {"type": "string", "description": "Path to data/config.py inside the container."},
+            "hash": {"type": "string", "description": "qBittorrent torrent hash/infohash to wait for. Either hash or path is required."},
+            "torrent_hash": {"type": "string", "description": "Alias for hash."},
+            "infohash": {"type": "string", "description": "Alias for hash."},
+            "path": {"type": "string", "description": "Seedbox content/save path to wait for when hash is not known. Either hash or path is required."},
+            "content_path": {"type": "string", "description": "Alias for path."},
+            "timeout": {"type": "number", "default": 3600.0, "minimum": 0},
+            "interval": {"type": "number", "default": 30.0, "exclusiveMinimum": 0},
+        },
+    }
+
+
 def _site_policy_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -8009,6 +8282,26 @@ def _qbit_export_response_contract() -> dict[str, Any]:
         "target_upload_handoff_fields": ["ready", "target", "target_torrent_file", "request_fields", "requires_before_upload", "next_step", "blockers"],
         "agent_summary_fields": ["ready", "client", "hash", "target", "target_torrent_file", "mteam_safe", "recommended_next_tool"],
         "safety": ["does_not_add_torrents", "does_not_upload", "does_not_change_rate_limits", "writes_exported_torrent_files"],
+    }
+
+
+def _qbit_inject_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "mutates_qbittorrent", "live_upload", "client", "request", "torrent_path", "hash", "save_path", "category", "tags", "upload_limit", "download_limit", "rate_limits", "paused", "skip_checking", "visible_in_client", "verified_in_client", "client_verification", "client_matches", "agent_summary", "blockers", "next_actions"],
+        "rate_limit_fields": ["requested", "applied", "skipped", "calls"],
+        "client_verification_fields": ["visible", "hash_matched", "save_path_matched", "category_matched", "tags_matched", "requested", "observed"],
+        "agent_summary_fields": ["ready", "mutates_qbittorrent", "client", "hash", "torrent_file", "save_path", "category", "tags", "visible_in_client", "verified_in_client", "rate_limits_requested", "rate_limits_applied", "blocker_count"],
+        "safety": ["adds_torrent_to_qbittorrent", "may_change_qbittorrent_rate_limits", "does_not_upload"],
+    }
+
+
+def _qbit_wait_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "read_only", "client", "request", "complete", "query", "matched_count", "completion_verification", "matches", "agent_summary", "blockers", "next_actions"],
+        "completion_verification_fields": ["matched_count", "complete_count", "seeding_state_count", "all_matches_complete", "any_complete", "requested_hash_matched", "requested_content_path_matched", "observed_hashes", "observed_content_paths", "observed_save_paths", "observed_states", "observed_progress"],
+        "match_fields": ["name", "hash", "save_path", "content_path", "size", "progress", "state", "category", "tags", "tracker"],
+        "agent_summary_fields": ["ready", "read_only", "client", "hash", "path", "complete", "matched_count", "complete_count", "observed_hashes", "observed_content_paths", "blocker_count"],
+        "safety": ["read_only", "does_not_add_torrents", "does_not_upload", "does_not_change_rate_limits"],
     }
 
 
@@ -8548,6 +8841,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     qbit_inspect_request_schema = _qbit_inspect_tool_request_schema()
     qbit_match_request_schema = _qbit_match_tool_request_schema()
     qbit_export_request_schema = _qbit_export_tool_request_schema()
+    qbit_inject_request_schema = _qbit_inject_tool_request_schema()
+    qbit_wait_request_schema = _qbit_wait_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
         "properties": {
@@ -8662,6 +8957,52 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "candidate": {"type": ["object", "null"]},
             "evidence": {"type": "object"},
             "target_upload_handoff": {"type": "object"},
+            "agent_summary": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    qbit_inject_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "mutates_qbittorrent": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "client": {"type": "string"},
+            "request": {"type": "object"},
+            "torrent_path": {"type": "string"},
+            "hash": {"type": "string"},
+            "save_path": {"type": "string"},
+            "category": {"type": ["string", "null"]},
+            "tags": {"type": ["string", "null"]},
+            "upload_limit": {"type": ["integer", "null"]},
+            "download_limit": {"type": ["integer", "null"]},
+            "rate_limits": {"type": "object"},
+            "paused": {"type": "boolean"},
+            "skip_checking": {"type": "boolean"},
+            "visible_in_client": {"type": "boolean"},
+            "verified_in_client": {"type": "boolean"},
+            "client_verification": {"type": "object"},
+            "client_matches": {"type": "array", "items": {"type": "object"}},
+            "agent_summary": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    qbit_wait_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "read_only": {"type": "boolean"},
+            "client": {"type": "string"},
+            "request": {"type": "object"},
+            "complete": {"type": "boolean"},
+            "query": {"type": "object"},
+            "matched_count": {"type": "integer"},
+            "completion_verification": {"type": "object"},
+            "matches": {"type": "array", "items": {"type": "object"}},
             "agent_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
@@ -8965,6 +9306,22 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": qbit_export_request_schema}}},
                     "responses": {"200": {"description": "Exported qBittorrent torrent and MTEAM-safe target candidate.", "content": {"application/json": {"schema": qbit_export_response_schema}}}},
+                },
+            },
+            "/v1/qbit/inject": {
+                "post": {
+                    "operationId": "injectQbittorrentTorrent",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": qbit_inject_request_schema}}},
+                    "responses": {"200": {"description": "Add a local .torrent to qBittorrent and verify hash/path/category/tag/rate-limit evidence.", "content": {"application/json": {"schema": qbit_inject_response_schema}}}},
+                },
+            },
+            "/v1/qbit/wait": {
+                "post": {
+                    "operationId": "waitQbittorrentComplete",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": qbit_wait_request_schema}}},
+                    "responses": {"200": {"description": "Wait for qBittorrent completion by hash or content path.", "content": {"application/json": {"schema": qbit_wait_response_schema}}}},
                 },
             },
             "/v1/site-policies": {
