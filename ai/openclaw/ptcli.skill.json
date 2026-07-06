@@ -5679,6 +5679,167 @@
       }
     },
     {
+      "name": "qbit_inspect",
+      "method": "POST",
+      "path": "/v1/qbit/inspect",
+      "description": "Read qBittorrent torrent state by optional hash/limit. This endpoint is read-only and returns hash/path/progress/category/tag evidence for AI decisions.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "client": {
+            "type": "string",
+            "default": "default"
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py inside the container."
+          },
+          "hash": {
+            "type": "string",
+            "description": "Optional torrent hash/infohash filter."
+          },
+          "torrent_hash": {
+            "type": "string",
+            "description": "Alias for hash."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "read_only",
+          "client",
+          "request",
+          "count",
+          "torrents",
+          "agent_summary",
+          "blockers",
+          "next_actions"
+        ],
+        "torrent_fields": [
+          "name",
+          "hash",
+          "save_path",
+          "content_path",
+          "size",
+          "progress",
+          "state",
+          "category",
+          "tags",
+          "tracker"
+        ],
+        "agent_summary_fields": [
+          "ready",
+          "read_only",
+          "client",
+          "query_hash",
+          "torrent_count",
+          "complete_count",
+          "incomplete_count",
+          "hashes"
+        ],
+        "safety": [
+          "read_only",
+          "does_not_add_torrents",
+          "does_not_export_torrents",
+          "does_not_change_rate_limits"
+        ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
+      "name": "qbit_match",
+      "method": "POST",
+      "path": "/v1/qbit/match",
+      "description": "Find qBittorrent torrents matching a seedbox content path. This endpoint is read-only and helps AI decide whether existing local content can be reused for retorrent workflows.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "client": {
+            "type": "string",
+            "default": "default"
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py inside the container."
+          },
+          "path": {
+            "type": "string",
+            "description": "Seedbox content path to match against qBittorrent torrents."
+          },
+          "content_path": {
+            "type": "string",
+            "description": "Alias for path."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "read_only",
+          "client",
+          "request",
+          "path",
+          "count",
+          "matched",
+          "matches",
+          "agent_summary",
+          "blockers",
+          "next_actions"
+        ],
+        "match_fields": [
+          "name",
+          "hash",
+          "save_path",
+          "content_path",
+          "size",
+          "progress",
+          "state",
+          "category",
+          "tags",
+          "tracker"
+        ],
+        "agent_summary_fields": [
+          "ready",
+          "read_only",
+          "client",
+          "path",
+          "matched",
+          "matched_count",
+          "complete_count",
+          "hashes",
+          "blocker_count"
+        ],
+        "safety": [
+          "read_only",
+          "does_not_add_torrents",
+          "does_not_export_torrents",
+          "does_not_change_rate_limits"
+        ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
       "name": "list_jobs",
       "method": "GET",
       "path": "/v1/jobs",
@@ -7720,7 +7881,7 @@
       }
     }
   ],
-  "tool_count": 24,
+  "tool_count": 26,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

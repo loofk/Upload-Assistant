@@ -26,6 +26,7 @@ from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, parse_tracker_list
 from src.ptcli.policies import build_rule_obligations, build_site_policy_coverage, build_site_policy_report, qbit_limits_for_tracker
+from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.source import resolve_source_reference
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
@@ -485,6 +486,26 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 except ServiceError as exc:
                     self._send_json(exc.status, {"status": "error", "message": str(exc)})
                 return
+            if path == "/v1/qbit/inspect":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                try:
+                    self._send_json(HTTPStatus.OK, asyncio.run(qbit_inspect_payload(query)))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
+            if path == "/v1/qbit/match":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                try:
+                    self._send_json(HTTPStatus.OK, asyncio.run(qbit_match_payload(query)))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
             if path == "/v1/deployment/check":
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -548,6 +569,8 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/retorrent/source-url/preflight": source_url_retorrent_preflight_payload,
                 "/v1/sites": sites_payload,
                 "/v1/site-policies": site_policies_payload,
+                "/v1/qbit/inspect": lambda payload: asyncio.run(qbit_inspect_payload(payload)),
+                "/v1/qbit/match": lambda payload: asyncio.run(qbit_match_payload(payload)),
                 "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
                 "/v1/candidates/daily/schedule": daily_candidate_schedule_payload,
@@ -1220,6 +1243,56 @@ def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
         "agent_summary": _sites_agent_summary(capability_matrix, policy_matrix, flow_matrix, blockers),
         "blockers": blockers,
         "next_actions": _sites_next_actions(blockers, capability_matrix),
+    }
+
+
+async def qbit_inspect_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return qBittorrent torrent state without mutating the client."""
+    request = request or {}
+    context = _qbit_inspect_request_context(request)
+    client_name, client_config = resolve_client_config(load_config(context.get("config")), context["client"])
+    service = QbitReadOnlyService(client_config)
+    torrents = await service.list_torrents(torrent_hash=context.get("hash"), limit=context.get("limit"))
+    torrent_dicts = summaries_to_dicts(torrents)
+    return {
+        "kind": "ptcli.qbit_inspect",
+        "status": "ok",
+        "ok": True,
+        "read_only": True,
+        "client": client_name,
+        "request": context,
+        "count": len(torrent_dicts),
+        "torrents": torrent_dicts,
+        "agent_summary": _qbit_inspect_agent_summary(torrent_dicts, context),
+        "blockers": [],
+        "next_actions": _qbit_inspect_next_actions(torrent_dicts, context),
+    }
+
+
+async def qbit_match_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return qBittorrent torrents matching a seedbox content path."""
+    request = request or {}
+    context = _qbit_match_request_context(request)
+    client_name, client_config = resolve_client_config(load_config(context.get("config")), context["client"])
+    service = QbitReadOnlyService(client_config)
+    torrents = await service.list_torrents()
+    matches = match_torrents(torrents, context["path"])
+    match_dicts = summaries_to_dicts(matches)
+    blockers = [] if match_dicts else [f"No qBittorrent torrent matched path {context['path']}."]
+    return {
+        "kind": "ptcli.qbit_match",
+        "status": "ok" if match_dicts else "blocked",
+        "ok": bool(match_dicts),
+        "read_only": True,
+        "client": client_name,
+        "request": context,
+        "path": context["path"],
+        "count": len(match_dicts),
+        "matched": bool(match_dicts),
+        "matches": match_dicts,
+        "agent_summary": _qbit_match_agent_summary(match_dicts, context, blockers),
+        "blockers": blockers,
+        "next_actions": _qbit_match_next_actions(match_dicts, context),
     }
 
 
@@ -2148,6 +2221,86 @@ def _sites_next_actions(blockers: list[str], capability_matrix: list[dict[str, A
     if any((item.get("adapter_profile") or {}).get("full_live_closure_to_mteam") for item in capability_matrix):
         return ["Use readiness_bundle or source_url_retorrent_preflight for a concrete source URL and target before live work."]
     return ["Pick a tracker with full_live_closure_to_mteam=true or implement the missing source/target adapter profile."]
+
+
+def _qbit_inspect_request_context(request: dict[str, Any]) -> dict[str, Any]:
+    torrent_hash = request.get("hash") or request.get("torrent_hash") or request.get("infohash")
+    limit = _bounded_int(request.get("limit"), default=20, minimum=1, maximum=100)
+    return {
+        "config": request.get("config"),
+        "client": str(request.get("client") or "default"),
+        "hash": str(torrent_hash).strip().lower() if torrent_hash else None,
+        "limit": limit,
+    }
+
+
+def _qbit_match_request_context(request: dict[str, Any]) -> dict[str, Any]:
+    path = request.get("path") or request.get("content_path")
+    if not path or not str(path).strip():
+        raise ServiceError("path is required for qBittorrent match.", status=HTTPStatus.BAD_REQUEST)
+    return {
+        "config": request.get("config"),
+        "client": str(request.get("client") or "default"),
+        "path": str(path).strip(),
+    }
+
+
+def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    if value in (None, ""):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ServiceError(f"Expected integer value, got {value!r}.", status=HTTPStatus.BAD_REQUEST) from exc
+    return max(minimum, min(maximum, parsed))
+
+
+def _qbit_inspect_agent_summary(torrents: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ready": True,
+        "read_only": True,
+        "client": context.get("client"),
+        "query_hash": context.get("hash"),
+        "torrent_count": len(torrents),
+        "complete_count": sum(1 for torrent in torrents if _torrent_dict_complete(torrent)),
+        "incomplete_count": sum(1 for torrent in torrents if not _torrent_dict_complete(torrent)),
+        "hashes": [torrent.get("hash") for torrent in torrents if torrent.get("hash")],
+    }
+
+
+def _qbit_match_agent_summary(matches: list[dict[str, Any]], context: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    return {
+        "ready": bool(matches),
+        "read_only": True,
+        "client": context.get("client"),
+        "path": context.get("path"),
+        "matched": bool(matches),
+        "matched_count": len(matches),
+        "complete_count": sum(1 for match in matches if _torrent_dict_complete(match)),
+        "hashes": [match.get("hash") for match in matches if match.get("hash")],
+        "blocker_count": len(blockers),
+    }
+
+
+def _torrent_dict_complete(torrent: dict[str, Any]) -> bool:
+    progress = torrent.get("progress")
+    if isinstance(progress, (int, float)) and progress >= 1:
+        return True
+    return str(torrent.get("state") or "").lower() in {"uploading", "stalled_up", "paused_up", "queued_up", "forced_up", "checking_up"}
+
+
+def _qbit_inspect_next_actions(torrents: list[dict[str, Any]], context: dict[str, Any]) -> list[str]:
+    if context.get("hash") and not torrents:
+        return ["Check the requested hash or use qbit_match with a content path to locate the torrent."]
+    if torrents:
+        return ["Use hashes/content_path from torrents[] as evidence for source matching, export, wait, or resume steps."]
+    return ["No torrents returned; verify qBittorrent config and client filter before relying on qBittorrent evidence."]
+
+
+def _qbit_match_next_actions(matches: list[dict[str, Any]], context: dict[str, Any]) -> list[str]:
+    if matches:
+        return ["Use matches[].hash and matches[].content_path as qBittorrent evidence for retorrent pipeline or resume."]
+    return [f"Inject or download the source torrent, then retry qbit_match for {context['path']}."]
 
 
 def _add_site_policy_roles(roles: dict[str, set[str]], trackers: list[str], role: str) -> None:
@@ -7045,6 +7198,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     retorrent_check_submit_request_schema = _retorrent_check_submit_tool_request_schema()
     sites_request_schema = _sites_tool_request_schema()
+    qbit_inspect_request_schema = _qbit_inspect_tool_request_schema()
+    qbit_match_request_schema = _qbit_match_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
@@ -7205,6 +7360,24 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return Chinese PT tracker adapter capabilities, credential requirements, policy profiles, and supported source/target flow matrix. This endpoint never contacts trackers or qBittorrent.",
             "input_schema": sites_request_schema,
             "response_contract": _sites_response_contract(),
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "qbit_inspect",
+            "method": "POST",
+            "path": "/v1/qbit/inspect",
+            "description": "Read qBittorrent torrent state by optional hash/limit. This endpoint is read-only and returns hash/path/progress/category/tag evidence for AI decisions.",
+            "input_schema": qbit_inspect_request_schema,
+            "response_contract": _qbit_inspect_response_contract(),
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "qbit_match",
+            "method": "POST",
+            "path": "/v1/qbit/match",
+            "description": "Find qBittorrent torrents matching a seedbox content path. This endpoint is read-only and helps AI decide whether existing local content can be reused for retorrent workflows.",
+            "input_schema": qbit_match_request_schema,
+            "response_contract": _qbit_match_response_contract(),
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -7511,6 +7684,33 @@ def _sites_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _qbit_inspect_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": [],
+        "properties": {
+            "client": {"type": "string", "default": "default"},
+            "config": {"type": "string", "description": "Path to data/config.py inside the container."},
+            "hash": {"type": "string", "description": "Optional torrent hash/infohash filter."},
+            "torrent_hash": {"type": "string", "description": "Alias for hash."},
+            "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
+        },
+    }
+
+
+def _qbit_match_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+            "client": {"type": "string", "default": "default"},
+            "config": {"type": "string", "description": "Path to data/config.py inside the container."},
+            "path": {"type": "string", "description": "Seedbox content path to match against qBittorrent torrents."},
+            "content_path": {"type": "string", "description": "Alias for path."},
+        },
+    }
+
+
 def _site_policy_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -7641,6 +7841,24 @@ def _sites_response_contract() -> dict[str, Any]:
         "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "missing_fields", "template", "current_values", "next_actions"],
         "agent_summary_fields": ["ready", "site_count", "source_info_count", "source_download_count", "target_upload_count", "full_live_closure_to_mteam_count", "policy_profile_count", "reference_flow_count", "recommended_next_tool", "blocker_count"],
         "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_upload"],
+    }
+
+
+def _qbit_inspect_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "read_only", "client", "request", "count", "torrents", "agent_summary", "blockers", "next_actions"],
+        "torrent_fields": ["name", "hash", "save_path", "content_path", "size", "progress", "state", "category", "tags", "tracker"],
+        "agent_summary_fields": ["ready", "read_only", "client", "query_hash", "torrent_count", "complete_count", "incomplete_count", "hashes"],
+        "safety": ["read_only", "does_not_add_torrents", "does_not_export_torrents", "does_not_change_rate_limits"],
+    }
+
+
+def _qbit_match_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "read_only", "client", "request", "path", "count", "matched", "matches", "agent_summary", "blockers", "next_actions"],
+        "match_fields": ["name", "hash", "save_path", "content_path", "size", "progress", "state", "category", "tags", "tracker"],
+        "agent_summary_fields": ["ready", "read_only", "client", "path", "matched", "matched_count", "complete_count", "hashes", "blocker_count"],
+        "safety": ["read_only", "does_not_add_torrents", "does_not_export_torrents", "does_not_change_rate_limits"],
     }
 
 
@@ -8177,6 +8395,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     retorrent_check_submit_request_schema = _retorrent_check_submit_tool_request_schema()
     sites_request_schema = _sites_tool_request_schema()
+    qbit_inspect_request_schema = _qbit_inspect_tool_request_schema()
+    qbit_match_request_schema = _qbit_match_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
         "properties": {
@@ -8238,6 +8458,38 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_execution_summary": {"type": "object"},
             "flow_matrix": {"type": "array", "items": {"type": "object"}},
             "reference_flows": {"type": "array", "items": {"type": "object"}},
+            "agent_summary": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    qbit_inspect_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "read_only": {"type": "boolean"},
+            "client": {"type": "string"},
+            "request": {"type": "object"},
+            "count": {"type": "integer"},
+            "torrents": {"type": "array", "items": {"type": "object"}},
+            "agent_summary": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    qbit_match_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "read_only": {"type": "boolean"},
+            "client": {"type": "string"},
+            "request": {"type": "object"},
+            "path": {"type": "string"},
+            "count": {"type": "integer"},
+            "matched": {"type": "boolean"},
+            "matches": {"type": "array", "items": {"type": "object"}},
             "agent_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
@@ -8487,6 +8739,41 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": False, "content": {"application/json": {"schema": sites_request_schema}}},
                     "responses": {"200": {"description": "Chinese PT site adapter and policy profiles.", "content": {"application/json": {"schema": sites_response_schema}}}},
+                },
+            },
+            "/v1/qbit/inspect": {
+                "get": {
+                    "operationId": "inspectQbittorrent",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "client", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "hash", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "limit", "in": "query", "required": False, "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}},
+                    ],
+                    "responses": {"200": {"description": "Read-only qBittorrent torrent state.", "content": {"application/json": {"schema": qbit_inspect_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "inspectQbittorrentPost",
+                    "security": token_security,
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": qbit_inspect_request_schema}}},
+                    "responses": {"200": {"description": "Read-only qBittorrent torrent state.", "content": {"application/json": {"schema": qbit_inspect_response_schema}}}},
+                },
+            },
+            "/v1/qbit/match": {
+                "get": {
+                    "operationId": "matchQbittorrentPath",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "client", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "path", "in": "query", "required": True, "schema": {"type": "string"}},
+                    ],
+                    "responses": {"200": {"description": "Read-only qBittorrent content path match.", "content": {"application/json": {"schema": qbit_match_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "matchQbittorrentPathPost",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": qbit_match_request_schema}}},
+                    "responses": {"200": {"description": "Read-only qBittorrent content path match.", "content": {"application/json": {"schema": qbit_match_response_schema}}}},
                 },
             },
             "/v1/site-policies": {

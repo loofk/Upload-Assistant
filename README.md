@@ -44,7 +44,7 @@ python3 ptcli.py target-upload --package-dir ./tmp/target/U2-60635-to-MTEAM --up
 ## AI 友好输出
 
 - 关键命令支持 `--json`。
-- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`、AI 预检 `/v1/agent/run-preview`、创建任务前同步 `/v1/retorrent/source-url/preflight`、`/v1/deployment/check`、`/v1/readiness/bundle`、站点能力/规则 profile `/v1/sites`、每日候选 `/v1/candidates/daily`/`/v1/candidates/daily/schedule`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/retorrent/from-url`、`/v1/jobs/retorrent/submit`、`/v1/jobs/candidates/daily`、`/v1/jobs/candidates/{job_id}/submit`、`/v1/jobs`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`、`/v1/jobs/{job_id}/cancel`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
+- `ptcli serve` 会启动本地 JSON HTTP API，提供 `/health`、`/openapi.json`、`/v1/tools`、同步 `/v1/retorrent/check`/`/v1/retorrent`、AI 预检 `/v1/agent/run-preview`、创建任务前同步 `/v1/retorrent/source-url/preflight`、`/v1/deployment/check`、`/v1/readiness/bundle`、站点能力/规则 profile `/v1/sites`、qBittorrent 只读检查 `/v1/qbit/inspect`/`/v1/qbit/match`、每日候选 `/v1/candidates/daily`/`/v1/candidates/daily/schedule`，以及任务式 `/v1/jobs/retorrent/check`、`/v1/jobs/retorrent`、`/v1/jobs/retorrent/from-url`、`/v1/jobs/retorrent/submit`、`/v1/jobs/candidates/daily`、`/v1/jobs/candidates/{job_id}/submit`、`/v1/jobs`、`/v1/jobs/{job_id}`、`/v1/jobs/{job_id}/summary`、`/v1/jobs/{job_id}/resume`、`/v1/jobs/{job_id}/cancel`，方便 AI/自动化工具按 OpenAPI 或简单 JSON 调用。
 - 手动转种 job 的请求 schema 已暴露素材准备参数，可在创建任务时直接传 `metadata_file`、`ptgen_description_file`、`mediainfo_file`、`bdinfo_file`、`screenshot_files`、`image_host_file`，或传 `enrich_metadata`、`fetch_ptgen`、`generate_mediainfo`、`generate_bdinfo`、`generate_screenshots`、`upload_screenshots` 让服务在目标站准备包前生成缺失素材；这些输入会进入 job `request.material_options` 和 `command_argv`，便于 AI 后续审计和续跑。
 - `sites --json` 暴露每个站点的 `source_info`、`source_info_adapter`、`source_download`、`source_download_adapter`、`credential_requirements`、`target_upload`、`full_live_closure_to_mteam` 能力。
 - `rule-check --json` 暴露 `rule_obligations[].review_scope.required_confirmations`，供 agent 在 live 前逐项提示人工确认。
@@ -189,6 +189,7 @@ OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/opencla
 ## 配置要求
 
 - qBittorrent client 配置沿用 `data/config.py`。
+- HTTP 服务的 `/v1/qbit/inspect` 和 `/v1/qbit/match` 提供只读 QB 证据，返回 `hash`、`save_path`、`content_path`、`progress`、`state`、`category`、`tags` 和 `agent_summary`，不会添加种子、导出种子或修改限速。
 - 源站 cookie 放在 `data/cookies/<TRACKER>.txt` 或对应适配器要求的位置。
 - MTEAM 需要 `TRACKERS.MTEAM.api_key`。
 - 站点自动化策略可写在 `config["PTCLI"]["SITE_POLICIES"]` 或顶层 `config["SITE_POLICIES"]`。默认只启用当前参考闭环的保守自动化能力；限速、做种要求和人工审查指纹建议按站点规则自行维护，例如：
