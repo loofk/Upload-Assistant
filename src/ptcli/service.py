@@ -25,7 +25,7 @@ from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.mainland import parse_tracker_list
-from src.ptcli.policies import build_site_policy_coverage, build_site_policy_report, qbit_limits_for_tracker
+from src.ptcli.policies import build_rule_obligations, build_site_policy_coverage, build_site_policy_report, qbit_limits_for_tracker
 from src.ptcli.source import resolve_source_reference
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
@@ -903,10 +903,15 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     config = load_config(context.get("config"))
     report = build_site_policy_report(config, context["trackers"], accept_rules=bool(context.get("accept_rules")))
     roles = context.get("roles") if isinstance(context.get("roles"), dict) else {}
-    matrix = [_site_policy_matrix_item(policy, roles=_string_list(roles.get(str(policy.get("tracker"))))) for policy in report.get("site_policies", []) if isinstance(policy, dict)]
+    matrix = [
+        _site_policy_matrix_item(policy, roles=_string_list(roles.get(str(policy.get("tracker")))), accept_rules=bool(report.get("accept_rules")))
+        for policy in report.get("site_policies", [])
+        if isinstance(policy, dict)
+    ]
     policy_gap_summary = _site_policy_gap_summary(matrix)
     execution_readiness = _site_policy_execution_readiness(matrix, report)
     policy_handoff = _site_policy_handoff(matrix, policy_gap_summary, execution_readiness, report, context)
+    rule_obligations = {str(item.get("tracker")): item.get("rule_obligations") for item in matrix if item.get("tracker")}
     return {
         "kind": "ptcli.site_policies",
         "status": report.get("status", "ok"),
@@ -914,6 +919,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "ready": bool(report.get("ready")),
         "request": context,
         "policy_matrix": matrix,
+        "rule_obligations": rule_obligations,
         "config_templates": _site_policy_config_templates(matrix),
         "site_policies": report.get("site_policies", []),
         "qbit_limits": report.get("qbit_limits", {}),
@@ -2090,14 +2096,16 @@ def _daily_candidate_schedule_run_next_actions(jobs: list[dict[str, Any]], skipp
     return actions
 
 
-def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None = None) -> dict[str, Any]:
+def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None = None, accept_rules: bool = False) -> dict[str, Any]:
     policy_roles = roles or ["unknown"]
+    rule_obligations = build_rule_obligations(policy, roles=policy_roles, accept_rules=accept_rules)
     item = {
         "tracker": policy.get("tracker"),
         "roles": policy_roles,
         "rules_url": policy.get("rules_url"),
         "manual_review_required": policy.get("manual_review_required"),
         "rule_review_fingerprint": policy.get("rule_review_fingerprint"),
+        "rule_obligations": rule_obligations,
         "automation": policy.get("automation") if isinstance(policy.get("automation"), dict) else {
             "download": policy.get("allow_auto_download"),
             "upload": policy.get("allow_auto_upload"),
@@ -2123,7 +2131,7 @@ def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None 
         },
         "notes": _string_list(policy.get("notes")),
     }
-    item["policy_coverage"] = build_site_policy_coverage(policy, roles=policy_roles)
+    item["policy_coverage"] = build_site_policy_coverage(policy, roles=policy_roles, accept_rules=accept_rules)
     item["execution_readiness"] = _site_policy_item_execution_readiness(item)
     item["policy_profile"] = _site_policy_profile(item)
     return item
@@ -2151,6 +2159,7 @@ def _site_policy_profile(item: dict[str, Any]) -> dict[str, Any]:
             "seeding_requirements": item.get("seeding_requirements"),
             "transfer_rules": item.get("transfer_rules"),
             "rule_review_fingerprint": item.get("rule_review_fingerprint"),
+            "rule_obligations": item.get("rule_obligations"),
         },
         "next_actions": _site_policy_profile_next_actions(tracker, roles, coverage),
     }
@@ -2221,6 +2230,7 @@ def _site_policy_handoff(matrix: list[dict[str, Any]], policy_gap_summary: dict[
     blocked_trackers = _string_list(execution_readiness.get("blocked_trackers"))
     ready = bool(execution_readiness.get("ready")) and bool(report.get("ready"))
     missing_by_category = policy_gap_summary.get("missing_by_category") if isinstance(policy_gap_summary.get("missing_by_category"), dict) else {}
+    rule_obligations = {str(item.get("tracker")): item.get("rule_obligations") for item in matrix if item.get("tracker")}
     tracker_items = []
     for item in matrix:
         tracker = str(item.get("tracker") or "")
@@ -2229,6 +2239,7 @@ def _site_policy_handoff(matrix: list[dict[str, Any]], policy_gap_summary: dict[
         profile = item.get("policy_profile") if isinstance(item.get("policy_profile"), dict) else {}
         coverage = item.get("policy_coverage") if isinstance(item.get("policy_coverage"), dict) else {}
         readiness = item.get("execution_readiness") if isinstance(item.get("execution_readiness"), dict) else {}
+        item_rule_obligations = item.get("rule_obligations") if isinstance(item.get("rule_obligations"), dict) else {}
         tracker_items.append(
             {
                 "tracker": tracker,
@@ -2240,6 +2251,7 @@ def _site_policy_handoff(matrix: list[dict[str, Any]], policy_gap_summary: dict[
                 "template": profile.get("template"),
                 "rules_url": item.get("rules_url"),
                 "rule_review_fingerprint": item.get("rule_review_fingerprint"),
+                "rule_obligations": item_rule_obligations,
             }
         )
     next_step = _site_policy_next_step(ready, templates, tracker_items, missing_by_category, report, execution_readiness, request_context)
@@ -2251,6 +2263,7 @@ def _site_policy_handoff(matrix: list[dict[str, Any]], policy_gap_summary: dict[
         "blocked_trackers": blocked_trackers,
         "tracker_count": len(tracker_items),
         "items": tracker_items,
+        "rule_obligations": rule_obligations,
         "config_templates": templates,
         "missing_by_category": missing_by_category,
         "next_step": next_step,
@@ -2352,6 +2365,7 @@ def _site_policy_item_execution_readiness(item: dict[str, Any]) -> dict[str, Any
         "manual_review_ready": item.get("manual_review_required") is not True or bool(item.get("rule_review_fingerprint")),
         "rules_url": item.get("rules_url"),
         "rule_review_fingerprint": item.get("rule_review_fingerprint"),
+        "rule_obligations": item.get("rule_obligations") if isinstance(item.get("rule_obligations"), dict) else {},
         "blockers": blockers,
         "role_status": role_status,
         "qbit_limits": qbit_limits,
@@ -2651,8 +2665,8 @@ def _request_policy_coverage(request: dict[str, Any], source: dict[str, Any], ta
         policies_by_tracker = {str(policy.get("tracker")): policy for policy in policies if isinstance(policy, dict) and policy.get("tracker")}
         source_policy = policies_by_tracker.get(source_tracker)
         target_policies = [policies_by_tracker.get(target) for target in targets]
-        source_coverage = build_site_policy_coverage(source_policy, roles=["source"]) if isinstance(source_policy, dict) else None
-        target_coverages = [build_site_policy_coverage(policy, roles=["target"]) for policy in target_policies if isinstance(policy, dict)]
+        source_coverage = build_site_policy_coverage(source_policy, roles=["source"], accept_rules=bool(request.get("accept_rules"))) if isinstance(source_policy, dict) else None
+        target_coverages = [build_site_policy_coverage(policy, roles=["target"], accept_rules=bool(request.get("accept_rules"))) for policy in target_policies if isinstance(policy, dict)]
         coverages = [coverage for coverage in [source_coverage, *target_coverages] if isinstance(coverage, dict)]
         return {
             "ready": bool(report.get("ready")) and bool(coverages) and all(bool(coverage.get("complete")) for coverage in coverages),
@@ -2661,8 +2675,8 @@ def _request_policy_coverage(request: dict[str, Any], source: dict[str, Any], ta
             "source": source_coverage,
             "targets": target_coverages,
             "obligations": {
-                "source": _policy_obligation_from_policy(source_policy, role="source") if isinstance(source_policy, dict) else None,
-                "targets": [_policy_obligation_from_policy(policy, role="target") for policy in target_policies if isinstance(policy, dict)],
+                "source": _policy_obligation_from_policy(source_policy, role="source", accept_rules=bool(request.get("accept_rules"))) if isinstance(source_policy, dict) else None,
+                "targets": [_policy_obligation_from_policy(policy, role="target", accept_rules=bool(request.get("accept_rules"))) for policy in target_policies if isinstance(policy, dict)],
             },
             "missing_policy_fields": _policy_coverage_fields(coverages, "missing_fields"),
             "disabled_automation": _policy_coverage_fields(coverages, "disabled_automation"),
@@ -2678,7 +2692,7 @@ def _request_policy_coverage(request: dict[str, Any], source: dict[str, Any], ta
         }
 
 
-def _policy_obligation_from_policy(policy: dict[str, Any], *, role: str) -> dict[str, Any]:
+def _policy_obligation_from_policy(policy: dict[str, Any], *, role: str, accept_rules: bool = False) -> dict[str, Any]:
     qbit_limits = {
         "download_limit": policy.get("download_rate_limit"),
         "download_limit_human": policy.get("download_rate_limit_human"),
@@ -2691,6 +2705,7 @@ def _policy_obligation_from_policy(policy: dict[str, Any], *, role: str) -> dict
         "rules_url": policy.get("rules_url"),
         "manual_review_required": policy.get("manual_review_required"),
         "rule_review_fingerprint": policy.get("rule_review_fingerprint"),
+        "rule_obligations": build_rule_obligations(policy, roles=[role], accept_rules=accept_rules),
         "automation": policy.get("automation") if isinstance(policy.get("automation"), dict) else {},
         "qbit_limits": qbit_limits,
         "seeding_requirements": {
@@ -6113,7 +6128,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "config_templates", "qbit_limits", "policy_gap_summary", "execution_readiness", "policy_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "config_templates", "qbit_limits", "policy_gap_summary", "execution_readiness", "policy_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -6122,6 +6137,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                     "qbit_limits",
                     "seeding_requirements",
                     "transfer_rules",
+                    "rule_obligations",
                     "policy_profile",
                     "manual_review_required",
                     "rule_review_fingerprint",
@@ -6130,8 +6146,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 ],
                 "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "missing_fields", "disabled_automation", "template", "current_values", "next_actions"],
                 "gap_summary_fields": ["ready", "missing_total", "disabled_total", "by_role", "missing_by_category", "recommendations"],
+                "rule_obligation_fields": ["ready", "accepted_rules", "rules_url", "manual_review_required", "rule_review_fingerprint", "missing_fields", "missing_confirmations", "scopes", "required_confirmations", "blockers"],
+                "rule_obligation_scope_fields": ["role", "scope", "action", "ready", "rules_url", "review_fingerprint", "required_confirmations", "missing_fields", "missing_confirmations", "blockers"],
                 "execution_readiness_fields": ["ready", "accepted_rules", "ready_trackers", "blocked_trackers", "by_tracker", "blockers"],
-                "policy_handoff_fields": ["ready", "config_path", "blocked_trackers", "items", "config_templates", "missing_by_category", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers"],
+                "policy_handoff_fields": ["ready", "config_path", "blocked_trackers", "items", "config_templates", "missing_by_category", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "rule_obligations"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },

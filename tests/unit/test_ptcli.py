@@ -14411,6 +14411,11 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["U2"]["seeding_requirements"]["min_seed_time_hours"] == 72
     assert matrix_by_tracker["U2"]["transfer_rules"]["required_promotions"] == ["free"]
     assert matrix_by_tracker["U2"]["execution_readiness"]["transfer_rules"]["forbidden_release_groups"] == ["BADGRP"]
+    assert matrix_by_tracker["U2"]["rule_obligations"]["ready"] is True
+    assert matrix_by_tracker["U2"]["rule_obligations"]["accepted_rules"] is True
+    assert matrix_by_tracker["U2"]["rule_obligations"]["scopes"][0]["scope"] == "download_and_retorrent"
+    assert "source_retorrent_allowed" in matrix_by_tracker["U2"]["rule_obligations"]["required_confirmations"]
+    assert matrix_by_tracker["U2"]["policy_coverage"]["rule_obligations"]["ready"] is True
     assert matrix_by_tracker["U2"]["policy_coverage"]["complete"] is True
     assert matrix_by_tracker["U2"]["policy_profile"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]["U2"]'
     assert "download_rate_limit" in matrix_by_tracker["U2"]["policy_profile"]["required_fields"]
@@ -14424,6 +14429,10 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["MTEAM"]["seeding_requirements"]["min_ratio"] == 1.0
     assert matrix_by_tracker["MTEAM"]["transfer_rules"]["freeleech_required"] is True
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["transfer_rules"]["forbidden_title_patterns"] == ["Forbidden"]
+    assert matrix_by_tracker["MTEAM"]["rule_obligations"]["ready"] is True
+    assert matrix_by_tracker["MTEAM"]["rule_obligations"]["scopes"][0]["scope"] == "upload_and_seed"
+    assert "target_upload_allowed" in matrix_by_tracker["MTEAM"]["rule_obligations"]["required_confirmations"]
+    assert matrix_by_tracker["MTEAM"]["execution_readiness"]["rule_obligations"]["ready"] is True
     assert matrix_by_tracker["MTEAM"]["policy_coverage"]["complete"] is True
     assert "upload_rate_limit" in matrix_by_tracker["MTEAM"]["policy_profile"]["required_fields"]
     assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["upload_rate_limit"] == "2 MiB/s"
@@ -14445,6 +14454,8 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert payload["policy_gap_summary"]["missing_total"] == 0
     assert payload["policy_gap_summary"]["by_role"]["source"]["trackers"] == ["U2"]
     assert payload["policy_gap_summary"]["by_role"]["target"]["trackers"] == ["MTEAM"]
+    assert payload["rule_obligations"]["U2"]["ready"] is True
+    assert payload["policy_handoff"]["rule_obligations"]["MTEAM"]["scopes"][0]["scope"] == "upload_and_seed"
     assert payload["policy_handoff"]["ready"] is True
     assert payload["policy_handoff"]["next_step"]["tool"] == "readiness_bundle"
     assert payload["policy_handoff"]["next_step"]["endpoint"] == "/v1/readiness/bundle"
@@ -14510,6 +14521,12 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     matrix_by_tracker = {item["tracker"]: item for item in payload["policy_matrix"]}
     assert matrix_by_tracker["U2"]["policy_coverage"]["complete"] is False
     assert matrix_by_tracker["MTEAM"]["policy_coverage"]["complete"] is False
+    assert matrix_by_tracker["U2"]["rule_obligations"]["ready"] is False
+    assert matrix_by_tracker["U2"]["rule_obligations"]["missing_fields"] == ["rule_review_fingerprint"]
+    assert matrix_by_tracker["U2"]["rule_obligations"]["scopes"][0]["scope"] == "download_and_retorrent"
+    assert "rule_review_fingerprint" in matrix_by_tracker["U2"]["rule_obligations"]["scopes"][0]["blockers"]
+    assert matrix_by_tracker["MTEAM"]["rule_obligations"]["ready"] is False
+    assert matrix_by_tracker["MTEAM"]["rule_obligations"]["scopes"][0]["scope"] == "upload_and_seed"
     assert matrix_by_tracker["U2"]["policy_profile"]["template"]["download_rate_limit"] == "20MiB/s"
     assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["upload_rate_limit"] == "2MiB/s"
     assert "rule_review_fingerprint" in matrix_by_tracker["U2"]["policy_profile"]["missing_fields"]
@@ -14710,6 +14727,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "config_templates" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
+    assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
+    assert "rule_obligation_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "scopes" in tool_by_name["site_policies"]["response_contract"]["rule_obligation_fields"]
     assert "transfer_rules" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "policy_profile" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "template" in tool_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
@@ -14722,6 +14743,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "missing_by_category" in tool_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
     assert "recommended_tool" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
+    assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
     assert tool_by_name["daily_candidates_schedule"]["method"] == "POST"
     assert "schedule_fields" in tool_by_name["daily_candidates_schedule"]["response_contract"]
     assert tool_by_name["submit_daily_candidate_job"]["path"] == "/v1/jobs/candidates/{job_id}/submit"
@@ -15035,6 +15057,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "config_templates" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_coverage" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
+        assert "rule_obligations" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "rule_obligations" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
+        assert "rule_obligation_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "scopes" in tools_by_name["site_policies"]["response_contract"]["rule_obligation_fields"]
         assert "transfer_rules" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert "policy_profile" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert "template" in tools_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
@@ -15047,6 +15073,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "missing_by_category" in tools_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
         assert "next_step" in tools_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
         assert "recommended_tool" in tools_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
+        assert "rule_obligations" in tools_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
         assert tools_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
         assert tools_by_name["source_url_retorrent_job"]["input_schema"]["required"] == ["source_url", "target"]

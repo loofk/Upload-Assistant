@@ -50,6 +50,7 @@ class SitePolicy:
             "forbidden_title_patterns": list(self.forbidden_title_patterns),
             "forbidden_release_groups": list(self.forbidden_release_groups),
         }
+        payload["rule_obligations"] = build_rule_obligations(self, roles=("source", "target"))
         return payload
 
 
@@ -114,6 +115,7 @@ def qbit_limits_for_tracker(config: dict[str, Any] | None, tracker: str, *, role
             "manual_review_required": policy.manual_review_required,
             "rules_url": policy.rules_url,
             "rule_review_fingerprint": policy.rule_review_fingerprint,
+            "rule_obligations": build_rule_obligations(policy, roles=(role,)),
             "transfer_rules": policy.to_dict().get("transfer_rules"),
         },
     }
@@ -128,10 +130,11 @@ def qbit_limits_for_policy(policy: SitePolicy) -> dict[str, Any]:
     }
 
 
-def build_site_policy_coverage(policy: dict[str, Any], *, roles: list[str] | tuple[str, ...] | None = None) -> dict[str, Any]:
+def build_site_policy_coverage(policy: dict[str, Any], *, roles: list[str] | tuple[str, ...] | None = None, accept_rules: bool = False) -> dict[str, Any]:
     """Return role-aware policy completeness hints for AI-safe automation."""
     tracker = str(policy.get("tracker") or "UNKNOWN")
     normalized_roles = _string_list(roles) or ["unknown"]
+    rule_obligations = build_rule_obligations(policy, roles=normalized_roles, accept_rules=accept_rules)
     automation = policy.get("automation") if isinstance(policy.get("automation"), dict) else {
         "download": policy.get("allow_auto_download"),
         "upload": policy.get("allow_auto_upload"),
@@ -179,8 +182,45 @@ def build_site_policy_coverage(policy: dict[str, Any], *, roles: list[str] | tup
         "roles": normalized_roles,
         "missing_fields": missing,
         "disabled_automation": disabled,
+        "rule_obligations": rule_obligations,
         "transfer_rules": _policy_transfer_rules(policy),
         "recommendations": recommendations,
+    }
+
+
+def build_rule_obligations(policy: SitePolicy | dict[str, Any], *, roles: list[str] | tuple[str, ...] | None = None, accept_rules: bool = False) -> dict[str, Any]:
+    """Return explicit manual rule obligations for source/target automation scopes."""
+    tracker = str(_policy_value(policy, "tracker") or "UNKNOWN")
+    normalized_roles = _string_list(roles) or ["unknown"]
+    rules_url = _policy_value(policy, "rules_url")
+    fingerprint = _policy_value(policy, "rule_review_fingerprint")
+    manual_review_required = _policy_value(policy, "manual_review_required") is True
+    automation = _policy_automation(policy)
+    missing_fields: list[str] = []
+    missing_confirmations: list[str] = []
+    if not rules_url:
+        missing_fields.append("rules_url")
+    if manual_review_required and not fingerprint:
+        missing_fields.append("rule_review_fingerprint")
+    if manual_review_required and not accept_rules:
+        missing_confirmations.append("accept_rules")
+
+    scopes = [_rule_obligation_scope(policy, role, automation, missing_fields, missing_confirmations) for role in normalized_roles]
+    blockers = list(dict.fromkeys([blocker for scope in scopes for blocker in _string_list(scope.get("blockers"))]))
+    return {
+        "kind": "ptcli.site_policy_rule_obligations",
+        "tracker": tracker,
+        "roles": normalized_roles,
+        "ready": not missing_fields and not missing_confirmations and not blockers,
+        "accepted_rules": bool(accept_rules),
+        "rules_url": rules_url,
+        "manual_review_required": manual_review_required,
+        "rule_review_fingerprint": fingerprint,
+        "missing_fields": missing_fields,
+        "missing_confirmations": missing_confirmations,
+        "blockers": blockers,
+        "scopes": scopes,
+        "required_confirmations": list(dict.fromkeys([confirmation for scope in scopes for confirmation in _string_list(scope.get("required_confirmations"))])),
     }
 
 
@@ -306,6 +346,85 @@ def _policy_transfer_rules(policy: dict[str, Any]) -> dict[str, Any]:
         "required_promotions": _string_list(policy.get("required_promotions") or nested.get("required_promotions")),
         "forbidden_title_patterns": _string_list(policy.get("forbidden_title_patterns") or nested.get("forbidden_title_patterns")),
         "forbidden_release_groups": _string_list(policy.get("forbidden_release_groups") or nested.get("forbidden_release_groups")),
+    }
+
+
+def _policy_value(policy: SitePolicy | dict[str, Any], key: str) -> Any:
+    if isinstance(policy, SitePolicy):
+        return getattr(policy, key)
+    return policy.get(key)
+
+
+def _policy_automation(policy: SitePolicy | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(policy, SitePolicy):
+        return {
+            "download": policy.allow_auto_download,
+            "upload": policy.allow_auto_upload,
+            "retorrent": policy.allow_retorrent,
+            "manual_review_required": policy.manual_review_required,
+        }
+    automation = policy.get("automation")
+    if isinstance(automation, dict):
+        return automation
+    return {
+        "download": policy.get("allow_auto_download"),
+        "upload": policy.get("allow_auto_upload"),
+        "retorrent": policy.get("allow_retorrent"),
+        "manual_review_required": policy.get("manual_review_required"),
+    }
+
+
+def _rule_obligation_scope(
+    policy: SitePolicy | dict[str, Any],
+    role: str,
+    automation: dict[str, Any],
+    missing_fields: list[str],
+    missing_confirmations: list[str],
+) -> dict[str, Any]:
+    tracker = str(_policy_value(policy, "tracker") or "UNKNOWN")
+    if role == "source":
+        action = "download_and_retorrent"
+        required_confirmations = [
+            "source_rules_reviewed",
+            "source_download_allowed",
+            "source_retorrent_allowed",
+            "source_seeding_obligations_accepted",
+        ]
+        role_blockers = []
+        if automation.get("download") is not True:
+            role_blockers.append("allow_auto_download")
+        if automation.get("retorrent") is not True:
+            role_blockers.append("allow_retorrent")
+    elif role == "target":
+        action = "upload_and_seed"
+        required_confirmations = [
+            "target_rules_reviewed",
+            "target_upload_allowed",
+            "target_retorrent_allowed",
+            "target_seeding_obligations_accepted",
+        ]
+        role_blockers = []
+        if automation.get("upload") is not True:
+            role_blockers.append("allow_auto_upload")
+        if automation.get("retorrent") is not True:
+            role_blockers.append("allow_retorrent")
+    else:
+        action = "role_unknown"
+        required_confirmations = ["source_or_target_role_selected"]
+        role_blockers = ["source_or_target_role"]
+    blockers = list(dict.fromkeys([*missing_fields, *missing_confirmations, *role_blockers]))
+    return {
+        "tracker": tracker,
+        "role": role,
+        "scope": action,
+        "action": action,
+        "ready": not blockers,
+        "rules_url": _policy_value(policy, "rules_url"),
+        "review_fingerprint": _policy_value(policy, "rule_review_fingerprint"),
+        "required_confirmations": required_confirmations,
+        "missing_fields": list(missing_fields),
+        "missing_confirmations": list(missing_confirmations),
+        "blockers": blockers,
     }
 
 
