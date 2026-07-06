@@ -14500,12 +14500,20 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
+    assert manifest["closure_contract"]["primary_field"] == "closure_handoff"
+    assert manifest["closure_contract"]["complete_when"] == "closure_handoff.complete=true"
+    assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
     assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     assert [step["tool"] for step in source_url_workflow["runbook"]] == ["readiness_bundle", "site_policies", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
     assert source_url_workflow["runbook"][0]["continue_when"] == "live_readiness.ready_for_manual_retorrent=true"
-    assert "manual_retorrent_handoff.action=stop_duplicate" in source_url_workflow["runbook"][2]["stop_when"]
+    assert "closure_handoff" in source_url_workflow["runbook"][2]["read"]
+    assert "closure_handoff.action=stop_duplicate" in source_url_workflow["runbook"][2]["stop_when"]
+    assert source_url_workflow["runbook"][4]["step"] == "closure_decision"
+    assert "closure_handoff.next_step" in source_url_workflow["runbook"][4]["read"]
+    assert source_url_workflow["runbook"][4]["complete_when"] == "closure_handoff.complete=true"
+    assert source_url_workflow["runbook"][4]["resume_with"].startswith("closure_handoff.recommended_tool")
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
     assert manual_workflow["tool"] == "manual_retorrent_job"
     assert manual_workflow["runbook_ref"] == "source_url_retorrent"
@@ -14529,6 +14537,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         payload = json.loads(Path(relative_path).read_text(encoding="utf-8"))
         assert payload["schema_version"] == "ptcli.agent_manifest.v1"
         assert payload["auth"]["env"] == "PTCLI_API_TOKEN"
+        assert payload["closure_contract"]["primary_field"] == "closure_handoff"
+        assert "collect_confirmations" in payload["closure_contract"]["actions"]
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         assert payload["discovery"]["readiness_bundle"].endswith("/v1/readiness/bundle")
@@ -14556,6 +14566,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         source_url_workflow = next(workflow for workflow in payload["default_workflows"] if workflow["name"] == "source_url_retorrent")
         assert source_url_workflow["runbook"][0]["tool"] == "readiness_bundle"
         assert source_url_workflow["runbook"][3]["repeat_when"] == "status in queued,running and runtime.should_poll=true"
+        assert source_url_workflow["runbook"][4]["complete_when"] == "closure_handoff.complete=true"
+        assert "closure_handoff.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][4]["stop_when"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "config_templates" in tools_by_name["site_policies"]["response_contract"]["required_fields"]

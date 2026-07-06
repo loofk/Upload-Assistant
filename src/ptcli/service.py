@@ -5416,7 +5416,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/.well-known/ptcli-agent.json",
             "description": "Return an OpenClaw/Hermes-friendly skill manifest with OpenAPI, tool, auth, safety, and workflow metadata.",
             "input_schema": {"type": "object", "required": [], "properties": {}},
-            "response_contract": {"required_fields": ["schema_version", "base_url", "auth", "discovery", "safety", "tools", "default_workflows"]},
+            "response_contract": {"required_fields": ["schema_version", "base_url", "auth", "discovery", "safety", "closure_contract", "tools", "default_workflows"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -5869,6 +5869,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             "never_skip": ["site rule gates", "target duplicate check", "uploaded torrent injection/seeding evidence"],
             "blocked_contract": "When rules, duplicate checks, qBittorrent evidence, or required confirmations are missing, APIs return status=blocked with blockers and next_actions.",
         },
+        "closure_contract": _agent_closure_contract(),
         "default_workflows": _agent_default_workflows(),
         "tools": tools,
         "tool_count": len(tools),
@@ -5912,24 +5913,25 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "step": "submit_job",
                     "tool": "source_url_retorrent_job",
                     "request_from": "readiness_bundle.live_readiness.manual_job_template.request",
-                    "read": ["job_id", "status", "runtime.status_endpoint", "agent_decision", "manual_retorrent_handoff", "materials_handoff", "target_upload_handoff", "workflow_context"],
+                    "read": ["job_id", "status", "runtime.status_endpoint", "agent_decision", "closure_handoff", "materials_handoff", "target_upload_handoff", "workflow_context"],
                     "continue_when": "job_id is present",
-                    "stop_when": ["manual_retorrent_handoff.action=stop_duplicate", "manual_retorrent_handoff.action=configure_policy", "manual_retorrent_handoff.action=collect_confirmations"],
+                    "stop_when": ["closure_handoff.action=stop_duplicate", "closure_handoff.action=configure_policy", "closure_handoff.action=collect_confirmations"],
                 },
                 {
                     "step": "poll",
                     "tool": "get_job_status",
-                    "read": ["status", "runtime.should_poll", "runtime.poll_after_seconds", "agent_decision", "manual_retorrent_handoff", "materials_handoff", "target_upload_handoff", "blockers", "next_actions"],
-                    "continue_when": "status=complete",
+                    "read": ["status", "runtime.should_poll", "runtime.poll_after_seconds", "agent_decision", "closure_handoff", "blockers", "next_actions"],
+                    "continue_when": "status not in queued,running",
                     "repeat_when": "status in queued,running and runtime.should_poll=true",
                     "stop_when": ["status=blocked", "status=failed", "status=cancelled"],
                 },
                 {
-                    "step": "summary_or_resume",
+                    "step": "closure_decision",
                     "tool": "get_job_summary",
-                    "read": ["summary", "evidence", "manual_retorrent_handoff", "materials_handoff", "target_upload_handoff", "resume_plan", "resume_lineage", "qbit_plan", "candidate_submission"],
-                    "resume_with": "resume_job when resume_plan.allowed=true; pass only allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
-                    "complete_when": "status=complete and uploaded torrent injection/seeding evidence is present",
+                    "read": ["closure_handoff.complete", "closure_handoff.action", "closure_handoff.next_step", "closure_handoff.recommended_tool", "closure_handoff.blockers", "closure_handoff.source", "closure_handoff.target", "summary", "evidence", "resume_plan", "resume_requirements", "candidate_submission"],
+                    "complete_when": "closure_handoff.complete=true",
+                    "resume_with": "closure_handoff.recommended_tool when closure_handoff.next_step.method is not null; pass only closure_handoff.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
+                    "stop_when": ["closure_handoff.action=stop_duplicate", "closure_handoff.action=collect_confirmations without explicit user confirmation", "closure_handoff.action=configure_policy", "closure_handoff.action=resolve_blockers and recommended_tool is null"],
                 },
             ],
         },
@@ -5966,7 +5968,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "step": "submit_approved_candidate",
                     "tool": "submit_daily_candidate_job",
                     "request_from": "schedule_digest.submission_handoff.items[].request_template after human rule review",
-                    "read": ["job_id", "candidate_submission", "agent_decision", "qbit_plan"],
+                    "read": ["job_id", "candidate_submission", "agent_decision", "closure_handoff", "qbit_plan"],
                     "stop_when": ["candidate can_submit=false", "confirm_upload missing", "save_path/path missing"],
                     "then_follow": "source_url_retorrent.poll",
                 },
@@ -5981,9 +5983,9 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "inspect",
                     "tool": "get_job_status",
-                    "read": ["resume_plan", "resume_requirements", "resume_state", "next_command_argv", "blockers", "next_actions"],
-                    "continue_when": "resume_plan.allowed=true",
-                    "stop_when": ["resume_plan.allowed=false", "next_command_argv not allowlisted"],
+                    "read": ["closure_handoff", "resume_plan", "resume_requirements", "resume_state", "next_command_argv", "blockers", "next_actions"],
+                    "continue_when": "closure_handoff.next_step.tool=resume_job and resume_plan.allowed=true",
+                    "stop_when": ["closure_handoff.complete=true", "resume_plan.allowed=false", "next_command_argv not allowlisted"],
                 },
                 {
                     "step": "resume",
@@ -5994,6 +5996,28 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
             ],
         },
     ]
+
+
+def _agent_closure_contract() -> dict[str, Any]:
+    return {
+        "primary_field": "closure_handoff",
+        "complete_when": "closure_handoff.complete=true",
+        "never_treat_complete_when": ["closure_handoff.action!=done", "closure_handoff.target.uploaded_seeding_ready=false", "closure_handoff.blockers is not empty"],
+        "next_step_source": "closure_handoff.next_step",
+        "recommended_call_fields": ["recommended_tool", "recommended_endpoint", "recommended_request"],
+        "actions": {
+            "done": "Read get_job_summary and report the completed source/target/qBittorrent evidence.",
+            "wait": "Poll get_job_status after runtime.poll_after_seconds.",
+            "stop_duplicate": "Do not upload; report duplicate_check.dupes to the user.",
+            "collect_confirmations": "Ask the user for explicit accept_rules/confirm_upload confirmation before resume.",
+            "configure_policy": "Call site_policies or update PTCLI.SITE_POLICIES before live work.",
+            "prepare_materials": "Use closure_handoff.next_step or resume_job with allowlisted material overrides.",
+            "repair_target_payload": "Use closure_handoff.next_step after fixing target upload payload blockers.",
+            "repair_qbit": "Use closure_handoff.next_step after reviewing qBittorrent evidence and rate-limit blockers.",
+            "resolve_blockers": "Stop and report closure_handoff.blockers unless next_step provides a safe tool call.",
+            "inspect": "Read get_job_summary and report uncertainty; do not attempt live upload.",
+        },
+    }
 
 
 def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
@@ -6245,6 +6269,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "auth": {"type": "object"},
             "discovery": {"type": "object"},
             "safety": {"type": "object"},
+            "closure_contract": {"type": "object"},
+            "default_workflows": {"type": "array", "items": {"type": "object"}},
             "tools": {"type": "array", "items": {"type": "object"}},
         },
     }

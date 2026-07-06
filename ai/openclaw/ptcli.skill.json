@@ -36,6 +36,33 @@
     ],
     "blocked_contract": "When rules, duplicate checks, qBittorrent evidence, or required confirmations are missing, APIs return status=blocked with blockers and next_actions."
   },
+  "closure_contract": {
+    "primary_field": "closure_handoff",
+    "complete_when": "closure_handoff.complete=true",
+    "never_treat_complete_when": [
+      "closure_handoff.action!=done",
+      "closure_handoff.target.uploaded_seeding_ready=false",
+      "closure_handoff.blockers is not empty"
+    ],
+    "next_step_source": "closure_handoff.next_step",
+    "recommended_call_fields": [
+      "recommended_tool",
+      "recommended_endpoint",
+      "recommended_request"
+    ],
+    "actions": {
+      "done": "Read get_job_summary and report the completed source/target/qBittorrent evidence.",
+      "wait": "Poll get_job_status after runtime.poll_after_seconds.",
+      "stop_duplicate": "Do not upload; report duplicate_check.dupes to the user.",
+      "collect_confirmations": "Ask the user for explicit accept_rules/confirm_upload confirmation before resume.",
+      "configure_policy": "Call site_policies or update PTCLI.SITE_POLICIES before live work.",
+      "prepare_materials": "Use closure_handoff.next_step or resume_job with allowlisted material overrides.",
+      "repair_target_payload": "Use closure_handoff.next_step after fixing target upload payload blockers.",
+      "repair_qbit": "Use closure_handoff.next_step after reviewing qBittorrent evidence and rate-limit blockers.",
+      "resolve_blockers": "Stop and report closure_handoff.blockers unless next_step provides a safe tool call.",
+      "inspect": "Read get_job_summary and report uncertainty; do not attempt live upload."
+    }
+  },
   "default_workflows": [
     {
       "name": "source_url_retorrent",
@@ -94,16 +121,16 @@
             "status",
             "runtime.status_endpoint",
             "agent_decision",
-            "manual_retorrent_handoff",
+            "closure_handoff",
             "materials_handoff",
             "target_upload_handoff",
             "workflow_context"
           ],
           "continue_when": "job_id is present",
           "stop_when": [
-            "manual_retorrent_handoff.action=stop_duplicate",
-            "manual_retorrent_handoff.action=configure_policy",
-            "manual_retorrent_handoff.action=collect_confirmations"
+            "closure_handoff.action=stop_duplicate",
+            "closure_handoff.action=configure_policy",
+            "closure_handoff.action=collect_confirmations"
           ]
         },
         {
@@ -114,13 +141,11 @@
             "runtime.should_poll",
             "runtime.poll_after_seconds",
             "agent_decision",
-            "manual_retorrent_handoff",
-            "materials_handoff",
-            "target_upload_handoff",
+            "closure_handoff",
             "blockers",
             "next_actions"
           ],
-          "continue_when": "status=complete",
+          "continue_when": "status not in queued,running",
           "repeat_when": "status in queued,running and runtime.should_poll=true",
           "stop_when": [
             "status=blocked",
@@ -129,21 +154,30 @@
           ]
         },
         {
-          "step": "summary_or_resume",
+          "step": "closure_decision",
           "tool": "get_job_summary",
           "read": [
+            "closure_handoff.complete",
+            "closure_handoff.action",
+            "closure_handoff.next_step",
+            "closure_handoff.recommended_tool",
+            "closure_handoff.blockers",
+            "closure_handoff.source",
+            "closure_handoff.target",
             "summary",
             "evidence",
-            "manual_retorrent_handoff",
-            "materials_handoff",
-            "target_upload_handoff",
             "resume_plan",
-            "resume_lineage",
-            "qbit_plan",
+            "resume_requirements",
             "candidate_submission"
           ],
-          "resume_with": "resume_job when resume_plan.allowed=true; pass only allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
-          "complete_when": "status=complete and uploaded torrent injection/seeding evidence is present"
+          "complete_when": "closure_handoff.complete=true",
+          "resume_with": "closure_handoff.recommended_tool when closure_handoff.next_step.method is not null; pass only closure_handoff.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
+          "stop_when": [
+            "closure_handoff.action=stop_duplicate",
+            "closure_handoff.action=collect_confirmations without explicit user confirmation",
+            "closure_handoff.action=configure_policy",
+            "closure_handoff.action=resolve_blockers and recommended_tool is null"
+          ]
         }
       ]
     },
@@ -214,6 +248,7 @@
             "job_id",
             "candidate_submission",
             "agent_decision",
+            "closure_handoff",
             "qbit_plan"
           ],
           "stop_when": [
@@ -237,6 +272,7 @@
           "step": "inspect",
           "tool": "get_job_status",
           "read": [
+            "closure_handoff",
             "resume_plan",
             "resume_requirements",
             "resume_state",
@@ -244,8 +280,9 @@
             "blockers",
             "next_actions"
           ],
-          "continue_when": "resume_plan.allowed=true",
+          "continue_when": "closure_handoff.next_step.tool=resume_job and resume_plan.allowed=true",
           "stop_when": [
+            "closure_handoff.complete=true",
             "resume_plan.allowed=false",
             "next_command_argv not allowlisted"
           ]
@@ -3451,6 +3488,7 @@
           "auth",
           "discovery",
           "safety",
+          "closure_contract",
           "tools",
           "default_workflows"
         ]
