@@ -96,6 +96,7 @@
             "agent_decision",
             "manual_retorrent_handoff",
             "materials_handoff",
+            "target_upload_handoff",
             "workflow_context"
           ],
           "continue_when": "job_id is present",
@@ -115,6 +116,7 @@
             "agent_decision",
             "manual_retorrent_handoff",
             "materials_handoff",
+            "target_upload_handoff",
             "blockers",
             "next_actions"
           ],
@@ -134,6 +136,7 @@
             "evidence",
             "manual_retorrent_handoff",
             "materials_handoff",
+            "target_upload_handoff",
             "resume_plan",
             "resume_lineage",
             "qbit_plan",
@@ -690,6 +693,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
           "resume_plan",
@@ -763,6 +767,17 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "blockers",
+          "next_actions"
         ]
       },
       "workflow_hints": {
@@ -918,6 +933,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
           "resume_plan",
@@ -991,6 +1007,17 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "blockers",
+          "next_actions"
         ]
       },
       "workflow_hints": {
@@ -1156,6 +1183,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
           "resume_plan",
@@ -1229,6 +1257,17 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "blockers",
+          "next_actions"
         ]
       },
       "workflow_hints": {
@@ -1398,6 +1437,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
           "resume_plan",
@@ -1471,6 +1511,17 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "blockers",
+          "next_actions"
         ]
       },
       "workflow_hints": {
@@ -1714,6 +1765,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
           "resume_plan",
@@ -1787,6 +1839,17 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "blockers",
+          "next_actions"
         ],
         "result_fields": [
           "ranking",
@@ -2123,6 +2186,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
           "resume_plan",
@@ -2196,6 +2260,17 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "blockers",
+          "next_actions"
         ]
       },
       "workflow_hints": {
@@ -2516,6 +2591,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "agent_decision",
           "resume_plan",
@@ -2586,6 +2662,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
           "resume_plan",
@@ -2659,6 +2736,17 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "blockers",
+          "next_actions"
         ]
       },
       "safety": {
@@ -2700,6 +2788,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
           "runtime",
@@ -2906,6 +2995,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
           "resume_plan",
@@ -2979,6 +3069,17 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "blockers",
+          "next_actions"
         ]
       },
       "workflow_hints": {
@@ -3039,6 +3140,7 @@
           "qbit_limit_audit",
           "qbit_handoff",
           "materials_handoff",
+          "target_upload_handoff",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
           "resume_plan",
@@ -3112,6 +3214,17 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "blockers",
+          "next_actions"
         ]
       },
       "safety": {
