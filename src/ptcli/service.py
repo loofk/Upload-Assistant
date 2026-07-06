@@ -880,6 +880,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     matrix = [_site_policy_matrix_item(policy, roles=_string_list(roles.get(str(policy.get("tracker"))))) for policy in report.get("site_policies", []) if isinstance(policy, dict)]
     policy_gap_summary = _site_policy_gap_summary(matrix)
     execution_readiness = _site_policy_execution_readiness(matrix, report)
+    policy_handoff = _site_policy_handoff(matrix, policy_gap_summary, execution_readiness, report, context)
     return {
         "kind": "ptcli.site_policies",
         "status": report.get("status", "ok"),
@@ -892,6 +893,11 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "qbit_limits": report.get("qbit_limits", {}),
         "policy_gap_summary": policy_gap_summary,
         "execution_readiness": execution_readiness,
+        "policy_handoff": policy_handoff,
+        "next_step": policy_handoff.get("next_step"),
+        "recommended_tool": policy_handoff.get("recommended_tool"),
+        "recommended_endpoint": policy_handoff.get("recommended_endpoint"),
+        "recommended_request": policy_handoff.get("recommended_request"),
         "blockers": _string_list(report.get("blockers")),
         "next_actions": _string_list(report.get("next_actions")),
         "agent_summary": _site_policy_agent_summary(matrix, report, policy_gap_summary, execution_readiness),
@@ -2072,6 +2078,107 @@ def _site_policy_config_templates(matrix: list[dict[str, Any]]) -> dict[str, Any
         "config_path": 'config["PTCLI"]["SITE_POLICIES"]',
         "trackers": {str(item.get("tracker")): (item.get("policy_profile") or {}).get("template") for item in matrix if item.get("tracker")},
     }
+
+
+def _site_policy_handoff(matrix: list[dict[str, Any]], policy_gap_summary: dict[str, Any], execution_readiness: dict[str, Any], report: dict[str, Any], request_context: dict[str, Any]) -> dict[str, Any]:
+    templates = _site_policy_config_templates(matrix)
+    blocked_trackers = _string_list(execution_readiness.get("blocked_trackers"))
+    ready = bool(execution_readiness.get("ready")) and bool(report.get("ready"))
+    missing_by_category = policy_gap_summary.get("missing_by_category") if isinstance(policy_gap_summary.get("missing_by_category"), dict) else {}
+    tracker_items = []
+    for item in matrix:
+        tracker = str(item.get("tracker") or "")
+        if not tracker:
+            continue
+        profile = item.get("policy_profile") if isinstance(item.get("policy_profile"), dict) else {}
+        coverage = item.get("policy_coverage") if isinstance(item.get("policy_coverage"), dict) else {}
+        readiness = item.get("execution_readiness") if isinstance(item.get("execution_readiness"), dict) else {}
+        tracker_items.append(
+            {
+                "tracker": tracker,
+                "roles": _string_list(item.get("roles")),
+                "ready": bool(coverage.get("complete")) and bool(readiness.get("ready")),
+                "config_path": profile.get("config_path"),
+                "missing_fields": _string_list(coverage.get("missing_fields")),
+                "disabled_automation": _string_list(coverage.get("disabled_automation")),
+                "template": profile.get("template"),
+                "rules_url": item.get("rules_url"),
+                "rule_review_fingerprint": item.get("rule_review_fingerprint"),
+            }
+        )
+    next_step = _site_policy_next_step(ready, templates, tracker_items, missing_by_category, report, execution_readiness, request_context)
+    return {
+        "kind": "ptcli.site_policy_handoff",
+        "ready": ready,
+        "accepted_rules": bool(report.get("accept_rules")),
+        "config_path": templates.get("config_path"),
+        "blocked_trackers": blocked_trackers,
+        "tracker_count": len(tracker_items),
+        "items": tracker_items,
+        "config_templates": templates,
+        "missing_by_category": missing_by_category,
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
+        "blockers": _string_list(report.get("blockers")) + _string_list(execution_readiness.get("blockers")),
+    }
+
+
+def _site_policy_next_step(
+    ready: bool,
+    templates: dict[str, Any],
+    tracker_items: list[dict[str, Any]],
+    missing_by_category: dict[str, Any],
+    report: dict[str, Any],
+    execution_readiness: dict[str, Any],
+    request_context: dict[str, Any],
+) -> dict[str, Any]:
+    policy_request = _site_policy_rerun_request(request_context, report)
+    if ready:
+        return {
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "request": policy_request,
+            "reason": "site_policy_ready",
+        }
+    return {
+        "tool": "edit_config",
+        "endpoint": None,
+        "method": None,
+        "request": {
+            "config_path": templates.get("config_path"),
+            "site_policy_templates": templates.get("trackers"),
+            "blocked_trackers": _string_list(execution_readiness.get("blocked_trackers")),
+            "missing_by_category": missing_by_category,
+        },
+        "reason": "site_policy_incomplete",
+        "after_edit": {
+            "tool": "site_policies",
+            "endpoint": "/v1/site-policies",
+            "method": "POST",
+            "request": policy_request,
+        },
+        "items": tracker_items,
+    }
+
+
+def _site_policy_rerun_request(request_context: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+    request: dict[str, Any] = {"accept_rules": bool(report.get("accept_rules"))}
+    roles = request_context.get("roles") if isinstance(request_context.get("roles"), dict) else {}
+    trackers = _string_list(request_context.get("trackers"))
+    source_trackers = [tracker for tracker in trackers if "source" in _string_list(roles.get(tracker))]
+    target_trackers = [tracker for tracker in trackers if "target" in _string_list(roles.get(tracker))]
+    if source_trackers:
+        request["source_tracker"] = source_trackers[0]
+    if target_trackers:
+        request["target"] = ",".join(target_trackers)
+    elif trackers:
+        request["trackers"] = ",".join(trackers)
+    if request_context.get("config"):
+        request["config"] = request_context.get("config")
+    return request
 
 
 def _site_policy_profile_next_actions(tracker: str, roles: list[str], coverage: dict[str, Any]) -> list[str]:
@@ -5083,7 +5190,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "config_templates", "qbit_limits", "policy_gap_summary", "execution_readiness", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "config_templates", "qbit_limits", "policy_gap_summary", "execution_readiness", "policy_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -5101,6 +5208,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "missing_fields", "disabled_automation", "template", "current_values", "next_actions"],
                 "gap_summary_fields": ["ready", "missing_total", "disabled_total", "by_role", "missing_by_category", "recommendations"],
                 "execution_readiness_fields": ["ready", "accepted_rules", "ready_trackers", "blocked_trackers", "by_tracker", "blockers"],
+                "policy_handoff_fields": ["ready", "config_path", "blocked_trackers", "items", "config_templates", "missing_by_category", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
@@ -5840,6 +5948,12 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "site_policies": {"type": "array", "items": {"type": "object"}},
             "qbit_limits": {"type": "object"},
             "policy_gap_summary": {"type": "object"},
+            "execution_readiness": {"type": "object"},
+            "policy_handoff": {"type": "object"},
+            "next_step": {"type": "object"},
+            "recommended_tool": {"type": ["string", "null"]},
+            "recommended_endpoint": {"type": ["string", "null"]},
+            "recommended_request": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
             "agent_summary": {"type": "object"},

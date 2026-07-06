@@ -3705,6 +3705,11 @@
           "qbit_limits",
           "policy_gap_summary",
           "execution_readiness",
+          "policy_handoff",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions",
           "agent_summary"
@@ -3747,6 +3752,19 @@
           "ready_trackers",
           "blocked_trackers",
           "by_tracker",
+          "blockers"
+        ],
+        "policy_handoff_fields": [
+          "ready",
+          "config_path",
+          "blocked_trackers",
+          "items",
+          "config_templates",
+          "missing_by_category",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers"
         ]
       },
