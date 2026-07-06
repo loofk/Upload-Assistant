@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import io
 import json
+import runpy
 import shlex
 import subprocess
 import threading
@@ -49,6 +50,34 @@ from src.ptcli.target import (
     upload_mteam_from_package,
     write_mteam_prepare_package,
 )
+
+READY_REFERENCE_POLICY_CONFIG = {
+    "PTCLI": {
+        "SITE_POLICIES": {
+            "U2": {
+                "allow_auto_download": True,
+                "allow_retorrent": True,
+                "download_rate_limit": "20MiB/s",
+                "min_seed_time_hours": 72,
+                "rule_review_fingerprint": "u2-review",
+            },
+            "CHD": {
+                "allow_auto_download": True,
+                "allow_retorrent": True,
+                "download_rate_limit": "20MiB/s",
+                "min_seed_time_hours": 72,
+                "rule_review_fingerprint": "chd-review",
+            },
+            "MTEAM": {
+                "allow_auto_upload": True,
+                "allow_retorrent": True,
+                "upload_rate_limit": "2MiB/s",
+                "min_ratio": 1.0,
+                "rule_review_fingerprint": "mteam-review",
+            },
+        }
+    }
+}
 
 
 class FakeQbitClient:
@@ -381,7 +410,16 @@ def test_site_policy_overrides_parse_rate_limits() -> None:
     config = {
         "PTCLI": {
             "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "rule_review_fingerprint": "u2-review",
+                },
                 "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
                     "upload_rate_limit": "2 MiB/s",
                     "download_rate_limit": "20MiB/s",
                     "min_seed_time_hours": 72,
@@ -390,6 +428,7 @@ def test_site_policy_overrides_parse_rate_limits() -> None:
                     "required_promotions": ["free"],
                     "forbidden_title_patterns": ["禁转"],
                     "forbidden_release_groups": ["BADGRP"],
+                    "rule_review_fingerprint": "mteam-review",
                 }
             }
         }
@@ -409,6 +448,29 @@ def test_site_policy_overrides_parse_rate_limits() -> None:
     assert policy.forbidden_release_groups == ("BADGRP",)
     assert policy.to_dict()["transfer_rules"]["forbidden_release_groups"] == ["BADGRP"]
     assert report["ready"] is True
+    assert report["qbit_limits"]["MTEAM"]["upload_limit"] == 2 * 1024 * 1024
+
+
+def test_example_config_includes_safe_ptcli_site_policy_templates() -> None:
+    namespace = runpy.run_path(str(Path(__file__).resolve().parents[2] / "data" / "example-config.py"))
+    config = namespace["config"]
+    policies = config["PTCLI"]["SITE_POLICIES"]
+
+    assert {"U2", "CHD", "MTEAM"}.issubset(policies)
+    assert policies["U2"]["allow_auto_download"] is True
+    assert policies["CHD"]["allow_retorrent"] is True
+    assert policies["MTEAM"]["allow_auto_upload"] is True
+    assert policies["U2"]["rule_review_fingerprint"] == ""
+    assert policies["CHD"]["rule_review_fingerprint"] == ""
+    assert policies["MTEAM"]["rule_review_fingerprint"] == ""
+
+    report = build_site_policy_report(config, ["U2", "MTEAM"], accept_rules=True)
+
+    assert report["ready"] is False
+    obligations = {policy["tracker"]: policy["rule_obligations"] for policy in report["site_policies"]}
+    assert obligations["U2"]["missing_fields"] == ["rule_review_fingerprint"]
+    assert obligations["MTEAM"]["missing_fields"] == ["rule_review_fingerprint"]
+    assert report["qbit_limits"]["U2"]["download_limit"] == 20 * 1024 * 1024
     assert report["qbit_limits"]["MTEAM"]["upload_limit"] == 2 * 1024 * 1024
 
 
@@ -17050,6 +17112,7 @@ def test_flow_check_ready_for_u2_to_mteam(tmp_path) -> None:
             "MTEAM": {"api_key": "mteam-api"},
         },
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
 
     payload = build_flow_check(config, "U2", "https://u2.dmhy.org/details.php?id=60635", "MTEAM", "default", base_dir=str(tmp_path))
@@ -17085,6 +17148,7 @@ def test_flow_check_ready_for_enabled_chinese_nexus_source(tmp_path) -> None:
             "MTEAM": {"api_key": "mteam-api"},
         },
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
 
     payload = build_flow_check(config, "PTER", "123", "MTEAM", "default", base_dir=str(tmp_path))
@@ -17107,6 +17171,7 @@ def test_flow_check_ready_for_ttg_to_mteam_uses_announce_url(tmp_path) -> None:
             "MTEAM": {"api_key": "mteam-api"},
         },
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
 
     payload = build_flow_check(config, "TTG", "123", "MTEAM", "default", base_dir=str(tmp_path))
@@ -17128,6 +17193,7 @@ def test_flow_check_ready_for_hds_to_mteam_uses_cookie_only(tmp_path) -> None:
             "MTEAM": {"api_key": "mteam-api"},
         },
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
 
     payload = build_flow_check(config, "HDS", "123", "MTEAM", "default", base_dir=str(tmp_path))
@@ -17148,6 +17214,7 @@ def test_flow_check_reports_missing_cookie(tmp_path) -> None:
             "MTEAM": {"api_key": "mteam-api"},
         },
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
 
     payload = build_flow_check(config, "CHD", "123", "MTEAM", "default", base_dir=str(tmp_path))
@@ -17182,6 +17249,7 @@ def test_doctor_reports_ready_live_checklist(tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -17327,6 +17395,7 @@ def test_doctor_preflight_gates_expose_blocked_materials(tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -17472,6 +17541,7 @@ def test_doctor_auto_enables_uploaded_torrent_followup_for_live_closure(tmp_path
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -17519,6 +17589,7 @@ def test_doctor_infers_uploaded_save_path_from_package_content(tmp_path) -> None
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -17637,6 +17708,7 @@ def test_doctor_blocks_live_upload_without_rule_obligations(tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -17693,6 +17765,7 @@ def test_doctor_surfaces_material_gate_checks(tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -17760,6 +17833,7 @@ def test_doctor_accepts_resume_files_for_live_closure(tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -17812,6 +17886,7 @@ def test_doctor_uploaded_torrent_file_resume_blocks_unreadable_metadata(tmp_path
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -17906,6 +17981,7 @@ def test_doctor_resume_files_still_require_target_materials(tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -17958,6 +18034,7 @@ def test_doctor_surfaces_duplicate_package_blocker(tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -18011,6 +18088,7 @@ def test_doctor_reports_blockers_for_missing_package(tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
 
     payload = build_doctor_check(
@@ -18039,6 +18117,7 @@ def test_doctor_runtime_check_reports_ptcli_dependencies(tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
 
     payload = build_doctor_check(
@@ -18066,6 +18145,7 @@ def test_doctor_runtime_check_blocks_missing_ptcli_dependency(monkeypatch, tmp_p
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     original_find_spec = ptcli_doctor.importlib.util.find_spec
 
@@ -18099,6 +18179,7 @@ def test_doctor_runtime_check_blocks_failed_internal_import(monkeypatch, tmp_pat
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     original_import_module = ptcli_doctor.importlib.import_module
 
@@ -18138,6 +18219,7 @@ def test_doctor_runtime_check_blocks_live_safe_when_requested(monkeypatch, tmp_p
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -18190,6 +18272,7 @@ def test_doctor_command_outputs_json(monkeypatch, tmp_path, capsys) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18232,6 +18315,7 @@ def test_doctor_target_execute_not_live_safe_returns_nonzero(monkeypatch, tmp_pa
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18466,6 +18550,7 @@ def test_doctor_summary_check_preserves_resume_state(monkeypatch, tmp_path, caps
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18548,6 +18633,7 @@ def test_doctor_uploaded_torrent_id_resume_is_live_safe(monkeypatch, tmp_path, c
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18654,6 +18740,7 @@ def test_doctor_uploaded_torrent_file_resume_is_live_safe(monkeypatch, tmp_path,
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18766,6 +18853,7 @@ def test_doctor_command_writes_summary_json(monkeypatch, tmp_path, capsys) -> No
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18827,6 +18915,7 @@ def test_doctor_command_can_probe_qbit_connection(monkeypatch, tmp_path, capsys)
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18851,6 +18940,7 @@ def test_doctor_command_can_check_runtime(monkeypatch, tmp_path, capsys) -> None
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18871,6 +18961,7 @@ def test_doctor_command_can_probe_source_and_target(monkeypatch, tmp_path, capsy
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18923,6 +19014,7 @@ async def test_pipeline_skips_match_without_path(monkeypatch, tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18960,6 +19052,7 @@ async def test_pipeline_keeps_source_info_error(monkeypatch, tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -18990,6 +19083,7 @@ async def test_pipeline_action_failure_reports_top_level_blockers(monkeypatch, t
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19017,6 +19111,7 @@ async def test_pipeline_rejects_empty_source_info(monkeypatch, tmp_path) -> None
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19045,6 +19140,7 @@ async def test_pipeline_download_source_skips_when_source_info_fails(monkeypatch
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19074,6 +19170,7 @@ async def test_pipeline_download_source_requires_rule_check_ready(monkeypatch, t
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19109,6 +19206,7 @@ async def test_pipeline_download_source_runs_after_prereqs(monkeypatch, tmp_path
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19164,6 +19262,7 @@ async def test_pipeline_inject_source_requires_save_path(monkeypatch, tmp_path) 
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19200,6 +19299,7 @@ async def test_pipeline_inject_source_runs_after_download(monkeypatch, tmp_path)
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19274,6 +19374,7 @@ async def test_pipeline_inject_source_reuses_existing_source_torrent(monkeypatch
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19341,6 +19442,7 @@ async def test_pipeline_inject_source_requires_client_verification(monkeypatch, 
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19400,6 +19502,7 @@ async def test_pipeline_wait_complete_runs_after_inject(monkeypatch, tmp_path) -
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19476,6 +19579,7 @@ async def test_pipeline_wait_complete_requires_matched_source_evidence(monkeypat
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19555,6 +19659,7 @@ async def test_pipeline_wait_complete_prefers_injected_hash(monkeypatch, tmp_pat
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19620,6 +19725,7 @@ async def test_pipeline_wait_complete_uses_hash_from_real_injected_torrent(monke
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19691,6 +19797,7 @@ async def test_pipeline_wait_complete_uses_hash_from_downloaded_source_torrent(m
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19764,6 +19871,7 @@ async def test_pipeline_blocks_source_injection_when_downloaded_torrent_hash_mis
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19835,6 +19943,7 @@ async def test_pipeline_blocks_source_injection_hash_mismatch(monkeypatch, tmp_p
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19913,6 +20022,7 @@ async def test_pipeline_infers_content_path_from_completed_qbit_match(monkeypatc
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -19992,6 +20102,7 @@ async def test_pipeline_prepare_target_preview(monkeypatch, tmp_path) -> None:
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -20067,6 +20178,7 @@ async def test_pipeline_generate_mediainfo_material_before_prepare_target(monkey
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
@@ -20122,6 +20234,7 @@ async def test_pipeline_generate_bdinfo_material_before_prepare_target(monkeypat
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
@@ -20180,6 +20293,7 @@ async def test_pipeline_enrich_metadata_before_prepare_target(monkeypatch, tmp_p
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
@@ -20241,6 +20355,7 @@ async def test_pipeline_ptgen_description_file_enables_metadata_enrichment(monke
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
@@ -20293,6 +20408,7 @@ async def test_pipeline_generate_screenshot_materials_before_prepare_target(monk
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
@@ -20353,6 +20469,7 @@ async def test_pipeline_upload_screenshots_before_prepare_target(monkeypatch, tm
         "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg", "ptpimg_api": "ptpimg-key"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
@@ -20421,6 +20538,7 @@ async def test_pipeline_partial_image_host_upload_records_returned_screenshot_ev
         "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg", "ptpimg_api": "ptpimg-key"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     mediainfo = tmp_path / "MI_FULL_00.txt"
     mediainfo.write_text("General\nComplete name : Name.mkv\n", encoding="utf-8")
@@ -20519,6 +20637,7 @@ async def test_pipeline_material_prerequisite_check_blocks_missing_image_host(mo
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     screenshot = tmp_path / "screen-1.png"
     screenshot.write_bytes(b"png")
@@ -20583,6 +20702,7 @@ async def test_pipeline_target_execute_defaults_to_generating_materials(monkeypa
         "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg", "ptpimg_api": "ptpimg-key"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     monkeypatch.setattr(ptcli_cli, "load_config", lambda _path: config)
 
@@ -20706,6 +20826,7 @@ async def test_pipeline_prepare_target_blocks_mismatched_existing_qbit_content(m
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -20761,6 +20882,7 @@ async def test_pipeline_prepare_target_blocks_unhashed_existing_qbit_content(mon
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -20816,6 +20938,7 @@ async def test_pipeline_promotes_matched_qbit_hash_when_source_hash_is_missing(m
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -20869,6 +20992,7 @@ async def test_pipeline_check_dupes_runs_after_source_info(monkeypatch, tmp_path
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -20901,6 +21025,7 @@ async def test_pipeline_prepare_target_gate_uses_dupe_check_and_rules_ack(monkey
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -21207,6 +21332,7 @@ async def test_pipeline_summary_recovers_missing_image_host_uploads(monkeypatch,
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -21330,6 +21456,7 @@ async def test_pipeline_can_orchestrate_target_upload_and_qbit_inject(monkeypatc
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -21457,6 +21584,7 @@ async def test_pipeline_closure_complete_for_full_retorrent_flow(monkeypatch, tm
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -21961,6 +22089,7 @@ async def test_pipeline_closure_complete_for_chd_to_mteam_nexus_flow(monkeypatch
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"CHD": {"passkey": "chd-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -22121,6 +22250,7 @@ async def test_pipeline_summary_recommends_uploaded_id_resume_when_download_miss
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -22249,6 +22379,7 @@ async def test_pipeline_reuses_inferred_path_for_uploaded_torrent_inject(monkeyp
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -22361,6 +22492,7 @@ async def test_pipeline_exports_matched_torrent_for_target_upload(monkeypatch, t
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -22461,6 +22593,7 @@ async def test_pipeline_reuses_existing_target_package_for_upload(monkeypatch, t
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -22530,6 +22663,7 @@ async def test_pipeline_reuses_uploaded_torrent_file_for_target_injection(monkey
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     source_info = {
         "tracker": "U2",
@@ -22638,6 +22772,7 @@ async def test_pipeline_uploaded_torrent_file_resume_auto_waits_when_inject_requ
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -22719,6 +22854,7 @@ async def test_pipeline_reuses_uploaded_torrent_id_for_target_injection(monkeypa
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -22829,6 +22965,7 @@ async def test_pipeline_target_execute_enables_uploaded_torrent_followup(monkeyp
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -22925,6 +23062,7 @@ async def test_pipeline_target_execute_blocks_missing_runtime_dependency(monkeyp
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -23021,6 +23159,7 @@ async def test_pipeline_target_execute_blocks_incomplete_material_gate(monkeypat
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -23140,6 +23279,7 @@ async def test_pipeline_target_execute_requires_current_source_ready_evidence(mo
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -23219,6 +23359,7 @@ async def test_pipeline_target_execute_does_not_fallback_to_match_after_wait_fai
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -23306,6 +23447,7 @@ async def test_pipeline_target_execute_requires_current_duplicate_check(monkeypa
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -23387,6 +23529,7 @@ async def test_pipeline_target_execute_rechecks_fresh_duplicates_before_upload(m
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -23475,6 +23618,7 @@ async def test_pipeline_sanitizes_manual_target_torrent_for_upload(monkeypatch, 
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -23572,6 +23716,7 @@ async def test_pipeline_target_execute_auto_exports_and_sanitizes_target_torrent
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -23679,6 +23824,7 @@ async def test_pipeline_target_execute_auto_downloads_injects_and_waits_source(m
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)
@@ -23826,6 +23972,7 @@ async def test_pipeline_upload_target_requires_prepare_target(monkeypatch, tmp_p
         "DEFAULT": {"default_torrent_client": "qbittorrent"},
         "TRACKERS": {"U2": {"passkey": "u2-passkey"}, "MTEAM": {"api_key": "mteam-api"}},
         "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit"}},
+        **READY_REFERENCE_POLICY_CONFIG,
     }
     cookies_dir = tmp_path / "data" / "cookies"
     cookies_dir.mkdir(parents=True)

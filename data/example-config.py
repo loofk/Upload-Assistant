@@ -1185,6 +1185,62 @@ config = {
             "watch_folder": "",
         },
     },
+    "PTCLI": {
+        # Focused Chinese PT automation settings used by ptcli.py and the ptcli-api Docker service.
+        # These policies are local safety gates. They do not replace reading each site's current rules.
+        # After reviewing a site's rules, set rule_review_fingerprint to your own audit marker
+        # such as "reviewed-2026-07-06-<initials>". The empty defaults below intentionally keep
+        # live automation blocked until you record a real manual review.
+        "SITE_POLICIES": {
+            # U2 and CHD are source-side examples for the current reference flows to MTEAM.
+            "U2": {
+                "rules_url": "https://u2.dmhy.org/rules.php",
+                "manual_review_required": True,
+                "allow_auto_download": True,
+                "allow_auto_upload": False,
+                "allow_retorrent": True,
+                "download_rate_limit": "20MiB/s",
+                "upload_rate_limit": "2MiB/s",
+                "min_seed_time_hours": 72,
+                "rule_review_fingerprint": "",
+                "notes": [
+                    "Verify U2 download,转载/转种, and continued seeding rules before live automation.",
+                    "Adjust limits to your box, account class, and site requirements.",
+                ],
+            },
+            "CHD": {
+                "rules_url": "https://ptchdbits.co/rules.php",
+                "manual_review_required": True,
+                "allow_auto_download": True,
+                "allow_auto_upload": False,
+                "allow_retorrent": True,
+                "download_rate_limit": "20MiB/s",
+                "upload_rate_limit": "2MiB/s",
+                "min_seed_time_hours": 72,
+                "rule_review_fingerprint": "",
+                "notes": [
+                    "Verify CHD download,转载/转种, and continued seeding rules before live automation.",
+                    "NexusPHP-like source flows depend on valid cookies in data/cookies/CHD.txt.",
+                ],
+            },
+            # MTEAM is the current API-style target example.
+            "MTEAM": {
+                "rules_url": "https://kp.m-team.cc/rules",
+                "manual_review_required": True,
+                "allow_auto_download": False,
+                "allow_auto_upload": True,
+                "allow_retorrent": True,
+                "upload_rate_limit": "2MiB/s",
+                "download_rate_limit": "20MiB/s",
+                "min_ratio": 1.0,
+                "rule_review_fingerprint": "",
+                "notes": [
+                    "Verify MTEAM upload,转载/转种, screenshot, description, and seeding rules before live upload.",
+                    "Target upload still requires accept_rules=true and confirm_upload=true.",
+                ],
+            },
+        },
+    },
     "DISCORD": {
         # Set to True to enable Discord bot functionality
         "use_discord": False,

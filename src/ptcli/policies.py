@@ -439,6 +439,10 @@ def _as_list(value: Any) -> list[Any]:
 def _policy_blockers(policies: list[SitePolicy], *, accept_rules: bool) -> list[str]:
     blockers: list[str] = []
     for policy in policies:
+        if not policy.rules_url:
+            blockers.append(f"{policy.tracker}: rules_url is required before automation.")
+        if policy.manual_review_required and not policy.rule_review_fingerprint:
+            blockers.append(f"{policy.tracker}: rule_review_fingerprint is required before automation.")
         if policy.manual_review_required and not accept_rules:
             blockers.append(f"{policy.tracker}: manual rule review is required before automation.")
         if not policy.allow_retorrent:
