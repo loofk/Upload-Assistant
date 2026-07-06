@@ -244,6 +244,7 @@ class JobStore:
             "agent_decision": _agent_decision(job),
             "candidate_digest": _candidate_digest_from_payload(summary_payload) or _candidate_digest_from_payload(job.get("result")),
             "policy_coverage": _job_policy_coverage(job),
+            "policy_handoff": _job_policy_handoff(job),
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
             "qbit_plan": _job_qbit_plan(job),
             "qbit_limit_audit": _job_qbit_limit_audit(job, summary_payload),
@@ -2601,6 +2602,10 @@ def _request_policy_coverage(request: dict[str, Any], source: dict[str, Any], ta
             "accept_rules": bool(request.get("accept_rules")),
             "source": source_coverage,
             "targets": target_coverages,
+            "obligations": {
+                "source": _policy_obligation_from_policy(source_policy, role="source") if isinstance(source_policy, dict) else None,
+                "targets": [_policy_obligation_from_policy(policy, role="target") for policy in target_policies if isinstance(policy, dict)],
+            },
             "missing_policy_fields": _policy_coverage_fields(coverages, "missing_fields"),
             "disabled_automation": _policy_coverage_fields(coverages, "disabled_automation"),
             "recommendations": [recommendation for coverage in coverages for recommendation in _string_list(coverage.get("recommendations"))],
@@ -2613,6 +2618,29 @@ def _request_policy_coverage(request: dict[str, Any], source: dict[str, Any], ta
             "error": str(exc),
             "recommendations": ["Run deployment_check or provide a readable data/config.py before relying on policy coverage."],
         }
+
+
+def _policy_obligation_from_policy(policy: dict[str, Any], *, role: str) -> dict[str, Any]:
+    qbit_limits = {
+        "download_limit": policy.get("download_rate_limit"),
+        "download_limit_human": policy.get("download_rate_limit_human"),
+        "upload_limit": policy.get("upload_rate_limit"),
+        "upload_limit_human": policy.get("upload_rate_limit_human"),
+    }
+    return {
+        "tracker": policy.get("tracker"),
+        "role": role,
+        "rules_url": policy.get("rules_url"),
+        "manual_review_required": policy.get("manual_review_required"),
+        "rule_review_fingerprint": policy.get("rule_review_fingerprint"),
+        "automation": policy.get("automation") if isinstance(policy.get("automation"), dict) else {},
+        "qbit_limits": qbit_limits,
+        "seeding_requirements": {
+            "min_seed_time_hours": policy.get("min_seed_time_hours"),
+            "min_ratio": policy.get("min_ratio"),
+        },
+        "transfer_rules": policy.get("transfer_rules") if isinstance(policy.get("transfer_rules"), dict) else {},
+    }
 
 
 def _policy_coverage_fields(coverages: list[dict[str, Any]], key: str) -> dict[str, list[str]]:
@@ -3015,6 +3043,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "source_reference": _job_source_reference(job),
         "target_trackers": (job.get("request") or {}).get("target_trackers") if isinstance(job.get("request"), dict) else None,
         "duplicate_check": _job_duplicate_check(job),
+        "policy_handoff": _job_policy_handoff(job),
         "qbit_plan": _job_qbit_plan(job),
         "qbit_limit_audit": _job_qbit_limit_audit(job),
         "qbit_handoff": _job_qbit_handoff(job),
@@ -3070,6 +3099,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
         "candidate_digest": _candidate_digest_from_payload(job.get("result")),
         "policy_coverage": _job_policy_coverage(job),
+        "policy_handoff": _job_policy_handoff(job),
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
         "qbit_plan": _job_qbit_plan(job),
         "qbit_limit_audit": _job_qbit_limit_audit(job),
@@ -3101,6 +3131,74 @@ def _job_policy_coverage(job: dict[str, Any]) -> dict[str, Any] | None:
     if isinstance(request, dict) and isinstance(request.get("policy_coverage"), dict):
         return request["policy_coverage"]
     return None
+
+
+def _job_policy_handoff(job: dict[str, Any]) -> dict[str, Any] | None:
+    coverage = _job_policy_coverage(job)
+    qbit_defaults = _job_policy_qbit_defaults(job)
+    qbit_plan = _job_qbit_plan(job)
+    if not isinstance(coverage, dict) and not isinstance(qbit_defaults, dict):
+        return None
+    ready = coverage.get("ready") if isinstance(coverage, dict) and isinstance(coverage.get("ready"), bool) else None
+    obligations = coverage.get("obligations") if isinstance(coverage, dict) and isinstance(coverage.get("obligations"), dict) else {}
+    missing_fields = coverage.get("missing_policy_fields") if isinstance(coverage, dict) and isinstance(coverage.get("missing_policy_fields"), dict) else {}
+    disabled_automation = coverage.get("disabled_automation") if isinstance(coverage, dict) and isinstance(coverage.get("disabled_automation"), dict) else {}
+    blockers = _policy_handoff_blockers(coverage, missing_fields, disabled_automation)
+    next_step = _policy_handoff_next_step(job, ready, blockers)
+    return {
+        "kind": "ptcli.policy_handoff",
+        "ready": ready,
+        "accepted_rules": coverage.get("accept_rules") if isinstance(coverage, dict) else None,
+        "site_policy_ready": coverage.get("site_policy_ready") if isinstance(coverage, dict) else None,
+        "source": obligations.get("source"),
+        "targets": obligations.get("targets") if isinstance(obligations.get("targets"), list) else [],
+        "missing_policy_fields": missing_fields,
+        "disabled_automation": disabled_automation,
+        "qbit_defaults": qbit_defaults,
+        "qbit_plan": qbit_plan,
+        "recommendations": _string_list(coverage.get("recommendations")) if isinstance(coverage, dict) else [],
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
+        "blockers": blockers,
+        "next_actions": _policy_handoff_next_actions(ready, blockers),
+    }
+
+
+def _policy_handoff_blockers(coverage: dict[str, Any] | None, missing_fields: dict[str, Any], disabled_automation: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    if isinstance(coverage, dict):
+        blockers.extend(_string_list(coverage.get("blockers")))
+        for tracker, fields in missing_fields.items():
+            blockers.extend(f"{tracker}.{field}" for field in _string_list(fields))
+        for tracker, fields in disabled_automation.items():
+            blockers.extend(f"{tracker}.{field}" for field in _string_list(fields))
+    return list(dict.fromkeys(blockers))
+
+
+def _policy_handoff_next_step(job: dict[str, Any], ready: bool | None, blockers: list[str]) -> dict[str, Any]:
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    source = _job_source_reference(job)
+    policy_request: dict[str, Any] = {"accept_rules": bool(request.get("accept_rules"))}
+    if isinstance(source, dict) and source.get("tracker"):
+        policy_request["source_tracker"] = source.get("tracker")
+    if request.get("target_trackers"):
+        policy_request["target"] = request.get("target_trackers")
+    if request.get("config"):
+        policy_request["config"] = request.get("config")
+    if ready is False or blockers:
+        return {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": policy_request, "reason": "policy_obligations_not_ready"}
+    job_id = job.get("job_id")
+    return {"tool": "get_job_summary", "endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None, "method": "GET", "request": None, "reason": "policy_obligations_ready"}
+
+
+def _policy_handoff_next_actions(ready: bool | None, blockers: list[str]) -> list[str]:
+    if ready is True and not blockers:
+        return []
+    if blockers:
+        return ["Review policy_handoff.blockers and update PTCLI.SITE_POLICIES before live automation."]
+    return ["Inspect policy_handoff obligations before live automation."]
 
 
 def _job_policy_qbit_defaults(job: dict[str, Any]) -> dict[str, Any] | None:
@@ -4141,6 +4239,7 @@ def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = 
         },
         "required_confirmations_missing": missing_confirmations,
         "policy_coverage": policy_coverage,
+        "policy_handoff": _job_policy_handoff(job),
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
         "qbit_plan": _job_qbit_plan(job),
         "qbit_limit_audit": _job_qbit_limit_audit(job, payload if isinstance(payload, dict) else None),
@@ -4447,6 +4546,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     resume_plan = _job_resume_plan(job)
     missing_confirmations = _missing_live_confirmations(request)
     policy_coverage = _job_policy_coverage(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
+    policy_handoff = _job_policy_handoff(job) if policy_coverage is not None else None
     policy_qbit_defaults = _job_policy_qbit_defaults(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     qbit_plan = _job_qbit_plan(job) if policy_qbit_defaults is not None else None
     qbit_limit_audit = _job_qbit_limit_audit(job) if qbit_plan is not None else None
@@ -4507,6 +4607,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "duplicate_check": duplicate_check,
         "missing_confirmations": missing_confirmations,
         "policy_coverage": policy_coverage,
+        "policy_handoff": policy_handoff,
         "policy_qbit_defaults": policy_qbit_defaults,
         "qbit_plan": qbit_plan,
         "qbit_limit_audit": qbit_limit_audit,
@@ -5575,7 +5676,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "material_resolution", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "material_resolution", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -5914,7 +6015,7 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "material_resolution", "candidate_submission", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "material_resolution", "candidate_submission", "source_reference", "workflow_context"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -5923,6 +6024,7 @@ def _job_response_contract() -> dict[str, Any]:
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "recommended_inputs", "allowed_overrides", "current_flags"],
         "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "closure_handoff_fields": ["action", "complete", "source", "target", "evidence", "duplicate_check", "target_upload_handoff", "qbit_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
     }
 
@@ -5945,7 +6047,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "candidate_submission_handoff", "source_reference", "duplicate_check", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_lineage", "material_resolution", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "candidate_submission_handoff", "source_reference", "duplicate_check", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_lineage", "material_resolution", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -6300,6 +6402,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "kind": {"type": "string"},
             "request": {"type": "object"},
             "policy_coverage": {"type": ["object", "null"]},
+            "policy_handoff": {"type": ["object", "null"]},
             "command_argv": {"type": "array", "items": {"type": "string"}},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
@@ -6345,6 +6448,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_decision": {"type": ["object", "null"]},
             "candidate_digest": {"type": ["object", "null"]},
             "policy_coverage": {"type": ["object", "null"]},
+            "policy_handoff": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
             "qbit_plan": {"type": ["object", "null"]},
             "qbit_limit_audit": {"type": ["object", "null"]},
