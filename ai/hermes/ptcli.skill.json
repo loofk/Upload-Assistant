@@ -6256,6 +6256,7 @@
           "qbit_limits",
           "policy_gap_summary",
           "execution_readiness",
+          "policy_execution_summary",
           "policy_handoff",
           "next_step",
           "recommended_tool",
@@ -6329,6 +6330,22 @@
           "blocked_trackers",
           "by_tracker",
           "blockers"
+        ],
+        "policy_execution_summary_fields": [
+          "ready",
+          "accepted_rules",
+          "ready_trackers",
+          "blocked_trackers",
+          "by_role",
+          "items",
+          "qbit_limit_plan",
+          "seeding_plan",
+          "transfer_rule_plan",
+          "missing_by_category",
+          "next_step",
+          "recommended_tool",
+          "blockers",
+          "next_actions"
         ],
         "policy_handoff_fields": [
           "ready",
