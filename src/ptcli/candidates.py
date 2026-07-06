@@ -104,7 +104,8 @@ async def build_daily_candidates(
         payload_blockers.extend(f"rule-check: {blocker}" for blocker in _rule_blockers(rule_check))
     if not site_policy.get("ready"):
         payload_blockers.extend(f"site-policy: {blocker}" for blocker in _string_list(site_policy.get("blockers")))
-    digest = _candidate_digest(candidates, payload_blockers, next_actions, limit=limit)
+    digest = _candidate_digest(candidates, payload_blockers, next_actions, limit=limit, scan_count=len(seeds))
+    target_summary = _candidate_target_summary(limit, scan_count=len(seeds), selected_count=len(candidates), ready_count=ready_count)
     return {
         "kind": "ptcli.daily_candidates",
         "status": status,
@@ -112,8 +113,13 @@ async def build_daily_candidates(
         "source_tracker": source,
         "target_trackers": targets,
         "limit": limit,
+        "target_count": target_summary["target_count"],
+        "scan_count": target_summary["scan_count"],
         "count": len(candidates),
         "ready_count": ready_count,
+        "shortfall_count": target_summary["shortfall_count"],
+        "target_met": target_summary["target_met"],
+        "target_summary": target_summary,
         "source_capability": source_capability,
         "rule_check": rule_check,
         "site_policy": site_policy,
@@ -592,7 +598,7 @@ def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, int, int]:
     return ready, score, -source_order
 
 
-def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], next_actions: list[str], *, limit: int) -> dict[str, Any]:
+def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], next_actions: list[str], *, limit: int, scan_count: int | None = None) -> dict[str, Any]:
     ready_candidates = [candidate for candidate in candidates if candidate.get("status") == "ready"]
     review_count = sum(1 for candidate in candidates if _candidate_tier(candidate) == "review")
     blocked_count = sum(1 for candidate in candidates if candidate.get("status") == "blocked" or _candidate_tier(candidate) == "blocked")
@@ -604,15 +610,21 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
     else:
         recommendation = "no_candidates"
     push_items = [_candidate_digest_item(candidate, rank=index + 1) for index, candidate in enumerate(candidates)]
-    push_summary = _candidate_push_summary(len(candidates), len(ready_candidates), review_count, blocked_count, recommendation)
-    push_payload = _candidate_push_payload(push_summary, push_items, recommendation, blockers, next_actions)
+    target_summary = _candidate_target_summary(limit, scan_count=scan_count, selected_count=len(candidates), ready_count=len(ready_candidates))
+    push_summary = _candidate_push_summary(target_summary, review_count, blocked_count, recommendation)
+    push_payload = _candidate_push_payload(push_summary, push_items, recommendation, blockers, next_actions, target_summary=target_summary)
     return {
         "kind": "ptcli.daily_candidates_digest",
         "limit": limit,
+        "target_count": target_summary["target_count"],
+        "scan_count": target_summary["scan_count"],
         "selected_count": len(candidates),
         "ready_count": len(ready_candidates),
         "review_count": review_count,
         "blocked_count": blocked_count,
+        "shortfall_count": target_summary["shortfall_count"],
+        "target_met": target_summary["target_met"],
+        "target_summary": target_summary,
         "push_title": "Daily PT retorrent candidates",
         "push_summary": push_summary,
         "push_payload": push_payload,
@@ -629,7 +641,15 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
     }
 
 
-def _candidate_push_payload(push_summary: str, push_items: list[dict[str, Any] | None], recommendation: str, blockers: list[str], next_actions: list[str]) -> dict[str, Any]:
+def _candidate_push_payload(
+    push_summary: str,
+    push_items: list[dict[str, Any] | None],
+    recommendation: str,
+    blockers: list[str],
+    next_actions: list[str],
+    *,
+    target_summary: dict[str, Any],
+) -> dict[str, Any]:
     items = [item for item in push_items if isinstance(item, dict)]
     ready_items = [item for item in items if item.get("can_submit") is True]
     blocked_items = [item for item in items if item.get("can_submit") is not True]
@@ -641,9 +661,14 @@ def _candidate_push_payload(push_summary: str, push_items: list[dict[str, Any] |
         "summary": push_summary,
         "message": "\n".join(lines),
         "format": "text/plain",
+        "target_count": target_summary["target_count"],
+        "scan_count": target_summary["scan_count"],
         "item_count": len(items),
         "ready_count": len(ready_items),
         "blocked_count": len(blocked_items),
+        "shortfall_count": target_summary["shortfall_count"],
+        "target_met": target_summary["target_met"],
+        "target_summary": target_summary,
         "recommendation": recommendation,
         "recommended_action": _candidate_digest_recommended_action(recommendation),
         "decision_summary": decision_summary,
@@ -791,10 +816,35 @@ def _push_decision_summary(items: list[dict[str, Any]], ready_items: list[dict[s
     }
 
 
-def _candidate_push_summary(selected_count: int, ready_count: int, review_count: int, blocked_count: int, recommendation: str) -> str:
+def _candidate_target_summary(limit: int, *, scan_count: int | None, selected_count: int, ready_count: int) -> dict[str, Any]:
+    target_count = max(1, min(int(limit or DEFAULT_CANDIDATE_LIMIT), DEFAULT_CANDIDATE_LIMIT))
+    selected_count = max(0, int(selected_count or 0))
+    ready_count = max(0, int(ready_count or 0))
+    scan_total = selected_count if scan_count is None else max(0, int(scan_count or 0))
+    shortfall = max(0, target_count - selected_count)
+    ready_shortfall = max(0, target_count - ready_count)
+    return {
+        "target_count": target_count,
+        "scan_count": scan_total,
+        "selected_count": selected_count,
+        "ready_count": ready_count,
+        "shortfall_count": shortfall,
+        "ready_shortfall_count": ready_shortfall,
+        "target_met": selected_count >= target_count,
+        "ready_target_met": ready_count >= target_count,
+        "exhausted_scan": scan_total < target_count or selected_count < target_count,
+    }
+
+
+def _candidate_push_summary(target_summary: dict[str, Any], review_count: int, blocked_count: int, recommendation: str) -> str:
+    selected_count = int(target_summary.get("selected_count") or 0)
+    ready_count = int(target_summary.get("ready_count") or 0)
+    target_count = int(target_summary.get("target_count") or DEFAULT_CANDIDATE_LIMIT)
+    shortfall_count = int(target_summary.get("shortfall_count") or 0)
     if selected_count <= 0:
-        return "No daily retorrent candidates are available yet."
-    return f"{selected_count} candidate(s): {ready_count} ready, {review_count} need review, {blocked_count} blocked. Recommendation: {recommendation}."
+        return f"No daily retorrent candidates are available yet; target is {target_count}."
+    shortfall_text = f", shortfall {shortfall_count}" if shortfall_count else ""
+    return f"{selected_count}/{target_count} candidate(s): {ready_count} ready, {review_count} need review, {blocked_count} blocked{shortfall_text}. Recommendation: {recommendation}."
 
 
 def _candidate_digest_recommended_action(recommendation: str) -> str:
@@ -866,7 +916,12 @@ def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list
             "scan_count": 0,
             "selected_count": 0,
         },
-        "digest": _candidate_digest([], blockers, [], limit=limit),
+        "target_count": limit,
+        "scan_count": 0,
+        "shortfall_count": limit,
+        "target_met": False,
+        "target_summary": _candidate_target_summary(limit, scan_count=0, selected_count=0, ready_count=0),
+        "digest": _candidate_digest([], blockers, [], limit=limit, scan_count=0),
         "candidates": [],
         "blockers": blockers,
         "next_actions": [],

@@ -14404,11 +14404,19 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["jobs"][0]["status_endpoint"].startswith("/v1/jobs/")
     assert payload["schedule_digest"]["kind"] == "ptcli.daily_candidate_schedule_digest"
     assert payload["schedule_digest"]["ready_job_count"] == 1
+    assert payload["schedule_digest"]["target_count"] == 10
+    assert payload["schedule_digest"]["selected_count"] == 1
+    assert payload["schedule_digest"]["shortfall_count"] == 9
+    assert payload["schedule_digest"]["target_met"] is False
     assert payload["schedule_digest"]["push_count"] == 1
     assert payload["schedule_digest"]["push_payload"]["kind"] == "ptcli.daily_candidate_schedule_push_payload"
     assert payload["schedule_digest"]["push_payload"]["submission_ready"] is True
+    assert payload["schedule_digest"]["push_payload"]["target_count"] == 10
+    assert payload["schedule_digest"]["push_payload"]["selected_count"] == 1
+    assert payload["schedule_digest"]["push_payload"]["shortfall_count"] == 9
+    assert payload["schedule_digest"]["push_payload"]["target_met"] is False
     assert payload["schedule_digest"]["push_payload"]["top_item"]["source_id"] == "60635"
-    assert "1 candidate(s) across 1 schedule job(s)" in payload["schedule_digest"]["push_payload"]["message"]
+    assert "1/10 candidate(s) across 1 schedule job(s)" in payload["schedule_digest"]["push_payload"]["message"]
     assert payload["schedule_digest"]["push_items"][0]["schedule_name"] == "u2-to-mteam"
     assert payload["schedule_digest"]["push_items"][0]["status_endpoint"].startswith("/v1/jobs/")
     assert payload["schedule_digest"]["top_submit_requests"][0]["submit_tool"] == "source_url_retorrent_job"
@@ -14441,7 +14449,11 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["notification_payload"]["kind"] == "ptcli.daily_candidate_notification_payload"
     assert payload["notification_payload"]["ready"] is True
     assert payload["notification_payload"]["status"] == "ready"
+    assert payload["notification_payload"]["counts"]["target_candidates"] == 10
+    assert payload["notification_payload"]["counts"]["selected_candidates"] == 1
     assert payload["notification_payload"]["counts"]["ready_candidates"] == 1
+    assert payload["notification_payload"]["counts"]["shortfall_candidates"] == 9
+    assert payload["notification_payload"]["counts"]["target_met"] is False
     assert payload["notification_payload"]["top_item"]["source_id"] == "60635"
     assert payload["notification_payload"]["next_step"] == payload["schedule_digest"]["submission_handoff"]["next_step"]
     assert payload["notification_payload"]["recommended_tool"] == "submit_daily_candidate_job"
@@ -15625,7 +15637,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "notification_payload" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "top_submit_requests" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "push_payload" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "shortfall_count" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "target_met" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "submission_ready" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
+    assert "shortfall_count" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "submit_items" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
     assert "next_step" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
@@ -15704,7 +15719,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
     assert "top_submit_request" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "push_payload" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
+    assert "target_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
+    assert "shortfall_count" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "message" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
+    assert "target_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
+    assert "shortfall_count" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "push_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
@@ -16116,7 +16135,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "notification_payload" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
         assert "top_submit_requests" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "push_payload" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "shortfall_count" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "target_met" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "submission_ready" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
+        assert "shortfall_count" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
         assert "submit_items" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
         assert "next_step" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
@@ -16264,7 +16286,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "workflow_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "push_payload" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "target_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "shortfall_count" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "message" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
+        assert "target_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
+        assert "shortfall_count" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
         assert "push_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
@@ -16861,13 +16887,24 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     result = await ptcli_candidates.build_daily_candidates(config, "U2", "MTEAM", limit=1, accept_rules=True)
 
     assert result["status"] == "ok"
+    assert result["target_count"] == 1
+    assert result["scan_count"] == 1
     assert result["count"] == 1
     assert result["ready_count"] == 1
+    assert result["shortfall_count"] == 0
+    assert result["target_met"] is True
+    assert result["target_summary"]["ready_target_met"] is True
     assert result["ranking"]["scan_count"] == 1
     assert result["ranking"]["selected_count"] == 1
     assert result["digest"]["recommendation"] == "submit_top_candidate_when_confirmed"
-    assert result["digest"]["push_summary"] == "1 candidate(s): 1 ready, 0 need review, 0 blocked. Recommendation: submit_top_candidate_when_confirmed."
+    assert result["digest"]["target_count"] == 1
+    assert result["digest"]["target_met"] is True
+    assert result["digest"]["shortfall_count"] == 0
+    assert result["digest"]["push_summary"] == "1/1 candidate(s): 1 ready, 0 need review, 0 blocked. Recommendation: submit_top_candidate_when_confirmed."
     assert result["digest"]["push_payload"]["kind"] == "ptcli.daily_candidates_push_payload"
+    assert result["digest"]["push_payload"]["target_count"] == 1
+    assert result["digest"]["push_payload"]["shortfall_count"] == 0
+    assert result["digest"]["push_payload"]["target_met"] is True
     assert result["digest"]["push_payload"]["ready_count"] == 1
     assert result["digest"]["push_payload"]["top_item"]["source_id"] == "60635"
     assert result["digest"]["push_payload"]["decision_summary"]["submit_ready"] is True

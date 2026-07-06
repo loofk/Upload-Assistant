@@ -1291,7 +1291,12 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         "digest": result.get("digest"),
         "candidates": result.get("candidates", []),
         "count": result.get("count", 0),
+        "target_count": result.get("target_count"),
+        "scan_count": result.get("scan_count"),
         "ready_count": result.get("ready_count", 0),
+        "shortfall_count": result.get("shortfall_count"),
+        "target_met": result.get("target_met"),
+        "target_summary": result.get("target_summary"),
     }
 
 
@@ -2835,6 +2840,8 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
         request = job.get("job_request") if isinstance(job.get("job_request"), dict) else {}
         top_candidate = digest.get("top_candidate") if isinstance(digest.get("top_candidate"), dict) else {}
         top_submit_request = digest.get("top_submit_request") if isinstance(digest.get("top_submit_request"), dict) else None
+        digest_push_items = digest.get("push_items") if isinstance(digest.get("push_items"), list) else []
+        selected_count = int(digest.get("selected_count") or len(digest_push_items))
         item = {
             "schedule_name": job.get("schedule_name"),
             "job_id": job.get("job_id"),
@@ -2845,7 +2852,13 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
             "status_endpoint": job.get("status_endpoint"),
             "summary_endpoint": job.get("summary_endpoint"),
             "recommendation": digest.get("recommendation"),
+            "target_count": int(digest.get("target_count") or request.get("limit") or DEFAULT_CANDIDATE_LIMIT),
+            "scan_count": int(digest.get("scan_count") or 0),
+            "selected_count": selected_count,
             "ready_count": int(digest.get("ready_count") or decision.get("ready_count") or 0),
+            "shortfall_count": int(digest.get("shortfall_count") or 0),
+            "target_met": bool(digest.get("target_met")),
+            "target_summary": digest.get("target_summary") if isinstance(digest.get("target_summary"), dict) else None,
             "top_candidate": top_candidate or None,
             "top_submit_request": top_submit_request,
             "top_submit_job_endpoint": digest.get("top_submit_job_endpoint"),
@@ -2853,12 +2866,11 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
             "agent_decision": decision.get("decision"),
             "can_submit_job": bool(decision.get("can_submit_job")),
             "missing_confirmations": _string_list(decision.get("missing_confirmations")),
-            "push_count": len(digest.get("push_items")) if isinstance(digest.get("push_items"), list) else 0,
+            "push_count": len(digest_push_items),
             "blockers": _string_list(decision.get("blockers") or digest.get("blockers")),
             "next_actions": _string_list(digest.get("next_actions")),
         }
         items.append(item)
-        digest_push_items = digest.get("push_items") if isinstance(digest.get("push_items"), list) else []
         push_items.extend(
             {
                 "schedule_name": job.get("schedule_name"),
@@ -2888,6 +2900,10 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
             submission_items.append(_daily_candidate_schedule_submission_item(job, request, submission_source, item))
     submission_handoff = _daily_candidate_schedule_submission_handoff(submission_items, blockers)
     push_payload = _daily_candidate_schedule_push_payload(push_items, items, submission_handoff, blockers)
+    target_count = sum(int(item.get("target_count") or 0) for item in items)
+    selected_count = sum(int(item.get("selected_count") or 0) for item in items)
+    ready_count = sum(int(item.get("ready_count") or 0) for item in items)
+    shortfall_count = sum(max(0, int(item.get("target_count") or 0) - int(item.get("selected_count") or 0)) for item in items)
     return {
         "kind": "ptcli.daily_candidate_schedule_digest",
         "job_count": len(jobs),
@@ -2895,6 +2911,11 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
         "pending_job_count": sum(1 for item in items if item.get("status") in {"queued", "running"}),
         "blocked_job_count": sum(1 for item in items if item.get("status") in {"blocked", "failed"} or item.get("blockers")),
         "skipped_count": len(skipped),
+        "target_count": target_count,
+        "selected_count": selected_count,
+        "ready_count": ready_count,
+        "shortfall_count": shortfall_count,
+        "target_met": bool(items) and selected_count >= target_count,
         "push_count": len(push_items),
         "push_payload": push_payload,
         "submit_request_count": len(top_submit_requests),
@@ -2911,8 +2932,11 @@ def _daily_candidate_schedule_push_payload(push_items: list[dict[str, Any]], ite
     ready_items = [item for item in push_items if item.get("can_submit") is True]
     blocked_items = [item for item in push_items if item.get("can_submit") is not True]
     pending_count = sum(1 for item in items if item.get("status") in {"queued", "running"})
+    target_count = sum(int(item.get("target_count") or 0) for item in items)
+    selected_count = sum(int(item.get("selected_count") or 0) for item in items)
+    shortfall_count = sum(max(0, int(item.get("target_count") or 0) - int(item.get("selected_count") or 0)) for item in items)
     title = "Daily PT candidate schedule"
-    summary = f"{len(push_items)} candidate(s) across {len(items)} schedule job(s): {len(ready_items)} ready, {len(blocked_items)} blocked/review, {pending_count} pending."
+    summary = f"{selected_count}/{target_count} candidate(s) across {len(items)} schedule job(s): {len(ready_items)} ready, {len(blocked_items)} blocked/review, {pending_count} pending, shortfall {shortfall_count}."
     lines = [summary, *[str(item.get("summary_text")) for item in push_items if item.get("summary_text")]]
     if submission_handoff.get("ready"):
         recommended_action = "Review push_payload.items and submit approved entries through submission_handoff.items[].submit_endpoint."
@@ -2927,6 +2951,10 @@ def _daily_candidate_schedule_push_payload(push_items: list[dict[str, Any]], ite
         "message": "\n".join(lines),
         "format": "text/plain",
         "schedule_job_count": len(items),
+        "target_count": target_count,
+        "selected_count": selected_count,
+        "shortfall_count": shortfall_count,
+        "target_met": bool(items) and selected_count >= target_count,
         "item_count": len(push_items),
         "ready_count": len(ready_items),
         "blocked_count": len(blocked_items),
@@ -2948,6 +2976,9 @@ def _daily_candidate_schedule_notification_payload(schedule_digest: dict[str, An
     ready_items = [item for item in items if isinstance(item, dict) and item.get("can_submit") is True]
     blocked_items = [item for item in items if isinstance(item, dict) and item.get("can_submit") is not True]
     pending_count = int(schedule_digest.get("pending_job_count") or 0)
+    target_count = int(schedule_digest.get("target_count") or push_payload.get("target_count") or 0)
+    selected_count = int(schedule_digest.get("selected_count") or push_payload.get("selected_count") or 0)
+    shortfall_count = int(schedule_digest.get("shortfall_count") or push_payload.get("shortfall_count") or 0)
     submit_items = submission_handoff.get("items") if isinstance(submission_handoff.get("items"), list) else []
     submission_ready = bool(submission_handoff.get("ready"))
     ready_count = len(ready_items) if ready_items else len(submit_items) if submission_ready else 0
@@ -2968,9 +2999,13 @@ def _daily_candidate_schedule_notification_payload(schedule_digest: dict[str, An
             "ready_jobs": schedule_digest.get("ready_job_count", 0),
             "pending_jobs": pending_count,
             "blocked_jobs": schedule_digest.get("blocked_job_count", 0),
+            "target_candidates": target_count,
             "candidates": schedule_digest.get("push_count", 0),
+            "selected_candidates": selected_count,
             "ready_candidates": ready_count,
             "blocked_candidates": len(blocked_items),
+            "shortfall_candidates": shortfall_count,
+            "target_met": bool(schedule_digest.get("target_met")),
             "submit_requests": schedule_digest.get("submit_request_count", 0),
         },
         "top_item": top_item,
@@ -3133,6 +3168,11 @@ def _daily_candidate_schedule_job_decision(schedule_digest: dict[str, Any], bloc
         "submit_request_count": schedule_digest.get("submit_request_count", 0),
         "submission_handoff_ready": bool((schedule_digest.get("submission_handoff") or {}).get("ready")) if isinstance(schedule_digest.get("submission_handoff"), dict) else False,
         "submit_tool": "submit_daily_candidate_job" if schedule_digest.get("submit_request_count") else None,
+        "target_count": schedule_digest.get("target_count", 0),
+        "selected_count": schedule_digest.get("selected_count", 0),
+        "ready_count": schedule_digest.get("ready_count", 0),
+        "shortfall_count": schedule_digest.get("shortfall_count", 0),
+        "target_met": bool(schedule_digest.get("target_met")),
         "push_count": schedule_digest.get("push_count", 0),
         "blocker_count": len(blockers),
     }
@@ -8037,8 +8077,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "schedule_digest", "notification_payload", "agent_decision", "blockers", "next_actions"],
                 "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
-                "digest_fields": ["items", "push_items", "push_payload", "top_submit_requests", "submission_handoff", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
-                "push_payload_fields": ["title", "summary", "message", "format", "items", "top_item", "decision_summary", "submission_ready", "recommended_action"],
+                "digest_fields": ["items", "push_items", "push_payload", "top_submit_requests", "submission_handoff", "target_count", "selected_count", "ready_count", "shortfall_count", "target_met", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
+                "push_payload_fields": ["title", "summary", "message", "format", "target_count", "selected_count", "shortfall_count", "target_met", "items", "top_item", "decision_summary", "submission_ready", "recommended_action"],
                 "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "submit_items", "submission_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
                 "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items"],
             },
@@ -8740,10 +8780,16 @@ def _job_list_response_contract() -> dict[str, Any]:
 
 def _candidate_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "count", "ready_count", "site_policy", "ranking", "digest", "candidates", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "target_count", "scan_count", "count", "ready_count", "shortfall_count", "target_met", "target_summary", "site_policy", "ranking", "digest", "candidates", "blockers", "next_actions"],
         "digest_fields": [
             "recommendation",
             "recommended_action",
+            "target_count",
+            "scan_count",
+            "selected_count",
+            "shortfall_count",
+            "target_met",
+            "target_summary",
             "push_title",
             "push_summary",
             "push_payload",
@@ -8765,9 +8811,14 @@ def _candidate_response_contract() -> dict[str, Any]:
             "summary",
             "message",
             "format",
+            "target_count",
+            "scan_count",
             "item_count",
             "ready_count",
             "blocked_count",
+            "shortfall_count",
+            "target_met",
+            "target_summary",
             "recommended_action",
             "decision_summary",
             "top_item",
