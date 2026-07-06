@@ -30,6 +30,7 @@ DEFAULT_CANDIDATE_LIMIT = 10
 MAX_CANDIDATE_SCAN = 50
 SOURCE_URL_RETORRENT_JOB_ENDPOINT = "/v1/jobs/retorrent/from-url"
 SOURCE_URL_RETORRENT_JOB_TOOL = "source_url_retorrent_job"
+PLACEHOLDER_FINGERPRINTS = {"manual-review", "manual-review-yyyy-mm-dd", "reviewed-yyyy-mm-dd"}
 RECENT_PATHS: dict[str, str] = {
     "HDS": "/index.php?page=torrents",
     "TTG": "/browse.php",
@@ -250,6 +251,7 @@ def _candidate_blockers(
     blockers: list[str] = []
     if (source_policy.get("manual_review_required") is True or any(policy.get("manual_review_required") is True for policy in target_policies)) and not accept_rules:
         blockers.append("site-policy: manual source/target rule review must be acknowledged before execution.")
+    blockers.extend(_candidate_rule_review_blockers(seed.tracker, source_policy))
     if source_policy.get("allow_auto_download") is not True:
         blockers.append(f"{seed.tracker} policy: automatic source download is not enabled.")
     if source_policy.get("allow_retorrent") is not True:
@@ -257,6 +259,7 @@ def _candidate_blockers(
     blockers.extend(_candidate_transfer_rule_blockers(seed, source_policy))
     for target_policy in target_policies:
         target = str(target_policy.get("tracker") or "target")
+        blockers.extend(_candidate_rule_review_blockers(target, target_policy))
         if target_policy.get("allow_auto_upload") is not True:
             blockers.append(f"{target} policy: automatic target upload is not enabled.")
         if target_policy.get("allow_retorrent") is not True:
@@ -275,6 +278,22 @@ def _candidate_blockers(
     if duplicate_check.get("searched") is False:
         blockers.append(f"target-duplicate: {duplicate_check.get('reason') or 'duplicate search did not run.'}")
     return blockers
+
+
+def _candidate_rule_review_blockers(tracker: str, policy: dict[str, Any]) -> list[str]:
+    if policy.get("manual_review_required") is not True:
+        return []
+    fingerprint = str(policy.get("rule_review_fingerprint") or "").strip()
+    if not fingerprint:
+        return [f"{tracker} policy: rule_review_fingerprint is required before candidate submission."]
+    if _placeholder_rule_review_fingerprint(fingerprint):
+        return [f"{tracker} policy: rule_review_fingerprint still looks like a placeholder."]
+    return []
+
+
+def _placeholder_rule_review_fingerprint(value: str) -> bool:
+    normalized = value.strip().lower()
+    return "yyyy" in normalized or normalized in PLACEHOLDER_FINGERPRINTS
 
 
 def _candidate_transfer_rule_blockers(seed: CandidateSeed, policy: dict[str, Any]) -> list[str]:
@@ -363,8 +382,26 @@ def _candidate_policy_summary(source_policy: dict[str, Any], target_policies: li
             "target_rules_urls": [policy.get("rules_url") for policy in target_policies if policy.get("rules_url")],
             "source_fingerprint": source_policy.get("rule_review_fingerprint"),
             "target_fingerprints": [policy.get("rule_review_fingerprint") for policy in target_policies if policy.get("rule_review_fingerprint")],
+            "fingerprint_status": {
+                "source": _policy_fingerprint_status(source_policy),
+                "targets": [_policy_fingerprint_status(policy) for policy in target_policies],
+            },
         },
         "policy_coverage": _candidate_policy_coverage_summary(source_coverage, target_coverages),
+    }
+
+
+def _policy_fingerprint_status(policy: dict[str, Any]) -> dict[str, Any]:
+    fingerprint = str(policy.get("rule_review_fingerprint") or "").strip()
+    placeholder = bool(fingerprint and _placeholder_rule_review_fingerprint(fingerprint))
+    ready = policy.get("manual_review_required") is not True or bool(fingerprint and not placeholder)
+    return {
+        "tracker": policy.get("tracker"),
+        "manual_review_required": policy.get("manual_review_required") is True,
+        "ready": ready,
+        "missing": policy.get("manual_review_required") is True and not fingerprint,
+        "placeholder": placeholder,
+        "fingerprint": fingerprint or None,
     }
 
 
@@ -697,7 +734,7 @@ def _candidate_decision_summary(
         action = "submit_when_confirmed"
     elif duplicate_check.get("exists") is True:
         action = "stop_duplicate"
-    elif policy_coverage.get("ready") is False:
+    elif policy_coverage.get("ready") is False or any("rule_review_fingerprint" in blocker for blocker in blockers):
         action = "configure_policy"
     else:
         action = "review_blockers"
@@ -804,6 +841,7 @@ def _candidate_digest_policy_summary(policy_summary: dict[str, Any]) -> dict[str
         "policy_coverage": policy_summary.get("policy_coverage"),
         "qbit_limits": qbit_limits,
         "seeding_requirements": seeding,
+        "rules": policy_summary.get("rules"),
     }
 
 

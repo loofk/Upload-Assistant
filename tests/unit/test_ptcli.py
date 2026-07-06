@@ -15713,6 +15713,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_coverage" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "rules" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
+    assert "fingerprint_status" in tool_by_name["daily_candidates"]["response_contract"]["rule_fields"]
+    assert "placeholder" in tool_by_name["daily_candidates"]["response_contract"]["rule_fingerprint_status_fields"]
     assert "submit_job_endpoint" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "summary_text" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
@@ -16270,6 +16273,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "rules" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
+        assert "fingerprint_status" in tools_by_name["daily_candidates_job"]["response_contract"]["rule_fields"]
+        assert "placeholder" in tools_by_name["daily_candidates_job"]["response_contract"]["rule_fingerprint_status_fields"]
         assert "summary_text" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "can_submit" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
@@ -16894,6 +16900,8 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["policy_summary"]["policy_coverage"]["ready"] is True
     assert result["digest"]["push_items"][0]["policy_summary"]["qbit_limits"]["source"]["download_limit"] == 20 * 1024 * 1024
     assert result["digest"]["push_items"][0]["policy_summary"]["qbit_limits"]["target"]["upload_limit"] == 2 * 1024 * 1024
+    assert result["digest"]["push_items"][0]["policy_summary"]["rules"]["fingerprint_status"]["source"]["ready"] is True
+    assert result["digest"]["push_items"][0]["policy_summary"]["rules"]["fingerprint_status"]["targets"][0]["ready"] is True
     candidate = result["candidates"][0]
     assert candidate["status"] == "ready"
     assert candidate["ranking"]["tier"] == "ready"
@@ -16954,7 +16962,7 @@ async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers
     monkeypatch.setattr(ptcli_candidates, "fetch_source_info", fake_fetch_source_info)
     monkeypatch.setattr(ptcli_candidates, "search_mteam_duplicates", fake_search_mteam_duplicates)
 
-    result = await ptcli_candidates.build_daily_candidates({"TRACKERS": {"MTEAM": {"api_key": "fake"}}}, "U2", "MTEAM", limit=2, accept_rules=True)
+    result = await ptcli_candidates.build_daily_candidates({"TRACKERS": {"MTEAM": {"api_key": "fake"}}, **READY_REFERENCE_POLICY_CONFIG}, "U2", "MTEAM", limit=2, accept_rules=True)
 
     assert result["count"] == 2
     assert [candidate["source"]["torrent_id"] for candidate in result["candidates"]] == ["60636", "60635"]
@@ -16975,6 +16983,57 @@ async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers
     assert result["digest"]["push_payload"]["decision_summary"]["blocked_source_ids"] == ["60635"]
     assert result["digest"]["push_payload"]["decision_summary"]["risk_counts"]["high"] == 1
     assert any("target-duplicate" in blocker for blocker in result["digest"]["push_items"][1]["blockers"])
+
+
+async def test_daily_candidates_block_placeholder_rule_review_fingerprint(monkeypatch) -> None:
+    seed = ptcli_candidates.CandidateSeed("U2", "60635", "Example.Release", "https://u2.dmhy.org/details.php?id=60635", size="42 GiB", promotion="free")
+
+    async def fake_fetch_recent_candidate_seeds(*_args, **_kwargs):
+        return [seed]
+
+    async def fake_fetch_source_info(*_args, **_kwargs):
+        return source_info_from_tuple("U2", "60635", (1234567, 999, "Example.Release", "a" * 40, "desc"), {})
+
+    async def fake_search_mteam_duplicates(_config, _source_info):
+        return {"searched": True, "count": 0, "dupes": []}
+
+    monkeypatch.setattr(ptcli_candidates, "fetch_recent_candidate_seeds", fake_fetch_recent_candidate_seeds)
+    monkeypatch.setattr(ptcli_candidates, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_candidates, "search_mteam_duplicates", fake_search_mteam_duplicates)
+
+    config = {
+        "TRACKERS": {"MTEAM": {"api_key": "fake"}},
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "rule_review_fingerprint": "manual-review-YYYY-MM-DD",
+                },
+                "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
+                    "upload_rate_limit": "2MiB/s",
+                    "min_ratio": 1.0,
+                    "rule_review_fingerprint": "mteam-review",
+                },
+            }
+        },
+    }
+
+    result = await ptcli_candidates.build_daily_candidates(config, "U2", "MTEAM", limit=1, accept_rules=True)
+
+    item = result["digest"]["push_items"][0]
+    assert result["ready_count"] == 0
+    assert result["candidates"][0]["status"] == "blocked"
+    assert any("rule_review_fingerprint still looks like a placeholder" in blocker for blocker in result["candidates"][0]["blockers"])
+    assert item["can_submit"] is False
+    assert item["decision_summary"]["action"] == "configure_policy"
+    assert item["policy_summary"]["rules"]["fingerprint_status"]["source"]["placeholder"] is True
+    assert item["policy_summary"]["rules"]["fingerprint_status"]["source"]["ready"] is False
+    assert item["policy_summary"]["rules"]["fingerprint_status"]["targets"][0]["ready"] is True
 
 
 async def test_daily_candidates_blocks_for_transfer_policy_rules(monkeypatch) -> None:

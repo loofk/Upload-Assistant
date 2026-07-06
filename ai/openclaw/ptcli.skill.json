@@ -4599,6 +4599,29 @@
           "submit_job_endpoint",
           "submit_tool"
         ],
+        "policy_summary_fields": [
+          "manual_review_ready",
+          "automation",
+          "policy_coverage",
+          "qbit_limits",
+          "seeding_requirements",
+          "rules"
+        ],
+        "rule_fields": [
+          "source_rules_url",
+          "target_rules_urls",
+          "source_fingerprint",
+          "target_fingerprints",
+          "fingerprint_status"
+        ],
+        "rule_fingerprint_status_fields": [
+          "tracker",
+          "manual_review_required",
+          "ready",
+          "missing",
+          "placeholder",
+          "fingerprint"
+        ],
         "ranking": {
           "score_range": "0-100",
           "tiers": [
@@ -5094,6 +5117,29 @@
           "items",
           "blockers",
           "next_actions"
+        ],
+        "policy_summary_fields": [
+          "manual_review_ready",
+          "automation",
+          "policy_coverage",
+          "qbit_limits",
+          "seeding_requirements",
+          "rules"
+        ],
+        "rule_fields": [
+          "source_rules_url",
+          "target_rules_urls",
+          "source_fingerprint",
+          "target_fingerprints",
+          "fingerprint_status"
+        ],
+        "rule_fingerprint_status_fields": [
+          "tracker",
+          "manual_review_required",
+          "ready",
+          "missing",
+          "placeholder",
+          "fingerprint"
         ]
       },
       "workflow_hints": {

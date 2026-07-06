@@ -8721,6 +8721,9 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
             "candidate_fields": candidate_contract["candidate_fields"],
             "push_item_fields": candidate_contract["push_item_fields"],
             "push_payload_fields": candidate_contract["push_payload_fields"],
+            "policy_summary_fields": candidate_contract["policy_summary_fields"],
+            "rule_fields": candidate_contract["rule_fields"],
+            "rule_fingerprint_status_fields": candidate_contract["rule_fingerprint_status_fields"],
         }
     )
     return contract
@@ -8818,6 +8821,9 @@ def _candidate_response_contract() -> dict[str, Any]:
             "submit_job_endpoint",
             "submit_tool",
         ],
+        "policy_summary_fields": ["manual_review_ready", "automation", "policy_coverage", "qbit_limits", "seeding_requirements", "rules"],
+        "rule_fields": ["source_rules_url", "target_rules_urls", "source_fingerprint", "target_fingerprints", "fingerprint_status"],
+        "rule_fingerprint_status_fields": ["tracker", "manual_review_required", "ready", "missing", "placeholder", "fingerprint"],
         "ranking": {"score_range": "0-100", "tiers": ["ready", "review", "blocked"], "sort": "ready-first, then descending score"},
     }
 
