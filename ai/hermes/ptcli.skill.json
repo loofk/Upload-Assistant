@@ -1031,9 +1031,23 @@
           "blockers",
           "next_actions"
         ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
+          "closure_checklist",
           "source",
           "target",
           "evidence",
@@ -1310,9 +1324,23 @@
           "blockers",
           "next_actions"
         ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
+          "closure_checklist",
           "source",
           "target",
           "evidence",
@@ -1599,9 +1627,23 @@
           "blockers",
           "next_actions"
         ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
+          "closure_checklist",
           "source",
           "target",
           "evidence",
@@ -1892,9 +1934,23 @@
           "blockers",
           "next_actions"
         ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
+          "closure_checklist",
           "source",
           "target",
           "evidence",
@@ -2259,9 +2315,23 @@
           "blockers",
           "next_actions"
         ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
+          "closure_checklist",
           "source",
           "target",
           "evidence",
@@ -2719,9 +2789,23 @@
           "blockers",
           "next_actions"
         ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
+          "closure_checklist",
           "source",
           "target",
           "evidence",
@@ -3244,9 +3328,23 @@
           "blockers",
           "next_actions"
         ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
+          "closure_checklist",
           "source",
           "target",
           "evidence",
@@ -3618,9 +3716,23 @@
           "blockers",
           "next_actions"
         ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
+          "closure_checklist",
           "source",
           "target",
           "evidence",
@@ -3802,9 +3914,23 @@
           "blockers",
           "next_actions"
         ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
+          "closure_checklist",
           "source",
           "target",
           "evidence",

@@ -3707,10 +3707,12 @@ def _job_closure_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | 
         target_upload_handoff.get("uploaded_seeding_ready") if isinstance(target_upload_handoff, dict) else None,
         closure.get("target_ready"),
     )
+    closure_checklist = _closure_checklist(source_ready, target_ready, complete, duplicate_check, manual_retorrent_handoff, target_upload_handoff, qbit_handoff)
     return {
         "kind": "ptcli.closure_handoff",
         "ready": complete,
         "complete": complete,
+        "closure_checklist": closure_checklist,
         "action": action,
         "status": status,
         "source_reference": _job_source_reference(job),
@@ -3754,6 +3756,34 @@ def _job_closure_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | 
         "recommended_request": next_step.get("request"),
         "blockers": blockers,
         "next_actions": _closure_handoff_next_actions(action, blockers, next_step),
+    }
+
+
+def _closure_checklist(
+    source_ready: Any,
+    target_ready: Any,
+    complete: bool,
+    duplicate_check: dict[str, Any],
+    manual_retorrent_handoff: dict[str, Any] | None,
+    target_upload_handoff: dict[str, Any] | None,
+    qbit_handoff: dict[str, Any] | None,
+) -> dict[str, Any]:
+    manual_checklist = manual_retorrent_handoff.get("live_checklist") if isinstance(manual_retorrent_handoff, dict) and isinstance(manual_retorrent_handoff.get("live_checklist"), dict) else None
+    items = [
+        _checklist_item("source_download_or_match", source_ready is True, required=True, blocker="source.not_ready"),
+        _checklist_item("target_uploaded_and_seeding", target_ready is True, required=True, blocker="target.uploaded_seeding_not_ready"),
+        _checklist_item("target_duplicate_clear", duplicate_check.get("searched") is True and duplicate_check.get("exists") is False, required=True, blocker="duplicate_check.not_clear"),
+        _checklist_item("manual_live_gates", manual_checklist.get("ready") is True if isinstance(manual_checklist, dict) else None, required=True, blocker="manual_retorrent_handoff.live_checklist_not_ready"),
+        _checklist_item("target_upload_handoff", target_upload_handoff.get("uploaded_seeding_ready") is True if isinstance(target_upload_handoff, dict) else None, required=True, blocker="target_upload_handoff.not_ready"),
+        _checklist_item("qbit_handoff", qbit_handoff.get("ready") is True if isinstance(qbit_handoff, dict) else None, required=False, blocker="qbit_handoff.not_ready"),
+    ]
+    blockers = _checklist_blockers(items)
+    return {
+        "kind": "ptcli.closure_checklist",
+        "ready": complete and not blockers,
+        "items": items,
+        "blockers": blockers,
+        "next_actions": [] if complete and not blockers else ["Follow closure_handoff.next_step after reviewing closure_checklist.blockers."],
     }
 
 
@@ -4075,11 +4105,22 @@ def _job_manual_retorrent_handoff(job: dict[str, Any], summary_payload: dict[str
     )
     can_attempt_live = bool(duplicate_clear and not missing_confirmations and policy_ready is not False and status not in {"queued", "running", "cancelled"})
     can_resume = bool(resume_plan.get("recommended")) and not duplicate_exists and not missing_confirmations and policy_ready is not False
+    live_checklist = _manual_retorrent_live_checklist(
+        job,
+        duplicate_clear=duplicate_clear,
+        missing_confirmations=missing_confirmations,
+        policy_ready=policy_ready,
+        qbit_limit_ready=qbit_limit_ready,
+        materials_handoff=materials_handoff,
+        target_upload_handoff=target_upload_handoff,
+    )
     return {
         "kind": "ptcli.manual_retorrent_handoff",
         "ready": status == "complete",
         "action": action,
         "reason": reason,
+        "live_ready": live_checklist["ready"],
+        "live_checklist": live_checklist,
         "status": status,
         "source_reference": _job_source_reference(job),
         "target_trackers": request.get("target_trackers"),
@@ -4101,6 +4142,56 @@ def _job_manual_retorrent_handoff(job: dict[str, Any], summary_payload: dict[str
         "blockers": blockers,
         "next_actions": _manual_retorrent_handoff_next_actions(action, next_actions, missing_confirmations, resume_plan),
     }
+
+
+def _manual_retorrent_live_checklist(
+    job: dict[str, Any],
+    *,
+    duplicate_clear: bool,
+    missing_confirmations: list[str],
+    policy_ready: bool | None,
+    qbit_limit_ready: bool | None,
+    materials_handoff: dict[str, Any] | None,
+    target_upload_handoff: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source_reference = _job_source_reference(job)
+    source_resolved = bool(source_reference.get("tracker") and (source_reference.get("source_id") or source_reference.get("source_url")))
+    materials_ready = materials_handoff.get("ready") if isinstance(materials_handoff, dict) else None
+    target_payload_ready = target_upload_handoff.get("ready_for_live_upload") if isinstance(target_upload_handoff, dict) else None
+    uploaded_seeding_ready = target_upload_handoff.get("uploaded_seeding_ready") if isinstance(target_upload_handoff, dict) else None
+    items = [
+        _checklist_item("source_reference", source_resolved, required=True, blocker="source_reference.unresolved", evidence=source_reference),
+        _checklist_item("target_duplicate_clear", duplicate_clear, required=True, blocker="duplicate_check.not_clear"),
+        _checklist_item("confirmations", not missing_confirmations, required=True, blocker="confirmations.missing", missing=missing_confirmations),
+        _checklist_item("site_policy", policy_ready is True, required=True, blocker="policy_coverage.not_ready", state="unknown" if policy_ready is None else "ready" if policy_ready else "blocked"),
+        _checklist_item("materials", materials_ready is True if materials_ready is not None else None, required=False, blocker="materials_handoff.not_ready"),
+        _checklist_item("target_upload_payload", target_payload_ready is True if target_payload_ready is not None else None, required=False, blocker="target_upload_handoff.not_ready"),
+        _checklist_item("uploaded_seeding", uploaded_seeding_ready is True if uploaded_seeding_ready is not None else None, required=False, blocker="target_upload_handoff.uploaded_seeding_not_ready"),
+        _checklist_item("qbit_limit_audit", qbit_limit_ready is True if qbit_limit_ready is not None else None, required=False, blocker="qbit_limit_audit.not_ready"),
+    ]
+    blockers = _checklist_blockers(items)
+    return {
+        "kind": "ptcli.manual_retorrent_live_checklist",
+        "ready": not blockers,
+        "items": items,
+        "blockers": blockers,
+        "next_actions": [] if not blockers else ["Resolve manual_retorrent_handoff.live_checklist.blockers before attempting live upload."],
+    }
+
+
+def _checklist_item(key: str, ready: bool | None, *, required: bool, blocker: str, **extra: Any) -> dict[str, Any]:
+    item = {
+        "key": key,
+        "ready": ready,
+        "required": required,
+        "blocker": blocker if ready is not True else None,
+    }
+    item.update({name: value for name, value in extra.items() if value not in (None, [], {})})
+    return item
+
+
+def _checklist_blockers(items: list[dict[str, Any]]) -> list[str]:
+    return [str(item["blocker"]) for item in items if item.get("required") is True and item.get("ready") is not True and item.get("blocker")]
 
 
 def _is_manual_retorrent_job(job: dict[str, Any], request: dict[str, Any]) -> bool:
@@ -6044,7 +6135,8 @@ def _job_response_contract() -> dict[str, Any]:
         "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
-        "closure_handoff_fields": ["action", "complete", "source", "target", "evidence", "duplicate_check", "target_upload_handoff", "qbit_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
+        "closure_handoff_fields": ["action", "complete", "closure_checklist", "source", "target", "evidence", "duplicate_check", "target_upload_handoff", "qbit_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
     }
 
 
