@@ -90,7 +90,8 @@
             "target_trackers",
             "policy_execution_summary",
             "duplicate_check",
-            "job_template.request",
+            "duplicate_check_handoff",
+            "job_creation_handoff.request",
             "next_step",
             "blockers"
           ],
@@ -140,9 +141,28 @@
           ]
         },
         {
+          "step": "duplicate_check",
+          "tool": "retorrent_check",
+          "request_from": "source_url_retorrent_preflight.duplicate_check_handoff.request",
+          "read": [
+            "duplicate_check.searched",
+            "duplicate_check.exists",
+            "duplicate_check.count",
+            "duplicate_check.dupes",
+            "blockers",
+            "next_actions"
+          ],
+          "continue_when": "duplicate_check.searched=true and duplicate_check.exists=false",
+          "stop_when": [
+            "duplicate_check.exists=true",
+            "status=blocked",
+            "status=error"
+          ]
+        },
+        {
           "step": "submit_job",
           "tool": "source_url_retorrent_job",
-          "request_from": "readiness_bundle.live_readiness.manual_job_template.request",
+          "request_from": "source_url_retorrent_preflight.job_creation_handoff.request after duplicate_check.exists=false",
           "read": [
             "job_id",
             "status",
@@ -779,13 +799,16 @@
           "ready_to_create_job",
           "ready_for_live_upload",
           "duplicate_check",
+          "duplicate_check_handoff",
           "readiness_bundle",
           "policy_execution_summary",
           "job_template",
+          "job_creation_handoff",
           "next_step",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
+          "agent_decision",
           "blockers",
           "warnings",
           "next_actions",
@@ -806,13 +829,38 @@
           "count",
           "dupes",
           "reason",
+          "ready_to_check",
           "next_tool",
-          "next_endpoint"
+          "next_endpoint",
+          "next_request",
+          "continue_when",
+          "stop_when"
+        ],
+        "duplicate_handoff_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "stop_when",
+          "then_tool",
+          "then_endpoint",
+          "then_request"
         ],
         "job_template_fields": [
           "tool",
           "endpoint",
           "request"
+        ],
+        "job_creation_handoff_fields": [
+          "ready_after_duplicate_clear",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "requires_before_call"
         ],
         "safety": [
           "does_not_create_job",

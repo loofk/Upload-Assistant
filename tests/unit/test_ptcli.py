@@ -15108,13 +15108,15 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["request_template"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert ready["request_template"]["target"] == "MTEAM"
     assert ready["request_template"]["save_path"] == "/downloads"
-    assert [step["tool"] for step in ready["steps"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
+    assert [step["tool"] for step in ready["steps"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
     assert "policy_execution_summary" in ready["steps"][0]["read"]
     assert "live_readiness.policy_execution_summary" in ready["steps"][1]["read"]
     assert "policy_execution_summary.ready" in ready["steps"][2]["read"]
     assert ready["steps"][2]["continue_when"] == "ready=true and policy_execution_summary.ready=true"
-    assert ready["steps"][3]["request"] == ready["request_template"]
-    assert ready["steps"][5]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
+    assert ready["steps"][3]["tool"] == "retorrent_check"
+    assert ready["steps"][3]["request"]["source"] == ready["request_template"]["source_url"]
+    assert ready["steps"][4]["request"] == ready["request_template"]
+    assert ready["steps"][6]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
     assert "Submit request_template to source_url_retorrent_job" in ready["next_actions"][0]
 
     daily_blocked = ptcli_service.agent_run_preview_payload({"workflow": "daily_candidates", "source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
@@ -15161,19 +15163,21 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
-    assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
+    assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
     assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
     assert "policy_execution_summary" in source_url_workflow["runbook"][0]["read"]
     assert source_url_workflow["runbook"][1]["continue_when"] == "live_readiness.ready_for_manual_retorrent=true"
     assert "live_readiness.policy_execution_summary" in source_url_workflow["runbook"][1]["read"]
     assert "policy_execution_summary.ready=false" in source_url_workflow["runbook"][0]["stop_when"]
     assert source_url_workflow["runbook"][2]["continue_when"] == "ready=true and policy_execution_summary.ready=true"
-    assert "closure_handoff" in source_url_workflow["runbook"][3]["read"]
-    assert "closure_handoff.action=stop_duplicate" in source_url_workflow["runbook"][3]["stop_when"]
-    assert source_url_workflow["runbook"][5]["step"] == "closure_decision"
-    assert "closure_summary.next_step" in source_url_workflow["runbook"][5]["read"]
-    assert source_url_workflow["runbook"][5]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
-    assert source_url_workflow["runbook"][5]["resume_with"].startswith("closure_summary.recommended_tool")
+    assert source_url_workflow["runbook"][3]["tool"] == "retorrent_check"
+    assert source_url_workflow["runbook"][3]["continue_when"] == "duplicate_check.searched=true and duplicate_check.exists=false"
+    assert "closure_handoff" in source_url_workflow["runbook"][4]["read"]
+    assert "closure_handoff.action=stop_duplicate" in source_url_workflow["runbook"][4]["stop_when"]
+    assert source_url_workflow["runbook"][6]["step"] == "closure_decision"
+    assert "closure_summary.next_step" in source_url_workflow["runbook"][6]["read"]
+    assert source_url_workflow["runbook"][6]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
+    assert source_url_workflow["runbook"][6]["resume_with"].startswith("closure_summary.recommended_tool")
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
     assert manual_workflow["tool"] == "manual_retorrent_job"
     assert manual_workflow["runbook_ref"] == "source_url_retorrent"
@@ -15211,6 +15215,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
         assert "ready_to_create_job" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "duplicate_check_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
+        assert "duplicate_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
+        assert "job_creation_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "queue" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -15239,9 +15245,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         source_url_workflow = next(workflow for workflow in payload["default_workflows"] if workflow["name"] == "source_url_retorrent")
         assert source_url_workflow["runbook"][0]["tool"] == "source_url_retorrent_preflight"
         assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
-        assert source_url_workflow["runbook"][4]["repeat_when"] == "status in queued,running and runtime.should_poll=true"
-        assert source_url_workflow["runbook"][5]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
-        assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][5]["stop_when"]
+        assert source_url_workflow["runbook"][3]["tool"] == "retorrent_check"
+        assert source_url_workflow["runbook"][5]["repeat_when"] == "status in queued,running and runtime.should_poll=true"
+        assert source_url_workflow["runbook"][6]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
+        assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][6]["stop_when"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "config_templates" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
@@ -15751,13 +15758,21 @@ def test_source_url_preflight_ready_points_to_source_url_job(tmp_path, monkeypat
     assert payload["target_trackers"] == "MTEAM"
     assert payload["duplicate_check"]["searched"] is False
     assert payload["duplicate_check"]["next_endpoint"] == "/v1/retorrent/check"
+    assert payload["duplicate_check"]["ready_to_check"] is True
+    assert payload["duplicate_check"]["next_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert payload["duplicate_check"]["next_request"]["target"] == "MTEAM"
+    assert payload["duplicate_check_handoff"]["tool"] == "retorrent_check"
+    assert payload["duplicate_check_handoff"]["continue_when"] == "duplicate_check.searched=true and duplicate_check.exists=false"
+    assert payload["duplicate_check_handoff"]["then_tool"] == "source_url_retorrent_job"
     assert payload["policy_execution_summary"]["ready"] is True
     assert payload["job_template"]["endpoint"] == "/v1/jobs/retorrent/from-url"
     assert payload["job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["job_template"]["request"]["target"] == "MTEAM"
-    assert payload["recommended_tool"] == "source_url_retorrent_job"
-    assert payload["recommended_endpoint"] == "/v1/jobs/retorrent/from-url"
-    assert payload["recommended_request"] == payload["job_template"]["request"]
+    assert payload["job_creation_handoff"]["request"] == payload["job_template"]["request"]
+    assert payload["recommended_tool"] == "retorrent_check"
+    assert payload["recommended_endpoint"] == "/v1/retorrent/check"
+    assert payload["recommended_request"] == payload["duplicate_check"]["next_request"]
+    assert payload["agent_decision"]["decision"] == "check_duplicates_before_job"
 
 
 def test_source_url_preflight_blocks_on_policy_config(tmp_path, monkeypatch) -> None:

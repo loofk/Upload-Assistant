@@ -715,18 +715,10 @@ def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None
     source_reference = live_readiness.get("source") if isinstance(live_readiness.get("source"), dict) else None
     target_trackers = live_readiness.get("target_trackers")
     manual_job_template = live_readiness.get("manual_job_template") if isinstance(live_readiness.get("manual_job_template"), dict) else None
-    duplicate_check = {
-        "searched": False,
-        "status": "not_checked",
-        "exists": None,
-        "count": None,
-        "dupes": [],
-        "reason": "source_url_preflight_does_not_contact_trackers",
-        "next_tool": "retorrent_check",
-        "next_endpoint": "/v1/retorrent/check",
-    }
     ready_to_create_job = bool(live_readiness.get("ready_for_manual_retorrent")) and bool(manual_job_template)
-    next_step = _source_url_preflight_next_step(ready_to_create_job, readiness, manual_job_template)
+    duplicate_check = _source_url_preflight_duplicate_check(request, source_reference, target_trackers, manual_job_template, ready_to_create_job)
+    duplicate_check_handoff = _source_url_preflight_duplicate_handoff(duplicate_check, manual_job_template, ready_to_create_job)
+    next_step = _source_url_preflight_next_step(ready_to_create_job, readiness, duplicate_check_handoff)
     blockers = _source_url_preflight_blockers(readiness, source_reference, target_trackers)
     status = "ok" if ready_to_create_job else "blocked"
     return {
@@ -751,13 +743,16 @@ def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None
         "ready_to_create_job": ready_to_create_job,
         "ready_for_live_upload": ready_to_create_job,
         "duplicate_check": duplicate_check,
+        "duplicate_check_handoff": duplicate_check_handoff,
         "readiness_bundle": readiness,
         "policy_execution_summary": policy_execution_summary,
         "job_template": manual_job_template,
+        "job_creation_handoff": _source_url_preflight_job_creation_handoff(manual_job_template, ready_to_create_job),
         "next_step": next_step,
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
         "recommended_request": next_step.get("request"),
+        "agent_decision": _source_url_preflight_agent_decision(ready_to_create_job, duplicate_check_handoff, next_step, blockers),
         "blockers": blockers,
         "warnings": _string_list(readiness.get("warnings")),
         "next_actions": _source_url_preflight_next_actions(ready_to_create_job, next_step, blockers),
@@ -770,14 +765,90 @@ def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None
     }
 
 
-def _source_url_preflight_next_step(ready_to_create_job: bool, readiness: dict[str, Any], manual_job_template: dict[str, Any] | None) -> dict[str, Any]:
-    if ready_to_create_job and isinstance(manual_job_template, dict):
+def _source_url_preflight_duplicate_check(
+    request: dict[str, Any],
+    source_reference: dict[str, Any] | None,
+    target_trackers: Any,
+    manual_job_template: dict[str, Any] | None,
+    ready_to_create_job: bool,
+) -> dict[str, Any]:
+    check_request = _source_url_preflight_duplicate_check_request(request, source_reference, target_trackers, manual_job_template) if ready_to_create_job else None
+    return {
+        "searched": False,
+        "status": "not_checked",
+        "exists": None,
+        "count": None,
+        "dupes": [],
+        "reason": "source_url_preflight_does_not_contact_trackers",
+        "ready_to_check": bool(check_request),
+        "next_tool": "retorrent_check",
+        "next_endpoint": "/v1/retorrent/check",
+        "next_request": check_request,
+        "continue_when": "duplicate_check.searched=true and duplicate_check.exists=false",
+        "stop_when": "duplicate_check.exists=true",
+    }
+
+
+def _source_url_preflight_duplicate_check_request(
+    request: dict[str, Any],
+    source_reference: dict[str, Any] | None,
+    target_trackers: Any,
+    manual_job_template: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not source_reference or source_reference.get("error") or not target_trackers:
+        return None
+    job_request = manual_job_template.get("request") if isinstance(manual_job_template, dict) and isinstance(manual_job_template.get("request"), dict) else {}
+    source_url = job_request.get("source_url") or source_reference.get("details_url") or source_reference.get("requested_source") or request.get("source_url") or request.get("source")
+    if not source_url:
+        return None
+    check_request: dict[str, Any] = {
+        "source": str(source_url),
+        "source_url": str(source_url),
+        "source_tracker": source_reference.get("tracker") or request.get("source_tracker") or request.get("from"),
+        "target": target_trackers,
+        "accept_rules": _truthy(request.get("accept_rules")),
+    }
+    for key in ("config", "base_dir", "client", "path", "content_path", "save_path", "metadata_file", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url"):
+        if request.get(key) is not None:
+            check_request[key] = request[key]
+    return {key: value for key, value in check_request.items() if value is not None}
+
+
+def _source_url_preflight_duplicate_handoff(duplicate_check: dict[str, Any], manual_job_template: dict[str, Any] | None, ready_to_create_job: bool) -> dict[str, Any]:
+    return {
+        "ready": bool(ready_to_create_job and duplicate_check.get("next_request")),
+        "tool": "retorrent_check",
+        "endpoint": "/v1/retorrent/check",
+        "method": "POST",
+        "request": duplicate_check.get("next_request"),
+        "read": ["duplicate_check.searched", "duplicate_check.exists", "duplicate_check.count", "duplicate_check.dupes", "blockers", "next_actions"],
+        "continue_when": duplicate_check.get("continue_when"),
+        "stop_when": duplicate_check.get("stop_when"),
+        "then_tool": "source_url_retorrent_job",
+        "then_endpoint": "/v1/jobs/retorrent/from-url",
+        "then_request": manual_job_template.get("request") if isinstance(manual_job_template, dict) else None,
+    }
+
+
+def _source_url_preflight_job_creation_handoff(manual_job_template: dict[str, Any] | None, ready_to_create_job: bool) -> dict[str, Any]:
+    return {
+        "ready_after_duplicate_clear": bool(ready_to_create_job and isinstance(manual_job_template, dict)),
+        "tool": "source_url_retorrent_job",
+        "endpoint": "/v1/jobs/retorrent/from-url",
+        "method": "POST",
+        "request": manual_job_template.get("request") if isinstance(manual_job_template, dict) else None,
+        "requires_before_call": ["duplicate_check.searched=true", "duplicate_check.exists=false", "accept_rules=true", "confirm_upload=true"],
+    }
+
+
+def _source_url_preflight_next_step(ready_to_create_job: bool, readiness: dict[str, Any], duplicate_check_handoff: dict[str, Any]) -> dict[str, Any]:
+    if ready_to_create_job and duplicate_check_handoff.get("ready"):
         return {
-            "tool": "source_url_retorrent_job",
-            "endpoint": manual_job_template.get("endpoint") or "/v1/jobs/retorrent/from-url",
+            "tool": "retorrent_check",
+            "endpoint": "/v1/retorrent/check",
             "method": "POST",
-            "request": manual_job_template.get("request"),
-            "reason": "source_url_preflight_ready",
+            "request": duplicate_check_handoff.get("request"),
+            "reason": "check_target_duplicates_before_job_creation",
         }
     next_step = readiness.get("next_step") if isinstance(readiness.get("next_step"), dict) else {}
     if next_step:
@@ -804,12 +875,31 @@ def _source_url_preflight_blockers(readiness: dict[str, Any], source_reference: 
 
 def _source_url_preflight_next_actions(ready_to_create_job: bool, next_step: dict[str, Any], blockers: list[str]) -> list[str]:
     if ready_to_create_job:
-        return ["Submit job_template.request to source_url_retorrent_job, then poll runtime.status_endpoint and inspect closure_summary before reporting completion."]
+        return ["Call duplicate_check_handoff.request with retorrent_check; if duplicate_check.exists=false, submit job_creation_handoff.request to source_url_retorrent_job."]
     if next_step.get("tool"):
         return [f"Call next_step with {next_step['tool']} after resolving source_url_preflight.blockers."]
     if blockers:
         return ["Resolve source_url_preflight.blockers before creating a live-capable retorrent job."]
     return ["Inspect readiness_bundle and source_url_preflight before creating a live-capable retorrent job."]
+
+
+def _source_url_preflight_agent_decision(ready_to_create_job: bool, duplicate_check_handoff: dict[str, Any], next_step: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    if ready_to_create_job and duplicate_check_handoff.get("ready"):
+        decision = "check_duplicates_before_job"
+        recommended_action = "Run retorrent_check with duplicate_check_handoff.request; create the source-url job only when duplicate_check.exists=false."
+    else:
+        decision = "resolve_preflight_blockers"
+        recommended_action = "Resolve preflight blockers before checking duplicates or creating a live-capable job."
+    return {
+        "workflow": "source_url_retorrent",
+        "decision": decision,
+        "recommended_action": recommended_action,
+        "can_check_duplicates": bool(duplicate_check_handoff.get("ready")),
+        "can_create_job_after_duplicate_clear": bool(ready_to_create_job),
+        "next_tool": next_step.get("tool"),
+        "next_endpoint": next_step.get("endpoint"),
+        "blockers": blockers,
+    }
 
 
 def create_candidate_retorrent_job(job_store: JobStore, candidate_job_id: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -6535,6 +6625,8 @@ def _agent_preview_step_request(tool: str, request_template: dict[str, Any]) -> 
         return request_template
     if tool == "site_policies":
         return {"source_url": request_template.get("source_url"), "target": request_template.get("target"), "accept_rules": request_template.get("accept_rules")}
+    if tool == "retorrent_check":
+        return {"source": request_template.get("source_url"), "source_url": request_template.get("source_url"), "target": request_template.get("target"), "accept_rules": request_template.get("accept_rules")}
     if tool == "source_url_retorrent_job":
         return request_template
     if tool == "get_job_status":
@@ -7087,10 +7179,12 @@ def _agent_run_preview_response_contract() -> dict[str, Any]:
 
 def _source_url_preflight_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "request", "source_reference", "target_trackers", "ready_to_create_job", "ready_for_live_upload", "duplicate_check", "readiness_bundle", "policy_execution_summary", "job_template", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "warnings", "next_actions", "safety"],
+        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "request", "source_reference", "target_trackers", "ready_to_create_job", "ready_for_live_upload", "duplicate_check", "duplicate_check_handoff", "readiness_bundle", "policy_execution_summary", "job_template", "job_creation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions", "safety"],
         "next_step_fields": ["tool", "endpoint", "method", "request", "reason", "blockers"],
-        "duplicate_check_fields": ["searched", "status", "exists", "count", "dupes", "reason", "next_tool", "next_endpoint"],
+        "duplicate_check_fields": ["searched", "status", "exists", "count", "dupes", "reason", "ready_to_check", "next_tool", "next_endpoint", "next_request", "continue_when", "stop_when"],
+        "duplicate_handoff_fields": ["ready", "tool", "endpoint", "method", "request", "read", "continue_when", "stop_when", "then_tool", "then_endpoint", "then_request"],
         "job_template_fields": ["tool", "endpoint", "request"],
+        "job_creation_handoff_fields": ["ready_after_duplicate_clear", "tool", "endpoint", "method", "request", "requires_before_call"],
         "safety": ["does_not_create_job", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_job_requires_accept_rules_confirm_upload_policy_and_duplicate_clear"],
     }
 
@@ -7311,7 +7405,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "preflight",
                     "tool": "source_url_retorrent_preflight",
-                    "read": ["ready_to_create_job", "source_reference", "target_trackers", "policy_execution_summary", "duplicate_check", "job_template.request", "next_step", "blockers"],
+                    "read": ["ready_to_create_job", "source_reference", "target_trackers", "policy_execution_summary", "duplicate_check", "duplicate_check_handoff", "job_creation_handoff.request", "next_step", "blockers"],
                     "continue_when": "ready_to_create_job=true",
                     "stop_when": ["source_reference.error is present", "policy_execution_summary.ready=false", "accept_rules or confirm_upload missing", "deployment.ready=false"],
                 },
@@ -7330,9 +7424,17 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "stop_when": ["missing rule_review_fingerprint", "missing qBittorrent rate limits", "missing seeding requirements", "automation disabled"],
                 },
                 {
+                    "step": "duplicate_check",
+                    "tool": "retorrent_check",
+                    "request_from": "source_url_retorrent_preflight.duplicate_check_handoff.request",
+                    "read": ["duplicate_check.searched", "duplicate_check.exists", "duplicate_check.count", "duplicate_check.dupes", "blockers", "next_actions"],
+                    "continue_when": "duplicate_check.searched=true and duplicate_check.exists=false",
+                    "stop_when": ["duplicate_check.exists=true", "status=blocked", "status=error"],
+                },
+                {
                     "step": "submit_job",
                     "tool": "source_url_retorrent_job",
-                    "request_from": "readiness_bundle.live_readiness.manual_job_template.request",
+                    "request_from": "source_url_retorrent_preflight.job_creation_handoff.request after duplicate_check.exists=false",
                     "read": ["job_id", "status", "runtime.status_endpoint", "agent_decision", "closure_summary", "closure_handoff", "materials_handoff", "target_upload_handoff", "workflow_context"],
                     "continue_when": "job_id is present",
                     "stop_when": ["closure_handoff.action=stop_duplicate", "closure_handoff.action=configure_policy", "closure_handoff.action=collect_confirmations"],
@@ -7745,13 +7847,16 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "ready_to_create_job": {"type": "boolean"},
             "ready_for_live_upload": {"type": "boolean"},
             "duplicate_check": {"type": "object"},
+            "duplicate_check_handoff": {"type": "object"},
             "readiness_bundle": {"type": "object"},
             "policy_execution_summary": {"type": ["object", "null"]},
             "job_template": {"type": ["object", "null"]},
+            "job_creation_handoff": {"type": "object"},
             "next_step": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},
             "recommended_request": {"type": ["object", "null"]},
+            "agent_decision": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "warnings": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
