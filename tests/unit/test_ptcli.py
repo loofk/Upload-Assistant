@@ -15671,9 +15671,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "queue" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "docker_compose" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "deployment_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_summary" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "ready_for_daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "manual_workflow_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "compose_deployable" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "api_auth_recommended" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "deployment_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
+    assert "next_step" in tool_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
     assert "docker_compose_api_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "docker_compose_daily_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "docker_compose_fields" in tool_by_name["deployment_check"]["response_contract"]
@@ -16057,9 +16063,15 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "queue" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "docker_compose" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "deployment_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_summary" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "ready_for_daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "manual_workflow_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "compose_deployable" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "api_auth_recommended" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "deployment_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "next_step" in tools_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
         assert "docker_compose_api_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "docker_compose_daily_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "docker_compose_fields" in tools_by_name["deployment_check"]["response_contract"]
@@ -16421,9 +16433,28 @@ services:
     assert payload["queue"]["max_concurrent_jobs"] == 2
     assert payload["agent_summary"]["ready_for_ai"] is True
     assert payload["agent_summary"]["ready_for_daily_candidates"] is True
+    assert payload["agent_summary"]["manual_workflow_ready"] is True
+    assert payload["agent_summary"]["daily_workflow_ready"] is True
+    assert payload["agent_summary"]["compose_deployable"] is True
+    assert payload["agent_summary"]["api_local_only"] is True
+    assert payload["agent_summary"]["api_auth_recommended"] is True
     assert payload["agent_summary"]["docker_compose_daily_ready"] is True
     assert payload["agent_summary"]["docker_compose_api_ready"] is True
     assert payload["agent_summary"]["daily_candidate_schedule_count"] == 1
+    assert payload["deployment_handoff"]["kind"] == "ptcli.deployment_runtime_handoff"
+    assert payload["deployment_handoff"]["ready"] is True
+    assert payload["deployment_handoff"]["compose_deployable"] is True
+    assert payload["deployment_handoff"]["api"]["health"] == "http://127.0.0.1:8080/health"
+    assert payload["deployment_handoff"]["api"]["openapi"] == "http://127.0.0.1:8080/openapi.json"
+    assert payload["deployment_handoff"]["api"]["tools"] == "http://127.0.0.1:8080/v1/tools"
+    assert payload["deployment_handoff"]["api"]["localhost_bound"] is True
+    assert payload["deployment_handoff"]["api"]["auth_recommended"] is True
+    assert payload["deployment_handoff"]["manual_retorrent"]["ready"] is True
+    assert payload["deployment_handoff"]["manual_retorrent"]["tool"] == "source_url_check_and_submit"
+    assert payload["deployment_handoff"]["manual_retorrent"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert payload["deployment_handoff"]["daily_candidates"]["ready"] is True
+    assert payload["deployment_handoff"]["daily_candidates"]["tool"] == "daily_candidates_schedule_job"
+    assert payload["deployment_handoff"]["next_step"]["action"] == "run_manual_preflight"
     assert payload["agent_handoff"]["ready"] is True
     assert payload["agent_handoff"]["recommended_first_step"] == "site_policies"
     assert payload["agent_handoff"]["manual_retorrent"]["ready"] is True
@@ -16457,7 +16488,13 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert payload["ready"] is False
     assert payload["daily_candidates"]["configured"] is False
     assert payload["agent_summary"]["ready_for_ai"] is False
+    assert payload["agent_summary"]["manual_workflow_ready"] is False
+    assert payload["agent_summary"]["compose_deployable"] is False
     assert payload["agent_summary"]["missing_mounts"]
+    assert payload["deployment_handoff"]["ready"] is False
+    assert payload["deployment_handoff"]["next_step"]["action"] == "fix_deployment"
+    assert payload["deployment_handoff"]["manual_retorrent"]["tool"] == "readiness_bundle"
+    assert payload["deployment_handoff"]["daily_candidates"]["tool"] == "deployment_check"
     assert payload["agent_handoff"]["ready"] is False
     assert payload["agent_handoff"]["recommended_first_step"] == "fix_deployment"
     assert payload["agent_handoff"]["manual_retorrent"]["ready"] is False

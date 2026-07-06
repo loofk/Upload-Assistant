@@ -7263,6 +7263,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     }
     mounts = _deployment_mount_summary(checks)
     agent_summary = _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan, docker_compose)
+    deployment_handoff = _deployment_runtime_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings)
     return {
         "kind": "ptcli.deployment_check",
         "status": "ok" if ready else "blocked",
@@ -7278,6 +7279,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "qbit": qbit,
         "daily_candidates": daily_candidate_plan,
         "docker_compose": docker_compose,
+        "deployment_handoff": deployment_handoff,
         "agent_summary": agent_summary,
         "agent_handoff": _deployment_agent_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings),
         "connectivity_checked": False,
@@ -7550,6 +7552,11 @@ def _deployment_agent_summary(
         "ready_for_ai": ready,
         "ready_for_manual_retorrent": ready and bool(qbit.get("configured")),
         "ready_for_daily_candidates": ready and bool(daily_candidate_plan.get("configured")) and not bool(daily_candidate_plan.get("blockers")),
+        "manual_workflow_ready": ready and bool(qbit.get("configured")),
+        "daily_workflow_ready": ready and bool(daily_candidate_plan.get("configured")) and not bool(daily_candidate_plan.get("blockers")),
+        "compose_deployable": bool(docker_compose.get("ptcli_api_service_ready")),
+        "api_local_only": bool(docker_compose.get("ptcli_api_localhost_port")),
+        "api_auth_recommended": not bool(api_token_check.get("configured")),
         "api_token_configured": bool(api_token_check.get("configured")),
         "qbit_configured": bool(qbit.get("configured")),
         "daily_candidates_configured": bool(daily_candidate_plan.get("configured")),
@@ -7562,6 +7569,77 @@ def _deployment_agent_summary(
         "qbit_client": qbit.get("client"),
         "daily_candidate_schedule_count": daily_candidate_plan.get("count", 0),
     }
+
+
+def _deployment_runtime_handoff(
+    agent_summary: dict[str, Any],
+    paths: dict[str, str],
+    qbit: dict[str, Any],
+    daily_candidate_plan: dict[str, Any],
+    docker_compose: dict[str, Any],
+    blockers: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    api_base_url = os.environ.get("PTCLI_PUBLIC_BASE_URL") or "http://127.0.0.1:8080"
+    manual_ready = bool(agent_summary.get("manual_workflow_ready"))
+    daily_ready = bool(agent_summary.get("daily_workflow_ready"))
+    compose_ready = bool(agent_summary.get("compose_deployable"))
+    return {
+        "kind": "ptcli.deployment_runtime_handoff",
+        "ready": bool(agent_summary.get("ready_for_ai")),
+        "compose_deployable": compose_ready,
+        "api": {
+            "base_url": api_base_url,
+            "health": f"{api_base_url.rstrip('/')}/health",
+            "openapi": f"{api_base_url.rstrip('/')}/openapi.json",
+            "tools": f"{api_base_url.rstrip('/')}/v1/tools",
+            "agent_manifest": f"{api_base_url.rstrip('/')}/.well-known/ptcli-agent.json",
+            "localhost_bound": bool(docker_compose.get("ptcli_api_localhost_port")),
+            "token_configured": bool(agent_summary.get("api_token_configured")),
+            "auth_header": "Authorization: Bearer <PTCLI_API_TOKEN>",
+            "auth_recommended": bool(agent_summary.get("api_auth_recommended")),
+        },
+        "manual_retorrent": {
+            "ready": manual_ready,
+            "tool": "source_url_check_and_submit" if manual_ready else "readiness_bundle",
+            "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit" if manual_ready else "/v1/readiness/bundle",
+            "minimum_request": {
+                "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                "target": "MTEAM",
+                "accept_rules": True,
+                "confirm_upload": True,
+                "save_path": paths.get("downloads_path") or "/downloads",
+            },
+            "blocked_by": [] if manual_ready else _deployment_handoff_blockers(agent_summary, blockers, require_daily=False),
+        },
+        "daily_candidates": {
+            "ready": daily_ready,
+            "tool": "daily_candidates_schedule_job" if daily_ready else "deployment_check",
+            "endpoint": "/v1/jobs/candidates/daily/schedule" if daily_ready else "/v1/deployment/check",
+            "schedule_count": daily_candidate_plan.get("count", 0),
+            "blocked_by": [] if daily_ready else _deployment_handoff_blockers(agent_summary, blockers, require_daily=True),
+        },
+        "qbit": {
+            "configured": bool(qbit.get("configured")),
+            "client": qbit.get("client"),
+            "url": qbit.get("qbit_url"),
+            "connectivity_checked": bool(qbit.get("connectivity_checked")),
+        },
+        "next_step": _deployment_runtime_next_step(manual_ready, daily_ready, compose_ready, blockers, warnings),
+        "warnings": warnings,
+    }
+
+
+def _deployment_runtime_next_step(manual_ready: bool, daily_ready: bool, compose_ready: bool, blockers: list[str], warnings: list[str]) -> dict[str, Any]:
+    if blockers:
+        return {"action": "fix_deployment", "tool": "deployment_check", "endpoint": "/v1/deployment/check", "blockers": blockers}
+    if not compose_ready:
+        return {"action": "fix_compose", "tool": "deployment_check", "endpoint": "/v1/deployment/check", "warnings": warnings}
+    if manual_ready:
+        return {"action": "run_manual_preflight", "tool": "source_url_check_and_submit", "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit"}
+    if daily_ready:
+        return {"action": "run_daily_candidates", "tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule"}
+    return {"action": "configure_workflows", "tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "warnings": warnings}
 
 
 def _deployment_agent_handoff(
@@ -8214,9 +8292,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "queue", "qbit", "daily_candidates", "docker_compose", "agent_summary", "agent_handoff"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "queue", "qbit", "daily_candidates", "docker_compose", "deployment_handoff", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
-                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready"],
+                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready"],
+                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "manual_retorrent", "daily_candidates", "qbit", "next_step", "warnings"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "qbit", "docker_compose", "safety", "next_tools"],
                 "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
@@ -9584,6 +9663,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "qbit": {"type": "object"},
             "daily_candidates": {"type": "object"},
             "docker_compose": {"type": "object"},
+            "deployment_handoff": {"type": "object"},
             "agent_summary": {"type": "object"},
             "agent_handoff": {"type": "object"},
         },

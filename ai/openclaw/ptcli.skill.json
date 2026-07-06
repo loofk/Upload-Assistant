@@ -8347,6 +8347,7 @@
           "qbit",
           "daily_candidates",
           "docker_compose",
+          "deployment_handoff",
           "agent_summary",
           "agent_handoff"
         ],
@@ -8358,11 +8359,26 @@
           "ready_for_ai",
           "ready_for_manual_retorrent",
           "ready_for_daily_candidates",
+          "manual_workflow_ready",
+          "daily_workflow_ready",
+          "compose_deployable",
+          "api_local_only",
+          "api_auth_recommended",
           "missing_mounts",
           "qbit_configured",
           "daily_candidates_configured",
           "docker_compose_api_ready",
           "docker_compose_daily_ready"
+        ],
+        "deployment_handoff_fields": [
+          "ready",
+          "compose_deployable",
+          "api",
+          "manual_retorrent",
+          "daily_candidates",
+          "qbit",
+          "next_step",
+          "warnings"
         ],
         "agent_handoff_fields": [
           "ready",
