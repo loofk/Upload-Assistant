@@ -51,6 +51,7 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
       - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
+      - PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}
     volumes:
       - /path/to/torrents/:/downloads/:rw # map this to qBittorrent download location with matching container paths
       - /mnt/user/appdata/Upload-Assistant/data/config.py:/Upload-Assistant/data/config.py:rw
@@ -74,6 +75,7 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
       - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
+      - PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}
     volumes:
       - /path/to/torrents/:/downloads/:rw # map this to qBittorrent download location with matching container paths
       - /mnt/user/appdata/Upload-Assistant/data/config.py:/Upload-Assistant/data/config.py:rw
@@ -97,6 +99,7 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
       - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
+      - PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}
     volumes:
       - /path/to/torrents/:/downloads/:rw # map this to qBittorrent download location with matching container paths
       - /mnt/user/appdata/Upload-Assistant/data/config.py:/Upload-Assistant/data/config.py:rw

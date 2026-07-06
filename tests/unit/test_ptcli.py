@@ -13987,7 +13987,17 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
             "next_actions": [],
         }
 
+    webhook_calls = []
+
+    class FakeWebhookResponse:
+        status_code = 204
+
+    def fake_post(url, *, json, timeout):
+        webhook_calls.append({"url": url, "json": json, "timeout": timeout})
+        return FakeWebhookResponse()
+
     monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
+    monkeypatch.setattr(ptcli_cli.requests, "post", fake_post)
     schedules_file = tmp_path / "schedules.json"
     schedules_file.write_text(json.dumps([{"name": "chd-to-mteam", "source_tracker": "CHD", "target": "MTEAM", "accept_rules": True}]), encoding="utf-8")
 
@@ -14002,6 +14012,10 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
             "--summary-output-dir",
             str(tmp_path / "summary"),
             "--write-notification",
+            "--notification-webhook-url",
+            "https://hooks.example/ptcli",
+            "--notification-webhook-timeout",
+            "3",
             "--json",
         ]
     )
@@ -14026,6 +14040,12 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert summary["notification_payload"]["top_item"]["source_id"] == "12345"
     assert summary["notification_payload"]["ready"] is True
     assert summary["notification_files"] == payload["notification_files"]
+    assert summary["notification_webhook"] == payload["notification_webhook"]
+    assert payload["notification_webhook"]["ok"] is True
+    assert payload["notification_webhook"]["status_code"] == 204
+    assert webhook_calls[0]["url"] == "https://hooks.example/ptcli"
+    assert webhook_calls[0]["timeout"] == 3
+    assert webhook_calls[0]["json"]["notification_payload"]["top_item"]["source_id"] == "12345"
     assert summary["summary_file"] == str(summary_path)
     notification_json = Path(payload["notification_files"]["json"])
     notification_text = Path(payload["notification_files"]["text"])
@@ -14046,6 +14066,59 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert check_payload["live_safe_to_attempt"] is False
     assert check_payload["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
     assert check_payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
+
+
+def test_daily_schedule_webhook_error_is_reported(monkeypatch, tmp_path, capsys) -> None:
+    async def fake_daily_candidates(_request):
+        return {
+            "kind": "ptcli.service.daily_candidates",
+            "status": "ok",
+            "ok": True,
+            "digest": {
+                "kind": "ptcli.daily_candidates_digest",
+                "ready_count": 1,
+                "top_candidate": {"source_tracker": "U2", "source_id": "60635"},
+                "push_items": [{"rank": 1, "source_id": "60635"}],
+            },
+            "candidates": [{"status": "ready"}],
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    def fake_post(_url, *, json, timeout):
+        assert json["notification_payload"]["top_item"]["source_id"] == "60635"
+        assert timeout == 10.0
+        raise ptcli_cli.requests.RequestException("connection refused")
+
+    monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
+    monkeypatch.setattr(ptcli_cli.requests, "post", fake_post)
+    schedules_file = tmp_path / "schedules.json"
+    schedules_file.write_text(json.dumps([{"name": "u2-to-mteam", "source_tracker": "U2", "target": "MTEAM", "accept_rules": True}]), encoding="utf-8")
+
+    code = main(
+        [
+            "daily-schedule",
+            "--job-dir",
+            str(tmp_path / "jobs"),
+            "--schedules-file",
+            str(schedules_file),
+            "--write-summary",
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
+            "--notification-webhook-url",
+            "https://hooks.example/ptcli",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["notification_webhook"]["attempted"] is True
+    assert payload["notification_webhook"]["ok"] is False
+    assert payload["notification_webhook"]["status_code"] is None
+    assert "connection refused" in payload["notification_webhook"]["error"]
+    summary = json.loads(Path(payload["summary_file"]).read_text(encoding="utf-8"))
+    assert summary["notification_webhook"] == payload["notification_webhook"]
 
 
 def test_daily_scheduler_once_runs_schedule_and_writes_summary(monkeypatch, tmp_path, capsys) -> None:
@@ -14907,9 +14980,11 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     assert "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in compose
     assert "PTCLI_MAX_CONCURRENT_JOBS=${PTCLI_MAX_CONCURRENT_JOBS:-1}" in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}" in compose
+    assert "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}" in compose
     assert "- daily" in compose
     assert 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]' in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=" in env_example
+    assert "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=" in env_example
     assert "PTCLI_MAX_CONCURRENT_JOBS=1" in env_example
     assert "name: ${PTCLI_DOCKER_NETWORK:-upload-assistant-ptcli}" in compose
     assert "yournetwork" not in compose

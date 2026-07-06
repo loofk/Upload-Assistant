@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import requests
 from torf import Torrent
 
 from src.ptcli.config import load_config, resolve_client_config
@@ -129,6 +130,8 @@ def build_parser() -> argparse.ArgumentParser:
     daily_schedule.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --job-dir or PTCLI_JOB_DIR/TMPDIR.")
     daily_schedule.add_argument("--write-notification", action="store_true", help="Write notification JSON and text files for AI/IM/webhook pickup.")
     daily_schedule.add_argument("--notification-output-dir", help="Directory for notification files. Defaults to --summary-output-dir or job dir.")
+    daily_schedule.add_argument("--notification-webhook-url", help="Optional HTTP webhook URL for pushing the daily candidate notification payload.")
+    daily_schedule.add_argument("--notification-webhook-timeout", type=float, default=10.0, help="Webhook POST timeout in seconds. Defaults to 10.")
     daily_schedule.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
     daily_scheduler = subparsers.add_parser(
@@ -146,6 +149,8 @@ def build_parser() -> argparse.ArgumentParser:
     daily_scheduler.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --job-dir or PTCLI_JOB_DIR/TMPDIR.")
     daily_scheduler.add_argument("--write-notification", action="store_true", default=True, help="Write notification JSON and text files after each run. Enabled by default.")
     daily_scheduler.add_argument("--notification-output-dir", help="Directory for notification files. Defaults to --summary-output-dir or job dir.")
+    daily_scheduler.add_argument("--notification-webhook-url", help="Optional HTTP webhook URL for pushing the daily candidate notification payload after each run.")
+    daily_scheduler.add_argument("--notification-webhook-timeout", type=float, default=10.0, help="Webhook POST timeout in seconds. Defaults to 10.")
     daily_scheduler.add_argument("--once", action="store_true", help="Run one scheduled scan immediately and exit. Useful for smoke tests.")
     daily_scheduler.add_argument("--json", action="store_true", help="Print machine-readable JSON for --once; continuous mode writes line-delimited JSON events.")
 
@@ -11628,6 +11633,11 @@ def daily_schedule_payload(args: argparse.Namespace) -> dict[str, Any]:
         result["notification_files"] = _write_daily_schedule_notification_files(result, args, store.root)
         if args.write_summary:
             result["summary_file"] = _write_daily_schedule_summary(result, args, store.root)
+    webhook_url = getattr(args, "notification_webhook_url", None) or os.environ.get("PTCLI_DAILY_CANDIDATE_WEBHOOK_URL")
+    if webhook_url:
+        result["notification_webhook"] = _post_daily_schedule_notification_webhook(result, webhook_url, timeout=float(getattr(args, "notification_webhook_timeout", 10.0) or 10.0))
+        if args.write_summary:
+            result["summary_file"] = _write_daily_schedule_summary(result, args, store.root)
     return result
 
 
@@ -11753,6 +11763,7 @@ def _write_daily_schedule_summary(payload: dict[str, Any], args: argparse.Namesp
         "schedule_digest": payload.get("schedule_digest"),
         "notification_payload": payload.get("notification_payload"),
         "notification_files": payload.get("notification_files"),
+        "notification_webhook": payload.get("notification_webhook"),
         "agent_decision": payload.get("agent_decision"),
         "blockers": payload.get("blockers", []),
         "next_actions": payload.get("next_actions", []),
@@ -11794,6 +11805,39 @@ def _write_daily_schedule_notification_files(payload: dict[str, Any], args: argp
         "json": str(json_path),
         "text": str(text_path),
     }
+
+
+def _post_daily_schedule_notification_webhook(payload: dict[str, Any], url: str, *, timeout: float = 10.0) -> dict[str, Any]:
+    notification = payload.get("notification_payload") if isinstance(payload.get("notification_payload"), dict) else {}
+    body = {
+        "schema_version": SUMMARY_SCHEMA_VERSION,
+        "kind": "ptcli.daily_candidates.notification",
+        "status": payload.get("status"),
+        "ok": payload.get("ok"),
+        "notification_payload": notification,
+        "schedule_digest": payload.get("schedule_digest"),
+        "agent_decision": payload.get("agent_decision"),
+        "summary_file": payload.get("summary_file"),
+        "notification_files": payload.get("notification_files"),
+        "blockers": payload.get("blockers", []),
+        "next_actions": payload.get("next_actions", []),
+    }
+    result: dict[str, Any] = {
+        "url": url,
+        "attempted": True,
+        "ok": False,
+        "status_code": None,
+        "error": None,
+    }
+    try:
+        response = requests.post(url, json=body, timeout=timeout)
+        result["status_code"] = response.status_code
+        result["ok"] = 200 <= response.status_code < 300
+        if not result["ok"]:
+            result["error"] = f"webhook returned HTTP {response.status_code}"
+    except requests.RequestException as exc:
+        result["error"] = str(exc)
+    return result
 
 
 def site_policies_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
