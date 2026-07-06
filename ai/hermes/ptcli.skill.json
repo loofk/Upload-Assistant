@@ -1302,6 +1302,22 @@
           "blockers",
           "next_actions"
         ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
@@ -1677,6 +1693,22 @@
           "can_resume",
           "resume_plan",
           "blockers",
+          "next_actions"
+        ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -2064,6 +2096,22 @@
           "can_resume",
           "resume_plan",
           "blockers",
+          "next_actions"
+        ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -2455,6 +2503,22 @@
           "can_resume",
           "resume_plan",
           "blockers",
+          "next_actions"
+        ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -2862,6 +2926,22 @@
           "can_resume",
           "resume_plan",
           "blockers",
+          "next_actions"
+        ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -3480,6 +3560,22 @@
           "blockers",
           "next_actions"
         ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
@@ -4045,6 +4141,22 @@
           "blockers",
           "next_actions"
         ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
@@ -4507,6 +4619,22 @@
           "blockers",
           "next_actions"
         ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
@@ -4729,6 +4857,22 @@
           "can_resume",
           "resume_plan",
           "blockers",
+          "next_actions"
+        ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
           "next_actions"
         ],
         "closure_handoff_fields": [

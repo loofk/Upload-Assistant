@@ -13836,7 +13836,16 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
             "save_path": "/downloads",
             "source": "https://evil.invalid/details.php?id=1",
             "target": "CHD",
-            "overrides": {"uploaded_qbit_tags": "retorrent", "target": "TTG"},
+            "overrides": {
+                "uploaded_qbit_tags": "retorrent",
+                "uploaded_qbit_upload_limit": "2MiB/s",
+                "metadata_file": "/tmp/materials/metadata.json",
+                "screenshot_files": ["/tmp/materials/screen-01.png"],
+                "image_host_file": "/tmp/materials/image-host-uploads.json",
+                "generate_screenshots": True,
+                "upload_screenshots": True,
+                "target": "TTG",
+            },
         },
     )
 
@@ -13844,12 +13853,41 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["request"]["mode"] == "candidate_retorrent"
     assert retorrent_job["request"]["candidate_submission"]["candidate_job_id"] == candidate_job["job_id"]
     assert retorrent_job["request"]["candidate_submission"]["candidate_rank"] == 1
+    assert retorrent_job["request"]["candidate_submission"]["inherited_request"] == {
+        "source": "https://u2.dmhy.org/details.php?id=60635",
+        "source_url": "https://u2.dmhy.org/details.php?id=60635",
+        "source_tracker": "U2",
+        "target": "MTEAM",
+    }
+    assert retorrent_job["request"]["candidate_submission"]["submitted_overrides"] == {
+        "uploaded_qbit_tags": "retorrent",
+        "uploaded_qbit_upload_limit": "2MiB/s",
+        "metadata_file": "/tmp/materials/metadata.json",
+        "screenshot_files": ["/tmp/materials/screen-01.png"],
+        "image_host_file": "/tmp/materials/image-host-uploads.json",
+        "generate_screenshots": True,
+        "upload_screenshots": True,
+        "confirm_upload": True,
+        "save_path": "/downloads",
+    }
+    assert retorrent_job["request"]["candidate_submission"]["material_options"] == {
+        "metadata_file": "/tmp/materials/metadata.json",
+        "image_host_file": "/tmp/materials/image-host-uploads.json",
+        "screenshot_files": ["/tmp/materials/screen-01.png"],
+        "generate_screenshots": True,
+        "upload_screenshots": True,
+    }
+    assert retorrent_job["request"]["candidate_submission"]["qbit_overrides"] == {"uploaded_qbit_tags": "retorrent", "uploaded_qbit_upload_limit": "2MiB/s"}
     assert retorrent_job["candidate_submission"] == retorrent_job["request"]["candidate_submission"]
     assert retorrent_job["workflow_context"]["candidate_submission"] == retorrent_job["candidate_submission"]
     assert retorrent_job["agent_decision"]["candidate_submission"] == retorrent_job["candidate_submission"]
     assert retorrent_job["candidate_submission_handoff"]["candidate_job_id"] == candidate_job["job_id"]
     assert retorrent_job["candidate_submission_handoff"]["candidate_rank"] == 1
     assert retorrent_job["candidate_submission_handoff"]["retorrent_job_id"] == retorrent_job["job_id"]
+    assert retorrent_job["candidate_submission_handoff"]["inherited_request"] == retorrent_job["candidate_submission"]["inherited_request"]
+    assert retorrent_job["candidate_submission_handoff"]["submitted_overrides"] == retorrent_job["candidate_submission"]["submitted_overrides"]
+    assert retorrent_job["candidate_submission_handoff"]["material_options"] == retorrent_job["candidate_submission"]["material_options"]
+    assert retorrent_job["candidate_submission_handoff"]["qbit_overrides"] == retorrent_job["candidate_submission"]["qbit_overrides"]
     assert retorrent_job["candidate_submission_handoff"]["manual_retorrent_handoff"]["action"] == "configure_policy"
     assert retorrent_job["workflow_context"]["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
     assert retorrent_job["agent_decision"]["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
@@ -13861,6 +13899,14 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert captured_request["confirm_upload"] is True
     assert captured_request["save_path"] == "/downloads"
     assert captured_request["uploaded_qbit_tags"] == "retorrent"
+    assert captured_request["uploaded_qbit_upload_limit"] == "2MiB/s"
+    assert captured_request["metadata_file"] == "/tmp/materials/metadata.json"
+    assert captured_request["screenshot_files"] == ["/tmp/materials/screen-01.png"]
+    assert captured_request["generate_screenshots"] is True
+    assert retorrent_job["request"]["material_options"] == retorrent_job["candidate_submission"]["material_options"]
+    assert retorrent_job["command_argv"][retorrent_job["command_argv"].index("--metadata-file") + 1] == "/tmp/materials/metadata.json"
+    assert "--generate-screenshots" in retorrent_job["command_argv"]
+    assert "--upload-screenshots" in retorrent_job["command_argv"]
     summary = store.summary(retorrent_job["job_id"])
     listed = store.list({"kind": "ptcli.candidate_retorrent"})["jobs"][0]
     assert summary["candidate_submission"] == retorrent_job["candidate_submission"]
@@ -14601,6 +14647,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_submission_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["required_fields"]
     assert "candidate_submission_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "candidate_submission_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "candidate_submission_handoff_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
+    assert "submitted_overrides" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
+    assert "material_options" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_requirements" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "confirm_upload" in tool_by_name["resume_job"]["input_schema"]["properties"]
@@ -15083,6 +15132,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_submission_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["required_fields"]
         assert "candidate_submission_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "candidate_submission_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "candidate_submission_handoff_fields" in tools_by_name["submit_daily_candidate_job"]["response_contract"]
+        assert "submitted_overrides" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
+        assert "material_options" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_requirements" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "confirm_upload" in tools_by_name["resume_job"]["input_schema"]["properties"]

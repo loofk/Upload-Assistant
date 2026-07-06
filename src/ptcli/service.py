@@ -703,16 +703,27 @@ def create_candidate_retorrent_job(job_store: JobStore, candidate_job_id: str, r
     submit_request = candidate_item.get("submit_request") if isinstance(candidate_item.get("submit_request"), dict) else None
     if not submit_request:
         raise ServiceError("Selected candidate is not submittable; inspect push_items[].blockers before creating a live retorrent job.", status=HTTPStatus.CONFLICT)
-    effective_request = {**submit_request, **_candidate_submit_overrides(request)}
-    effective_request["candidate_submission"] = {
+    submit_overrides = _candidate_submit_overrides(request)
+    effective_request = {**submit_request, **submit_overrides}
+    effective_request["candidate_submission"] = _candidate_submission_payload(candidate_job_id, candidate_item, digest, submit_request, submit_overrides, effective_request)
+    return _create_ai_retorrent_job(job_store, effective_request, kind="ptcli.candidate_retorrent", mode="candidate_retorrent")
+
+
+def _candidate_submission_payload(candidate_job_id: str, candidate_item: dict[str, Any], digest: dict[str, Any], submit_request: dict[str, Any], submit_overrides: dict[str, Any], effective_request: dict[str, Any]) -> dict[str, Any]:
+    inherited_keys = ("source", "source_url", "source_tracker", "target", "target_tracker", "target_trackers")
+    qbit_keys = ("qbit_category", "qbit_tags", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_category", "uploaded_qbit_tags", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit")
+    return {
         "candidate_job_id": candidate_job_id,
         "candidate_rank": candidate_item.get("rank"),
         "candidate_source_id": candidate_item.get("source_id"),
         "candidate_title": candidate_item.get("title"),
         "candidate_summary_text": candidate_item.get("summary_text"),
         "candidate_digest_kind": digest.get("kind"),
+        "inherited_request": {key: submit_request.get(key) for key in inherited_keys if submit_request.get(key) is not None},
+        "submitted_overrides": submit_overrides,
+        "material_options": _request_material_options(effective_request),
+        "qbit_overrides": {key: effective_request.get(key) for key in qbit_keys if effective_request.get(key) is not None},
     }
-    return _create_ai_retorrent_job(job_store, effective_request, kind="ptcli.candidate_retorrent", mode="candidate_retorrent")
 
 
 def _create_ai_retorrent_job(job_store: JobStore, request: dict[str, Any], *, kind: str, mode: str) -> dict[str, Any]:
@@ -4119,6 +4130,10 @@ def _job_candidate_submission_handoff(job: dict[str, Any], summary_payload: dict
         "candidate_title": submission.get("candidate_title"),
         "candidate_summary_text": submission.get("candidate_summary_text"),
         "candidate_digest_kind": submission.get("candidate_digest_kind"),
+        "inherited_request": submission.get("inherited_request") if isinstance(submission.get("inherited_request"), dict) else {},
+        "submitted_overrides": submission.get("submitted_overrides") if isinstance(submission.get("submitted_overrides"), dict) else {},
+        "material_options": submission.get("material_options") if isinstance(submission.get("material_options"), dict) else {},
+        "qbit_overrides": submission.get("qbit_overrides") if isinstance(submission.get("qbit_overrides"), dict) else {},
         "retorrent_job_id": job_id,
         "retorrent_status": job.get("status"),
         "source_reference": _job_source_reference(job),
@@ -6305,6 +6320,7 @@ def _job_response_contract() -> dict[str, Any]:
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
+        "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
         "closure_handoff_fields": ["action", "complete", "closure_checklist", "source", "target", "evidence", "duplicate_check", "target_upload_handoff", "qbit_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
     }
 
