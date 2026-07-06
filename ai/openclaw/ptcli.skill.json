@@ -991,6 +991,17 @@
           "allowed_overrides",
           "current_flags"
         ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
+        ],
         "material_resolution_fields": [
           "ready_before_resume",
           "recommended_inputs",
@@ -1283,6 +1294,17 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -1586,6 +1608,17 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -1893,6 +1926,17 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -2274,6 +2318,17 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -2748,6 +2803,17 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -3288,6 +3354,17 @@
           "allowed_overrides",
           "current_flags"
         ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
+        ],
         "material_resolution_fields": [
           "ready_before_resume",
           "recommended_inputs",
@@ -3450,6 +3527,30 @@
             "type": "boolean",
             "description": "Optional resume override for --target-execute; only true values are applied."
           },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Optional resume override for --enrich-metadata; only true values are applied."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Optional resume override for --fetch-ptgen; only true values are applied."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Optional resume override for --generate-bdinfo; only true values are applied."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Optional resume override for --generate-mediainfo; only true values are applied."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Optional resume override for --generate-screenshots; only true values are applied."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Optional resume override for --upload-screenshots; only true values are applied."
+          },
           "download_uploaded_torrent": {
             "type": "boolean",
             "description": "Optional resume override for --download-uploaded-torrent; only true values are applied."
@@ -3566,9 +3667,33 @@
             "type": "string",
             "description": "Optional resume override for --image-host-file."
           },
+          "image_host": {
+            "type": "string",
+            "description": "Optional resume override for --image-host."
+          },
           "screenshot_count": {
             "type": "string",
             "description": "Optional resume override for --screenshot-count."
+          },
+          "imdb_id": {
+            "type": "string",
+            "description": "Optional resume override for --imdb-id."
+          },
+          "tmdb_id": {
+            "type": "string",
+            "description": "Optional resume override for --tmdb-id."
+          },
+          "tmdb_type": {
+            "type": "string",
+            "description": "Optional resume override for --tmdb-type."
+          },
+          "douban_id": {
+            "type": "string",
+            "description": "Optional resume override for --douban-id."
+          },
+          "douban_url": {
+            "type": "string",
+            "description": "Optional resume override for --douban-url."
           },
           "screenshot_file": {
             "type": "string",
@@ -3675,6 +3800,17 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -3873,6 +4009,17 @@
           "recommended_inputs",
           "allowed_overrides",
           "current_flags"
+        ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
         ],
         "material_resolution_fields": [
           "ready_before_resume",

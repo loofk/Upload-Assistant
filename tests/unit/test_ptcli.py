@@ -12681,6 +12681,16 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert "metadata.tmdb" in job["materials_handoff"]["blockers"]
     recommended_input_keys = {item["key"] for item in job["materials_handoff"]["recommended_inputs"]}
     assert {"metadata_file", "ptgen_description_file"}.issubset(recommended_input_keys)
+    recommended_inputs = {item["key"]: item for item in job["materials_handoff"]["recommended_inputs"]}
+    metadata_input = recommended_inputs["metadata_file"]
+    assert metadata_input["stage"] == "materials-metadata"
+    assert metadata_input["resume_tool"] == "resume_job"
+    assert metadata_input["resume_endpoint_hint"] == "/v1/jobs/{job_id}/resume"
+    assert {"metadata_file", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url", "enrich_metadata", "fetch_ptgen"}.issubset(metadata_input["accepted_keys"])
+    assert metadata_input["examples"]["fetch_ptgen"] is True
+    description_input = recommended_inputs["ptgen_description_file"]
+    assert description_input["stage"] == "materials-description"
+    assert {"ptgen_description_file", "metadata_file", "fetch_ptgen", "douban_id", "douban_url"}.issubset(description_input["accepted_keys"])
     assert "Provide missing upload materials" in job["materials_handoff"]["next_actions"][0]
     assert job["agent_decision"]["materials_handoff"] == job["materials_handoff"]
     assert job["target_upload_handoff"]["kind"] == "ptcli.target_upload_handoff"
@@ -12923,6 +12933,56 @@ def test_job_store_resume_applies_allowlisted_overrides(monkeypatch, tmp_path) -
     assert resume["agent_decision"]["material_resolution"] == material_resolution
     assert resume["resume_context"]["applied_overrides"] == resume["request"]["applied_overrides"]
     assert resume["resume_context"]["ignored_overrides"] == resume["request"]["ignored_overrides"]
+
+
+def test_resume_recommended_inputs_expose_material_recovery_paths() -> None:
+    inputs = ptcli_service._resume_recommended_inputs(
+        {},
+        {
+            "ready": False,
+            "imdb_ready": False,
+            "tmdb_ready": False,
+            "douban_ready": False,
+            "ptgen_description_ready": False,
+            "missing": ["metadata.imdb", "metadata.tmdb", "metadata.douban"],
+        },
+        {
+            "critical_missing": [
+                "metadata.imdb",
+                "metadata.tmdb",
+                "metadata.douban",
+                "description.content",
+                "materials.description.screenshot_coverage",
+            ],
+            "upload_material_blockers": ["materials.assets.image_host_uploads"],
+            "mediainfo_or_bdinfo_ready": False,
+            "screenshots_ready": False,
+        },
+        {
+            "payload_ready": False,
+            "description_ready": False,
+            "description_missing": ["materials.description.ptgen_description"],
+            "blockers": ["materials.description.screenshot_coverage"],
+        },
+    )
+
+    by_key = {item["key"]: item for item in inputs}
+    assert list(by_key) == [
+        "path_or_save_path",
+        "metadata_file",
+        "ptgen_description_file",
+        "mediainfo_or_bdinfo",
+        "screenshot_files",
+        "image_host_file",
+    ]
+    assert {"path", "content_path", "save_path"}.issubset(by_key["path_or_save_path"]["accepted_keys"])
+    assert {"metadata_file", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url", "enrich_metadata", "fetch_ptgen"}.issubset(by_key["metadata_file"]["accepted_keys"])
+    assert {"ptgen_description_file", "metadata_file", "fetch_ptgen", "enrich_metadata", "douban_id", "douban_url"}.issubset(by_key["ptgen_description_file"]["accepted_keys"])
+    assert {"mediainfo_file", "bdinfo_file", "generate_mediainfo", "generate_bdinfo"}.issubset(by_key["mediainfo_or_bdinfo"]["accepted_keys"])
+    assert {"screenshot_files", "screenshot_file", "generate_screenshots", "screenshot_count"}.issubset(by_key["screenshot_files"]["accepted_keys"])
+    assert {"image_host_file", "upload_screenshots", "image_host"}.issubset(by_key["image_host_file"]["accepted_keys"])
+    assert by_key["image_host_file"]["stage"] == "materials-image-host"
+    assert by_key["image_host_file"]["resume_tool"] == "resume_job"
 
 
 def test_job_store_lists_recent_jobs_with_filters(tmp_path) -> None:

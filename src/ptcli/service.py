@@ -41,6 +41,12 @@ RESUME_BOOLEAN_FLAG_OVERRIDES = {
     "accept_rules": "--accept-rules",
     "confirm_upload": "--confirm-upload",
     "target_execute": "--target-execute",
+    "enrich_metadata": "--enrich-metadata",
+    "fetch_ptgen": "--fetch-ptgen",
+    "generate_bdinfo": "--generate-bdinfo",
+    "generate_mediainfo": "--generate-mediainfo",
+    "generate_screenshots": "--generate-screenshots",
+    "upload_screenshots": "--upload-screenshots",
     "download_uploaded_torrent": "--download-uploaded-torrent",
     "inject_uploaded_torrent": "--inject-uploaded-torrent",
     "wait_uploaded_complete": "--wait-uploaded-complete",
@@ -72,7 +78,13 @@ RESUME_VALUE_FLAG_OVERRIDES = {
     "mediainfo_file": "--mediainfo-file",
     "bdinfo_file": "--bdinfo-file",
     "image_host_file": "--image-host-file",
+    "image_host": "--image-host",
     "screenshot_count": "--screenshot-count",
+    "imdb_id": "--imdb-id",
+    "tmdb_id": "--tmdb-id",
+    "tmdb_type": "--tmdb-type",
+    "douban_id": "--douban-id",
+    "douban_url": "--douban-url",
 }
 RESUME_REPEATABLE_FLAG_OVERRIDES = {
     "screenshot_file": "--screenshot-file",
@@ -3423,8 +3435,43 @@ def _materials_handoff_recommended_inputs(
     inputs = _resume_recommended_inputs(request, metadata, materials, target_preflight)
     blocker_text = " ".join(blockers)
     if "image_host" in blocker_text or "screenshot_coverage" in blocker_text:
-        inputs.append({"key": "image_host_file", "accepted_keys": ["image_host_file"], "required": False, "reason": "hosted screenshot URLs are missing or stale"})
+        inputs.append(
+            _recommended_input(
+                "image_host_file",
+                ["image_host_file", "upload_screenshots", "image_host"],
+                "hosted screenshot URLs are missing, partial, or stale",
+                stage="materials-image-host",
+                blocking_keys=["assets.image_host_uploads", "description.screenshot_coverage"],
+                examples={"image_host_file": "/tmp/materials/image-host-uploads.json", "upload_screenshots": True, "image_host": "ptpimg"},
+            )
+        )
     return _dedupe_recommended_inputs(inputs)
+
+
+def _recommended_input(
+    key: str,
+    accepted_keys: list[str],
+    reason: str,
+    *,
+    stage: str,
+    required: bool = False,
+    blocking_keys: list[str] | None = None,
+    examples: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "key": key,
+        "accepted_keys": accepted_keys,
+        "required": required,
+        "reason": reason,
+        "stage": stage,
+        "resume_tool": "resume_job",
+        "resume_endpoint_hint": "/v1/jobs/{job_id}/resume",
+    }
+    if blocking_keys:
+        item["blocking_keys"] = blocking_keys
+    if examples:
+        item["examples"] = examples
+    return item
 
 
 def _dedupe_recommended_inputs(inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -4396,18 +4443,90 @@ def _resume_recommended_inputs(
     target_preflight: dict[str, Any],
 ) -> list[dict[str, Any]]:
     inputs: list[dict[str, Any]] = []
+    critical_missing = _string_list(materials.get("critical_missing"))
+    upload_material_blockers = _string_list(materials.get("upload_material_blockers"))
+    target_missing = _string_list(target_preflight.get("missing"))
+    target_description_missing = _string_list(target_preflight.get("description_missing"))
+    target_blockers = _string_list(target_preflight.get("blockers"))
+    all_missing = set(_string_list(metadata.get("missing")) + critical_missing + upload_material_blockers + target_missing + target_description_missing + target_blockers)
     if not request.get("path") and not request.get("save_path"):
-        inputs.append({"key": "path_or_save_path", "accepted_keys": ["path", "save_path"], "required": False, "reason": "content path helps resume without rediscovering qBittorrent state"})
-    if metadata.get("tmdb_ready") is False or "metadata.tmdb" in _string_list(materials.get("critical_missing")):
-        inputs.append({"key": "metadata_file", "accepted_keys": ["metadata_file"], "required": False, "reason": "TMDb/IMDb/豆瓣 metadata is incomplete"})
-    if metadata.get("ptgen_description_ready") is False or "description.content" in _string_list(materials.get("critical_missing")) or target_preflight.get("description_ready") is False:
-        inputs.append({"key": "ptgen_description_file", "accepted_keys": ["ptgen_description_file"], "required": False, "reason": "target description is incomplete"})
+        inputs.append(
+            _recommended_input(
+                "path_or_save_path",
+                ["path", "content_path", "save_path"],
+                "content path helps resume without rediscovering qBittorrent state",
+                stage="source-content",
+                examples={"path": "/downloads/Example.Movie.2024", "save_path": "/downloads"},
+            )
+        )
+    metadata_missing_keys = {"metadata.imdb", "metadata.tmdb", "metadata.douban", "materials.metadata.imdb", "materials.metadata.tmdb", "materials.metadata.douban"}
+    if metadata.get("imdb_ready") is False or metadata.get("tmdb_ready") is False or metadata.get("douban_ready") is False or any(key in all_missing for key in metadata_missing_keys):
+        inputs.append(
+            _recommended_input(
+                "metadata_file",
+                ["metadata_file", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url", "enrich_metadata", "fetch_ptgen"],
+                "IMDb/TMDb/豆瓣 metadata is incomplete; provide IDs/file or let ptcli enrich it before target package preparation",
+                stage="materials-metadata",
+                blocking_keys=sorted(key for key in metadata_missing_keys if key in all_missing),
+                examples={"metadata_file": "/tmp/materials/metadata.json", "imdb_id": "tt1234567", "tmdb_id": "999", "tmdb_type": "movie", "douban_id": "1291546", "fetch_ptgen": True},
+            )
+        )
+    description_missing_keys = {"description.content", "materials.description.ptgen_description", "materials.description.external_ids.tmdb", "materials.description.external_ids.imdb", "materials.description.external_ids.douban"}
+    if metadata.get("ptgen_description_ready") is False or target_preflight.get("description_ready") is False or any(key in all_missing for key in description_missing_keys):
+        inputs.append(
+            _recommended_input(
+                "ptgen_description_file",
+                ["ptgen_description_file", "metadata_file", "fetch_ptgen", "enrich_metadata", "douban_id", "douban_url"],
+                "target description/PTGen content is incomplete",
+                stage="materials-description",
+                blocking_keys=sorted(key for key in description_missing_keys if key in all_missing),
+                examples={"ptgen_description_file": "/tmp/materials/ptgen-description.txt", "fetch_ptgen": True, "douban_url": "https://movie.douban.com/subject/1291546/"},
+            )
+        )
     if materials.get("mediainfo_or_bdinfo_ready") is False:
-        inputs.append({"key": "mediainfo_or_bdinfo", "accepted_keys": ["mediainfo_file", "bdinfo_file"], "required": False, "reason": "MediaInfo or BDInfo evidence is missing"})
+        inputs.append(
+            _recommended_input(
+                "mediainfo_or_bdinfo",
+                ["mediainfo_file", "bdinfo_file", "generate_mediainfo", "generate_bdinfo"],
+                "MediaInfo or BDInfo evidence is missing",
+                stage="materials-media-info",
+                blocking_keys=["materials.description.mediainfo_or_bdinfo"],
+                examples={"mediainfo_file": "/tmp/materials/MI_FULL_00.txt", "bdinfo_file": "/tmp/materials/BDINFO.txt", "generate_mediainfo": True},
+            )
+        )
     if materials.get("screenshots_ready") is False:
-        inputs.append({"key": "screenshot_files", "accepted_keys": ["screenshot_files", "screenshot_file"], "required": False, "reason": "screenshots are missing or insufficient"})
+        inputs.append(
+            _recommended_input(
+                "screenshot_files",
+                ["screenshot_files", "screenshot_file", "generate_screenshots", "screenshot_count"],
+                "screenshots are missing or insufficient",
+                stage="materials-screenshots",
+                blocking_keys=["materials.description.screenshot_bbcode"],
+                examples={"screenshot_files": ["/tmp/materials/screen-01.png", "/tmp/materials/screen-02.png"], "generate_screenshots": True, "screenshot_count": "4"},
+            )
+        )
+    image_host_missing_keys = {"assets.image_host_uploads", "materials.assets.image_host_uploads", "description.screenshot_coverage", "materials.description.screenshot_coverage"}
+    if any(key in all_missing for key in image_host_missing_keys):
+        inputs.append(
+            _recommended_input(
+                "image_host_file",
+                ["image_host_file", "upload_screenshots", "image_host"],
+                "hosted screenshot URLs are missing, partial, or stale",
+                stage="materials-image-host",
+                blocking_keys=sorted(key for key in image_host_missing_keys if key in all_missing),
+                examples={"image_host_file": "/tmp/materials/image-host-uploads.json", "upload_screenshots": True, "image_host": "ptpimg"},
+            )
+        )
     if target_preflight.get("payload_ready") is False and request.get("package_dir"):
-        inputs.append({"key": "package_dir", "accepted_keys": ["package_dir"], "required": False, "reason": "reuse or replace the target upload package directory"})
+        inputs.append(
+            _recommended_input(
+                "package_dir",
+                ["package_dir"],
+                "reuse or replace the target upload package directory",
+                stage="target-package",
+                examples={"package_dir": "/tmp/target/U2-60635-to-MTEAM"},
+            )
+        )
     return inputs
 
 
@@ -6132,6 +6251,7 @@ def _job_response_contract() -> dict[str, Any]:
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "recommended_inputs", "allowed_overrides", "current_flags"],
+        "recommended_input_fields": ["key", "accepted_keys", "required", "reason", "stage", "resume_tool", "resume_endpoint_hint", "blocking_keys", "examples"],
         "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
