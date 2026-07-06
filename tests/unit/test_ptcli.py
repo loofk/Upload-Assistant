@@ -12724,6 +12724,16 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["closure_handoff"]["recommended_tool"] == "resume_job"
     assert job["closure_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
     assert "materials_handoff.not_ready" in job["closure_handoff"]["blockers"]
+    assert job["closure_summary"]["kind"] == "ptcli.closure_summary"
+    assert job["closure_summary"]["complete"] is False
+    assert job["closure_summary"]["action"] == "prepare_materials"
+    assert job["closure_summary"]["gates"]["source_ready"] is True
+    assert job["closure_summary"]["gates"]["target_ready"] is False
+    assert job["closure_summary"]["gates"]["duplicate_clear"] is False
+    assert job["closure_summary"]["source"]["torrent_hash"] == "a" * 40
+    assert job["closure_summary"]["target"]["uploaded_torrent_hash"] == "b" * 40
+    assert job["closure_summary"]["next_step"] == job["target_upload_handoff"]["next_step"]
+    assert "materials_handoff.not_ready" in job["closure_summary"]["blockers"]
     assert job["agent_decision"]["closure_handoff"] == job["closure_handoff"]
     assert job["resume_plan"]["available"] is True
     assert job["resume_plan"]["allowed"] is True
@@ -12760,6 +12770,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["materials_handoff"] == job["materials_handoff"]
     assert summary["target_upload_handoff"] == job["target_upload_handoff"]
     assert summary["closure_handoff"]["action"] == "prepare_materials"
+    assert summary["closure_summary"] == job["closure_summary"]
     assert summary["closure_handoff"]["next_step"] == job["target_upload_handoff"]["next_step"]
     assert summary["resume_plan"] == job["resume_plan"]
     assert summary["resume_requirements"] == job["resume_requirements"]
@@ -14698,7 +14709,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "closure_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "closure_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "closure_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "closure_summary" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "closure_summary" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "closure_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "closure_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "closure_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "closure_summary_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "manual_retorrent_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "live_checklist" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
     assert "live_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
@@ -14915,6 +14931,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "materials_handoff" in summary_schema["properties"]
     assert "target_upload_handoff" in summary_schema["properties"]
     assert "closure_handoff" in summary_schema["properties"]
+    assert "closure_summary" in summary_schema["properties"]
     assert "manual_retorrent_handoff" in summary_schema["properties"]
     assert "resume_plan" in summary_schema["properties"]
     assert "resume_requirements" in summary_schema["properties"]
@@ -14934,6 +14951,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "materials_handoff" in job_schema["properties"]
     assert "target_upload_handoff" in job_schema["properties"]
     assert "closure_handoff" in job_schema["properties"]
+    assert "closure_summary" in job_schema["properties"]
     assert "manual_retorrent_handoff" in job_schema["properties"]
     assert "candidate_submission_handoff" in job_schema["properties"]
     assert "resume_requirements" in job_schema["properties"]
@@ -14994,7 +15012,7 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["request_template"]["save_path"] == "/downloads"
     assert [step["tool"] for step in ready["steps"]] == ["readiness_bundle", "site_policies", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
     assert ready["steps"][2]["request"] == ready["request_template"]
-    assert ready["steps"][4]["complete_when"] == "closure_handoff.complete=true"
+    assert ready["steps"][4]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
     assert "Submit request_template to source_url_retorrent_job" in ready["next_actions"][0]
 
     daily_blocked = ptcli_service.agent_run_preview_payload({"workflow": "daily_candidates", "source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
@@ -15045,9 +15063,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "closure_handoff" in source_url_workflow["runbook"][2]["read"]
     assert "closure_handoff.action=stop_duplicate" in source_url_workflow["runbook"][2]["stop_when"]
     assert source_url_workflow["runbook"][4]["step"] == "closure_decision"
-    assert "closure_handoff.next_step" in source_url_workflow["runbook"][4]["read"]
-    assert source_url_workflow["runbook"][4]["complete_when"] == "closure_handoff.complete=true"
-    assert source_url_workflow["runbook"][4]["resume_with"].startswith("closure_handoff.recommended_tool")
+    assert "closure_summary.next_step" in source_url_workflow["runbook"][4]["read"]
+    assert source_url_workflow["runbook"][4]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
+    assert source_url_workflow["runbook"][4]["resume_with"].startswith("closure_summary.recommended_tool")
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
     assert manual_workflow["tool"] == "manual_retorrent_job"
     assert manual_workflow["runbook_ref"] == "source_url_retorrent"
@@ -15107,8 +15125,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         source_url_workflow = next(workflow for workflow in payload["default_workflows"] if workflow["name"] == "source_url_retorrent")
         assert source_url_workflow["runbook"][0]["tool"] == "readiness_bundle"
         assert source_url_workflow["runbook"][3]["repeat_when"] == "status in queued,running and runtime.should_poll=true"
-        assert source_url_workflow["runbook"][4]["complete_when"] == "closure_handoff.complete=true"
-        assert "closure_handoff.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][4]["stop_when"]
+        assert source_url_workflow["runbook"][4]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
+        assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][4]["stop_when"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "config_templates" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
@@ -15209,7 +15227,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "closure_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "closure_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "closure_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "closure_summary" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "closure_summary" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+        assert "closure_summary" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "closure_summary" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "closure_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "closure_summary_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "manual_retorrent_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "live_checklist" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
         assert "live_ready" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]

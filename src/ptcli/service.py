@@ -264,6 +264,7 @@ class JobStore:
             "materials_handoff": _job_materials_handoff(job, summary_payload),
             "target_upload_handoff": _job_target_upload_handoff(job, summary_payload),
             "closure_handoff": _job_closure_handoff(job, summary_payload),
+            "closure_summary": _job_closure_summary(job, summary_payload),
             "manual_retorrent_handoff": _job_manual_retorrent_handoff(job, summary_payload),
             "runtime": _job_runtime(job),
             "resume_plan": _job_resume_plan(job),
@@ -3127,6 +3128,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "materials_handoff": _job_materials_handoff(job),
         "target_upload_handoff": _job_target_upload_handoff(job),
         "closure_handoff": _job_closure_handoff(job),
+        "closure_summary": _job_closure_summary(job),
         "manual_retorrent_handoff": _job_manual_retorrent_handoff(job),
         "agent_decision": job.get("agent_decision") if isinstance(job.get("agent_decision"), dict) else _agent_decision(job),
         "resume_plan": _job_resume_plan(job),
@@ -3185,6 +3187,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "materials_handoff": _job_materials_handoff(job),
         "target_upload_handoff": _job_target_upload_handoff(job),
         "closure_handoff": _job_closure_handoff(job),
+        "closure_summary": _job_closure_summary(job),
         "manual_retorrent_handoff": _job_manual_retorrent_handoff(job),
         "resume_plan": _job_resume_plan(job),
         "resume_requirements": _job_resume_requirements(job),
@@ -3871,6 +3874,93 @@ def _job_closure_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | 
         "blockers": blockers,
         "next_actions": _closure_handoff_next_actions(action, blockers, next_step),
     }
+
+
+def _job_closure_summary(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    closure_handoff = _job_closure_handoff(job, summary_payload)
+    materials_handoff = _job_materials_handoff(job, summary_payload)
+    policy_handoff = _job_policy_handoff(job)
+    qbit_handoff = _job_qbit_handoff(job, summary_payload)
+    duplicate_check = closure_handoff.get("duplicate_check") if isinstance(closure_handoff.get("duplicate_check"), dict) else {}
+    source = closure_handoff.get("source") if isinstance(closure_handoff.get("source"), dict) else {}
+    target = closure_handoff.get("target") if isinstance(closure_handoff.get("target"), dict) else {}
+    evidence = closure_handoff.get("evidence") if isinstance(closure_handoff.get("evidence"), dict) else {}
+    checklist = closure_handoff.get("closure_checklist") if isinstance(closure_handoff.get("closure_checklist"), dict) else {}
+    gates = {
+        "source_ready": source.get("ready") is True,
+        "target_ready": target.get("ready") is True,
+        "duplicate_clear": duplicate_check.get("searched") is True and duplicate_check.get("exists") is False,
+        "policy_ready": policy_handoff.get("ready") is not False if isinstance(policy_handoff, dict) else None,
+        "materials_ready": materials_handoff.get("ready") is True if isinstance(materials_handoff, dict) else None,
+        "qbit_ready": qbit_handoff.get("ready") is True if isinstance(qbit_handoff, dict) else None,
+        "uploaded_seeding_ready": target.get("uploaded_seeding_ready") is True or target.get("uploaded_wait_evidence") is True,
+    }
+    blockers = list(dict.fromkeys(_string_list(closure_handoff.get("blockers")) + _string_list(checklist.get("blockers"))))
+    next_step = closure_handoff.get("next_step") if isinstance(closure_handoff.get("next_step"), dict) else {}
+    complete = closure_handoff.get("complete") is True
+    return {
+        "kind": "ptcli.closure_summary",
+        "complete": complete,
+        "status": closure_handoff.get("status"),
+        "action": closure_handoff.get("action"),
+        "ready_for_report": complete and not blockers,
+        "source_reference": closure_handoff.get("source_reference"),
+        "target_trackers": closure_handoff.get("target_trackers"),
+        "gates": gates,
+        "source": {
+            "ready": source.get("ready"),
+            "torrent_hash": source.get("torrent_hash"),
+            "content_path": source.get("content_path"),
+            "wait_complete": source.get("wait_complete"),
+        },
+        "target": {
+            "ready": target.get("ready"),
+            "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
+            "injected_torrent_hash": target.get("injected_torrent_hash"),
+            "uploaded_seeding_ready": target.get("uploaded_seeding_ready"),
+            "uploaded_wait_evidence": target.get("uploaded_wait_evidence"),
+        },
+        "duplicate_check": {
+            "searched": duplicate_check.get("searched"),
+            "exists": duplicate_check.get("exists"),
+            "status": duplicate_check.get("status"),
+            "count": duplicate_check.get("count"),
+        },
+        "materials": {
+            "ready": materials_handoff.get("ready") if isinstance(materials_handoff, dict) else None,
+            "blockers": _string_list(materials_handoff.get("blockers")) if isinstance(materials_handoff, dict) else [],
+        },
+        "policy": {
+            "ready": policy_handoff.get("ready") if isinstance(policy_handoff, dict) else None,
+            "blockers": _string_list(policy_handoff.get("blockers")) if isinstance(policy_handoff, dict) else [],
+        },
+        "qbit": {
+            "ready": qbit_handoff.get("ready") if isinstance(qbit_handoff, dict) else None,
+            "blockers": _string_list(qbit_handoff.get("blockers")) if isinstance(qbit_handoff, dict) else [],
+        },
+        "evidence": {
+            "present": evidence.get("present") is True,
+            "source_torrent_path": evidence.get("source_torrent_path"),
+            "target_torrent_file": evidence.get("target_torrent_file"),
+            "uploaded_torrent_path": evidence.get("uploaded_torrent_path"),
+        },
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
+        "blockers": blockers,
+        "next_actions": _closure_summary_next_actions(complete, blockers, next_step),
+    }
+
+
+def _closure_summary_next_actions(complete: bool, blockers: list[str], next_step: dict[str, Any]) -> list[str]:
+    if complete and not blockers:
+        return []
+    if next_step.get("tool"):
+        return [f"Use closure_summary.next_step with {next_step['tool']} after reviewing blockers."]
+    if blockers:
+        return ["Resolve closure_summary.blockers before considering the retorrent complete."]
+    return ["Inspect closure_handoff for detailed source, target, qBittorrent, and material evidence."]
 
 
 def _closure_checklist(
@@ -6230,7 +6320,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "material_resolution", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_submission_handoff", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "material_resolution", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -6587,7 +6677,7 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "material_resolution", "candidate_submission", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_submission_handoff", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "material_resolution", "candidate_submission", "source_reference", "workflow_context"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -6604,6 +6694,7 @@ def _job_response_contract() -> dict[str, Any]:
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
         "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
         "closure_handoff_fields": ["action", "complete", "closure_checklist", "source", "target", "evidence", "duplicate_check", "target_upload_handoff", "qbit_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "closure_summary_fields": ["complete", "ready_for_report", "action", "gates", "source", "target", "duplicate_check", "materials", "policy", "qbit", "evidence", "next_step", "recommended_tool", "blockers", "next_actions"],
     }
 
 
@@ -6801,14 +6892,14 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "step": "submit_job",
                     "tool": "source_url_retorrent_job",
                     "request_from": "readiness_bundle.live_readiness.manual_job_template.request",
-                    "read": ["job_id", "status", "runtime.status_endpoint", "agent_decision", "closure_handoff", "materials_handoff", "target_upload_handoff", "workflow_context"],
+                    "read": ["job_id", "status", "runtime.status_endpoint", "agent_decision", "closure_summary", "closure_handoff", "materials_handoff", "target_upload_handoff", "workflow_context"],
                     "continue_when": "job_id is present",
                     "stop_when": ["closure_handoff.action=stop_duplicate", "closure_handoff.action=configure_policy", "closure_handoff.action=collect_confirmations"],
                 },
                 {
                     "step": "poll",
                     "tool": "get_job_status",
-                    "read": ["status", "runtime.should_poll", "runtime.poll_after_seconds", "agent_decision", "closure_handoff", "blockers", "next_actions"],
+                    "read": ["status", "runtime.should_poll", "runtime.poll_after_seconds", "agent_decision", "closure_summary", "closure_handoff", "blockers", "next_actions"],
                     "continue_when": "status not in queued,running",
                     "repeat_when": "status in queued,running and runtime.should_poll=true",
                     "stop_when": ["status=blocked", "status=failed", "status=cancelled"],
@@ -6816,10 +6907,10 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "closure_decision",
                     "tool": "get_job_summary",
-                    "read": ["closure_handoff.complete", "closure_handoff.action", "closure_handoff.next_step", "closure_handoff.recommended_tool", "closure_handoff.blockers", "closure_handoff.source", "closure_handoff.target", "summary", "evidence", "resume_plan", "resume_requirements", "candidate_submission"],
-                    "complete_when": "closure_handoff.complete=true",
-                    "resume_with": "closure_handoff.recommended_tool when closure_handoff.next_step.method is not null; pass only closure_handoff.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
-                    "stop_when": ["closure_handoff.action=stop_duplicate", "closure_handoff.action=collect_confirmations without explicit user confirmation", "closure_handoff.action=configure_policy", "closure_handoff.action=resolve_blockers and recommended_tool is null"],
+                    "read": ["closure_summary.complete", "closure_summary.action", "closure_summary.next_step", "closure_summary.recommended_tool", "closure_summary.blockers", "closure_summary.gates", "closure_summary.source", "closure_summary.target", "closure_handoff", "summary", "evidence", "resume_plan", "resume_requirements", "candidate_submission"],
+                    "complete_when": "closure_summary.complete=true and closure_summary.blockers=[]",
+                    "resume_with": "closure_summary.recommended_tool when closure_summary.next_step.method is not null; pass only closure_summary.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
+                    "stop_when": ["closure_summary.action=stop_duplicate", "closure_summary.action=collect_confirmations without explicit user confirmation", "closure_summary.action=configure_policy", "closure_summary.action=resolve_blockers and recommended_tool is null"],
                 },
             ],
         },
@@ -7000,6 +7091,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "materials_handoff": {"type": ["object", "null"]},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},
+            "closure_summary": {"type": "object"},
             "manual_retorrent_handoff": {"type": ["object", "null"]},
             "candidate_submission_handoff": {"type": ["object", "null"]},
             "resume_plan": {"type": "object"},
@@ -7035,6 +7127,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "materials_handoff": {"type": ["object", "null"]},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},
+            "closure_summary": {"type": "object"},
             "manual_retorrent_handoff": {"type": ["object", "null"]},
             "candidate_submission_handoff": {"type": ["object", "null"]},
             "runtime": {"type": "object"},
