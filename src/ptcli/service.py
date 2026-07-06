@@ -270,6 +270,7 @@ class JobStore:
             "resume_requirements": _job_resume_requirements(job, summary_payload),
             "resume_lineage": _job_resume_lineage(job),
             "resume_context": _job_resume_context(job),
+            "resume_audit": _job_resume_audit(job),
             "material_resolution": _job_material_resolution(job),
             "candidate_submission": _job_candidate_submission(job),
             "candidate_submission_handoff": _job_candidate_submission_handoff(job, summary_payload),
@@ -3131,6 +3132,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "resume_plan": _job_resume_plan(job),
         "resume_requirements": _job_resume_requirements(job),
         "resume_lineage": _job_resume_lineage(job),
+        "resume_audit": _job_resume_audit(job),
         "material_resolution": _job_material_resolution(job),
         "candidate_submission": _job_candidate_submission(job),
         "candidate_submission_handoff": _job_candidate_submission_handoff(job),
@@ -3188,6 +3190,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "resume_requirements": _job_resume_requirements(job),
         "resume_lineage": _job_resume_lineage(job),
         "resume_context": _job_resume_context(job),
+        "resume_audit": _job_resume_audit(job),
         "material_resolution": _job_material_resolution(job),
         "candidate_submission": _job_candidate_submission(job),
         "candidate_submission_handoff": _job_candidate_submission_handoff(job),
@@ -4126,6 +4129,88 @@ def _job_resume_lineage(job: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _job_resume_audit(job: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(job.get("job_id") or "")
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    lineage = _job_resume_lineage(job)
+    context = _job_resume_context(job)
+    material_resolution = _job_material_resolution(job)
+    plan = _job_resume_plan(job)
+    requirements = _job_resume_requirements(job)
+    applied_overrides = _resume_audit_override_list(request, context, "applied_overrides")
+    ignored_overrides = _resume_audit_override_list(request, context, "ignored_overrides")
+    is_resume_job = bool(lineage or context or str(job.get("kind") or "") == "ptcli.resume")
+    parent_job_id = request.get("parent_job_id") or (lineage or {}).get("parent_job_id") or (context or {}).get("parent_job_id")
+    dry_run_request = requirements.get("dry_run_request") if isinstance(requirements.get("dry_run_request"), dict) else None
+    execute_request = requirements.get("execute_request") if isinstance(requirements.get("execute_request"), dict) else None
+    return {
+        "kind": "ptcli.resume_audit",
+        "job_id": job_id or None,
+        "is_resume_job": is_resume_job,
+        "parent_job_id": parent_job_id,
+        "parent_status": request.get("parent_status") or (lineage or {}).get("parent_status") or (context or {}).get("parent_status"),
+        "parent_kind": request.get("parent_kind") or (lineage or {}).get("parent_kind") or (context or {}).get("parent_kind"),
+        "child_status": job.get("status"),
+        "resume_available": bool(plan.get("available")),
+        "resume_allowed": bool(plan.get("allowed")),
+        "resume_recommended": bool(plan.get("recommended")),
+        "resume_endpoint": plan.get("endpoint"),
+        "summary_endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
+        "next_subcommand": plan.get("subcommand") or (lineage or {}).get("next_subcommand"),
+        "next_command_argv": plan.get("next_command_argv") or request.get("next_command_argv"),
+        "original_next_command_argv": request.get("original_next_command_argv"),
+        "applied_override_keys": [item["key"] for item in applied_overrides],
+        "ignored_override_keys": [item["key"] for item in ignored_overrides],
+        "applied_overrides": applied_overrides,
+        "ignored_overrides": ignored_overrides,
+        "material_resolution": material_resolution,
+        "covered_recommended_inputs": _string_list((material_resolution or {}).get("covered_recommended_inputs")) if isinstance(material_resolution, dict) else [],
+        "unresolved_recommended_inputs": (material_resolution or {}).get("unresolved_recommended_inputs") if isinstance(material_resolution, dict) else [],
+        "dry_run_request": dry_run_request,
+        "execute_request": execute_request,
+        "next_step": _resume_audit_next_step(job, plan, dry_run_request, execute_request),
+        "next_actions": _resume_audit_next_actions(job, plan, material_resolution),
+    }
+
+
+def _string_keyed_overrides(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict) and item.get("key")]
+
+
+def _resume_audit_override_list(request: dict[str, Any], context: dict[str, Any] | None, key: str) -> list[dict[str, Any]]:
+    if isinstance(request.get(key), list):
+        return _string_keyed_overrides(request.get(key))
+    if isinstance(context, dict) and isinstance(context.get(key), list):
+        return _string_keyed_overrides(context.get(key))
+    return []
+
+
+def _resume_audit_next_step(job: dict[str, Any], plan: dict[str, Any], dry_run_request: dict[str, Any] | None, execute_request: dict[str, Any] | None) -> dict[str, Any]:
+    if plan.get("recommended") and plan.get("allowed"):
+        return {
+            "tool": "resume_job",
+            "endpoint": plan.get("endpoint"),
+            "method": "POST",
+            "request": dry_run_request or execute_request or {"job_id": job.get("job_id")},
+            "reason": "resume_recommended",
+        }
+    if job.get("status") in {"queued", "running"}:
+        return {"tool": "get_job_status", "endpoint": f"/v1/jobs/{job.get('job_id')}", "method": "GET", "request": None, "reason": "job_running"}
+    return {"tool": "get_job_summary", "endpoint": f"/v1/jobs/{job.get('job_id')}/summary", "method": "GET", "request": None, "reason": "inspect_resume_audit"}
+
+
+def _resume_audit_next_actions(job: dict[str, Any], plan: dict[str, Any], material_resolution: dict[str, Any] | None) -> list[str]:
+    if plan.get("recommended") and plan.get("allowed"):
+        return ["Preview resume with resume_audit.dry_run_request, then execute resume_audit.execute_request after reviewing command_argv and blockers."]
+    if isinstance(material_resolution, dict) and material_resolution.get("unresolved_recommended_inputs"):
+        return ["Provide unresolved material inputs before executing resume."]
+    if job.get("status") in {"queued", "running"}:
+        return ["Poll status_endpoint before attempting resume."]
+    return ["Inspect resume_audit and closure_handoff before taking the next action."]
+
+
 def _job_candidate_submission(job: dict[str, Any]) -> dict[str, Any] | None:
     request = job.get("request")
     if isinstance(request, dict) and isinstance(request.get("candidate_submission"), dict):
@@ -4672,6 +4757,7 @@ def _resume_preview(parent: dict[str, Any], request: dict[str, Any], argv: list[
         "material_resolution": request.get("material_resolution"),
         "resume_context": request.get("resume_context"),
         "resume_lineage": request.get("resume_lineage"),
+        "resume_audit": _resume_audit_from_request(parent, request, argv, allowed=allowed, reason=reason),
         "resume_plan": _job_resume_plan(parent),
         "resume_requirements": _job_resume_requirements(parent),
         "source_reference": _job_source_reference(parent),
@@ -4691,6 +4777,31 @@ def _resume_preview(parent: dict[str, Any], request: dict[str, Any], argv: list[
         "next_actions": payload["next_actions"],
     }
     return payload
+
+
+def _resume_audit_from_request(parent: dict[str, Any], request: dict[str, Any], argv: list[str] | None, *, allowed: bool, reason: str | None) -> dict[str, Any]:
+    preview_job = {
+        "job_id": parent.get("job_id"),
+        "kind": parent.get("kind"),
+        "status": parent.get("status"),
+        "request": {
+            **request,
+            "resume_lineage": request.get("resume_lineage"),
+            "resume_context": request.get("resume_context"),
+        },
+        "result": {"next_command_argv": argv},
+    }
+    audit = _job_resume_audit(preview_job)
+    audit.update(
+        {
+            "kind": "ptcli.resume_preview_audit",
+            "dry_run": True,
+            "resume_allowed": bool(allowed),
+            "resume_blocker": reason,
+            "next_command_argv": argv or [],
+        }
+    )
+    return audit
 
 
 def _resume_preview_next_actions(allowed: bool, blockers: list[str], parent_job_id: str) -> list[str]:
@@ -6119,7 +6230,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "material_resolution", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "material_resolution", "candidate_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -6476,7 +6587,7 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "material_resolution", "candidate_submission", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "candidate_submission_handoff", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "material_resolution", "candidate_submission", "source_reference", "workflow_context"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -6485,6 +6596,7 @@ def _job_response_contract() -> dict[str, Any]:
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "request_template", "dry_run_request", "execute_request", "recommended_inputs", "allowed_overrides", "current_flags"],
         "resume_preview_fields": ["dry_run", "mutates_state", "live_upload", "command_argv", "original_next_command_argv", "applied_overrides", "ignored_overrides", "material_resolution", "resume_context", "resume_lineage", "resume_plan", "resume_requirements", "agent_decision"],
+        "resume_audit_fields": ["is_resume_job", "parent_job_id", "parent_status", "parent_kind", "child_status", "resume_available", "resume_allowed", "resume_recommended", "next_subcommand", "next_command_argv", "applied_override_keys", "ignored_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "next_actions"],
         "recommended_input_fields": ["key", "accepted_keys", "required", "reason", "stage", "resume_tool", "resume_endpoint_hint", "blocking_keys", "examples"],
         "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
@@ -6894,6 +7006,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_requirements": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
+            "resume_audit": {"type": "object"},
             "material_resolution": {"type": ["object", "null"]},
             "candidate_submission": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
@@ -6929,6 +7042,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_requirements": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
             "resume_context": {"type": ["object", "null"]},
+            "resume_audit": {"type": "object"},
             "material_resolution": {"type": ["object", "null"]},
             "candidate_submission": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},

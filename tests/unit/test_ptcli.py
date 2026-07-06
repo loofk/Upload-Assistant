@@ -12822,6 +12822,13 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["source_reference"] == parent["source_reference"]
     assert resume["workflow_context"]["resume_lineage"] == resume["resume_lineage"]
     assert resume["resume_context"] == resume["request"]["resume_context"]
+    assert resume["resume_audit"]["is_resume_job"] is True
+    assert resume["resume_audit"]["parent_job_id"] == parent["job_id"]
+    assert resume["resume_audit"]["parent_kind"] == "ptcli.test"
+    assert resume["resume_audit"]["child_status"] == "complete"
+    assert resume["resume_audit"]["next_subcommand"] == "doctor"
+    assert resume["resume_audit"]["next_command_argv"] == ["python3", "ptcli.py", "doctor", "--json"]
+    assert resume["resume_audit"]["summary_endpoint"] == f"/v1/jobs/{resume['job_id']}/summary"
     assert resume["material_resolution"] is None
     assert resume["agent_decision"]["resume_context"] == resume["resume_context"]
     assert resume["agent_decision"]["resume_lineage"] == resume["resume_lineage"]
@@ -13016,6 +13023,9 @@ def test_job_store_lists_recent_jobs_with_filters(tmp_path) -> None:
     assert payload["jobs"][0]["resume_plan"]["recommended"] is True
     assert payload["jobs"][0]["resume_requirements"]["can_call_resume"] is True
     assert payload["jobs"][0]["resume_requirements"]["subcommand"] == "doctor"
+    assert payload["jobs"][0]["resume_audit"]["resume_recommended"] is True
+    assert payload["jobs"][0]["resume_audit"]["next_step"]["tool"] == "resume_job"
+    assert payload["jobs"][0]["resume_audit"]["dry_run_request"] == {"job_id": blocked["job_id"], "dry_run": True}
     assert "Resume recommended blocked jobs" in payload["next_actions"][-1]
 
     limited = store.list({"limit": "1"})
@@ -13603,6 +13613,11 @@ def test_http_resume_job_endpoint_accepts_allowlisted_overrides(monkeypatch, tmp
     assert preview["command_argv"][preview["command_argv"].index("--uploaded-save-path") + 1] == "/downloads/Example"
     assert preview["resume_overrides"] == {"confirm_upload": True, "uploaded_save_path": "/downloads/Example"}
     assert preview["ignored_overrides"] == []
+    assert preview["resume_audit"]["kind"] == "ptcli.resume_preview_audit"
+    assert preview["resume_audit"]["dry_run"] is True
+    assert preview["resume_audit"]["parent_job_id"] == parent["job_id"]
+    assert preview["resume_audit"]["applied_override_keys"] == ["confirm_upload", "uploaded_save_path"]
+    assert preview["resume_audit"]["next_command_argv"] == preview["command_argv"]
     assert preview["agent_decision"]["decision"] == "resume_preview"
     assert calls == []
 
@@ -13621,6 +13636,10 @@ def test_http_resume_job_endpoint_accepts_allowlisted_overrides(monkeypatch, tmp
     assert payload["command_argv"][payload["command_argv"].index("--uploaded-save-path") + 1] == "/downloads/Example"
     assert payload["request"]["resume_overrides"] == {"confirm_upload": True, "uploaded_save_path": "/downloads/Example"}
     assert payload["resume_context"]["parent_job_id"] == parent["job_id"]
+    assert payload["resume_audit"]["parent_job_id"] == parent["job_id"]
+    assert payload["resume_audit"]["applied_override_keys"] == ["confirm_upload", "uploaded_save_path"]
+    assert payload["resume_audit"]["ignored_override_keys"] == []
+    assert payload["resume_audit"]["execute_request"]["job_id"] == payload["job_id"]
     assert calls == [{"argv": payload["command_argv"], "parent_job_id": parent["job_id"]}]
 
 
@@ -14722,6 +14741,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_context" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "resume_audit" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "resume_audit" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "resume_audit" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "resume_audit_fields" in tool_by_name["resume_job"]["response_contract"]
     assert "material_resolution" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "material_resolution" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "material_resolution" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -15228,6 +15251,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "resume_audit" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "resume_audit" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "resume_audit" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "resume_audit_fields" in tools_by_name["resume_job"]["response_contract"]
         assert "material_resolution" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "material_resolution" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "material_resolution" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
