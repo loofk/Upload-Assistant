@@ -14751,7 +14751,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "agent_summary" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "ready_for_daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "docker_compose_api_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "docker_compose_daily_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "docker_compose_fields" in tool_by_name["deployment_check"]["response_contract"]
+    assert "ptcli_api_service_ready" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
+    assert "ptcli_api_healthcheck" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
     assert "manual_retorrent" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
     assert tool_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
     assert "live_readiness" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
@@ -15007,7 +15011,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "agent_summary" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "ready_for_daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "docker_compose_api_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "docker_compose_daily_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "docker_compose_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "ptcli_api_service_ready" in tools_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
+        assert "ptcli_api_healthcheck" in tools_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
         assert "manual_retorrent" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
         assert tools_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
         assert "live_readiness" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
@@ -15216,9 +15224,13 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
 
     assert "ptcli-api:" in compose
     assert "ptcli-daily-schedule:" in compose
+    assert 'command: ["serve", "--host", "0.0.0.0", "--port", "8080"]' in compose
     assert "healthcheck:" in compose
     assert "http://127.0.0.1:8080/health" in compose
+    assert '"127.0.0.1:8080:8080"' in compose
     assert "host.docker.internal:host-gateway" in compose
+    assert "PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}" in compose
+    assert "PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}" in compose
     assert "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in compose
     assert "PTCLI_MAX_CONCURRENT_JOBS=${PTCLI_MAX_CONCURRENT_JOBS:-1}" in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}" in compose
@@ -15250,7 +15262,22 @@ def test_deployment_check_reports_ready_seedbox_mounts(tmp_path, monkeypatch) ->
         """
 services:
   ptcli-api:
-    command: ["serve"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+      - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+    volumes:
+      - /downloads:/downloads/:rw
+      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
+      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
+      - /app/tmp/:/Upload-Assistant/tmp/:rw
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
   ptcli-daily-schedule:
     profiles:
       - daily
@@ -15277,10 +15304,15 @@ services:
     assert payload["daily_candidates"]["count"] == 1
     assert payload["docker_compose"]["daily_schedule_service_ready"] is True
     assert payload["docker_compose"]["daily_scheduler_service_ready"] is True
+    assert payload["docker_compose"]["ptcli_api_service_ready"] is True
+    assert payload["docker_compose"]["ptcli_api_healthcheck"] is True
+    assert payload["docker_compose"]["ptcli_api_localhost_port"] is True
+    assert payload["docker_compose"]["downloads_mount"] is True
     assert payload["queue"]["max_concurrent_jobs"] == 2
     assert payload["agent_summary"]["ready_for_ai"] is True
     assert payload["agent_summary"]["ready_for_daily_candidates"] is True
     assert payload["agent_summary"]["docker_compose_daily_ready"] is True
+    assert payload["agent_summary"]["docker_compose_api_ready"] is True
     assert payload["agent_summary"]["daily_candidate_schedule_count"] == 1
     assert payload["agent_handoff"]["ready"] is True
     assert payload["agent_handoff"]["recommended_first_step"] == "site_policies"
@@ -15292,6 +15324,9 @@ services:
     assert payload["agent_handoff"]["daily_candidates"]["tool"] == "daily_candidates_schedule_job"
     assert payload["agent_handoff"]["daily_candidates"]["configured_schedule_count"] == 1
     assert payload["agent_handoff"]["docker_compose"]["daily_scheduler_ready"] is True
+    assert payload["agent_handoff"]["docker_compose"]["api_ready"] is True
+    assert payload["agent_handoff"]["docker_compose"]["api_service"]["healthcheck"] is True
+    assert payload["agent_handoff"]["docker_compose"]["api_service"]["config_mount"] is True
     assert payload["agent_handoff"]["safety"]["live_upload_requires"] == ["accept_rules=true", "confirm_upload=true", "non-duplicate target", "ready site policy gate"]
     assert payload["qbit"]["configured"] is True
     assert payload["qbit"]["qbit_url"] == "http://host.docker.internal"

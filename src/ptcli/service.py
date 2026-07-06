@@ -5243,6 +5243,16 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
             "details": docker_compose,
         }
     )
+    checks.append(
+        {
+            "name": "docker.compose_ptcli_api",
+            "ok": bool(docker_compose.get("ptcli_api_service_ready")),
+            "blocking": False,
+            "message": _deployment_docker_compose_api_message(docker_compose),
+            "path": str(compose_path),
+            "details": docker_compose,
+        }
+    )
 
     blockers = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking", True) is not False]
     warnings = [str(check.get("message")) for check in checks if check.get("ok") is False and check.get("blocking") is False]
@@ -5390,6 +5400,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
                 "daily_scheduler_command": False,
                 "daily_schedule_service_ready": False,
                 "daily_scheduler_service_ready": False,
+                "ptcli_api_service_ready": False,
             }
     scheduler_command = 'command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
     schedule_command = 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
@@ -5398,11 +5409,39 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
         "readable": exists,
         "path": str(compose_path),
         "ptcli_api_service": "ptcli-api:" in text,
+        "ptcli_api_command": 'command: ["serve", "--host", "0.0.0.0", "--port", "8080"]' in text,
+        "ptcli_api_healthcheck": "healthcheck:" in text and "http://127.0.0.1:8080/health" in text,
+        "ptcli_api_localhost_port": '"127.0.0.1:8080:8080"' in text or "'127.0.0.1:8080:8080'" in text,
+        "ptcli_api_token_env": "PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}" in text,
+        "ptcli_public_base_url_env": "PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-" in text,
+        "ptcli_job_dir_env": "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in text,
+        "host_gateway": "host.docker.internal:host-gateway" in text,
+        "downloads_mount": ":/downloads/" in text or ":/downloads:" in text,
+        "config_mount": ":/Upload-Assistant/data/config.py:" in text,
+        "cookies_mount": ":/Upload-Assistant/data/cookies/" in text or ":/Upload-Assistant/data/cookies:" in text,
+        "tmp_mount": ":/Upload-Assistant/tmp/" in text or ":/Upload-Assistant/tmp:" in text,
         "daily_schedule_service": "ptcli-daily-schedule:" in text,
         "daily_scheduler_service": "ptcli-daily-scheduler:" in text,
         "daily_profile": "- daily" in text,
         "daily_schedule_command": schedule_command in text,
         "daily_scheduler_command": scheduler_command in text,
+        "ptcli_api_service_ready": all(
+            (
+                exists,
+                "ptcli-api:" in text,
+                'command: ["serve", "--host", "0.0.0.0", "--port", "8080"]' in text,
+                "healthcheck:" in text,
+                "http://127.0.0.1:8080/health" in text,
+                ("\"127.0.0.1:8080:8080\"" in text or "'127.0.0.1:8080:8080'" in text),
+                "PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}" in text,
+                "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in text,
+                "host.docker.internal:host-gateway" in text,
+                (":/downloads/" in text or ":/downloads:" in text),
+                ":/Upload-Assistant/data/config.py:" in text,
+                (":/Upload-Assistant/data/cookies/" in text or ":/Upload-Assistant/data/cookies:" in text),
+                (":/Upload-Assistant/tmp/" in text or ":/Upload-Assistant/tmp:" in text),
+            )
+        ),
         "daily_schedule_service_ready": all(
             (
                 exists,
@@ -5422,6 +5461,34 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
             )
         ),
     }
+
+
+def _deployment_docker_compose_api_message(summary: dict[str, Any]) -> str:
+    path = summary.get("path")
+    if summary.get("ptcli_api_service_ready"):
+        return f"Docker Compose ptcli-api service is configured for local AI access: {path}"
+    if not summary.get("present"):
+        return f"docker-compose.yml is not present at {path}; skip this warning if not using Docker Compose."
+    if not summary.get("readable"):
+        return f"docker-compose.yml could not be read at {path}: {summary.get('error')}"
+    missing = [
+        name
+        for name, ready in (
+            ("ptcli-api service", summary.get("ptcli_api_service")),
+            ("serve command", summary.get("ptcli_api_command")),
+            ("healthcheck", summary.get("ptcli_api_healthcheck")),
+            ("127.0.0.1 API port binding", summary.get("ptcli_api_localhost_port")),
+            ("PTCLI_API_TOKEN env", summary.get("ptcli_api_token_env")),
+            ("PTCLI_JOB_DIR env", summary.get("ptcli_job_dir_env")),
+            ("host.docker.internal host-gateway", summary.get("host_gateway")),
+            ("/downloads mount", summary.get("downloads_mount")),
+            ("data/config.py mount", summary.get("config_mount")),
+            ("data/cookies mount", summary.get("cookies_mount")),
+            ("tmp mount", summary.get("tmp_mount")),
+        )
+        if not ready
+    ]
+    return f"Docker Compose ptcli-api service is incomplete at {path}: {', '.join(missing)}."
 
 
 def _deployment_docker_compose_message(summary: dict[str, Any]) -> str:
@@ -5492,6 +5559,7 @@ def _deployment_agent_summary(
         "api_token_configured": bool(api_token_check.get("configured")),
         "qbit_configured": bool(qbit.get("configured")),
         "daily_candidates_configured": bool(daily_candidate_plan.get("configured")),
+        "docker_compose_api_ready": bool(docker_compose.get("ptcli_api_service_ready")),
         "docker_compose_daily_ready": bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready")),
         "missing_mounts": mounts.get("missing", []),
         "blocking_checks": blocking_failures,
@@ -5547,9 +5615,23 @@ def _deployment_agent_handoff(
             "connectivity_checked": bool(qbit.get("connectivity_checked")),
         },
         "docker_compose": {
+            "api_ready": bool(docker_compose.get("ptcli_api_service_ready")),
             "daily_schedule_ready": bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready")),
             "daily_scheduler_ready": bool(docker_compose.get("daily_scheduler_service_ready")),
             "compose_file": docker_compose.get("path"),
+            "api_service": {
+                "service": bool(docker_compose.get("ptcli_api_service")),
+                "serve_command": bool(docker_compose.get("ptcli_api_command")),
+                "healthcheck": bool(docker_compose.get("ptcli_api_healthcheck")),
+                "localhost_port": bool(docker_compose.get("ptcli_api_localhost_port")),
+                "api_token_env": bool(docker_compose.get("ptcli_api_token_env")),
+                "job_dir_env": bool(docker_compose.get("ptcli_job_dir_env")),
+                "host_gateway": bool(docker_compose.get("host_gateway")),
+                "downloads_mount": bool(docker_compose.get("downloads_mount")),
+                "config_mount": bool(docker_compose.get("config_mount")),
+                "cookies_mount": bool(docker_compose.get("cookies_mount")),
+                "tmp_mount": bool(docker_compose.get("tmp_mount")),
+            },
         },
         "safety": {
             "api_token_configured": bool(agent_summary.get("api_token_configured")),
@@ -6008,8 +6090,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "queue", "qbit", "daily_candidates", "docker_compose", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
-                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_daily_ready"],
+                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "qbit", "docker_compose", "safety", "next_tools"],
+                "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },

@@ -4995,6 +4995,7 @@
           "missing_mounts",
           "qbit_configured",
           "daily_candidates_configured",
+          "docker_compose_api_ready",
           "docker_compose_daily_ready"
         ],
         "agent_handoff_fields": [
@@ -5006,6 +5007,22 @@
           "docker_compose",
           "safety",
           "next_tools"
+        ],
+        "docker_compose_fields": [
+          "ptcli_api_service_ready",
+          "ptcli_api_service",
+          "ptcli_api_command",
+          "ptcli_api_healthcheck",
+          "ptcli_api_localhost_port",
+          "ptcli_api_token_env",
+          "ptcli_job_dir_env",
+          "host_gateway",
+          "downloads_mount",
+          "config_mount",
+          "cookies_mount",
+          "tmp_mount",
+          "daily_schedule_service_ready",
+          "daily_scheduler_service_ready"
         ]
       },
       "safety": {
