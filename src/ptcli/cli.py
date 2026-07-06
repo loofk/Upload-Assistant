@@ -5131,6 +5131,13 @@ def _summary_check_readiness_summary(payload: dict[str, Any]) -> dict[str, Any]:
         summary_file=payload.get("summary_file"),
     )
     readiness["source_command_recovery"] = source_command_recovery
+    daily_candidate_targets = payload.get("daily_candidate_targets") if isinstance(payload.get("daily_candidate_targets"), dict) else {}
+    if daily_candidate_targets:
+        readiness["daily_candidate_targets"] = daily_candidate_targets
+        readiness["daily_candidate_target_met"] = daily_candidate_targets.get("target_met")
+        readiness["daily_candidate_ready_target_met"] = daily_candidate_targets.get("ready_target_met")
+        readiness["daily_candidate_shortfall_count"] = daily_candidate_targets.get("shortfall_count")
+        readiness["daily_candidate_ready_shortfall_count"] = daily_candidate_targets.get("ready_shortfall_count")
     return readiness
 
 
@@ -5610,6 +5617,7 @@ def _daily_schedule_summary_check(payload: dict[str, Any], summary_file: str) ->
     diagnostics = _summary_check_diagnostics(payload)
     schedule_digest = payload.get("schedule_digest") if isinstance(payload.get("schedule_digest"), dict) else {}
     agent_decision = payload.get("agent_decision") if isinstance(payload.get("agent_decision"), dict) else {}
+    daily_candidate_targets = _daily_candidate_target_audit(schedule_digest, payload.get("notification_payload"))
     blockers = _string_list(payload.get("blockers")) or _string_list(schedule_digest.get("blockers"))
     ready_for_push = bool(schedule_digest.get("push_count")) and not blockers
     can_submit_any = bool(agent_decision.get("can_submit_any")) or bool(schedule_digest.get("submit_request_count"))
@@ -5637,6 +5645,13 @@ def _daily_schedule_summary_check(payload: dict[str, Any], summary_file: str) ->
             "complete": pending_count == 0,
             "ready_for_push": ready_for_push,
             "can_submit_any": can_submit_any,
+            "daily_candidate_targets": daily_candidate_targets,
+            "target_count": daily_candidate_targets.get("target_count"),
+            "selected_count": daily_candidate_targets.get("selected_count"),
+            "ready_count": daily_candidate_targets.get("ready_count"),
+            "shortfall_count": daily_candidate_targets.get("shortfall_count"),
+            "target_met": daily_candidate_targets.get("target_met"),
+            "ready_target_met": daily_candidate_targets.get("ready_target_met"),
             "live_safe_to_attempt": False,
             "blockers": blockers,
             "next_actions": list(dict.fromkeys(next_actions)),
@@ -5651,6 +5666,39 @@ def _daily_schedule_summary_check(payload: dict[str, Any], summary_file: str) ->
             "candidate_commands": [],
         }
     )
+
+
+def _daily_candidate_target_audit(schedule_digest: dict[str, Any], notification_payload: Any = None) -> dict[str, Any]:
+    notification = notification_payload if isinstance(notification_payload, dict) else {}
+    counts = notification.get("counts") if isinstance(notification.get("counts"), dict) else {}
+    target_count = _int_or_zero(schedule_digest.get("target_count") or counts.get("target_candidates"))
+    selected_count = _int_or_zero(schedule_digest.get("selected_count") or counts.get("selected_candidates") or schedule_digest.get("push_count") or counts.get("candidates"))
+    ready_count = _int_or_zero(schedule_digest.get("ready_count") or counts.get("ready_candidates"))
+    shortfall_count = _int_or_zero(schedule_digest.get("shortfall_count") or counts.get("shortfall_candidates") or max(0, target_count - selected_count))
+    ready_shortfall_count = max(0, target_count - ready_count) if target_count else 0
+    target_met = bool(schedule_digest.get("target_met") if "target_met" in schedule_digest else counts.get("target_met") if "target_met" in counts else target_count > 0 and selected_count >= target_count)
+    ready_target_met = bool(target_count > 0 and ready_count >= target_count)
+    return {
+        "kind": "ptcli.daily_candidate_target_audit",
+        "target_count": target_count,
+        "selected_count": selected_count,
+        "ready_count": ready_count,
+        "shortfall_count": shortfall_count,
+        "ready_shortfall_count": ready_shortfall_count,
+        "target_met": target_met,
+        "ready_target_met": ready_target_met,
+        "candidate_goal": f"{selected_count}/{target_count}" if target_count else None,
+        "ready_goal": f"{ready_count}/{target_count}" if target_count else None,
+        "source": "schedule_digest" if schedule_digest else "notification_payload" if notification else "missing",
+        "next_action": "Review and submit ready candidates." if ready_count else "Rerun daily-schedule after fixing blockers or when more source candidates are available.",
+    }
+
+
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _summary_next_command(payload: dict[str, Any], resume_state: dict[str, Any], preferred_stages: tuple[str, ...]) -> dict[str, Any]:
@@ -12063,6 +12111,7 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
     qbit_wait_retry_hints = payload.get("qbit_wait_retry_hints") if isinstance(payload.get("qbit_wait_retry_hints"), dict) else {}
     resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
     readiness_summary = payload.get("readiness_summary") if isinstance(payload.get("readiness_summary"), dict) else {}
+    daily_candidate_targets = payload.get("daily_candidate_targets") if isinstance(payload.get("daily_candidate_targets"), dict) else {}
     fields = {
         "PTCLI_SUMMARY_STATUS": payload.get("status"),
         "PTCLI_AUTOMATION_ACTION": payload.get("automation_action"),
@@ -12084,6 +12133,13 @@ def _summary_check_print_shell(payload: dict[str, Any]) -> int:
         "PTCLI_NEXT_COMMAND_RUN_ALLOWED": _shell_bool(payload.get("next_command_run_allowed")),
         "PTCLI_NEXT_COMMAND_RUN_BLOCKER": payload.get("next_command_run_blocker"),
         "PTCLI_CANDIDATE_COMMAND_COUNT": payload.get("candidate_command_count"),
+        "PTCLI_DAILY_CANDIDATE_TARGET": daily_candidate_targets.get("target_count"),
+        "PTCLI_DAILY_CANDIDATE_SELECTED": daily_candidate_targets.get("selected_count"),
+        "PTCLI_DAILY_CANDIDATE_READY": daily_candidate_targets.get("ready_count"),
+        "PTCLI_DAILY_CANDIDATE_SHORTFALL": daily_candidate_targets.get("shortfall_count"),
+        "PTCLI_DAILY_CANDIDATE_READY_SHORTFALL": daily_candidate_targets.get("ready_shortfall_count"),
+        "PTCLI_DAILY_CANDIDATE_TARGET_MET": _shell_bool(daily_candidate_targets.get("target_met")) if daily_candidate_targets.get("target_met") is not None else None,
+        "PTCLI_DAILY_CANDIDATE_READY_TARGET_MET": _shell_bool(daily_candidate_targets.get("ready_target_met")) if daily_candidate_targets.get("ready_target_met") is not None else None,
         "PTCLI_RUNNABLE_COMMAND_COUNT": payload.get("runnable_command_count"),
         "PTCLI_FIRST_RUNNABLE_STAGE": payload.get("first_runnable_stage"),
         "PTCLI_FIRST_RUNNABLE_COMMAND": payload.get("first_runnable_command"),
@@ -12196,6 +12252,7 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
     uploaded_hash_evidence = uploaded_followup.get("hash_evidence") if isinstance(uploaded_followup.get("hash_evidence"), dict) else {}
     uploaded_followup_gates = uploaded_followup.get("gates") if isinstance(uploaded_followup.get("gates"), dict) else {}
     uploaded_followup_next_actions = _string_list(uploaded_followup.get("next_actions"))
+    daily_candidate_targets = readiness_summary.get("daily_candidate_targets") if isinstance(readiness_summary.get("daily_candidate_targets"), dict) else {}
     return {
         "PTCLI_READINESS_STATUS": readiness_summary.get("status"),
         "PTCLI_READINESS_READY": _shell_bool(readiness_summary.get("ready")) if readiness_summary.get("ready") is not None else None,
@@ -12217,6 +12274,13 @@ def _summary_check_readiness_shell_fields(readiness_summary: dict[str, Any]) -> 
         "PTCLI_READINESS_RULES_READY": _shell_bool(readiness_summary.get("rules_ready")) if readiness_summary.get("rules_ready") is not None else None,
         "PTCLI_READINESS_TARGET_UPLOAD_READY": _shell_bool(readiness_summary.get("target_upload_ready")) if readiness_summary.get("target_upload_ready") is not None else None,
         "PTCLI_READINESS_QBIT_WAIT_READY": _shell_bool(readiness_summary.get("qbit_wait_ready")) if readiness_summary.get("qbit_wait_ready") is not None else None,
+        "PTCLI_READINESS_DAILY_CANDIDATE_TARGET": daily_candidate_targets.get("target_count"),
+        "PTCLI_READINESS_DAILY_CANDIDATE_SELECTED": daily_candidate_targets.get("selected_count"),
+        "PTCLI_READINESS_DAILY_CANDIDATE_READY": daily_candidate_targets.get("ready_count"),
+        "PTCLI_READINESS_DAILY_CANDIDATE_SHORTFALL": daily_candidate_targets.get("shortfall_count"),
+        "PTCLI_READINESS_DAILY_CANDIDATE_READY_SHORTFALL": daily_candidate_targets.get("ready_shortfall_count"),
+        "PTCLI_READINESS_DAILY_CANDIDATE_TARGET_MET": _shell_bool(readiness_summary.get("daily_candidate_target_met")) if readiness_summary.get("daily_candidate_target_met") is not None else None,
+        "PTCLI_READINESS_DAILY_CANDIDATE_READY_TARGET_MET": _shell_bool(readiness_summary.get("daily_candidate_ready_target_met")) if readiness_summary.get("daily_candidate_ready_target_met") is not None else None,
         "PTCLI_READINESS_READY_FOR_MTEAM_UPLOAD": _shell_bool(readiness_summary.get("ready_for_mteam_upload"))
         if readiness_summary.get("ready_for_mteam_upload") is not None
         else None,

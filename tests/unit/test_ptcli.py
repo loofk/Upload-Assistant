@@ -14564,11 +14564,28 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert check_payload["kind"] == "ptcli.daily_schedule.summary"
     assert check_payload["ready_for_push"] is True
     assert check_payload["can_submit_any"] is True
+    assert check_payload["daily_candidate_targets"]["target_count"] == 10
+    assert check_payload["daily_candidate_targets"]["selected_count"] == 1
+    assert check_payload["daily_candidate_targets"]["ready_count"] == 1
+    assert check_payload["daily_candidate_targets"]["shortfall_count"] == 9
+    assert check_payload["daily_candidate_targets"]["target_met"] is False
+    assert check_payload["target_count"] == 10
+    assert check_payload["shortfall_count"] == 9
+    assert check_payload["readiness_summary"]["daily_candidate_targets"] == check_payload["daily_candidate_targets"]
+    assert check_payload["readiness_summary"]["daily_candidate_shortfall_count"] == 9
     assert check_payload["notification_payload"]["top_item"]["source_id"] == "12345"
     assert check_payload["notification_payload"]["submission_ready"] is True
     assert check_payload["live_safe_to_attempt"] is False
     assert check_payload["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
     assert check_payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
+
+    shell_code = main(["summary-check", "--summary-file", str(summary_path), "--print-shell"])
+    shell_output = capsys.readouterr().out
+    assert shell_code == 0
+    assert "export PTCLI_DAILY_CANDIDATE_TARGET=10" in shell_output
+    assert "export PTCLI_DAILY_CANDIDATE_SHORTFALL=9" in shell_output
+    assert "export PTCLI_DAILY_CANDIDATE_TARGET_MET=0" in shell_output
+    assert "export PTCLI_READINESS_DAILY_CANDIDATE_SHORTFALL=9" in shell_output
 
 
 def test_daily_schedule_webhook_error_is_reported(monkeypatch, tmp_path, capsys) -> None:
