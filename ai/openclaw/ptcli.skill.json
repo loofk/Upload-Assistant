@@ -1688,6 +1688,35 @@
           "blocking_keys",
           "examples"
         ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
+        ],
         "material_resolution_fields": [
           "ready_before_resume",
           "recommended_inputs",
@@ -2340,6 +2369,35 @@
           "blocking_keys",
           "examples"
         ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
+        ],
         "material_resolution_fields": [
           "ready_before_resume",
           "recommended_inputs",
@@ -2859,6 +2917,35 @@
           "blocking_keys",
           "examples"
         ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
+        ],
         "material_resolution_fields": [
           "ready_before_resume",
           "recommended_inputs",
@@ -3377,6 +3464,35 @@
           "resume_endpoint_hint",
           "blocking_keys",
           "examples"
+        ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -3900,6 +4016,35 @@
           "resume_endpoint_hint",
           "blocking_keys",
           "examples"
+        ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -4693,6 +4838,35 @@
           "blocking_keys",
           "examples"
         ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
+        ],
         "material_resolution_fields": [
           "ready_before_resume",
           "recommended_inputs",
@@ -5440,6 +5614,35 @@
           "resume_endpoint_hint",
           "blocking_keys",
           "examples"
+        ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -6784,6 +6987,35 @@
           "blocking_keys",
           "examples"
         ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
+        ],
         "material_resolution_fields": [
           "ready_before_resume",
           "recommended_inputs",
@@ -7388,6 +7620,35 @@
           "blocking_keys",
           "examples"
         ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
+        ],
         "material_resolution_fields": [
           "ready_before_resume",
           "recommended_inputs",
@@ -7743,6 +8004,35 @@
           "resume_endpoint_hint",
           "blocking_keys",
           "examples"
+        ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
         ],
         "material_resolution_fields": [
           "ready_before_resume",

@@ -4702,6 +4702,7 @@ def _job_materials_handoff(job: dict[str, Any], summary_payload: dict[str, Any] 
     blockers = list(dict.fromkeys(_string_list(metadata.get("missing")) + critical_missing + upload_material_blockers + preflight_missing + preflight_description_missing + preflight_blockers))
     recommended_inputs = _materials_handoff_recommended_inputs(request, metadata, materials, target_preflight, blockers)
     ready = _materials_handoff_ready(metadata, materials, target_preflight, blockers)
+    material_plan = _materials_handoff_plan(request, metadata, materials, target_preflight, recommended_inputs)
     return {
         "kind": "ptcli.materials_handoff",
         "ready": ready,
@@ -4741,6 +4742,8 @@ def _job_materials_handoff(job: dict[str, Any], summary_payload: dict[str, Any] 
             "description_missing": preflight_description_missing,
             "blockers": preflight_blockers,
         },
+        "material_plan": material_plan,
+        "resume_request_template": _materials_handoff_resume_request_template(material_plan),
         "recommended_inputs": recommended_inputs,
         "blockers": blockers,
         "next_actions": _materials_handoff_next_actions(ready, recommended_inputs, blockers),
@@ -4863,6 +4866,108 @@ def _materials_handoff_next_actions(ready: bool, recommended_inputs: list[dict[s
     if blockers:
         return ["Resolve materials_handoff.blockers, then rerun target package preparation or resume the blocked job."]
     return ["Inspect agent_summary.materials and target_preflight before attempting live upload."]
+
+
+def _materials_handoff_plan(
+    request: dict[str, Any],
+    metadata: dict[str, Any],
+    materials: dict[str, Any],
+    target_preflight: dict[str, Any],
+    recommended_inputs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    by_key = {str(item.get("key")): item for item in recommended_inputs if isinstance(item, dict) and item.get("key")}
+    items = [
+        _material_plan_item(
+            "source_content",
+            "Source content path or qBittorrent save path",
+            ready=bool(request.get("path") or request.get("content_path") or request.get("save_path")),
+            recommended_input=by_key.get("path_or_save_path"),
+            resume_overrides={"path": "/downloads/Example.Release", "save_path": "/downloads"},
+        ),
+        _material_plan_item(
+            "metadata_ids",
+            "IMDb/TMDb/Douban identifiers and metadata",
+            ready=metadata.get("ready") is True or all(metadata.get(key) is True for key in ("imdb_ready", "tmdb_ready", "douban_ready")),
+            recommended_input=by_key.get("metadata_file"),
+            resume_overrides={"metadata_file": "/tmp/materials/metadata.json", "imdb_id": "tt1234567", "tmdb_id": "999", "tmdb_type": "movie", "douban_id": "1291546", "fetch_ptgen": True},
+        ),
+        _material_plan_item(
+            "ptgen_description",
+            "PTGen/Douban description for target upload",
+            ready=metadata.get("ptgen_description_ready") is True and target_preflight.get("description_ready") is not False,
+            recommended_input=by_key.get("ptgen_description_file"),
+            resume_overrides={"ptgen_description_file": "/tmp/materials/ptgen-description.txt", "fetch_ptgen": True, "douban_url": "https://movie.douban.com/subject/1291546/"},
+        ),
+        _material_plan_item(
+            "mediainfo_bdinfo",
+            "MediaInfo or BDInfo text",
+            ready=materials.get("mediainfo_or_bdinfo_ready") is not False,
+            recommended_input=by_key.get("mediainfo_or_bdinfo"),
+            resume_overrides={"mediainfo_file": "/tmp/materials/MI_FULL_00.txt", "bdinfo_file": "/tmp/materials/BDINFO.txt", "generate_mediainfo": True, "generate_bdinfo": True},
+        ),
+        _material_plan_item(
+            "screenshots",
+            "Video screenshots",
+            ready=materials.get("screenshots_ready") is not False,
+            recommended_input=by_key.get("screenshot_files"),
+            resume_overrides={"screenshot_files": ["/tmp/materials/screen-01.png", "/tmp/materials/screen-02.png"], "generate_screenshots": True, "screenshot_count": "4"},
+        ),
+        _material_plan_item(
+            "image_host",
+            "Hosted screenshot URLs / image-host upload evidence",
+            ready=by_key.get("image_host_file") is None,
+            recommended_input=by_key.get("image_host_file"),
+            resume_overrides={"image_host_file": "/tmp/materials/image-host-uploads.json", "upload_screenshots": True, "image_host": "ptpimg"},
+        ),
+        _material_plan_item(
+            "target_package",
+            "Reusable target upload package directory",
+            ready=target_preflight.get("payload_ready") is not False,
+            recommended_input=by_key.get("package_dir"),
+            resume_overrides={"package_dir": "/tmp/target/U2-60635-to-MTEAM"},
+        ),
+    ]
+    missing = [item["key"] for item in items if item["ready"] is False]
+    next_item = next((item for item in items if item["ready"] is False), None)
+    return {
+        "kind": "ptcli.material_plan",
+        "ready": not missing,
+        "missing": missing,
+        "next_item": next_item,
+        "items": items,
+    }
+
+
+def _material_plan_item(
+    key: str,
+    label: str,
+    *,
+    ready: bool,
+    recommended_input: dict[str, Any] | None,
+    resume_overrides: dict[str, Any],
+) -> dict[str, Any]:
+    accepted_keys = _string_list(recommended_input.get("accepted_keys")) if isinstance(recommended_input, dict) else []
+    return {
+        "key": key,
+        "label": label,
+        "ready": ready,
+        "stage": recommended_input.get("stage") if isinstance(recommended_input, dict) else None,
+        "recommended_input_key": recommended_input.get("key") if isinstance(recommended_input, dict) else None,
+        "accepted_keys": accepted_keys,
+        "blocking_keys": _string_list(recommended_input.get("blocking_keys")) if isinstance(recommended_input, dict) else [],
+        "next_step": "resume_job" if ready is False else None,
+        "resume_overrides": {key: value for key, value in resume_overrides.items() if not accepted_keys or key in accepted_keys},
+    }
+
+
+def _materials_handoff_resume_request_template(material_plan: dict[str, Any]) -> dict[str, Any]:
+    next_item = material_plan.get("next_item") if isinstance(material_plan.get("next_item"), dict) else None
+    if not next_item:
+        return {"dry_run": True}
+    return {
+        "dry_run": True,
+        **(next_item.get("resume_overrides") if isinstance(next_item.get("resume_overrides"), dict) else {}),
+    }
 
 
 def _job_target_upload_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -8495,6 +8600,9 @@ def _job_response_contract() -> dict[str, Any]:
         "resume_audit_fields": ["is_resume_job", "parent_job_id", "parent_status", "parent_kind", "child_status", "resume_available", "resume_allowed", "resume_recommended", "next_subcommand", "next_command_argv", "applied_override_keys", "ignored_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "next_actions"],
         "resume_summary_fields": ["available", "allowed", "recommended", "status", "subcommand", "missing_confirmations", "recommended_input_keys", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "recommended_tool", "blockers", "next_actions"],
         "recommended_input_fields": ["key", "accepted_keys", "required", "reason", "stage", "resume_tool", "resume_endpoint_hint", "blocking_keys", "examples"],
+        "materials_handoff_fields": ["ready", "can_prepare_upload_payload", "metadata", "materials", "target_preflight", "material_plan", "resume_request_template", "recommended_inputs", "blockers", "next_actions"],
+        "material_plan_fields": ["ready", "missing", "next_item", "items"],
+        "material_plan_item_fields": ["key", "label", "ready", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "next_step", "resume_overrides"],
         "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
