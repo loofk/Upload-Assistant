@@ -10393,6 +10393,12 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
     assert preflight["torrent_file"]["source_flag"] == "MTEAM"
     assert payload["material_diagnostics"]["present"] is True
     assert payload["material_diagnostics"]["critical_path"]["ready"] is True
+    assert payload["doctor_result_handoff"]["ready"] is True
+    assert payload["doctor_result_handoff"]["live_safe_to_attempt"] is True
+    assert payload["doctor_result_handoff"]["summary_check"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--json"]
+    assert payload["doctor_result_handoff"]["next_step"]["tool"] == "source_url_retorrent_job"
+    assert payload["doctor_result_handoff"]["next_step"]["endpoint"] == "/v1/jobs/retorrent/from-url"
+    assert payload["doctor_result_handoff"]["after_safe"]["requires"] == ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "site_policy_ready=true"]
 
     code = main(["summary-check", "--summary-file", str(summary_file), "--print-shell"])
 
@@ -14847,6 +14853,9 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert payload["live_test_handoff"]["next_step"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
     assert payload["live_test_handoff"]["after_doctor"]["then_tool"] == "source_url_retorrent_job"
     assert payload["live_test_handoff"]["after_doctor"]["then_request"] == payload["live_readiness"]["manual_job_template"]["request"]
+    assert payload["live_test_handoff"]["after_doctor"]["summary_check_tool"] == "summary_check"
+    assert payload["live_test_handoff"]["after_doctor"]["summary_check_argv_template"] == ["python3", "ptcli.py", "summary-check", "--summary-file", "<ptcli-doctor-summary.json>", "--json"]
+    assert "doctor_result_handoff" in payload["live_test_handoff"]["after_doctor"]["read_fields"]
     assert payload["recommended_tool"] == "ptcli_doctor"
     assert payload["recommended_request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
     assert payload["agent_decision"]["decision"] == "ready_for_manual_retorrent"

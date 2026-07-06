@@ -5435,6 +5435,45 @@ def _target_upload_summary_check(payload: dict[str, Any], summary_file: str) -> 
     return _summary_check_result(check_payload)
 
 
+def _doctor_result_handoff(check_payload: dict[str, Any]) -> dict[str, Any]:
+    automation_handoff = check_payload.get("automation_handoff") if isinstance(check_payload.get("automation_handoff"), dict) else {}
+    next_command_argv = check_payload.get("next_command_argv") if isinstance(check_payload.get("next_command_argv"), list) else []
+    live_safe = bool(check_payload.get("live_safe_to_attempt"))
+    blockers = _string_list(check_payload.get("blockers"))
+    next_step = {
+        "tool": "source_url_retorrent_job" if live_safe and not blockers else "summary_check",
+        "endpoint": "/v1/jobs/retorrent/from-url" if live_safe and not blockers else None,
+        "method": "POST" if live_safe and not blockers else "CLI",
+        "request": None,
+        "reason": "doctor_live_safe_to_submit" if live_safe and not blockers else "doctor_not_live_safe",
+    }
+    if not live_safe or blockers:
+        fallback_argv = (automation_handoff.get("json") or {}).get("argv") if isinstance(automation_handoff.get("json"), dict) else None
+        next_step["request"] = {"argv": next_command_argv or fallback_argv}
+        next_step["blockers"] = blockers
+    return {
+        "kind": "ptcli.doctor_result_handoff",
+        "ready": live_safe and not blockers,
+        "live_safe_to_attempt": live_safe,
+        "summary_file": check_payload.get("summary_file"),
+        "summary_check": automation_handoff.get("json"),
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
+        "next_stage": check_payload.get("next_stage"),
+        "next_command": check_payload.get("next_command"),
+        "next_command_argv": next_command_argv,
+        "blockers": blockers,
+        "after_safe": {
+            "tool": "source_url_retorrent_job",
+            "endpoint": "/v1/jobs/retorrent/from-url",
+            "requires": ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "site_policy_ready=true"],
+            "readiness_field": "doctor_result_handoff.ready",
+        },
+    }
+
+
 def _target_upload_summary_complete(target_upload_diagnostics: dict[str, Any], ready: bool) -> bool:
     completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
     if isinstance(completion.get("complete"), bool):
@@ -5534,6 +5573,7 @@ def _doctor_summary_check(payload: dict[str, Any], summary_file: str) -> dict[st
         **diagnostics,
         **artifact_status,
     }
+    check_payload["doctor_result_handoff"] = _doctor_result_handoff(check_payload)
     check_payload["candidate_commands"] = _summary_candidate_commands(check_payload)
     return _summary_check_result(check_payload)
 

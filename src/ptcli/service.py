@@ -1334,7 +1334,9 @@ def _readiness_bundle_live_test_handoff(
         "blockers": _string_list(live_readiness.get("blockers")),
         "warnings": _string_list(live_readiness.get("warnings")),
         "after_doctor": {
-            "read_fields": ["live_safe_to_attempt", "blockers", "credential_requirements", "summary_file", "next_actions"],
+            "summary_check_tool": "summary_check",
+            "summary_check_argv_template": ["python3", "ptcli.py", "summary-check", "--summary-file", "<ptcli-doctor-summary.json>", "--json"],
+            "read_fields": ["doctor_result_handoff", "live_safe_to_attempt", "blockers", "credential_requirements", "summary_file", "next_actions"],
             "continue_when": "live_safe_to_attempt=true",
             "then_tool": "source_url_retorrent_job",
             "then_request": manual_job_template.get("request") if isinstance(manual_job_template, dict) else None,
