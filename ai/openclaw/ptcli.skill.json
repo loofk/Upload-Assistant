@@ -318,7 +318,7 @@
           },
           "source_tracker": {
             "type": "string",
-            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
+            "description": "Required for workflow=daily_candidates, e.g. U2 or CHD."
           },
           "target": {
             "type": [
@@ -425,9 +425,15 @@
             "type": "string",
             "default": "source_url_retorrent",
             "enum": [
-              "source_url_retorrent"
+              "source_url_retorrent",
+              "daily_candidates"
             ],
             "description": "Agent workflow to preview without running live work."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 10,
+            "maximum": 10
           }
         }
       },
@@ -452,6 +458,10 @@
           "recommended_request",
           "blockers",
           "next_actions"
+        ],
+        "workflows": [
+          "source_url_retorrent",
+          "daily_candidates"
         ],
         "step_fields": [
           "index",

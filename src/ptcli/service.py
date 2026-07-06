@@ -5238,6 +5238,7 @@ def tools_payload() -> dict[str, Any]:
 def agent_run_preview_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
     request = request if isinstance(request, dict) else {}
     source_url = str(request.get("source_url") or request.get("source") or "").strip()
+    source_tracker = str(request.get("source_tracker") or "").strip().upper()
     target = request.get("target") or request.get("target_trackers") or "MTEAM"
     target_trackers = _preview_target_trackers(target)
     workflow_name = str(request.get("workflow") or "source_url_retorrent")
@@ -5245,8 +5246,8 @@ def agent_run_preview_payload(request: dict[str, Any] | None = None) -> dict[str
     workflow = workflows.get(workflow_name) or workflows["source_url_retorrent"]
     accept_rules = _truthy(request.get("accept_rules"))
     confirm_upload = _truthy(request.get("confirm_upload"))
-    request_template = _agent_preview_request_template(source_url, target_trackers, accept_rules, confirm_upload, request)
-    blockers = _agent_preview_blockers(source_url, target_trackers, accept_rules, confirm_upload)
+    request_template = _agent_preview_request_template(str(workflow.get("name") or ""), source_url, source_tracker, target_trackers, accept_rules, confirm_upload, request)
+    blockers = _agent_preview_blockers(str(workflow.get("name") or ""), source_url, source_tracker, target_trackers, accept_rules, confirm_upload, request)
     steps = _agent_preview_steps(workflow, request_template)
     closure_contract = _agent_closure_contract()
     return {
@@ -5260,9 +5261,11 @@ def agent_run_preview_payload(request: dict[str, Any] | None = None) -> dict[str
         "tool": workflow.get("tool"),
         "request": {
             "source_url": source_url or None,
+            "source_tracker": source_tracker or None,
             "target": target_trackers,
             "accept_rules": accept_rules,
             "confirm_upload": confirm_upload,
+            "limit": request.get("limit"),
             "save_path": request.get("save_path"),
             "uploaded_qbit_category": request.get("uploaded_qbit_category"),
             "uploaded_qbit_tags": request.get("uploaded_qbit_tags"),
@@ -5276,7 +5279,7 @@ def agent_run_preview_payload(request: dict[str, Any] | None = None) -> dict[str
         "recommended_endpoint": steps[0].get("endpoint") if steps else None,
         "recommended_request": steps[0].get("request") if steps else None,
         "blockers": blockers,
-        "next_actions": _agent_preview_next_actions(blockers, closure_contract),
+        "next_actions": _agent_preview_next_actions(str(workflow.get("name") or ""), blockers, closure_contract),
     }
 
 
@@ -5286,29 +5289,63 @@ def _preview_target_trackers(value: Any) -> list[str]:
     return [item.strip().upper() for item in str(value or "MTEAM").split(",") if item.strip()]
 
 
-def _agent_preview_request_template(source_url: str, target_trackers: list[str], accept_rules: bool, confirm_upload: bool, request: dict[str, Any]) -> dict[str, Any]:
-    template: dict[str, Any] = {
-        "source_url": source_url or "<source tracker details URL>",
-        "target": target_trackers[0] if len(target_trackers) == 1 else target_trackers,
-        "accept_rules": accept_rules,
-        "confirm_upload": confirm_upload,
-    }
+def _agent_preview_request_template(workflow: str, source_url: str, source_tracker: str, target_trackers: list[str], accept_rules: bool, confirm_upload: bool, request: dict[str, Any]) -> dict[str, Any]:
+    target: str | list[str] = target_trackers[0] if len(target_trackers) == 1 else target_trackers
+    if workflow == "daily_candidates":
+        template: dict[str, Any] = {
+            "source_tracker": source_tracker or "<source tracker code>",
+            "target": target,
+            "limit": _agent_preview_limit(request.get("limit")),
+            "accept_rules": accept_rules,
+        }
+    else:
+        template = {
+            "source_url": source_url or "<source tracker details URL>",
+            "target": target,
+            "accept_rules": accept_rules,
+            "confirm_upload": confirm_upload,
+        }
     for key in ("save_path", "path", "uploaded_qbit_category", "uploaded_qbit_tags", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"):
         if request.get(key) is not None:
             template[key] = request[key]
+    if workflow == "daily_candidates":
+        template["submission_overrides"] = _agent_preview_candidate_submission_overrides(confirm_upload, request)
     return template
 
 
-def _agent_preview_blockers(source_url: str, target_trackers: list[str], accept_rules: bool, confirm_upload: bool) -> list[str]:
+def _agent_preview_candidate_submission_overrides(confirm_upload: bool, request: dict[str, Any]) -> dict[str, Any]:
+    overrides: dict[str, Any] = {"confirm_upload": confirm_upload}
+    for key in ("save_path", "path", "uploaded_qbit_category", "uploaded_qbit_tags", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"):
+        if request.get(key) is not None:
+            overrides[key] = request[key]
+    return overrides
+
+
+def _agent_preview_limit(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_CANDIDATE_LIMIT
+    return max(1, min(parsed, DEFAULT_CANDIDATE_LIMIT))
+
+
+def _agent_preview_blockers(workflow: str, source_url: str, source_tracker: str, target_trackers: list[str], accept_rules: bool, confirm_upload: bool, request: dict[str, Any]) -> list[str]:
     blockers: list[str] = []
-    if not source_url:
+    if workflow == "daily_candidates":
+        if not source_tracker:
+            blockers.append("source_tracker is required before creating daily candidate jobs.")
+    elif not source_url:
         blockers.append("source_url is required before submitting source_url_retorrent_job.")
     if not target_trackers:
-        blockers.append("target is required before submitting source_url_retorrent_job.")
+        blockers.append("target is required before submitting retorrent automation.")
     if not accept_rules:
         blockers.append("accept_rules=true is required before live retorrent automation.")
-    if not confirm_upload:
+    if workflow == "source_url_retorrent" and not confirm_upload:
         blockers.append("confirm_upload=true is required before live target upload.")
+    if workflow == "daily_candidates" and not confirm_upload:
+        blockers.append("confirm_upload=true will be required before submitting an approved candidate.")
+    if workflow == "daily_candidates" and not (request.get("save_path") or request.get("path")):
+        blockers.append("save_path or path will be required before submitting an approved candidate.")
     return blockers
 
 
@@ -5351,6 +5388,10 @@ def _agent_preview_step_request(tool: str, request_template: dict[str, Any]) -> 
         return {"job_id": "<job_id from source_url_retorrent_job>"}
     if tool == "resume_job":
         return {"job_id": "<job_id from closure_handoff.next_step>", "overrides": "<allowlisted overrides only>"}
+    if tool == "daily_candidates_schedule_job":
+        return {"schedules": [request_template]}
+    if tool == "submit_daily_candidate_job":
+        return {"job_id": "<candidate_job_id from schedule_digest.submission_handoff.items[]>", "rank": 1, "overrides": request_template.get("submission_overrides")}
     return None
 
 
@@ -5362,9 +5403,11 @@ def _agent_preview_closure_examples() -> dict[str, Any]:
     }
 
 
-def _agent_preview_next_actions(blockers: list[str], closure_contract: dict[str, Any]) -> list[str]:
+def _agent_preview_next_actions(workflow: str, blockers: list[str], closure_contract: dict[str, Any]) -> list[str]:
     if blockers:
-        return ["Resolve preview blockers before submitting source_url_retorrent_job. This preview does not contact trackers or qBittorrent."]
+        return ["Resolve preview blockers before submitting live-capable jobs. This preview does not contact trackers or qBittorrent."]
+    if workflow == "daily_candidates":
+        return [f"Create daily candidate schedule jobs, read schedule_digest.submission_handoff, submit one approved candidate, then follow {closure_contract['next_step_source']} until {closure_contract['complete_when']}."]
     return [f"Submit request_template to source_url_retorrent_job, poll get_job_status, then follow {closure_contract['next_step_source']} until {closure_contract['complete_when']}."]
 
 
@@ -5696,7 +5739,9 @@ def _agent_run_preview_tool_request_schema() -> dict[str, Any]:
     schema["required"] = []
     properties = schema.get("properties")
     if isinstance(properties, dict):
-        properties["workflow"] = {"type": "string", "default": "source_url_retorrent", "enum": ["source_url_retorrent"], "description": "Agent workflow to preview without running live work."}
+        properties["workflow"] = {"type": "string", "default": "source_url_retorrent", "enum": ["source_url_retorrent", "daily_candidates"], "description": "Agent workflow to preview without running live work."}
+        properties["source_tracker"] = {"type": "string", "description": "Required for workflow=daily_candidates, e.g. U2 or CHD."}
+        properties["limit"] = {"type": "integer", "default": DEFAULT_CANDIDATE_LIMIT, "maximum": DEFAULT_CANDIDATE_LIMIT}
     return schema
 
 
@@ -5849,6 +5894,7 @@ def _sync_response_contract() -> dict[str, Any]:
 def _agent_run_preview_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "kind", "dry_run", "mutates_state", "live_upload", "workflow", "tool", "request", "request_template", "closure_contract", "closure_handoff_examples", "steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "workflows": ["source_url_retorrent", "daily_candidates"],
         "step_fields": ["index", "step", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when", "complete_when", "resume_with"],
         "closure_examples": ["complete", "resume", "stop"],
         "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_create_jobs", "does_not_upload"],

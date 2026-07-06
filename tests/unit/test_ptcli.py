@@ -14225,6 +14225,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["agent_run_preview"]["safety"]["mutates_state"] is False
     assert "closure_contract" in tool_by_name["agent_run_preview"]["response_contract"]["required_fields"]
     assert "steps" in tool_by_name["agent_run_preview"]["response_contract"]["required_fields"]
+    assert "daily_candidates" in tool_by_name["agent_run_preview"]["response_contract"]["workflows"]
     assert tool_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
     assert tool_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
     assert tool_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
@@ -14527,6 +14528,31 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["steps"][4]["complete_when"] == "closure_handoff.complete=true"
     assert "Submit request_template to source_url_retorrent_job" in ready["next_actions"][0]
 
+    daily_blocked = ptcli_service.agent_run_preview_payload({"workflow": "daily_candidates", "source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
+    assert daily_blocked["workflow"] == "daily_candidates"
+    assert daily_blocked["status"] == "blocked"
+    assert "confirm_upload=true will be required before submitting an approved candidate." in daily_blocked["blockers"]
+    assert "save_path or path will be required before submitting an approved candidate." in daily_blocked["blockers"]
+
+    daily_ready = ptcli_service.agent_run_preview_payload(
+        {
+            "workflow": "daily_candidates",
+            "source_tracker": "U2",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+            "uploaded_qbit_category": "MTEAM",
+        }
+    )
+    assert daily_ready["status"] == "ok"
+    assert daily_ready["request_template"]["source_tracker"] == "U2"
+    assert daily_ready["request_template"]["submission_overrides"]["confirm_upload"] is True
+    assert [step["tool"] for step in daily_ready["steps"]] == ["readiness_bundle", "daily_candidates_schedule_job", "submit_daily_candidate_job"]
+    assert daily_ready["steps"][1]["request"]["schedules"][0]["source_tracker"] == "U2"
+    assert daily_ready["steps"][2]["request"]["overrides"]["save_path"] == "/downloads"
+    assert "Create daily candidate schedule jobs" in daily_ready["next_actions"][0]
+
 
 def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     manifest = ptcli_service.agent_manifest_payload(base_url="http://ptcli.local:8080")
@@ -14585,6 +14611,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert set(tools_by_name) >= {"agent_run_preview", "deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
+        assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "queue" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]

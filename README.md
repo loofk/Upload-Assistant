@@ -83,6 +83,11 @@ curl -X POST http://127.0.0.1:8080/v1/agent/run-preview \
   -H 'Content-Type: application/json' \
   -d '{"source_url":"https://u2.dmhy.org/details.php?id=60635","target":"MTEAM","accept_rules":true,"confirm_upload":true,"save_path":"/downloads"}'
 
+# 每日候选/刷上传预演：输出候选扫描、提交候选和 closure_handoff 跟踪链路
+curl -X POST http://127.0.0.1:8080/v1/agent/run-preview \
+  -H 'Content-Type: application/json' \
+  -d '{"workflow":"daily_candidates","source_tracker":"U2","target":"MTEAM","accept_rules":true,"confirm_upload":true,"save_path":"/downloads"}'
+
 # 只查源站信息和目标站是否已有种子，不上传
 curl -X POST http://127.0.0.1:8080/v1/retorrent/check \
   -H "Content-Type: application/json" \
