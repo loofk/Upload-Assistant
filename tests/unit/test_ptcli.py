@@ -13280,6 +13280,15 @@ def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path)
             "source_url": "https://u2.dmhy.org/details.php?id=60635&hit=1",
             "target": "MTEAM",
             "save_path": "/downloads",
+            "metadata_file": "/tmp/materials/metadata.json",
+            "ptgen_description_file": "/tmp/materials/ptgen.txt",
+            "mediainfo_file": "/tmp/materials/MI_FULL_00.txt",
+            "screenshot_files": ["/tmp/materials/screen-01.png", "/tmp/materials/screen-02.png"],
+            "image_host_file": "/tmp/materials/image-host-uploads.json",
+            "fetch_ptgen": True,
+            "generate_mediainfo": True,
+            "generate_screenshots": True,
+            "upload_screenshots": True,
         },
     )
     summary = store.summary(job["job_id"])
@@ -13317,7 +13326,29 @@ def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path)
     assert summary["closure_handoff"] == job["closure_handoff"]
     assert captured_request["source_url"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
     assert captured_request["source"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
+    assert captured_request["metadata_file"] == "/tmp/materials/metadata.json"
+    assert captured_request["screenshot_files"] == ["/tmp/materials/screen-01.png", "/tmp/materials/screen-02.png"]
+    assert captured_request["generate_screenshots"] is True
+    assert job["request"]["material_options"] == {
+        "metadata_file": "/tmp/materials/metadata.json",
+        "ptgen_description_file": "/tmp/materials/ptgen.txt",
+        "mediainfo_file": "/tmp/materials/MI_FULL_00.txt",
+        "image_host_file": "/tmp/materials/image-host-uploads.json",
+        "screenshot_files": ["/tmp/materials/screen-01.png", "/tmp/materials/screen-02.png"],
+        "fetch_ptgen": True,
+        "generate_mediainfo": True,
+        "generate_screenshots": True,
+        "upload_screenshots": True,
+    }
     assert job["command_argv"][:7] == ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to"]
+    assert job["command_argv"][job["command_argv"].index("--metadata-file") + 1] == "/tmp/materials/metadata.json"
+    assert job["command_argv"][job["command_argv"].index("--image-host-file") + 1] == "/tmp/materials/image-host-uploads.json"
+    screenshot_indexes = [index for index, item in enumerate(job["command_argv"]) if item == "--screenshot-file"]
+    assert [job["command_argv"][index + 1] for index in screenshot_indexes] == ["/tmp/materials/screen-01.png", "/tmp/materials/screen-02.png"]
+    assert "--fetch-ptgen" in job["command_argv"]
+    assert "--generate-mediainfo" in job["command_argv"]
+    assert "--generate-screenshots" in job["command_argv"]
+    assert "--upload-screenshots" in job["command_argv"]
 
 
 def test_source_url_retorrent_job_handoff_stops_on_duplicate(monkeypatch, tmp_path) -> None:
@@ -13419,6 +13450,14 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
         "source_url": "https://u2.dmhy.org/details.php?id=60635&hit=1",
         "target": "MTEAM",
         "save_path": "/downloads",
+        "metadata_file": "/tmp/materials/metadata.json",
+        "mediainfo_file": "/tmp/materials/MI_FULL_00.txt",
+        "screenshot_files": ["/tmp/materials/screen-01.png"],
+        "image_host_file": "/tmp/materials/image-host-uploads.json",
+        "fetch_ptgen": True,
+        "generate_mediainfo": True,
+        "generate_screenshots": True,
+        "upload_screenshots": True,
     }
 
     unauthorized_status, unauthorized_body = _service_json_request(handler_class, "POST", "/v1/jobs/retorrent/from-url", payload=request)
@@ -13441,6 +13480,19 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
     assert payload["manual_retorrent_handoff"]["summary_endpoint"] == f"/v1/jobs/{payload['job_id']}/summary"
     assert captured_request["source"] == request["source_url"]
     assert captured_request["source_url"] == request["source_url"]
+    assert captured_request["metadata_file"] == request["metadata_file"]
+    assert captured_request["screenshot_files"] == request["screenshot_files"]
+    assert captured_request["upload_screenshots"] is True
+    assert payload["request"]["material_options"] == {
+        "metadata_file": "/tmp/materials/metadata.json",
+        "mediainfo_file": "/tmp/materials/MI_FULL_00.txt",
+        "image_host_file": "/tmp/materials/image-host-uploads.json",
+        "screenshot_files": ["/tmp/materials/screen-01.png"],
+        "fetch_ptgen": True,
+        "generate_mediainfo": True,
+        "generate_screenshots": True,
+        "upload_screenshots": True,
+    }
 
     status, job_status = _service_json_request(handler_class, "GET", f"/v1/jobs/{payload['job_id']}", api_token="secret")
     assert status == 200
@@ -13449,6 +13501,9 @@ def test_http_source_url_retorrent_job_endpoint_requires_auth_and_returns_ai_con
     assert job_status["workflow_context"] == payload["workflow_context"]
     assert job_status["manual_retorrent_handoff"] == payload["manual_retorrent_handoff"]
     assert job_status["command_argv"][:7] == ["ptcli", "retorrent", "--from", "U2", "--source-id", "60635", "--to"]
+    assert job_status["request"]["material_options"] == payload["request"]["material_options"]
+    assert "--generate-screenshots" in job_status["command_argv"]
+    assert "--upload-screenshots" in job_status["command_argv"]
 
     unauthorized_status, unauthorized_body = _service_json_request(handler_class, "GET", "/v1/jobs?status=blocked&limit=10")
     assert unauthorized_status == 401
@@ -14590,6 +14645,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "workflow_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["request_fields"]
     assert "qbit_plan" in tool_by_name["retorrent_job"]["response_contract"]["request_fields"]
+    assert "material_options" in tool_by_name["retorrent_job"]["response_contract"]["request_fields"]
+    assert "material_option_fields" in tool_by_name["retorrent_job"]["response_contract"]
+    assert "generate_screenshots" in tool_by_name["retorrent_job"]["response_contract"]["material_option_fields"]
     assert "uploaded_qbit_upload_limit" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
     assert "qbit_plan" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "qbit_limit_audit" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -14983,6 +15041,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "policy_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "policy_qbit_defaults" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "material_options" in tools_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
+        assert "material_option_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "generate_screenshots" in tools_by_name["manual_retorrent_job"]["response_contract"]["material_option_fields"]
         assert "policy_qbit_defaults" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "qbit_plan" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "qbit_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]

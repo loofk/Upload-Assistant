@@ -1626,6 +1626,10 @@ def _candidate_submit_overrides(request: dict[str, Any]) -> dict[str, Any]:
         "douban_url",
         "enrich_metadata",
         "fetch_ptgen",
+        "generate_bdinfo",
+        "generate_mediainfo",
+        "generate_screenshots",
+        "upload_screenshots",
     }
     overrides: dict[str, Any] = {}
     nested = request.get("overrides")
@@ -2556,9 +2560,40 @@ def _normalized_request(request: dict[str, Any], source: dict[str, Any], target_
         "uploaded_qbit_tags": request.get("uploaded_qbit_tags"),
         "uploaded_qbit_upload_limit": request.get("uploaded_qbit_upload_limit"),
         "uploaded_qbit_download_limit": request.get("uploaded_qbit_download_limit"),
+        "material_options": _request_material_options(request),
         "policy_qbit_defaults": request.get("policy_qbit_defaults"),
         "policy_coverage": _request_policy_coverage(request, source, target_trackers),
     }
+
+
+def _request_material_options(request: dict[str, Any]) -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    value_keys = (
+        "metadata_file",
+        "ptgen_description_file",
+        "mediainfo_file",
+        "bdinfo_file",
+        "bdinfo_playlist",
+        "image_host_file",
+        "image_host",
+        "screenshot_count",
+        "imdb_id",
+        "tmdb_id",
+        "tmdb_type",
+        "douban_id",
+        "douban_url",
+    )
+    for key in value_keys:
+        value = request.get(key)
+        if value not in (None, ""):
+            options[key] = value
+    screenshot_files = _list_value(request.get("screenshot_file") or request.get("screenshot_files"))
+    if screenshot_files:
+        options["screenshot_files"] = [str(item) for item in screenshot_files]
+    for key in ("enrich_metadata", "fetch_ptgen", "generate_bdinfo", "generate_mediainfo", "generate_screenshots", "upload_screenshots"):
+        if key in request:
+            options[key] = bool(request.get(key))
+    return options
 
 
 def _request_with_policy_qbit_defaults(request: dict[str, Any], source: dict[str, Any], target_trackers: str) -> dict[str, Any]:
@@ -6262,7 +6297,8 @@ def _job_response_contract() -> dict[str, Any]:
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
-        "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
+        "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
+        "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "recommended_inputs", "allowed_overrides", "current_flags"],
         "recommended_input_fields": ["key", "accepted_keys", "required", "reason", "stage", "resume_tool", "resume_endpoint_hint", "blocking_keys", "examples"],
         "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
