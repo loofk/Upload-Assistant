@@ -28,6 +28,7 @@ from src.ptcli.mainland import CHINESE_PT_TRACKERS, parse_tracker_list
 from src.ptcli.policies import build_rule_obligations, build_site_policy_coverage, build_site_policy_report, qbit_limits_for_tracker
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.source import resolve_source_reference
+from src.ptcli.target import create_mteam_upload_torrent_candidate
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
 DEFAULT_SERVICE_PORT = 8080
@@ -506,6 +507,16 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 except ServiceError as exc:
                     self._send_json(exc.status, {"status": "error", "message": str(exc)})
                 return
+            if path == "/v1/qbit/export":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                try:
+                    self._send_json(HTTPStatus.OK, asyncio.run(qbit_export_payload(query)))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
             if path == "/v1/deployment/check":
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -571,6 +582,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/site-policies": site_policies_payload,
                 "/v1/qbit/inspect": lambda payload: asyncio.run(qbit_inspect_payload(payload)),
                 "/v1/qbit/match": lambda payload: asyncio.run(qbit_match_payload(payload)),
+                "/v1/qbit/export": lambda payload: asyncio.run(qbit_export_payload(payload)),
                 "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
                 "/v1/candidates/daily/schedule": daily_candidate_schedule_payload,
@@ -1293,6 +1305,39 @@ async def qbit_match_payload(request: dict[str, Any] | None = None) -> dict[str,
         "agent_summary": _qbit_match_agent_summary(match_dicts, context, blockers),
         "blockers": blockers,
         "next_actions": _qbit_match_next_actions(match_dicts, context),
+    }
+
+
+async def qbit_export_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Export a qBittorrent .torrent and create a target upload candidate."""
+    request = request or {}
+    context = _qbit_export_request_context(request)
+    client_name, client_config = resolve_client_config(load_config(context.get("config")), context["client"])
+    service = QbitReadOnlyService(client_config)
+    exported_path = await service.export_torrent(context["hash"], context["output_dir"])
+    candidate = None
+    if context["sanitize_for"] == "MTEAM":
+        candidate = await asyncio.to_thread(create_mteam_upload_torrent_candidate, str(exported_path), context["output_dir"])
+    target_torrent_file = str(candidate.get("path")) if isinstance(candidate, dict) and candidate.get("path") else str(exported_path)
+    evidence = _qbit_export_file_evidence(exported_path, candidate)
+    return {
+        "kind": "ptcli.qbit_export",
+        "status": "ok",
+        "ok": True,
+        "read_only_client": True,
+        "mutates_filesystem": True,
+        "client": client_name,
+        "request": context,
+        "hash": context["hash"],
+        "exported_path": str(exported_path),
+        "path": target_torrent_file,
+        "target_torrent_file": target_torrent_file,
+        "candidate": candidate,
+        "evidence": evidence,
+        "target_upload_handoff": _qbit_export_target_upload_handoff(target_torrent_file, context, evidence),
+        "agent_summary": _qbit_export_agent_summary(target_torrent_file, context, evidence),
+        "blockers": [],
+        "next_actions": ["Use target_torrent_file as target_torrent_file for source_url_retorrent_job, retorrent_job, pipeline, or target-upload after duplicate/rule gates are ready."],
     }
 
 
@@ -2245,6 +2290,23 @@ def _qbit_match_request_context(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _qbit_export_request_context(request: dict[str, Any]) -> dict[str, Any]:
+    torrent_hash = request.get("hash") or request.get("torrent_hash") or request.get("infohash")
+    if not torrent_hash or not str(torrent_hash).strip():
+        raise ServiceError("hash is required for qBittorrent export.", status=HTTPStatus.BAD_REQUEST)
+    output_dir = request.get("output_dir") or request.get("target_torrent_output_dir") or "./tmp/exported"
+    sanitize_for = str(request.get("sanitize_for") or request.get("target") or "MTEAM").strip().upper()
+    if sanitize_for != "MTEAM":
+        raise ServiceError("qBittorrent export currently supports sanitize_for=MTEAM only.", status=HTTPStatus.BAD_REQUEST)
+    return {
+        "config": request.get("config"),
+        "client": str(request.get("client") or "default"),
+        "hash": str(torrent_hash).strip().lower(),
+        "output_dir": str(output_dir),
+        "sanitize_for": sanitize_for,
+    }
+
+
 def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
     if value in (None, ""):
         return default
@@ -2301,6 +2363,57 @@ def _qbit_match_next_actions(matches: list[dict[str, Any]], context: dict[str, A
     if matches:
         return ["Use matches[].hash and matches[].content_path as qBittorrent evidence for retorrent pipeline or resume."]
     return [f"Inject or download the source torrent, then retry qbit_match for {context['path']}."]
+
+
+def _qbit_export_file_evidence(exported_path: Path, candidate: dict[str, Any] | None) -> dict[str, Any]:
+    candidate_path = Path(str(candidate.get("path"))).expanduser() if isinstance(candidate, dict) and candidate.get("path") else None
+    return {
+        "exported": _path_evidence(exported_path),
+        "candidate": _path_evidence(candidate_path) if candidate_path else None,
+        "candidate_mteam_safe": True if isinstance(candidate, dict) and candidate.get("source_flag") == "MTEAM" else None,
+    }
+
+
+def _qbit_export_target_upload_handoff(target_torrent_file: str, context: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    ready = bool((evidence.get("candidate") or evidence.get("exported") or {}).get("is_file"))
+    return {
+        "kind": "ptcli.qbit_export_target_upload_handoff",
+        "ready": ready,
+        "target": context.get("sanitize_for"),
+        "target_torrent_file": target_torrent_file,
+        "request_fields": {"target_torrent_file": target_torrent_file, "target_torrent_output_dir": context.get("output_dir")},
+        "requires_before_upload": ["duplicate_check.exists=false", "accept_rules=true", "confirm_upload=true", "site_policy_ready=true", "target package/materials ready"],
+        "next_step": {
+            "tool": "source_url_retorrent_job",
+            "endpoint": "/v1/jobs/retorrent/from-url",
+            "method": "POST",
+            "request": {"target_torrent_file": target_torrent_file, "target_torrent_output_dir": context.get("output_dir")},
+        },
+        "blockers": [] if ready else ["exported target torrent file is missing"],
+    }
+
+
+def _qbit_export_agent_summary(target_torrent_file: str, context: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ready": bool((evidence.get("candidate") or evidence.get("exported") or {}).get("is_file")),
+        "client": context.get("client"),
+        "hash": context.get("hash"),
+        "target": context.get("sanitize_for"),
+        "target_torrent_file": target_torrent_file,
+        "mteam_safe": evidence.get("candidate_mteam_safe"),
+        "recommended_next_tool": "source_url_retorrent_job",
+    }
+
+
+def _path_evidence(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {"path": None, "exists": False, "is_file": False, "size_bytes": 0}
+    return {
+        "path": str(path),
+        "exists": path.exists(),
+        "is_file": path.is_file(),
+        "size_bytes": path.stat().st_size if path.exists() and path.is_file() else 0,
+    }
 
 
 def _add_site_policy_roles(roles: dict[str, set[str]], trackers: list[str], role: str) -> None:
@@ -7200,6 +7313,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     sites_request_schema = _sites_tool_request_schema()
     qbit_inspect_request_schema = _qbit_inspect_tool_request_schema()
     qbit_match_request_schema = _qbit_match_tool_request_schema()
+    qbit_export_request_schema = _qbit_export_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
@@ -7379,6 +7493,15 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "input_schema": qbit_match_request_schema,
             "response_contract": _qbit_match_response_contract(),
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "qbit_export_target_torrent",
+            "method": "POST",
+            "path": "/v1/qbit/export",
+            "description": "Export a .torrent from qBittorrent by hash and create an MTEAM-safe target upload candidate. This reads qBittorrent state and writes files to output_dir, but does not add torrents, upload, or change rate limits.",
+            "input_schema": qbit_export_request_schema,
+            "response_contract": _qbit_export_response_contract(),
+            "safety": {"mutates_state": True, "mutates_qbittorrent": False, "writes_files": True, "live_upload": False, "requires_confirmation": []},
         },
         {
             "name": "list_jobs",
@@ -7711,6 +7834,23 @@ def _qbit_match_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _qbit_export_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["hash"],
+        "properties": {
+            "client": {"type": "string", "default": "default"},
+            "config": {"type": "string", "description": "Path to data/config.py inside the container."},
+            "hash": {"type": "string", "description": "qBittorrent torrent hash/infohash to export."},
+            "torrent_hash": {"type": "string", "description": "Alias for hash."},
+            "output_dir": {"type": "string", "default": "./tmp/exported"},
+            "target_torrent_output_dir": {"type": "string", "description": "Alias for output_dir."},
+            "sanitize_for": {"type": "string", "enum": ["MTEAM"], "default": "MTEAM"},
+            "target": {"type": "string", "description": "Alias for sanitize_for; currently MTEAM only."},
+        },
+    }
+
+
 def _site_policy_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -7859,6 +7999,16 @@ def _qbit_match_response_contract() -> dict[str, Any]:
         "match_fields": ["name", "hash", "save_path", "content_path", "size", "progress", "state", "category", "tags", "tracker"],
         "agent_summary_fields": ["ready", "read_only", "client", "path", "matched", "matched_count", "complete_count", "hashes", "blocker_count"],
         "safety": ["read_only", "does_not_add_torrents", "does_not_export_torrents", "does_not_change_rate_limits"],
+    }
+
+
+def _qbit_export_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "read_only_client", "mutates_filesystem", "client", "request", "hash", "exported_path", "target_torrent_file", "candidate", "evidence", "target_upload_handoff", "agent_summary", "blockers", "next_actions"],
+        "evidence_fields": ["exported", "candidate", "candidate_mteam_safe"],
+        "target_upload_handoff_fields": ["ready", "target", "target_torrent_file", "request_fields", "requires_before_upload", "next_step", "blockers"],
+        "agent_summary_fields": ["ready", "client", "hash", "target", "target_torrent_file", "mteam_safe", "recommended_next_tool"],
+        "safety": ["does_not_add_torrents", "does_not_upload", "does_not_change_rate_limits", "writes_exported_torrent_files"],
     }
 
 
@@ -8397,6 +8547,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     sites_request_schema = _sites_tool_request_schema()
     qbit_inspect_request_schema = _qbit_inspect_tool_request_schema()
     qbit_match_request_schema = _qbit_match_tool_request_schema()
+    qbit_export_request_schema = _qbit_export_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
         "properties": {
@@ -8490,6 +8641,27 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "count": {"type": "integer"},
             "matched": {"type": "boolean"},
             "matches": {"type": "array", "items": {"type": "object"}},
+            "agent_summary": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    qbit_export_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "read_only_client": {"type": "boolean"},
+            "mutates_filesystem": {"type": "boolean"},
+            "client": {"type": "string"},
+            "request": {"type": "object"},
+            "hash": {"type": "string"},
+            "exported_path": {"type": "string"},
+            "path": {"type": "string"},
+            "target_torrent_file": {"type": "string"},
+            "candidate": {"type": ["object", "null"]},
+            "evidence": {"type": "object"},
+            "target_upload_handoff": {"type": "object"},
             "agent_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
@@ -8774,6 +8946,25 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": qbit_match_request_schema}}},
                     "responses": {"200": {"description": "Read-only qBittorrent content path match.", "content": {"application/json": {"schema": qbit_match_response_schema}}}},
+                },
+            },
+            "/v1/qbit/export": {
+                "get": {
+                    "operationId": "exportQbittorrentTargetTorrent",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "client", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "hash", "in": "query", "required": True, "schema": {"type": "string"}},
+                        {"name": "output_dir", "in": "query", "required": False, "schema": {"type": "string", "default": "./tmp/exported"}},
+                        {"name": "sanitize_for", "in": "query", "required": False, "schema": {"type": "string", "enum": ["MTEAM"], "default": "MTEAM"}},
+                    ],
+                    "responses": {"200": {"description": "Exported qBittorrent torrent and MTEAM-safe target candidate.", "content": {"application/json": {"schema": qbit_export_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "exportQbittorrentTargetTorrentPost",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": qbit_export_request_schema}}},
+                    "responses": {"200": {"description": "Exported qBittorrent torrent and MTEAM-safe target candidate.", "content": {"application/json": {"schema": qbit_export_response_schema}}}},
                 },
             },
             "/v1/site-policies": {

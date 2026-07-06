@@ -5840,6 +5840,110 @@
       }
     },
     {
+      "name": "qbit_export_target_torrent",
+      "method": "POST",
+      "path": "/v1/qbit/export",
+      "description": "Export a .torrent from qBittorrent by hash and create an MTEAM-safe target upload candidate. This reads qBittorrent state and writes files to output_dir, but does not add torrents, upload, or change rate limits.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "hash"
+        ],
+        "properties": {
+          "client": {
+            "type": "string",
+            "default": "default"
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py inside the container."
+          },
+          "hash": {
+            "type": "string",
+            "description": "qBittorrent torrent hash/infohash to export."
+          },
+          "torrent_hash": {
+            "type": "string",
+            "description": "Alias for hash."
+          },
+          "output_dir": {
+            "type": "string",
+            "default": "./tmp/exported"
+          },
+          "target_torrent_output_dir": {
+            "type": "string",
+            "description": "Alias for output_dir."
+          },
+          "sanitize_for": {
+            "type": "string",
+            "enum": [
+              "MTEAM"
+            ],
+            "default": "MTEAM"
+          },
+          "target": {
+            "type": "string",
+            "description": "Alias for sanitize_for; currently MTEAM only."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "read_only_client",
+          "mutates_filesystem",
+          "client",
+          "request",
+          "hash",
+          "exported_path",
+          "target_torrent_file",
+          "candidate",
+          "evidence",
+          "target_upload_handoff",
+          "agent_summary",
+          "blockers",
+          "next_actions"
+        ],
+        "evidence_fields": [
+          "exported",
+          "candidate",
+          "candidate_mteam_safe"
+        ],
+        "target_upload_handoff_fields": [
+          "ready",
+          "target",
+          "target_torrent_file",
+          "request_fields",
+          "requires_before_upload",
+          "next_step",
+          "blockers"
+        ],
+        "agent_summary_fields": [
+          "ready",
+          "client",
+          "hash",
+          "target",
+          "target_torrent_file",
+          "mteam_safe",
+          "recommended_next_tool"
+        ],
+        "safety": [
+          "does_not_add_torrents",
+          "does_not_upload",
+          "does_not_change_rate_limits",
+          "writes_exported_torrent_files"
+        ]
+      },
+      "safety": {
+        "mutates_state": true,
+        "mutates_qbittorrent": false,
+        "writes_files": true,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
       "name": "list_jobs",
       "method": "GET",
       "path": "/v1/jobs",
@@ -7881,7 +7985,7 @@
       }
     }
   ],
-  "tool_count": 26,
+  "tool_count": 27,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",
