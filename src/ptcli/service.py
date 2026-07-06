@@ -282,12 +282,13 @@ class JobStore:
         }
 
     def resume(self, job_id: str, request_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+        request_overrides = request_overrides or {}
         parent = self._read(job_id)
         status = str(parent.get("status") or "")
         if status in {"queued", "running"}:
             raise ServiceError(f"Job {job_id} is still {status}; wait before resuming.", status=HTTPStatus.CONFLICT)
         original_argv = _resume_argv_from_job(parent)
-        override_result = _apply_resume_overrides(original_argv, request_overrides or {})
+        override_result = _apply_resume_overrides(original_argv, request_overrides)
         argv = override_result["argv"]
         allowed, reason = _resume_command_allowed(argv)
         resume_context = _resume_context(parent, parent_job_id=job_id, argv=argv, allowed=allowed, reason=reason)
@@ -319,6 +320,8 @@ class JobStore:
             "resume_context": resume_context,
             "resume_lineage": resume_lineage,
         }
+        if _truthy(request_overrides.get("dry_run")):
+            return _resume_preview(parent, request, argv, allowed=allowed, reason=reason)
         if not allowed:
             return self.create(
                 "ptcli.resume",
@@ -4479,6 +4482,7 @@ def _job_resume_requirements(job: dict[str, Any], payload: dict[str, Any] | None
         required_overrides.append("confirm_upload")
 
     recommended_inputs = _resume_recommended_inputs(request, metadata, materials, target_preflight)
+    request_template = _resume_request_template(plan, suggested_overrides)
     return {
         "kind": "ptcli.resume_requirements",
         "can_call_resume": bool(plan.get("allowed")),
@@ -4489,6 +4493,9 @@ def _job_resume_requirements(job: dict[str, Any], payload: dict[str, Any] | None
         "missing_confirmations": missing_confirmations,
         "required_overrides": required_overrides,
         "suggested_overrides": suggested_overrides,
+        "request_template": request_template,
+        "dry_run_request": {**request_template, "dry_run": True},
+        "execute_request": request_template,
         "recommended_inputs": recommended_inputs,
         "allowed_overrides": {
             "boolean": sorted(RESUME_BOOLEAN_FLAG_OVERRIDES),
@@ -4499,6 +4506,14 @@ def _job_resume_requirements(job: dict[str, Any], payload: dict[str, Any] | None
         "ignored_override_policy": "Unknown override keys are ignored and reported in resume_context.ignored_overrides.",
         "blocker": plan.get("blocker"),
     }
+
+
+def _resume_request_template(plan: dict[str, Any], suggested_overrides: dict[str, Any]) -> dict[str, Any]:
+    template: dict[str, Any] = {}
+    if plan.get("parent_job_id"):
+        template["job_id"] = plan.get("parent_job_id")
+    template.update(suggested_overrides)
+    return template
 
 
 def _resume_recommended_inputs(
@@ -4632,6 +4647,58 @@ def _job_resume_plan(job: dict[str, Any]) -> dict[str, Any]:
         "blocker": reason,
         "parent_job_id": job_id,
     }
+
+
+def _resume_preview(parent: dict[str, Any], request: dict[str, Any], argv: list[str] | None, *, allowed: bool, reason: str | None) -> dict[str, Any]:
+    parent_job_id = str(parent.get("job_id") or "")
+    blockers = [] if allowed else [reason or "No executable resume command is available."]
+    payload = {
+        "kind": "ptcli.resume_preview",
+        "status": "ok" if allowed else "blocked",
+        "ok": bool(allowed),
+        "dry_run": True,
+        "mutates_state": False,
+        "live_upload": "--confirm-upload" in (argv or []),
+        "parent_job_id": parent_job_id,
+        "parent_status": parent.get("status"),
+        "parent_kind": parent.get("kind"),
+        "command_argv": argv or [],
+        "original_next_command_argv": request.get("original_next_command_argv"),
+        "resume_allowed": bool(allowed),
+        "resume_blocker": reason,
+        "resume_overrides": request.get("resume_overrides"),
+        "applied_overrides": request.get("applied_overrides"),
+        "ignored_overrides": request.get("ignored_overrides"),
+        "material_resolution": request.get("material_resolution"),
+        "resume_context": request.get("resume_context"),
+        "resume_lineage": request.get("resume_lineage"),
+        "resume_plan": _job_resume_plan(parent),
+        "resume_requirements": _job_resume_requirements(parent),
+        "source_reference": _job_source_reference(parent),
+        "workflow_context": _job_workflow_context(parent),
+        "blockers": blockers,
+        "next_actions": _resume_preview_next_actions(allowed, blockers, parent_job_id),
+    }
+    payload["agent_decision"] = {
+        "decision": "resume_preview" if allowed else "blocked",
+        "should_resume": bool(allowed),
+        "dry_run": True,
+        "mutates_state": False,
+        "resume_allowed": bool(allowed),
+        "resume_blocker": reason,
+        "command_argv": argv or [],
+        "blockers": blockers,
+        "next_actions": payload["next_actions"],
+    }
+    return payload
+
+
+def _resume_preview_next_actions(allowed: bool, blockers: list[str], parent_job_id: str) -> list[str]:
+    if allowed:
+        return [f"Review command_argv, then call /v1/jobs/{parent_job_id}/resume without dry_run when ready."]
+    if blockers:
+        return ["Resolve resume_preview.blockers before executing resume."]
+    return ["Inspect resume_preview before executing resume."]
 
 
 def _resume_lineage(parent: dict[str, Any], *, parent_job_id: str, argv: list[str] | None, allowed: bool, reason: str | None) -> dict[str, Any]:
@@ -5020,7 +5087,7 @@ def _resume_argv_from_job(job: dict[str, Any]) -> list[str] | None:
 
 
 def _apply_resume_overrides(argv: list[str] | None, overrides: dict[str, Any]) -> dict[str, Any]:
-    provided = {key: value for key, value in overrides.items() if key != "job_id"} if isinstance(overrides, dict) else {}
+    provided = {key: value for key, value in overrides.items() if key not in {"job_id", "dry_run"}} if isinstance(overrides, dict) else {}
     patched = list(argv or [])
     applied: list[dict[str, Any]] = []
     ignored: list[dict[str, Any]] = []
@@ -6341,6 +6408,7 @@ def _job_id_tool_request_schema() -> dict[str, Any]:
 def _job_resume_tool_request_schema() -> dict[str, Any]:
     schema = json.loads(json.dumps(_job_id_tool_request_schema()))
     properties = schema["properties"]
+    properties["dry_run"] = {"type": "boolean", "description": "Preview the patched allowlisted resume command without creating a child job or executing it."}
     for key in RESUME_BOOLEAN_FLAG_OVERRIDES:
         properties[key] = {"type": "boolean", "description": f"Optional resume override for {RESUME_BOOLEAN_FLAG_OVERRIDES[key]}; only true values are applied."}
     for key in RESUME_VALUE_FLAG_OVERRIDES:
@@ -6415,7 +6483,8 @@ def _job_response_contract() -> dict[str, Any]:
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],
-        "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "recommended_inputs", "allowed_overrides", "current_flags"],
+        "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "request_template", "dry_run_request", "execute_request", "recommended_inputs", "allowed_overrides", "current_flags"],
+        "resume_preview_fields": ["dry_run", "mutates_state", "live_upload", "command_argv", "original_next_command_argv", "applied_overrides", "ignored_overrides", "material_resolution", "resume_context", "resume_lineage", "resume_plan", "resume_requirements", "agent_decision"],
         "recommended_input_fields": ["key", "accepted_keys", "required", "reason", "stage", "resume_tool", "resume_endpoint_hint", "blocking_keys", "examples"],
         "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],

@@ -12733,6 +12733,10 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["resume_requirements"]["resume_recommended"] is True
     assert job["resume_requirements"]["subcommand"] == "pipeline"
     assert job["resume_requirements"]["allowed_overrides"]["boolean"] == sorted(ptcli_service.RESUME_BOOLEAN_FLAG_OVERRIDES)
+    assert job["resume_requirements"]["dry_run_request"]["job_id"] == job["job_id"]
+    assert job["resume_requirements"]["dry_run_request"]["dry_run"] is True
+    assert job["resume_requirements"]["execute_request"]["job_id"] == job["job_id"]
+    assert job["resume_requirements"]["execute_request"] == {"job_id": job["job_id"]}
     assert job["resume_requirements"]["current_flags"]["has_confirm_upload"] is False
     assert job["workflow_context"]["resume_plan"] == job["resume_plan"]
     assert job["workflow_context"]["resume_requirements"] == job["resume_requirements"]
@@ -13565,7 +13569,10 @@ def test_http_cancel_job_endpoint_requires_auth_and_only_cancels_queued(tmp_path
 
 
 def test_http_resume_job_endpoint_accepts_allowlisted_overrides(monkeypatch, tmp_path) -> None:
+    calls = []
+
     def fake_run_resume_command(argv, *, parent_job_id):
+        calls.append({"argv": argv, "parent_job_id": parent_job_id})
         return {"status": "ok", "parent_job_id": parent_job_id, "command_argv": argv}
 
     monkeypatch.setattr(ptcli_service, "_run_resume_command", fake_run_resume_command)
@@ -13577,6 +13584,27 @@ def test_http_resume_job_endpoint_accepts_allowlisted_overrides(monkeypatch, tmp
         lambda: {"status": "blocked", "next_command_argv": ["python3", "ptcli.py", "doctor", "--json"]},
     )
     handler_class = ptcli_service._handler_class("secret", store)
+
+    preview_status, preview = _service_json_request(
+        handler_class,
+        "POST",
+        f"/v1/jobs/{parent['job_id']}/resume",
+        payload={"dry_run": True, "confirm_upload": True, "uploaded_save_path": "/downloads/Example"},
+        api_token="secret",
+    )
+
+    assert preview_status == 202
+    assert preview["kind"] == "ptcli.resume_preview"
+    assert preview["status"] == "ok"
+    assert preview["dry_run"] is True
+    assert preview["mutates_state"] is False
+    assert preview["parent_job_id"] == parent["job_id"]
+    assert "--confirm-upload" in preview["command_argv"]
+    assert preview["command_argv"][preview["command_argv"].index("--uploaded-save-path") + 1] == "/downloads/Example"
+    assert preview["resume_overrides"] == {"confirm_upload": True, "uploaded_save_path": "/downloads/Example"}
+    assert preview["ignored_overrides"] == []
+    assert preview["agent_decision"]["decision"] == "resume_preview"
+    assert calls == []
 
     status, payload = _service_json_request(
         handler_class,
@@ -13593,6 +13621,7 @@ def test_http_resume_job_endpoint_accepts_allowlisted_overrides(monkeypatch, tmp
     assert payload["command_argv"][payload["command_argv"].index("--uploaded-save-path") + 1] == "/downloads/Example"
     assert payload["request"]["resume_overrides"] == {"confirm_upload": True, "uploaded_save_path": "/downloads/Example"}
     assert payload["resume_context"]["parent_job_id"] == parent["job_id"]
+    assert calls == [{"argv": payload["command_argv"], "parent_job_id": parent["job_id"]}]
 
 
 def test_manual_retorrent_job_requests_policy_config_when_coverage_missing(monkeypatch, tmp_path) -> None:
@@ -14669,6 +14698,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_options" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_requirements" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "dry_run" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "confirm_upload" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "save_path" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "screenshot_files" in tool_by_name["resume_job"]["input_schema"]["properties"]
@@ -14683,6 +14713,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_requirements" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_requirements" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "resume_requirement_fields" in tool_by_name["resume_job"]["response_contract"]
+    assert "dry_run_request" in tool_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
+    assert "execute_request" in tool_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
+    assert "resume_preview_fields" in tool_by_name["resume_job"]["response_contract"]
     assert "resume_lineage" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -15172,6 +15205,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "material_options" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_requirements" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "dry_run" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "confirm_upload" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "save_path" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "screenshot_files" in tools_by_name["resume_job"]["input_schema"]["properties"]
@@ -15185,6 +15219,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_requirements" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_requirements" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_requirement_fields" in tools_by_name["resume_job"]["response_contract"]
+        assert "dry_run_request" in tools_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
+        assert "execute_request" in tools_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
+        assert "resume_preview_fields" in tools_by_name["resume_job"]["response_contract"]
         assert "resume_lineage" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
