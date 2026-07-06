@@ -20,11 +20,11 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, build_daily_candidates
-from src.ptcli.cli import build_parser, pipeline_payload, retorrent_payload
+from src.ptcli.cli import build_parser, build_sites_payload, pipeline_payload, retorrent_payload
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
-from src.ptcli.mainland import parse_tracker_list
+from src.ptcli.mainland import CHINESE_PT_TRACKERS, parse_tracker_list
 from src.ptcli.policies import build_rule_obligations, build_site_policy_coverage, build_site_policy_report, qbit_limits_for_tracker
 from src.ptcli.source import resolve_source_reference
 
@@ -475,6 +475,16 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             if path in AGENT_MANIFEST_PATHS:
                 self._send_json(HTTPStatus.OK, agent_manifest_payload(base_url=self._request_base_url()))
                 return
+            if path == "/v1/sites":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                try:
+                    self._send_json(HTTPStatus.OK, sites_payload(query))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
             if path == "/v1/deployment/check":
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -536,6 +546,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/retorrent": lambda payload: asyncio.run(retorrent(payload)),
                 "/v1/agent/run-preview": agent_run_preview_payload,
                 "/v1/retorrent/source-url/preflight": source_url_retorrent_preflight_payload,
+                "/v1/sites": sites_payload,
                 "/v1/site-policies": site_policies_payload,
                 "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
@@ -1159,6 +1170,56 @@ def daily_candidate_schedule_payload(request: dict[str, Any]) -> dict[str, Any]:
         "schedules": schedules,
         "blockers": blockers,
         "next_actions": _daily_candidate_schedule_next_actions(schedules, blockers),
+    }
+
+
+def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return Chinese PT site adapter/profile capabilities for AI and extension work."""
+    request = request or {}
+    context = _sites_request_context(request)
+    config = load_config(context.get("config"))
+    base = build_sites_payload()
+    capabilities = base.get("capabilities") if isinstance(base.get("capabilities"), dict) else {}
+    report = build_site_policy_report(config, context["trackers"], accept_rules=bool(context.get("accept_rules")))
+    roles = context.get("roles") if isinstance(context.get("roles"), dict) else {}
+    policy_matrix = [
+        _site_policy_matrix_item(policy, roles=_string_list(roles.get(str(policy.get("tracker")))), accept_rules=bool(report.get("accept_rules")))
+        for policy in report.get("site_policies", [])
+        if isinstance(policy, dict)
+    ]
+    policy_gap_summary = _site_policy_gap_summary(policy_matrix)
+    execution_readiness = _site_policy_execution_readiness(policy_matrix, report)
+    policy_handoff = _site_policy_handoff(policy_matrix, policy_gap_summary, execution_readiness, report, context)
+    policy_by_tracker = {str(item.get("tracker")): item for item in policy_matrix if item.get("tracker")}
+    capability_matrix = [
+        _site_capability_matrix_item(tracker, capabilities.get(tracker) if isinstance(capabilities.get(tracker), dict) else {}, policy_by_tracker.get(tracker))
+        for tracker in context["trackers"]
+    ]
+    flow_matrix = _site_flow_matrix(base.get("flows") if isinstance(base.get("flows"), list) else [], context["trackers"])
+    blockers = _sites_payload_blockers(capability_matrix, context)
+    return {
+        "kind": "ptcli.sites",
+        "status": "ok" if not blockers else "blocked",
+        "ok": not blockers,
+        "ready": not blockers,
+        "request": context,
+        "sites": context["trackers"],
+        "all_sites": base.get("sites", []),
+        "capability_matrix": capability_matrix,
+        "adapter_profiles": {str(item["tracker"]): item["adapter_profile"] for item in capability_matrix if item.get("tracker")},
+        "policy_matrix": policy_matrix,
+        "policy_gap_summary": policy_gap_summary,
+        "policy_execution_summary": _site_policy_execution_summary(policy_matrix, policy_gap_summary, execution_readiness, policy_handoff, report),
+        "flow_matrix": flow_matrix,
+        "reference_flows": base.get("flows", []),
+        "source_info_trackers": base.get("source_info_trackers", []),
+        "source_download_trackers": base.get("source_download_trackers", []),
+        "target_upload_trackers": base.get("target_upload_trackers", []),
+        "mteam_flow_sources": base.get("mteam_flow_sources", []),
+        "full_live_closure_sources": base.get("full_live_closure_sources", []),
+        "agent_summary": _sites_agent_summary(capability_matrix, policy_matrix, flow_matrix, blockers),
+        "blockers": blockers,
+        "next_actions": _sites_next_actions(blockers, capability_matrix),
     }
 
 
@@ -1969,6 +2030,124 @@ def _site_policy_request_context(request: dict[str, Any]) -> dict[str, Any]:
         "config": request.get("config"),
         "accept_rules": _truthy(request.get("accept_rules")),
     }
+
+
+def _sites_request_context(request: dict[str, Any]) -> dict[str, Any]:
+    try:
+        context = _site_policy_request_context(request)
+    except ServiceError:
+        context = {"trackers": sorted(CHINESE_PT_TRACKERS), "roles": {}, "config": request.get("config"), "accept_rules": _truthy(request.get("accept_rules"))}
+    trackers = [tracker for tracker in context["trackers"] if tracker in CHINESE_PT_TRACKERS]
+    unsupported = [tracker for tracker in context["trackers"] if tracker not in CHINESE_PT_TRACKERS]
+    if not trackers:
+        raise ServiceError("No supported Chinese PT trackers found in request.", status=HTTPStatus.BAD_REQUEST)
+    roles = context.get("roles") if isinstance(context.get("roles"), dict) else {}
+    return {
+        "trackers": trackers,
+        "roles": {tracker: _string_list(roles.get(tracker)) or ["unknown"] for tracker in trackers},
+        "unsupported_trackers": unsupported,
+        "config": context.get("config"),
+        "accept_rules": bool(context.get("accept_rules")),
+    }
+
+
+def _site_capability_matrix_item(tracker: str, capability: dict[str, Any], policy_item: dict[str, Any] | None) -> dict[str, Any]:
+    target_upload = bool(capability.get("target_upload"))
+    adapter_profile = {
+        "kind": "ptcli.site_adapter_profile",
+        "tracker": tracker,
+        "source_info": bool(capability.get("source_info")),
+        "source_info_adapter": capability.get("source_info_adapter"),
+        "source_download": bool(capability.get("source_download")),
+        "source_download_adapter": capability.get("source_download_adapter"),
+        "target_upload": target_upload,
+        "target_upload_adapter": "mteam_api" if tracker == "MTEAM" and target_upload else None,
+        "credential_requirements": _string_list(capability.get("credential_requirements")),
+        "mteam_source_flow": bool(capability.get("mteam_source_flow")),
+        "full_live_closure_to_mteam": bool(capability.get("full_live_closure_to_mteam")),
+        "implemented_roles": _site_implemented_roles(capability),
+        "extension_notes": _site_extension_notes(tracker, capability),
+    }
+    policy_profile = policy_item.get("policy_profile") if isinstance(policy_item, dict) and isinstance(policy_item.get("policy_profile"), dict) else None
+    execution_readiness = policy_item.get("execution_readiness") if isinstance(policy_item, dict) and isinstance(policy_item.get("execution_readiness"), dict) else None
+    return {
+        "tracker": tracker,
+        "capabilities": capability,
+        "adapter_profile": adapter_profile,
+        "policy_profile": policy_profile,
+        "execution_readiness": execution_readiness,
+        "ready_for_source": bool(capability.get("source_info")) and bool(capability.get("source_download")),
+        "ready_for_mteam_target_flow": bool(capability.get("full_live_closure_to_mteam")),
+        "ready_as_target": target_upload,
+    }
+
+
+def _site_implemented_roles(capability: dict[str, Any]) -> list[str]:
+    roles: list[str] = []
+    if capability.get("source_info") or capability.get("source_download"):
+        roles.append("source")
+    if capability.get("target_upload"):
+        roles.append("target")
+    if capability.get("mteam_source_flow"):
+        roles.append("mteam_source_flow")
+    if capability.get("full_live_closure_to_mteam"):
+        roles.append("full_live_closure_to_mteam")
+    return roles
+
+
+def _site_extension_notes(tracker: str, capability: dict[str, Any]) -> list[str]:
+    notes: list[str] = []
+    if not capability.get("source_info"):
+        notes.append("Add source info adapter before using this tracker as a source.")
+    if not capability.get("source_download"):
+        notes.append("Add source torrent download adapter before automated source pulls.")
+    if tracker != "MTEAM" and not capability.get("target_upload"):
+        notes.append("Target upload adapter is not implemented yet; current live target closure is MTEAM-focused.")
+    if capability.get("full_live_closure_to_mteam"):
+        notes.append("Reference full live closure to MTEAM is available for this source tracker.")
+    return notes
+
+
+def _site_flow_matrix(flows: list[dict[str, Any]], trackers: list[str]) -> list[dict[str, Any]]:
+    tracker_set = set(trackers)
+    return [
+        flow
+        for flow in flows
+        if str(flow.get("source_tracker")) in tracker_set and str(flow.get("target_tracker")) in tracker_set
+    ]
+
+
+def _sites_payload_blockers(capability_matrix: list[dict[str, Any]], context: dict[str, Any]) -> list[str]:
+    blockers = [f"{tracker}: unsupported by Chinese PT allowlist." for tracker in _string_list(context.get("unsupported_trackers"))]
+    for item in capability_matrix:
+        tracker = item.get("tracker")
+        adapter = item.get("adapter_profile") if isinstance(item.get("adapter_profile"), dict) else {}
+        if not adapter.get("source_info") and not adapter.get("target_upload"):
+            blockers.append(f"{tracker}: no source_info or target_upload adapter is available.")
+    return list(dict.fromkeys(blockers))
+
+
+def _sites_agent_summary(capability_matrix: list[dict[str, Any]], policy_matrix: list[dict[str, Any]], flow_matrix: list[dict[str, Any]], blockers: list[str]) -> dict[str, Any]:
+    return {
+        "ready": not blockers,
+        "site_count": len(capability_matrix),
+        "source_info_count": sum(1 for item in capability_matrix if (item.get("adapter_profile") or {}).get("source_info")),
+        "source_download_count": sum(1 for item in capability_matrix if (item.get("adapter_profile") or {}).get("source_download")),
+        "target_upload_count": sum(1 for item in capability_matrix if (item.get("adapter_profile") or {}).get("target_upload")),
+        "full_live_closure_to_mteam_count": sum(1 for item in capability_matrix if (item.get("adapter_profile") or {}).get("full_live_closure_to_mteam")),
+        "policy_profile_count": len(policy_matrix),
+        "reference_flow_count": len(flow_matrix),
+        "recommended_next_tool": "site_policies" if blockers else "readiness_bundle",
+        "blocker_count": len(blockers),
+    }
+
+
+def _sites_next_actions(blockers: list[str], capability_matrix: list[dict[str, Any]]) -> list[str]:
+    if blockers:
+        return ["Review adapter_profiles and policy_profile templates before enabling live automation for blocked trackers."]
+    if any((item.get("adapter_profile") or {}).get("full_live_closure_to_mteam") for item in capability_matrix):
+        return ["Use readiness_bundle or source_url_retorrent_preflight for a concrete source URL and target before live work."]
+    return ["Pick a tracker with full_live_closure_to_mteam=true or implement the missing source/target adapter profile."]
 
 
 def _add_site_policy_roles(roles: dict[str, set[str]], trackers: list[str], role: str) -> None:
@@ -6865,6 +7044,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     retorrent_check_submit_request_schema = _retorrent_check_submit_tool_request_schema()
+    sites_request_schema = _sites_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
@@ -7017,6 +7197,15 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             },
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "site_profiles",
+            "method": "POST",
+            "path": "/v1/sites",
+            "description": "Return Chinese PT tracker adapter capabilities, credential requirements, policy profiles, and supported source/target flow matrix. This endpoint never contacts trackers or qBittorrent.",
+            "input_schema": sites_request_schema,
+            "response_contract": _sites_response_contract(),
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
             "name": "list_jobs",
@@ -7308,6 +7497,20 @@ def _retorrent_check_submit_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _sites_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": [],
+        "properties": {
+            "trackers": {"type": ["string", "array"], "description": "Optional comma-separated tracker codes or array. Defaults to the full Chinese PT allowlist."},
+            "source_tracker": {"type": "string", "description": "Optional source tracker code when asking for a source/target flow profile."},
+            "target": {"type": ["string", "array"], "description": "Optional target tracker code(s), e.g. MTEAM."},
+            "accept_rules": {"type": "boolean", "description": "Whether manual rule review obligations are acknowledged for policy profile readiness."},
+            "config": {"type": "string", "description": "Path to data/config.py inside the container."},
+        },
+    }
+
+
 def _site_policy_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -7427,6 +7630,17 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "doctor_template", "manual_job_template", "policy_execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
         "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
+    }
+
+
+def _sites_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "policy_matrix", "policy_execution_summary", "flow_matrix", "agent_summary", "blockers", "next_actions"],
+        "capability_fields": ["tracker", "capabilities", "adapter_profile", "policy_profile", "execution_readiness", "ready_for_source", "ready_for_mteam_target_flow", "ready_as_target"],
+        "adapter_profile_fields": ["tracker", "source_info", "source_info_adapter", "source_download", "source_download_adapter", "target_upload", "target_upload_adapter", "credential_requirements", "mteam_source_flow", "full_live_closure_to_mteam", "implemented_roles", "extension_notes"],
+        "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "missing_fields", "template", "current_values", "next_actions"],
+        "agent_summary_fields": ["ready", "site_count", "source_info_count", "source_download_count", "target_upload_count", "full_live_closure_to_mteam_count", "policy_profile_count", "reference_flow_count", "recommended_next_tool", "blocker_count"],
+        "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_upload"],
     }
 
 
@@ -7962,6 +8176,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     retorrent_check_submit_request_schema = _retorrent_check_submit_tool_request_schema()
+    sites_request_schema = _sites_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
         "properties": {
@@ -8008,6 +8223,26 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
         },
     }
     site_policy_request_schema = _site_policy_tool_request_schema()
+    sites_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "sites": {"type": "array", "items": {"type": "string"}},
+            "all_sites": {"type": "array", "items": {"type": "string"}},
+            "capability_matrix": {"type": "array", "items": {"type": "object"}},
+            "adapter_profiles": {"type": "object"},
+            "policy_matrix": {"type": "array", "items": {"type": "object"}},
+            "policy_gap_summary": {"type": "object"},
+            "policy_execution_summary": {"type": "object"},
+            "flow_matrix": {"type": "array", "items": {"type": "object"}},
+            "reference_flows": {"type": "array", "items": {"type": "object"}},
+            "agent_summary": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
     site_policy_response_schema = {
         "type": "object",
         "properties": {
@@ -8233,6 +8468,25 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": False, "content": {"application/json": {"schema": _readiness_bundle_tool_request_schema()}}},
                     "responses": {"200": {"description": "AI readiness bundle.", "content": {"application/json": {"schema": readiness_bundle_response_schema}}}},
+                },
+            },
+            "/v1/sites": {
+                "get": {
+                    "operationId": "listPtcliSiteProfiles",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "trackers", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "source_tracker", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "target", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "accept_rules", "in": "query", "required": False, "schema": {"type": "boolean"}},
+                    ],
+                    "responses": {"200": {"description": "Chinese PT site adapter and policy profiles.", "content": {"application/json": {"schema": sites_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "createPtcliSiteProfiles",
+                    "security": token_security,
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": sites_request_schema}}},
+                    "responses": {"200": {"description": "Chinese PT site adapter and policy profiles.", "content": {"application/json": {"schema": sites_response_schema}}}},
                 },
             },
             "/v1/site-policies": {

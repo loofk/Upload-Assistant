@@ -5570,6 +5570,115 @@
       }
     },
     {
+      "name": "site_profiles",
+      "method": "POST",
+      "path": "/v1/sites",
+      "description": "Return Chinese PT tracker adapter capabilities, credential requirements, policy profiles, and supported source/target flow matrix. This endpoint never contacts trackers or qBittorrent.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "trackers": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional comma-separated tracker codes or array. Defaults to the full Chinese PT allowlist."
+          },
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional source tracker code when asking for a source/target flow profile."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional target tracker code(s), e.g. MTEAM."
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Whether manual rule review obligations are acknowledged for policy profile readiness."
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py inside the container."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "sites",
+          "capability_matrix",
+          "adapter_profiles",
+          "policy_matrix",
+          "policy_execution_summary",
+          "flow_matrix",
+          "agent_summary",
+          "blockers",
+          "next_actions"
+        ],
+        "capability_fields": [
+          "tracker",
+          "capabilities",
+          "adapter_profile",
+          "policy_profile",
+          "execution_readiness",
+          "ready_for_source",
+          "ready_for_mteam_target_flow",
+          "ready_as_target"
+        ],
+        "adapter_profile_fields": [
+          "tracker",
+          "source_info",
+          "source_info_adapter",
+          "source_download",
+          "source_download_adapter",
+          "target_upload",
+          "target_upload_adapter",
+          "credential_requirements",
+          "mteam_source_flow",
+          "full_live_closure_to_mteam",
+          "implemented_roles",
+          "extension_notes"
+        ],
+        "policy_profile_fields": [
+          "config_path",
+          "required_fields",
+          "optional_fields",
+          "missing_fields",
+          "template",
+          "current_values",
+          "next_actions"
+        ],
+        "agent_summary_fields": [
+          "ready",
+          "site_count",
+          "source_info_count",
+          "source_download_count",
+          "target_upload_count",
+          "full_live_closure_to_mteam_count",
+          "policy_profile_count",
+          "reference_flow_count",
+          "recommended_next_tool",
+          "blocker_count"
+        ],
+        "safety": [
+          "does_not_contact_trackers",
+          "does_not_contact_qbittorrent",
+          "does_not_upload"
+        ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
       "name": "list_jobs",
       "method": "GET",
       "path": "/v1/jobs",
@@ -7611,7 +7720,7 @@
       }
     }
   ],
-  "tool_count": 23,
+  "tool_count": 24,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

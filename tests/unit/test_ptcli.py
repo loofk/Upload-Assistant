@@ -14717,6 +14717,59 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert payload["recommended_endpoint"] == "/v1/readiness/bundle"
 
 
+def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "rule_review_fingerprint": "u2-review",
+                },
+                "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
+                    "upload_rate_limit": "2MiB/s",
+                    "min_ratio": 1.0,
+                    "rule_review_fingerprint": "mteam-review",
+                },
+            }
+        }
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+
+    payload = ptcli_service.sites_payload({"source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
+
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["sites"] == ["U2", "MTEAM"]
+    assert payload["request"]["roles"] == {"U2": ["source"], "MTEAM": ["target"]}
+    assert len(payload["flow_matrix"]) == 1
+    assert payload["flow_matrix"][0]["source_tracker"] == "U2"
+    assert payload["flow_matrix"][0]["target_tracker"] == "MTEAM"
+    u2_profile = payload["adapter_profiles"]["U2"]
+    assert u2_profile["source_info"] is True
+    assert u2_profile["source_download"] is True
+    assert u2_profile["source_download_adapter"] == "nexusphp_passkey"
+    assert u2_profile["full_live_closure_to_mteam"] is True
+    assert "TRACKERS.U2.passkey" in u2_profile["credential_requirements"]
+    mteam_profile = payload["adapter_profiles"]["MTEAM"]
+    assert mteam_profile["target_upload"] is True
+    assert mteam_profile["target_upload_adapter"] == "mteam_api"
+    matrix_by_tracker = {item["tracker"]: item for item in payload["capability_matrix"]}
+    assert matrix_by_tracker["U2"]["ready_for_source"] is True
+    assert matrix_by_tracker["U2"]["ready_for_mteam_target_flow"] is True
+    assert matrix_by_tracker["U2"]["policy_profile"]["template"]["download_rate_limit"] == "20 MiB/s"
+    assert matrix_by_tracker["MTEAM"]["ready_as_target"] is True
+    assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["upload_rate_limit"] == "2 MiB/s"
+    assert payload["agent_summary"]["source_download_count"] == 2
+    assert payload["agent_summary"]["target_upload_count"] == 1
+    assert payload["agent_summary"]["full_live_closure_to_mteam_count"] == 1
+    assert payload["agent_summary"]["recommended_next_tool"] == "readiness_bundle"
+
+
 def test_site_policies_cli_exposes_policy_gap_summary(monkeypatch, capsys) -> None:
     config = {
         "PTCLI": {
@@ -15072,6 +15125,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "ptcli_api_service_ready" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
     assert "ptcli_api_healthcheck" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
     assert "manual_retorrent" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
+    assert tool_by_name["site_profiles"]["path"] == "/v1/sites"
+    assert "adapter_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "policy_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "full_live_closure_to_mteam_count" in tool_by_name["site_profiles"]["response_contract"]["agent_summary_fields"]
     assert tool_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
     assert "live_readiness" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "live_verification" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
@@ -15136,6 +15193,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/retorrent/source-url/preflight" in openapi["paths"]
     assert "/v1/deployment/check" in openapi["paths"]
     assert "/v1/readiness/bundle" in openapi["paths"]
+    assert "/v1/sites" in openapi["paths"]
     assert "/v1/site-policies" in openapi["paths"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent/check/{job_id}/submit" in openapi["paths"]
@@ -15166,6 +15224,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_gap_summary" in site_policy_schema["properties"]
     assert "policy_execution_summary" in site_policy_schema["properties"]
     assert "config_templates" in site_policy_schema["properties"]
+    site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "capability_matrix" in site_profiles_schema["properties"]
+    assert "adapter_profiles" in site_profiles_schema["properties"]
+    assert "flow_matrix" in site_profiles_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "qbit_plan" in summary_schema["properties"]
     assert "qbit_limit_audit" in summary_schema["properties"]
@@ -15314,7 +15376,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["primary_field"] == "closure_handoff"
     assert manifest["closure_contract"]["complete_when"] == "closure_handoff.complete=true"
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
-    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "site_profiles", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
