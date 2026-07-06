@@ -3129,6 +3129,8 @@ def _job_target_upload_handoff(job: dict[str, Any], summary_payload: dict[str, A
     gate_blockers = _target_upload_gate_blockers(duplicate_exists, missing_confirmations, policy_ready, materials_handoff)
     can_upload_now = bool(preflight_ready and payload_ready and not upload_blockers and not gate_blockers)
     action = _target_upload_handoff_action(uploaded_seeding_ready, duplicate_exists, missing_confirmations, policy_ready, materials_handoff, can_upload_now, upload_blockers)
+    resume_plan = _job_resume_plan(job)
+    next_step = _target_upload_handoff_next_step(job, action, resume_plan, missing_confirmations, materials_handoff, upload_blockers)
     return {
         "kind": "ptcli.target_upload_handoff",
         "ready": bool(uploaded_seeding_ready),
@@ -3157,7 +3159,11 @@ def _job_target_upload_handoff(job: dict[str, Any], summary_payload: dict[str, A
         "missing_confirmations": missing_confirmations,
         "policy_coverage_ready": policy_ready,
         "materials_handoff": materials_handoff,
-        "resume_plan": _job_resume_plan(job),
+        "resume_plan": resume_plan,
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
         "summary_file": job.get("summary_file") or _job_summary_file(job),
         "blockers": list(dict.fromkeys(gate_blockers + upload_blockers)),
         "next_actions": _target_upload_handoff_next_actions(action, missing_confirmations, materials_handoff, upload_blockers),
@@ -3227,6 +3233,93 @@ def _target_upload_handoff_next_actions(action: str, missing_confirmations: list
     if upload_blockers:
         return ["Inspect target_upload_handoff.blockers before attempting live upload."]
     return []
+
+
+def _target_upload_handoff_next_step(
+    job: dict[str, Any],
+    action: str,
+    resume_plan: dict[str, Any],
+    missing_confirmations: list[str],
+    materials_handoff: dict[str, Any] | None,
+    upload_blockers: list[str],
+) -> dict[str, Any]:
+    job_id = job.get("job_id")
+    resume_endpoint = resume_plan.get("endpoint") if isinstance(resume_plan.get("endpoint"), str) else f"/v1/jobs/{job_id}/resume" if job_id else None
+    resume_allowed = bool(resume_plan.get("allowed"))
+    base = {
+        "action": action,
+        "resume_allowed": resume_allowed,
+        "resume_endpoint": resume_endpoint,
+        "resume_subcommand": resume_plan.get("subcommand"),
+    }
+    if action == "done":
+        return {**base, "tool": "get_job_summary", "endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None, "method": "GET", "request": None, "reason": "uploaded_target_seeding_ready"}
+    if action == "stop_duplicate":
+        return {**base, "tool": None, "endpoint": None, "method": None, "request": None, "reason": "target_duplicate_exists"}
+    if action == "configure_policy":
+        return {**base, "tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "request": _target_upload_policy_request(job), "reason": "policy_coverage_incomplete"}
+    if action == "collect_confirmations":
+        return {
+            **base,
+            "tool": "resume_job" if resume_allowed else None,
+            "endpoint": resume_endpoint if resume_allowed else None,
+            "method": "POST" if resume_allowed else None,
+            "request": _target_upload_confirmation_overrides(missing_confirmations) if resume_allowed else None,
+            "reason": "missing_required_confirmation",
+        }
+    if action == "prepare_materials":
+        return {
+            **base,
+            "tool": "resume_job" if resume_allowed else None,
+            "endpoint": resume_endpoint if resume_allowed else None,
+            "method": "POST" if resume_allowed else None,
+            "request": {},
+            "reason": "materials_not_ready",
+            "recommended_inputs": materials_handoff.get("recommended_inputs") if isinstance(materials_handoff, dict) else [],
+        }
+    if action == "repair_target_payload":
+        return {
+            **base,
+            "tool": "resume_job" if resume_allowed else None,
+            "endpoint": resume_endpoint if resume_allowed else None,
+            "method": "POST" if resume_allowed else None,
+            "request": {},
+            "reason": "target_payload_or_preflight_blocked",
+            "upload_blockers": upload_blockers,
+        }
+    if action == "ready_for_upload":
+        return {
+            **base,
+            "tool": "resume_job" if resume_allowed else None,
+            "endpoint": resume_endpoint if resume_allowed else None,
+            "method": "POST" if resume_allowed else None,
+            "request": {},
+            "reason": "target_upload_preflight_ready",
+        }
+    return {**base, "tool": "get_job_summary", "endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None, "method": "GET", "request": None, "reason": "inspect_target_upload_state"}
+
+
+def _target_upload_confirmation_overrides(missing_confirmations: list[str]) -> dict[str, bool]:
+    overrides: dict[str, bool] = {}
+    if "accept_rules=true" in missing_confirmations:
+        overrides["accept_rules"] = True
+    if "confirm_upload=true" in missing_confirmations:
+        overrides["confirm_upload"] = True
+    return overrides
+
+
+def _target_upload_policy_request(job: dict[str, Any]) -> dict[str, Any]:
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    policy_request: dict[str, Any] = {}
+    source_reference = _job_source_reference(job)
+    if isinstance(source_reference, dict) and source_reference.get("tracker"):
+        policy_request["source_tracker"] = source_reference.get("tracker")
+    target_trackers = request.get("target_trackers")
+    if target_trackers:
+        policy_request["target"] = target_trackers
+    if request.get("accept_rules") is True:
+        policy_request["accept_rules"] = True
+    return policy_request
 
 
 def _first_bool(*values: Any) -> bool | None:
@@ -5197,7 +5290,7 @@ def _job_response_contract() -> dict[str, Any]:
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "recommended_inputs", "allowed_overrides", "current_flags"],
         "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
-        "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "blockers", "next_actions"],
+        "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
     }
 
 

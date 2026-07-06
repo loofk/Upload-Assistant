@@ -12688,6 +12688,12 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert "materials_handoff.not_ready" in job["target_upload_handoff"]["blockers"]
     assert "materials.metadata.tmdb" in job["target_upload_handoff"]["blockers"]
     assert job["target_upload_handoff"]["materials_handoff"] == job["materials_handoff"]
+    assert job["target_upload_handoff"]["next_step"]["tool"] == "resume_job"
+    assert job["target_upload_handoff"]["next_step"]["endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
+    assert job["target_upload_handoff"]["next_step"]["reason"] == "materials_not_ready"
+    assert job["target_upload_handoff"]["next_step"]["recommended_inputs"] == job["materials_handoff"]["recommended_inputs"]
+    assert job["target_upload_handoff"]["recommended_tool"] == "resume_job"
+    assert job["target_upload_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
     assert job["agent_decision"]["target_upload_handoff"] == job["target_upload_handoff"]
     assert job["resume_plan"]["available"] is True
     assert job["resume_plan"]["allowed"] is True
@@ -14200,6 +14206,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "target_upload_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "target_upload_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "target_upload_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "next_step" in tool_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
+    assert "recommended_tool" in tool_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -14534,6 +14542,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "target_upload_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "target_upload_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "target_upload_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "next_step" in tools_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
+        assert "recommended_tool" in tools_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]

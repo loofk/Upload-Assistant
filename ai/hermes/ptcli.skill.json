@@ -776,6 +776,10 @@
           "duplicate_clear",
           "missing_confirmations",
           "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions"
         ]
@@ -1016,6 +1020,10 @@
           "duplicate_clear",
           "missing_confirmations",
           "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions"
         ]
@@ -1266,6 +1274,10 @@
           "duplicate_clear",
           "missing_confirmations",
           "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions"
         ]
@@ -1520,6 +1532,10 @@
           "duplicate_clear",
           "missing_confirmations",
           "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions"
         ]
@@ -1848,6 +1864,10 @@
           "duplicate_clear",
           "missing_confirmations",
           "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions"
         ],
@@ -2269,6 +2289,10 @@
           "duplicate_clear",
           "missing_confirmations",
           "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions"
         ]
@@ -2745,6 +2769,10 @@
           "duplicate_clear",
           "missing_confirmations",
           "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions"
         ]
@@ -3078,6 +3106,10 @@
           "duplicate_clear",
           "missing_confirmations",
           "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions"
         ]
@@ -3223,6 +3255,10 @@
           "duplicate_clear",
           "missing_confirmations",
           "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions"
         ]
