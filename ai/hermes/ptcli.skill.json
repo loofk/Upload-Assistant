@@ -3599,6 +3599,11 @@
           "daily_schedule",
           "live_verification",
           "live_readiness",
+          "live_test_handoff",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "agent_decision",
           "blockers",
           "warnings",
@@ -3629,6 +3634,20 @@
           "blockers",
           "warnings",
           "next_actions"
+        ],
+        "live_test_handoff_fields": [
+          "ready",
+          "doctor_ready",
+          "manual_job_ready",
+          "doctor_template",
+          "manual_job_template",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "after_doctor",
+          "blockers",
+          "warnings"
         ],
         "agent_decision_fields": [
           "decision",

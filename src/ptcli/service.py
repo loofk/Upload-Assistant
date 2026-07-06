@@ -916,6 +916,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
     live_verification = _readiness_bundle_live_verification(request, deployment, source, target_trackers)
     live_readiness = _readiness_bundle_live_readiness(request, deployment, source, target_trackers, site_policies, daily_schedule, live_verification)
     agent_decision = _readiness_bundle_agent_decision(live_readiness)
+    live_test_handoff = _readiness_bundle_live_test_handoff(live_readiness, agent_decision, deployment, site_policies, live_verification)
     return {
         "kind": "ptcli.readiness_bundle",
         "status": "ok" if live_readiness.get("ready_for_ai") else "blocked",
@@ -927,6 +928,11 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
         "daily_schedule": daily_schedule,
         "live_verification": live_verification,
         "live_readiness": live_readiness,
+        "live_test_handoff": live_test_handoff,
+        "next_step": live_test_handoff.get("next_step"),
+        "recommended_tool": live_test_handoff.get("recommended_tool"),
+        "recommended_endpoint": live_test_handoff.get("recommended_endpoint"),
+        "recommended_request": live_test_handoff.get("recommended_request"),
         "agent_decision": agent_decision,
         "blockers": _string_list(live_readiness.get("blockers")),
         "warnings": _string_list(live_readiness.get("warnings")),
@@ -1180,7 +1186,7 @@ def _readiness_bundle_live_readiness(
         blockers.append(f"Source could not be resolved: {source.get('error')}")
     if not target_trackers:
         blockers.append("target is required for manual live readiness.")
-    if site_policies and site_policies.get("ready") is not True:
+    if site_policies and (site_policies.get("ready") is not True or (site_policies.get("execution_readiness") or {}).get("ready") is not True):
         blockers.extend(_string_list(site_policies.get("blockers")))
         blockers.extend(_string_list((site_policies.get("agent_summary") or {}).get("policy_recommendations")))
     if live_verification.get("ready") is not True:
@@ -1201,7 +1207,7 @@ def _readiness_bundle_live_readiness(
         "ready_for_daily_candidates": bool(deployment.get("ready")) and daily_ready,
         "source": source,
         "target_trackers": target_trackers,
-        "site_policy_ready": bool(site_policies.get("ready")) if isinstance(site_policies, dict) else False,
+        "site_policy_ready": bool(site_policies.get("ready")) and bool((site_policies.get("execution_readiness") or {}).get("ready")) if isinstance(site_policies, dict) else False,
         "live_verification_ready": bool(live_verification.get("ready")),
         "credential_requirements": _string_list(live_verification.get("credential_requirements")),
         "accept_rules": accept_rules,
@@ -1300,6 +1306,104 @@ def _readiness_bundle_agent_decision(live_readiness: dict[str, Any]) -> dict[str
         "can_run_daily_candidates": bool(live_readiness.get("ready_for_daily_candidates")),
         "should_fix_deployment": decision == "fix_deployment",
         "next_actions": list(dict.fromkeys(next_actions)),
+    }
+
+
+def _readiness_bundle_live_test_handoff(
+    live_readiness: dict[str, Any],
+    agent_decision: dict[str, Any],
+    deployment: dict[str, Any],
+    site_policies: dict[str, Any] | None,
+    live_verification: dict[str, Any],
+) -> dict[str, Any]:
+    next_step = _readiness_bundle_live_test_next_step(live_readiness, agent_decision, deployment, site_policies, live_verification)
+    doctor_template = live_readiness.get("doctor_template") if isinstance(live_readiness.get("doctor_template"), dict) else None
+    manual_job_template = live_readiness.get("manual_job_template") if isinstance(live_readiness.get("manual_job_template"), dict) else None
+    return {
+        "kind": "ptcli.live_test_handoff",
+        "ready": bool(live_readiness.get("ready_for_manual_retorrent")),
+        "doctor_ready": bool(doctor_template),
+        "manual_job_ready": bool(manual_job_template) and bool(live_readiness.get("ready_for_manual_retorrent")),
+        "connectivity_checked": bool(live_verification.get("connectivity_checked")),
+        "doctor_template": doctor_template,
+        "manual_job_template": manual_job_template,
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
+        "blockers": _string_list(live_readiness.get("blockers")),
+        "warnings": _string_list(live_readiness.get("warnings")),
+        "after_doctor": {
+            "read_fields": ["live_safe_to_attempt", "blockers", "credential_requirements", "summary_file", "next_actions"],
+            "continue_when": "live_safe_to_attempt=true",
+            "then_tool": "source_url_retorrent_job",
+            "then_request": manual_job_template.get("request") if isinstance(manual_job_template, dict) else None,
+        },
+    }
+
+
+def _readiness_bundle_live_test_next_step(
+    live_readiness: dict[str, Any],
+    agent_decision: dict[str, Any],
+    deployment: dict[str, Any],
+    site_policies: dict[str, Any] | None,
+    live_verification: dict[str, Any],
+) -> dict[str, Any]:
+    if deployment.get("ready") is not True:
+        return {
+            "tool": "deployment_check",
+            "endpoint": "/v1/deployment/check",
+            "method": "GET",
+            "request": None,
+            "reason": "deployment_not_ready",
+            "blockers": _string_list(deployment.get("blockers")),
+        }
+    if isinstance(site_policies, dict) and (site_policies.get("ready") is not True or (site_policies.get("execution_readiness") or {}).get("ready") is not True):
+        policy_handoff = site_policies.get("policy_handoff") if isinstance(site_policies.get("policy_handoff"), dict) else {}
+        policy_step = policy_handoff.get("next_step") if isinstance(policy_handoff.get("next_step"), dict) else {}
+        return {
+            "tool": policy_step.get("tool") or "site_policies",
+            "endpoint": policy_step.get("endpoint") or "/v1/site-policies",
+            "method": policy_step.get("method") or "POST",
+            "request": policy_step.get("request") or site_policies.get("request"),
+            "reason": "site_policy_not_ready",
+            "blockers": _string_list(site_policies.get("blockers")) or _string_list((site_policies.get("agent_summary") or {}).get("policy_recommendations")),
+        }
+    if live_verification.get("ready") is not True:
+        return {
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "request": None,
+            "reason": "live_verification_not_ready",
+            "blockers": _string_list(live_verification.get("blockers")),
+            "next_actions": _string_list(live_verification.get("next_actions")),
+        }
+    if not live_readiness.get("accept_rules") or not live_readiness.get("confirm_upload"):
+        return {
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "request": {"accept_rules": True, "confirm_upload": True},
+            "reason": "missing_live_confirmations",
+            "blockers": [blocker for blocker in _string_list(live_readiness.get("blockers")) if "accept_rules" in blocker or "confirm_upload" in blocker],
+        }
+    doctor_template = live_readiness.get("doctor_template") if isinstance(live_readiness.get("doctor_template"), dict) else {}
+    if live_readiness.get("ready_for_manual_retorrent") and doctor_template.get("argv"):
+        return {
+            "tool": "ptcli_doctor",
+            "endpoint": None,
+            "method": "CLI",
+            "request": {"argv": doctor_template.get("argv")},
+            "reason": "run_seedbox_live_doctor_before_submission",
+        }
+    return {
+        "tool": agent_decision.get("next_tool") or "readiness_bundle",
+        "endpoint": None,
+        "method": None,
+        "request": None,
+        "reason": "inspect_readiness_bundle",
+        "blockers": _string_list(live_readiness.get("blockers")),
     }
 
 
@@ -5422,9 +5526,10 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "agent_decision", "blockers", "warnings", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
+        "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "doctor_template", "manual_job_template", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
         "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
     }
@@ -6001,7 +6106,13 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "deployment": {"type": "object"},
             "site_policies": {"type": ["object", "null"]},
             "daily_schedule": {"type": "object"},
+            "live_verification": {"type": "object"},
             "live_readiness": {"type": "object"},
+            "live_test_handoff": {"type": "object"},
+            "next_step": {"type": "object"},
+            "recommended_tool": {"type": ["string", "null"]},
+            "recommended_endpoint": {"type": ["string", "null"]},
+            "recommended_request": {"type": ["object", "null"]},
             "agent_decision": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "warnings": {"type": "array", "items": {"type": "string"}},

@@ -14337,8 +14337,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
     assert "live_readiness" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "live_verification" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "live_test_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "next_step" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "credential_requirements" in tool_by_name["readiness_bundle"]["response_contract"]["live_verification_fields"]
+    assert "after_doctor" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+    assert "recommended_tool" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "runbook_ref" in tool_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
@@ -14512,7 +14516,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
         assert "live_readiness" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "live_verification" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "live_test_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "next_step" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "credential_requirements" in tools_by_name["readiness_bundle"]["response_contract"]["live_verification_fields"]
+        assert "after_doctor" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+        assert "recommended_tool" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "runbook_ref" in tools_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
         source_url_workflow = next(workflow for workflow in payload["default_workflows"] if workflow["name"] == "source_url_retorrent")
         assert source_url_workflow["runbook"][0]["tool"] == "readiness_bundle"
@@ -14833,6 +14841,14 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert payload["live_readiness"]["manual_job_template"]["request"]["target"] == "MTEAM"
     assert "--accept-rules" in payload["live_readiness"]["doctor_template"]["argv"]
     assert "--confirm-upload" in payload["live_readiness"]["doctor_template"]["argv"]
+    assert payload["live_test_handoff"]["ready"] is True
+    assert payload["live_test_handoff"]["next_step"]["tool"] == "ptcli_doctor"
+    assert payload["live_test_handoff"]["next_step"]["method"] == "CLI"
+    assert payload["live_test_handoff"]["next_step"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
+    assert payload["live_test_handoff"]["after_doctor"]["then_tool"] == "source_url_retorrent_job"
+    assert payload["live_test_handoff"]["after_doctor"]["then_request"] == payload["live_readiness"]["manual_job_template"]["request"]
+    assert payload["recommended_tool"] == "ptcli_doctor"
+    assert payload["recommended_request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
     assert payload["agent_decision"]["decision"] == "ready_for_manual_retorrent"
     assert payload["agent_decision"]["runbook_ref"] == "source_url_retorrent"
     assert payload["agent_decision"]["next_tool"] == "source_url_retorrent_job"
@@ -14903,6 +14919,7 @@ def test_readiness_bundle_cli_outputs_ai_handoff(tmp_path, monkeypatch, capsys) 
     assert payload["live_readiness"]["manual_job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["agent_decision"]["decision"] == "ready_for_manual_retorrent"
     assert payload["agent_decision"]["next_tool"] == "source_url_retorrent_job"
+    assert payload["live_test_handoff"]["next_step"]["tool"] == "ptcli_doctor"
 
 
 def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path, monkeypatch) -> None:
@@ -14941,6 +14958,8 @@ def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path
     assert payload["agent_decision"]["decision"] == "collect_missing_inputs"
     assert payload["agent_decision"]["runbook_ref"] is None
     assert payload["agent_decision"]["next_tool"] == "readiness_bundle"
+    assert payload["live_test_handoff"]["next_step"]["reason"] == "site_policy_not_ready"
+    assert payload["live_test_handoff"]["next_step"]["tool"] == "edit_config"
 
 
 def test_readiness_bundle_blocks_live_when_credentials_and_image_host_are_missing(tmp_path, monkeypatch) -> None:
@@ -14982,6 +15001,7 @@ def test_readiness_bundle_blocks_live_when_credentials_and_image_host_are_missin
     assert {"U2.passkey", "U2.cookie", "MTEAM.api_key", "materials.image_host"} <= check_names
     assert any("TRACKERS.MTEAM.api_key" in action for action in payload["next_actions"])
     assert any("data/cookies/<TRACKER>.txt" in action for action in payload["next_actions"])
+    assert payload["live_test_handoff"]["next_step"]["reason"] == "site_policy_not_ready"
 
 
 def test_parse_recent_candidate_seeds_from_nexusphp_html() -> None:
