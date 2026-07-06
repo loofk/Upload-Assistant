@@ -12748,8 +12748,20 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["resume_requirements"]["execute_request"]["job_id"] == job["job_id"]
     assert job["resume_requirements"]["execute_request"] == {"job_id": job["job_id"]}
     assert job["resume_requirements"]["current_flags"]["has_confirm_upload"] is False
+    assert job["resume_summary"]["kind"] == "ptcli.resume_summary"
+    assert job["resume_summary"]["available"] is True
+    assert job["resume_summary"]["allowed"] is True
+    assert job["resume_summary"]["recommended"] is True
+    assert job["resume_summary"]["subcommand"] == "pipeline"
+    assert job["resume_summary"]["dry_run_request"] == {"job_id": job["job_id"], "dry_run": True}
+    assert job["resume_summary"]["execute_request"] == {"job_id": job["job_id"]}
+    assert job["resume_summary"]["recommended_tool"] == "resume_job"
+    assert job["resume_summary"]["next_step"]["reason"] == "preview_resume_before_execute"
+    assert "metadata_file" in job["resume_summary"]["recommended_input_keys"]
+    assert job["agent_decision"]["resume_summary"] == job["resume_summary"]
     assert job["workflow_context"]["resume_plan"] == job["resume_plan"]
     assert job["workflow_context"]["resume_requirements"] == job["resume_requirements"]
+    assert job["workflow_context"]["resume_summary"] == job["resume_summary"]
     assert job["workflow_context"]["gates"]["resume_allowed"] is True
     assert job["workflow_context"]["gates"]["resume_recommended"] is True
     assert job["workflow_context"]["metadata"]["tmdb_ready"] is False
@@ -12774,6 +12786,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["closure_handoff"]["next_step"] == job["target_upload_handoff"]["next_step"]
     assert summary["resume_plan"] == job["resume_plan"]
     assert summary["resume_requirements"] == job["resume_requirements"]
+    assert summary["resume_summary"] == job["resume_summary"]
     assert summary["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["workflow_context"]["target_preflight"]["missing"] == ["materials.metadata.tmdb"]
 
@@ -12791,6 +12804,10 @@ def test_job_store_resume_blocks_without_next_command(tmp_path) -> None:
     assert parent["resume_plan"]["allowed"] is False
     assert parent["resume_plan"]["recommended"] is False
     assert parent["resume_plan"]["blocker"] == "No executable resume command is available for this job."
+    assert parent["resume_summary"]["available"] is False
+    assert parent["resume_summary"]["allowed"] is False
+    assert parent["resume_summary"]["recommended"] is False
+    assert "No executable resume command is available for this job." in parent["resume_summary"]["blockers"]
 
 
 def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> None:
@@ -12840,6 +12857,9 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["resume_audit"]["next_subcommand"] == "doctor"
     assert resume["resume_audit"]["next_command_argv"] == ["python3", "ptcli.py", "doctor", "--json"]
     assert resume["resume_audit"]["summary_endpoint"] == f"/v1/jobs/{resume['job_id']}/summary"
+    assert resume["resume_summary"]["available"] is False
+    assert resume["resume_summary"]["allowed"] is False
+    assert resume["agent_decision"]["resume_summary"] == resume["resume_summary"]
     assert resume["material_resolution"] is None
     assert resume["agent_decision"]["resume_context"] == resume["resume_context"]
     assert resume["agent_decision"]["resume_lineage"] == resume["resume_lineage"]
@@ -14778,6 +14798,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_requirements" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_requirements" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_requirements" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "resume_summary" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "resume_requirement_fields" in tool_by_name["resume_job"]["response_contract"]
     assert "dry_run_request" in tool_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
     assert "execute_request" in tool_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
@@ -14792,6 +14813,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_audit" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_audit" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_audit_fields" in tool_by_name["resume_job"]["response_contract"]
+    assert "resume_summary" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "resume_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "resume_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "resume_summary_fields" in tool_by_name["resume_job"]["response_contract"]
+    assert "recommended_tool" in tool_by_name["resume_job"]["response_contract"]["resume_summary_fields"]
     assert "material_resolution" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "material_resolution" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "material_resolution" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -14969,6 +14995,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_requirements" in summary_schema["properties"]
     assert "resume_lineage" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
+    assert "resume_summary" in summary_schema["properties"]
     assert "material_resolution" in summary_schema["properties"]
     assert "candidate_submission" in summary_schema["properties"]
     assert "candidate_submission_handoff" in summary_schema["properties"]
@@ -14989,6 +15016,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_submission_handoff" in job_schema["properties"]
     assert "candidate_submission_summary" in job_schema["properties"]
     assert "resume_requirements" in job_schema["properties"]
+    assert "resume_summary" in job_schema["properties"]
     assert "material_resolution" in job_schema["properties"]
     assert "cancelled" in job_schema["properties"]["status"]["enum"]
     assert "cancellation" in job_schema["properties"]
@@ -15303,6 +15331,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_requirements" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_requirements" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_requirements" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "resume_summary" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_requirement_fields" in tools_by_name["resume_job"]["response_contract"]
         assert "dry_run_request" in tools_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
         assert "execute_request" in tools_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
@@ -15317,6 +15346,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_audit" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_audit" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_audit_fields" in tools_by_name["resume_job"]["response_contract"]
+        assert "resume_summary" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "resume_summary" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "resume_summary" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "resume_summary_fields" in tools_by_name["resume_job"]["response_contract"]
+        assert "recommended_tool" in tools_by_name["resume_job"]["response_contract"]["resume_summary_fields"]
         assert "material_resolution" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "material_resolution" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "material_resolution" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
