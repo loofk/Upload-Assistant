@@ -12345,7 +12345,13 @@ def test_service_duplicate_check_summary_marks_existing_target_seed() -> None:
 def test_service_result_exposes_ai_shortcuts() -> None:
     payload = ptcli_service._service_result(
         "ptcli.service.retorrent",
-        {"target_trackers": "MTEAM"},
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target_trackers": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+        },
         ["retorrent", "--json"],
         {
             "status": "blocked",
@@ -12354,6 +12360,7 @@ def test_service_result_exposes_ai_shortcuts() -> None:
             "summary_file": "/tmp/summary.json",
             "resume_state": {"next_stage": "resume-target-package", "next_command_argv": ["python3", "ptcli.py", "pipeline", "--json"]},
             "next_command_argv": ["python3", "ptcli.py", "pipeline", "--json"],
+            "stages": [{"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}}],
         },
         100.0,
     )
@@ -12364,6 +12371,34 @@ def test_service_result_exposes_ai_shortcuts() -> None:
     assert payload["resume_state"]["next_stage"] == "resume-target-package"
     assert payload["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--json"]
     assert payload["blockers"] == ["target material missing"]
+    assert payload["submit_if_clear_handoff"]["ready"] is True
+    assert payload["submit_if_clear_handoff"]["duplicate_clear"] is True
+    assert payload["submit_if_clear_handoff"]["endpoint"] == "/v1/jobs/retorrent/from-url"
+    assert payload["submit_if_clear_handoff"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+
+
+def test_service_result_submit_if_clear_handoff_stops_on_duplicate() -> None:
+    payload = ptcli_service._service_result(
+        "ptcli.service.retorrent_check",
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target_trackers": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+        },
+        ["pipeline", "--check-dupes", "--json"],
+        {
+            "status": "ok",
+            "stages": [{"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 1, "dupes": [{"id": "999", "name": "Existing"}]}}],
+        },
+        100.0,
+    )
+
+    assert payload["duplicate_check"]["exists"] is True
+    assert payload["submit_if_clear_handoff"]["ready"] is False
+    assert "duplicate_check.exists" in payload["submit_if_clear_handoff"]["blockers"]
+    assert payload["submit_if_clear_handoff"]["next_step"]["tool"] is None
+    assert "Do not upload" in payload["submit_if_clear_handoff"]["next_actions"][0]
 
 
 def test_job_store_runs_inline_and_persists_status(tmp_path) -> None:
@@ -12380,6 +12415,31 @@ def test_job_store_runs_inline_and_persists_status(tmp_path) -> None:
     assert job["summary_file"] == str(tmp_path / "summary.json")
     assert job["next_actions"] == ["done"]
     assert (tmp_path / f"{job['job_id']}.json").is_file()
+
+
+def test_job_store_exposes_submit_if_clear_handoff_for_check_jobs(tmp_path) -> None:
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    job = store.create(
+        "ptcli.retorrent_check",
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target_trackers": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+        },
+        ["ptcli", "pipeline", "--check-dupes", "--json"],
+        lambda: {
+            "status": "ok",
+            "stages": [{"stage": "target-dupe-check", "ok": True, "result": {"searched": True, "count": 0, "dupes": []}}],
+        },
+    )
+    summary = store.summary(job["job_id"])
+
+    assert job["submit_if_clear_handoff"]["ready"] is True
+    assert job["submit_if_clear_handoff"]["next_step"]["tool"] == "source_url_retorrent_job"
+    assert summary["submit_if_clear_handoff"]["ready"] is True
+    assert summary["submit_if_clear_handoff"]["request"]["target"] == "MTEAM"
+    assert store.list()["jobs"][0]["submit_if_clear_handoff"]["ready"] is True
 
 
 def test_job_store_marks_blocked_results(tmp_path) -> None:
@@ -14953,6 +15013,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
     assert "ready_to_create_job" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "duplicate_check_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
+    assert "submit_if_clear_handoff" in tool_by_name["retorrent_check"]["response_contract"]["required_fields"]
+    assert "submit_if_clear_handoff_fields" in tool_by_name["retorrent_check"]["response_contract"]
+    assert "submit_if_clear_handoff" in tool_by_name["retorrent_check_job"]["response_contract"]["required_fields"]
+    assert "submit_if_clear_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "submit_if_clear_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
     assert tool_by_name["daily_candidates_job"]["input_schema"]["required"] == ["source_tracker", "target"]
     assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
@@ -15013,6 +15078,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "agent_decision" in summary_schema["properties"]
     assert "candidate_digest" in summary_schema["properties"]
     assert "policy_coverage" in summary_schema["properties"]
+    assert "submit_if_clear_handoff" in summary_schema["properties"]
     assert "policy_handoff" in summary_schema["properties"]
     site_policy_schema = openapi["paths"]["/v1/site-policies"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_gap_summary" in site_policy_schema["properties"]
@@ -15042,6 +15108,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "interruption" in job_schema["properties"]
     assert "runtime" in job_schema["properties"]
     assert "policy_handoff" in job_schema["properties"]
+    assert "submit_if_clear_handoff" in job_schema["properties"]
     assert "qbit_limit_audit" in job_schema["properties"]
     assert "qbit_handoff" in job_schema["properties"]
     assert "materials_handoff" in job_schema["properties"]
@@ -15242,6 +15309,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "recommended_tool" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "runbook_ref" in tools_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
+        assert "submit_if_clear_handoff" in tools_by_name["retorrent_check"]["response_contract"]["required_fields"]
+        assert "submit_if_clear_handoff_fields" in tools_by_name["retorrent_check"]["response_contract"]
+        assert "submit_if_clear_handoff" in tools_by_name["retorrent_check_job"]["response_contract"]["required_fields"]
+        assert "submit_if_clear_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "submit_if_clear_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         source_url_workflow = next(workflow for workflow in payload["default_workflows"] if workflow["name"] == "source_url_retorrent")
         assert source_url_workflow["runbook"][0]["tool"] == "source_url_retorrent_preflight"
         assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
