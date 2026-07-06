@@ -533,6 +533,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/retorrent/check": lambda payload: asyncio.run(retorrent_check(payload)),
                 "/v1/retorrent": lambda payload: asyncio.run(retorrent(payload)),
                 "/v1/agent/run-preview": agent_run_preview_payload,
+                "/v1/retorrent/source-url/preflight": source_url_retorrent_preflight_payload,
                 "/v1/site-policies": site_policies_payload,
                 "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
@@ -695,6 +696,120 @@ def create_source_url_retorrent_job(job_store: JobStore, request: dict[str, Any]
         raise ServiceError("source_url or source is required.")
     effective = {**request, "source": str(source_url), "source_url": str(source_url)}
     return _create_ai_retorrent_job(job_store, effective, kind="ptcli.source_url_retorrent", mode="source_url_retorrent")
+
+
+def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the AI-facing, no-mutation gate summary before creating a source-url job."""
+    request = request if isinstance(request, dict) else {}
+    source_url = request.get("source_url") or request.get("source") or request.get("source_link") or request.get("url")
+    effective_request = dict(request)
+    if source_url:
+        effective_request["source_url"] = str(source_url)
+        effective_request["source"] = str(source_url)
+    readiness = readiness_bundle_payload(effective_request)
+    live_readiness = readiness.get("live_readiness") if isinstance(readiness.get("live_readiness"), dict) else {}
+    site_policies = readiness.get("site_policies") if isinstance(readiness.get("site_policies"), dict) else None
+    policy_execution_summary = live_readiness.get("policy_execution_summary") if isinstance(live_readiness.get("policy_execution_summary"), dict) else None
+    if policy_execution_summary is None and isinstance(site_policies, dict) and isinstance(site_policies.get("policy_execution_summary"), dict):
+        policy_execution_summary = site_policies["policy_execution_summary"]
+    source_reference = live_readiness.get("source") if isinstance(live_readiness.get("source"), dict) else None
+    target_trackers = live_readiness.get("target_trackers")
+    manual_job_template = live_readiness.get("manual_job_template") if isinstance(live_readiness.get("manual_job_template"), dict) else None
+    duplicate_check = {
+        "searched": False,
+        "status": "not_checked",
+        "exists": None,
+        "count": None,
+        "dupes": [],
+        "reason": "source_url_preflight_does_not_contact_trackers",
+        "next_tool": "retorrent_check",
+        "next_endpoint": "/v1/retorrent/check",
+    }
+    ready_to_create_job = bool(live_readiness.get("ready_for_manual_retorrent")) and bool(manual_job_template)
+    next_step = _source_url_preflight_next_step(ready_to_create_job, readiness, manual_job_template)
+    blockers = _source_url_preflight_blockers(readiness, source_reference, target_trackers)
+    status = "ok" if ready_to_create_job else "blocked"
+    return {
+        "kind": "ptcli.source_url_retorrent_preflight",
+        "status": status,
+        "ok": ready_to_create_job,
+        "ready": ready_to_create_job,
+        "dry_run": True,
+        "mutates_state": False,
+        "live_upload": False,
+        "request": {
+            "source_url": str(source_url) if source_url else None,
+            "source_tracker": request.get("source_tracker") or request.get("from"),
+            "target": target_trackers,
+            "accept_rules": _truthy(request.get("accept_rules")),
+            "confirm_upload": _truthy(request.get("confirm_upload")),
+            "save_path": request.get("save_path"),
+            "path": request.get("path") or request.get("content_path"),
+        },
+        "source_reference": source_reference,
+        "target_trackers": target_trackers,
+        "ready_to_create_job": ready_to_create_job,
+        "ready_for_live_upload": ready_to_create_job,
+        "duplicate_check": duplicate_check,
+        "readiness_bundle": readiness,
+        "policy_execution_summary": policy_execution_summary,
+        "job_template": manual_job_template,
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
+        "blockers": blockers,
+        "warnings": _string_list(readiness.get("warnings")),
+        "next_actions": _source_url_preflight_next_actions(ready_to_create_job, next_step, blockers),
+        "safety": {
+            "does_not_create_job": True,
+            "does_not_contact_trackers": True,
+            "does_not_contact_qbittorrent": True,
+            "live_job_requires": ["accept_rules=true", "confirm_upload=true", "site policy ready", "target duplicate check clear"],
+        },
+    }
+
+
+def _source_url_preflight_next_step(ready_to_create_job: bool, readiness: dict[str, Any], manual_job_template: dict[str, Any] | None) -> dict[str, Any]:
+    if ready_to_create_job and isinstance(manual_job_template, dict):
+        return {
+            "tool": "source_url_retorrent_job",
+            "endpoint": manual_job_template.get("endpoint") or "/v1/jobs/retorrent/from-url",
+            "method": "POST",
+            "request": manual_job_template.get("request"),
+            "reason": "source_url_preflight_ready",
+        }
+    next_step = readiness.get("next_step") if isinstance(readiness.get("next_step"), dict) else {}
+    if next_step:
+        return {**next_step, "reason": next_step.get("reason") or "source_url_preflight_blocked"}
+    return {
+        "tool": "readiness_bundle",
+        "endpoint": "/v1/readiness/bundle",
+        "method": "POST",
+        "request": readiness.get("request"),
+        "reason": "inspect_readiness_bundle",
+    }
+
+
+def _source_url_preflight_blockers(readiness: dict[str, Any], source_reference: dict[str, Any] | None, target_trackers: Any) -> list[str]:
+    blockers = _string_list(readiness.get("blockers"))
+    if not source_reference:
+        blockers.append("source_url is required before creating a source-url retorrent job.")
+    elif source_reference.get("error"):
+        blockers.append(f"source_url could not be resolved: {source_reference.get('error')}")
+    if not target_trackers:
+        blockers.append("target is required before creating a source-url retorrent job.")
+    return list(dict.fromkeys(blockers))
+
+
+def _source_url_preflight_next_actions(ready_to_create_job: bool, next_step: dict[str, Any], blockers: list[str]) -> list[str]:
+    if ready_to_create_job:
+        return ["Submit job_template.request to source_url_retorrent_job, then poll runtime.status_endpoint and inspect closure_summary before reporting completion."]
+    if next_step.get("tool"):
+        return [f"Call next_step with {next_step['tool']} after resolving source_url_preflight.blockers."]
+    if blockers:
+        return ["Resolve source_url_preflight.blockers before creating a live-capable retorrent job."]
+    return ["Inspect readiness_bundle and source_url_preflight before creating a live-capable retorrent job."]
 
 
 def create_candidate_retorrent_job(job_store: JobStore, candidate_job_id: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -6416,6 +6531,8 @@ def _agent_preview_steps(workflow: dict[str, Any], request_template: dict[str, A
 def _agent_preview_step_request(tool: str, request_template: dict[str, Any]) -> dict[str, Any] | None:
     if tool == "readiness_bundle":
         return request_template
+    if tool == "source_url_retorrent_preflight":
+        return request_template
     if tool == "site_policies":
         return {"source_url": request_template.get("source_url"), "target": request_template.get("target"), "accept_rules": request_template.get("accept_rules")}
     if tool == "source_url_retorrent_job":
@@ -6471,6 +6588,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return a no-network, no-mutation walkthrough of the OpenClaw/Hermes source-url retorrent workflow, including request templates and closure_handoff handling.",
             "input_schema": agent_run_preview_request_schema,
             "response_contract": _agent_run_preview_response_contract(),
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "source_url_retorrent_preflight",
+            "method": "POST",
+            "path": "/v1/retorrent/source-url/preflight",
+            "description": "Resolve a user-provided source URL and summarize deployment, policy, confirmation, material, and job-template readiness before creating any live-capable retorrent job. This endpoint never contacts trackers or qBittorrent.",
+            "input_schema": source_url_retorrent_request_schema,
+            "response_contract": _source_url_preflight_response_contract(),
+            "workflow_hints": {"submit_with": "source_url_retorrent_job", "readiness_source": "readiness_bundle", "duplicate_check_with": "retorrent_check"},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -6958,6 +7085,16 @@ def _agent_run_preview_response_contract() -> dict[str, Any]:
     }
 
 
+def _source_url_preflight_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "request", "source_reference", "target_trackers", "ready_to_create_job", "ready_for_live_upload", "duplicate_check", "readiness_bundle", "policy_execution_summary", "job_template", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "warnings", "next_actions", "safety"],
+        "next_step_fields": ["tool", "endpoint", "method", "request", "reason", "blockers"],
+        "duplicate_check_fields": ["searched", "status", "exists", "count", "dupes", "reason", "next_tool", "next_endpoint"],
+        "job_template_fields": ["tool", "endpoint", "request"],
+        "safety": ["does_not_create_job", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_job_requires_accept_rules_confirm_upload_policy_and_duplicate_clear"],
+    }
+
+
 def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
@@ -7134,6 +7271,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
         "discovery": {
             "health": f"{public_base_url}/health",
             "deployment_check": f"{public_base_url}/v1/deployment/check",
+            "source_url_preflight": f"{public_base_url}/v1/retorrent/source-url/preflight",
             "readiness_bundle": f"{public_base_url}/v1/readiness/bundle",
             "openapi": f"{public_base_url}/openapi.json",
             "tools": f"{public_base_url}/v1/tools",
@@ -7172,6 +7310,13 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
             "runbook": [
                 {
                     "step": "preflight",
+                    "tool": "source_url_retorrent_preflight",
+                    "read": ["ready_to_create_job", "source_reference", "target_trackers", "policy_execution_summary", "duplicate_check", "job_template.request", "next_step", "blockers"],
+                    "continue_when": "ready_to_create_job=true",
+                    "stop_when": ["source_reference.error is present", "policy_execution_summary.ready=false", "accept_rules or confirm_upload missing", "deployment.ready=false"],
+                },
+                {
+                    "step": "readiness_bundle",
                     "tool": "readiness_bundle",
                     "read": ["live_readiness.ready_for_manual_retorrent", "live_readiness.policy_execution_summary", "live_readiness.blockers", "live_readiness.manual_job_template.request"],
                     "continue_when": "live_readiness.ready_for_manual_retorrent=true",
@@ -7585,6 +7730,34 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
+    source_url_preflight_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "dry_run": {"type": "boolean"},
+            "mutates_state": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "request": {"type": "object"},
+            "source_reference": {"type": ["object", "null"]},
+            "target_trackers": {"type": ["string", "null"]},
+            "ready_to_create_job": {"type": "boolean"},
+            "ready_for_live_upload": {"type": "boolean"},
+            "duplicate_check": {"type": "object"},
+            "readiness_bundle": {"type": "object"},
+            "policy_execution_summary": {"type": ["object", "null"]},
+            "job_template": {"type": ["object", "null"]},
+            "next_step": {"type": "object"},
+            "recommended_tool": {"type": ["string", "null"]},
+            "recommended_endpoint": {"type": ["string", "null"]},
+            "recommended_request": {"type": ["object", "null"]},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "warnings": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+            "safety": {"type": "object"},
+        },
+    }
     deployment_response_schema = {
         "type": "object",
         "properties": {
@@ -7674,6 +7847,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": False, "content": {"application/json": {"schema": agent_run_preview_request_schema}}},
                     "responses": {"200": {"description": "No-network AI workflow preview for source-url retorrent automation.", "content": {"application/json": {"schema": agent_run_preview_response_schema}}}},
+                }
+            },
+            "/v1/retorrent/source-url/preflight": {
+                "post": {
+                    "operationId": "preflightSourceUrlRetorrent",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": source_url_request_schema}}},
+                    "responses": {"200": {"description": "No-mutation source URL retorrent preflight for AI job creation decisions.", "content": {"application/json": {"schema": source_url_preflight_response_schema}}}},
                 }
             },
             "/v1/deployment/check": {

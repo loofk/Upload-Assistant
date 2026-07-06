@@ -19,6 +19,7 @@
   "discovery": {
     "health": "http://ptcli.local:8080/health",
     "deployment_check": "http://ptcli.local:8080/v1/deployment/check",
+    "source_url_preflight": "http://ptcli.local:8080/v1/retorrent/source-url/preflight",
     "readiness_bundle": "http://ptcli.local:8080/v1/readiness/bundle",
     "openapi": "http://ptcli.local:8080/openapi.json",
     "tools": "http://ptcli.local:8080/v1/tools",
@@ -82,6 +83,27 @@
       "runbook": [
         {
           "step": "preflight",
+          "tool": "source_url_retorrent_preflight",
+          "read": [
+            "ready_to_create_job",
+            "source_reference",
+            "target_trackers",
+            "policy_execution_summary",
+            "duplicate_check",
+            "job_template.request",
+            "next_step",
+            "blockers"
+          ],
+          "continue_when": "ready_to_create_job=true",
+          "stop_when": [
+            "source_reference.error is present",
+            "policy_execution_summary.ready=false",
+            "accept_rules or confirm_upload missing",
+            "deployment.ready=false"
+          ]
+        },
+        {
+          "step": "readiness_bundle",
           "tool": "readiness_bundle",
           "read": [
             "live_readiness.ready_for_manual_retorrent",
@@ -555,6 +577,254 @@
           "does_not_create_jobs",
           "does_not_upload"
         ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
+      "name": "source_url_retorrent_preflight",
+      "method": "POST",
+      "path": "/v1/retorrent/source-url/preflight",
+      "description": "Resolve a user-provided source URL and summarize deployment, policy, confirmation, material, and job-template readiness before creating any live-capable retorrent job. This endpoint never contacts trackers or qBittorrent.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "source_url",
+          "target"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Alias for source_url; source_url is preferred for this tool."
+          },
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Target tracker code(s), currently live upload closure is MTEAM-focused."
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Required before live target upload."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          },
+          "execute_if_no_duplicate": {
+            "type": "boolean",
+            "default": true,
+            "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work."
+          },
+          "source_url": {
+            "type": "string",
+            "description": "User-provided source tracker details or download URL. The service infers tracker and torrent id from this URL."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "dry_run",
+          "mutates_state",
+          "live_upload",
+          "request",
+          "source_reference",
+          "target_trackers",
+          "ready_to_create_job",
+          "ready_for_live_upload",
+          "duplicate_check",
+          "readiness_bundle",
+          "policy_execution_summary",
+          "job_template",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "blockers",
+          "warnings",
+          "next_actions",
+          "safety"
+        ],
+        "next_step_fields": [
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "reason",
+          "blockers"
+        ],
+        "duplicate_check_fields": [
+          "searched",
+          "status",
+          "exists",
+          "count",
+          "dupes",
+          "reason",
+          "next_tool",
+          "next_endpoint"
+        ],
+        "job_template_fields": [
+          "tool",
+          "endpoint",
+          "request"
+        ],
+        "safety": [
+          "does_not_create_job",
+          "does_not_contact_trackers",
+          "does_not_contact_qbittorrent",
+          "live_job_requires_accept_rules_confirm_upload_policy_and_duplicate_clear"
+        ]
+      },
+      "workflow_hints": {
+        "submit_with": "source_url_retorrent_job",
+        "readiness_source": "readiness_bundle",
+        "duplicate_check_with": "retorrent_check"
       },
       "safety": {
         "mutates_state": false,
@@ -6376,7 +6646,7 @@
       }
     }
   ],
-  "tool_count": 21,
+  "tool_count": 22,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://ptcli.local:8080/openapi.json",
