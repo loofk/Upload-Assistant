@@ -15044,6 +15044,117 @@ async def test_service_qbit_wait_payload_reports_completion(monkeypatch) -> None
     assert "completion_verification" in payload["next_actions"][0]
 
 
+async def test_source_url_check_and_submit_creates_job_when_duplicate_clear(monkeypatch) -> None:
+    async def fake_retorrent_check(request):
+        assert request["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+        assert request["execute"] is False
+        duplicate_check = {"searched": True, "exists": False, "count": 0, "dupes": []}
+        submit_request = {
+            "source_url": request["source_url"],
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+        }
+        return {
+            "kind": "ptcli.service.retorrent_check",
+            "status": "ok",
+            "ok": True,
+            "request": submit_request,
+            "duplicate_check": duplicate_check,
+            "submit_if_clear_handoff": {
+                "ready": True,
+                "duplicate_clear": True,
+                "request": submit_request,
+                "blockers": [],
+                "next_step": {"tool": "source_url_retorrent_job", "endpoint": "/v1/jobs/retorrent/from-url", "method": "POST", "request": submit_request},
+            },
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    def fake_create_source_url_retorrent_job(_job_store, request):
+        assert request["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+        assert request["check_submission"]["mode"] == "inline_check_and_submit"
+        assert request["check_submission"]["duplicate_check"]["exists"] is False
+        return {
+            "job_id": "abc123",
+            "status": "queued",
+            "ok": False,
+            "request": request,
+            "runtime": {"status_endpoint": "/v1/jobs/abc123"},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent_check", fake_retorrent_check)
+    monkeypatch.setattr(ptcli_service, "create_source_url_retorrent_job", fake_create_source_url_retorrent_job)
+
+    payload = await ptcli_service.create_source_url_check_and_submit_job(
+        object(),
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+        },
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["ok"] is True
+    assert payload["duplicate_check"]["exists"] is False
+    assert payload["submit_if_clear_handoff"]["ready"] is True
+    assert payload["job_id"] == "abc123"
+    assert payload["status_endpoint"] == "/v1/jobs/abc123"
+    assert payload["summary_endpoint"] == "/v1/jobs/abc123/summary"
+    assert payload["agent_summary"]["ready"] is True
+    assert "Poll get_job_status" in payload["next_actions"][0]
+
+
+async def test_source_url_check_and_submit_stops_on_duplicate(monkeypatch) -> None:
+    async def fake_retorrent_check(request):
+        duplicate_check = {"searched": True, "exists": True, "count": 1, "dupes": [{"name": "Existing"}]}
+        return {
+            "kind": "ptcli.service.retorrent_check",
+            "status": "blocked",
+            "ok": False,
+            "request": request,
+            "duplicate_check": duplicate_check,
+            "submit_if_clear_handoff": {
+                "ready": False,
+                "duplicate_clear": False,
+                "request": request,
+                "blockers": ["duplicate_check.exists"],
+                "next_step": {"tool": None, "reason": "submit_if_clear_blocked"},
+            },
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    def fail_create_source_url_retorrent_job(_job_store, _request):
+        raise AssertionError("live job must not be created when duplicate exists")
+
+    monkeypatch.setattr(ptcli_service, "retorrent_check", fake_retorrent_check)
+    monkeypatch.setattr(ptcli_service, "create_source_url_retorrent_job", fail_create_source_url_retorrent_job)
+
+    payload = await ptcli_service.create_source_url_check_and_submit_job(
+        object(),
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+        },
+    )
+
+    assert payload["status"] == "blocked"
+    assert payload["ok"] is False
+    assert payload["duplicate_check"]["exists"] is True
+    assert payload["job_id"] is None
+    assert "duplicate_check.exists" in payload["blockers"]
+    assert payload["agent_summary"]["duplicate_exists"] is True
+    assert "Do not upload" in payload["next_actions"][0]
+
+
 def test_site_policies_cli_exposes_policy_gap_summary(monkeypatch, capsys) -> None:
     config = {
         "PTCLI": {
@@ -15163,6 +15274,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent" in paths
     assert "/v1/jobs/retorrent/submit" in paths
     assert "/v1/jobs/retorrent/from-url" in paths
+    assert "/v1/jobs/retorrent/from-url/check-and-submit" in paths
     assert "/v1/deployment/check" in paths
     assert "/v1/site-policies" in paths
     assert "/v1/candidates/daily" in paths
@@ -15187,6 +15299,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
     assert tool_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
     assert tool_by_name["source_url_retorrent_job"]["input_schema"]["required"] == ["source_url", "target"]
+    assert tool_by_name["source_url_check_and_submit"]["path"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert tool_by_name["source_url_check_and_submit"]["input_schema"]["required"] == ["source_url", "target"]
+    assert "runs_duplicate_check_before_job_creation" in tool_by_name["source_url_check_and_submit"]["response_contract"]["safety"]
+    assert tool_by_name["source_url_check_and_submit"]["safety"]["live_upload"] is True
     assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     manual_properties = tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
@@ -15500,6 +15616,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent" in openapi["paths"]
     assert "/v1/jobs/retorrent/submit" in openapi["paths"]
     assert "/v1/jobs/retorrent/from-url" in openapi["paths"]
+    assert "/v1/jobs/retorrent/from-url/check-and-submit" in openapi["paths"]
     assert "/v1/candidates/daily" in openapi["paths"]
     assert "/v1/candidates/daily/schedule" in openapi["paths"]
     assert "/v1/jobs/candidates/daily" in openapi["paths"]
@@ -15597,6 +15714,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     check_submit_schema = openapi["paths"]["/v1/jobs/retorrent/check/{job_id}/submit"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert check_submit_schema["required"] == ["job_id"]
     assert "source_url" not in check_submit_schema["properties"]["overrides"]["properties"]
+    source_url_check_submit_schema = openapi["paths"]["/v1/jobs/retorrent/from-url/check-and-submit"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "duplicate_check" in source_url_check_submit_schema["properties"]
+    assert "submitted_job" in source_url_check_submit_schema["properties"]
     schedule_jobs_schema = openapi["paths"]["/v1/jobs/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "schedule_digest" in schedule_jobs_schema["properties"]
     assert "notification_payload" in schedule_jobs_schema["properties"]
@@ -15645,6 +15765,10 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["request_template"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert ready["request_template"]["target"] == "MTEAM"
     assert ready["request_template"]["save_path"] == "/downloads"
+    assert ready["one_call_handoff"]["ready"] is True
+    assert ready["one_call_handoff"]["tool"] == "source_url_check_and_submit"
+    assert ready["one_call_handoff"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert ready["recommended_tool"] == "source_url_check_and_submit"
     assert [step["tool"] for step in ready["steps"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
     assert "policy_execution_summary" in ready["steps"][0]["read"]
     assert "live_readiness.policy_execution_summary" in ready["steps"][1]["read"]
@@ -15654,7 +15778,7 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["steps"][3]["request"]["source"] == ready["request_template"]["source_url"]
     assert ready["steps"][4]["request"] == ready["request_template"]
     assert ready["steps"][6]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
-    assert "Submit request_template to source_url_retorrent_job" in ready["next_actions"][0]
+    assert "source_url_check_and_submit" in ready["next_actions"][0]
 
     daily_blocked = ptcli_service.agent_run_preview_payload({"workflow": "daily_candidates", "source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
     assert daily_blocked["workflow"] == "daily_candidates"
@@ -15697,9 +15821,11 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["primary_field"] == "closure_handoff"
     assert manifest["closure_contract"]["complete_when"] == "closure_handoff.complete=true"
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
-    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
-    assert source_url_workflow["tool"] == "source_url_retorrent_job"
+    assert source_url_workflow["tool"] == "source_url_check_and_submit"
+    assert source_url_workflow["fallback_tool"] == "source_url_retorrent_job"
+    assert source_url_workflow["one_call"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
     assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
     assert "policy_execution_summary" in source_url_workflow["runbook"][0]["read"]

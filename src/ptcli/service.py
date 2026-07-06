@@ -592,6 +592,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/jobs/retorrent": lambda payload: create_retorrent_job(job_store, payload),
                 "/v1/jobs/retorrent/submit": lambda payload: create_manual_retorrent_job(job_store, payload),
                 "/v1/jobs/retorrent/from-url": lambda payload: create_source_url_retorrent_job(job_store, payload),
+                "/v1/jobs/retorrent/from-url/check-and-submit": lambda payload: asyncio.run(create_source_url_check_and_submit_job(job_store, payload)),
                 "/v1/jobs/candidates/daily": lambda payload: create_daily_candidates_job(job_store, payload),
                 "/v1/jobs/candidates/daily/schedule": lambda payload: create_daily_candidate_schedule_jobs(job_store, payload),
             }
@@ -758,6 +759,42 @@ def create_source_url_retorrent_job(job_store: JobStore, request: dict[str, Any]
         raise ServiceError("source_url or source is required.")
     effective = {**request, "source": str(source_url), "source_url": str(source_url)}
     return _create_ai_retorrent_job(job_store, effective, kind="ptcli.source_url_retorrent", mode="source_url_retorrent")
+
+
+async def create_source_url_check_and_submit_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
+    """Check target duplicates now, then create a live source-url job only when clear."""
+    source_url = request.get("source_url") or request.get("source") or request.get("source_link") or request.get("url")
+    if not source_url:
+        raise ServiceError("source_url or source is required.")
+    effective = {**request, "source": str(source_url), "source_url": str(source_url)}
+    check_request = {**effective, "execute": False, "execute_if_no_duplicate": False, "auto_retorrent": False}
+    check_result = await retorrent_check(check_request)
+    duplicate_check = check_result.get("duplicate_check") if isinstance(check_result.get("duplicate_check"), dict) else {}
+    handoff = check_result.get("submit_if_clear_handoff") if isinstance(check_result.get("submit_if_clear_handoff"), dict) else _submit_if_clear_handoff(check_result.get("request") if isinstance(check_result.get("request"), dict) else effective, duplicate_check, kind=str(check_result.get("kind") or "ptcli.service.retorrent_check"))
+    blockers = _source_url_check_and_submit_blockers(check_result, handoff)
+    if blockers:
+        return _source_url_check_and_submit_response(
+            check_result=check_result,
+            handoff=handoff,
+            submitted_job=None,
+            blockers=blockers,
+        )
+
+    submit_request = handoff.get("request") if isinstance(handoff, dict) and isinstance(handoff.get("request"), dict) else None
+    if not submit_request:
+        blockers = ["submit_if_clear_handoff.request is missing."]
+        return _source_url_check_and_submit_response(check_result=check_result, handoff=handoff, submitted_job=None, blockers=blockers)
+    submit_request = {
+        **submit_request,
+        "check_submission": _inline_retorrent_check_submission_payload(check_result, handoff, submit_request),
+    }
+    submitted_job = create_source_url_retorrent_job(job_store, submit_request)
+    return _source_url_check_and_submit_response(
+        check_result=check_result,
+        handoff=handoff,
+        submitted_job=submitted_job,
+        blockers=[],
+    )
 
 
 def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1018,6 +1055,86 @@ def _retorrent_check_submission_payload(check_job_id: str, check_job: dict[str, 
         "material_options": _request_material_options(effective_request),
         "qbit_overrides": {key: effective_request.get(key) for key in qbit_keys if effective_request.get(key) is not None},
     }
+
+
+def _inline_retorrent_check_submission_payload(check_result: dict[str, Any], handoff: dict[str, Any], effective_request: dict[str, Any]) -> dict[str, Any]:
+    qbit_keys = ("qbit_category", "qbit_tags", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_category", "uploaded_qbit_tags", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit")
+    return {
+        "mode": "inline_check_and_submit",
+        "check_kind": check_result.get("kind"),
+        "check_status": check_result.get("status"),
+        "check_ok": check_result.get("ok"),
+        "check_summary_file": check_result.get("summary_file"),
+        "duplicate_check": check_result.get("duplicate_check"),
+        "inherited_request": handoff.get("request") if isinstance(handoff, dict) else {},
+        "material_options": _request_material_options(effective_request),
+        "qbit_overrides": {key: effective_request.get(key) for key in qbit_keys if effective_request.get(key) is not None},
+    }
+
+
+def _source_url_check_and_submit_blockers(check_result: dict[str, Any], handoff: dict[str, Any] | None) -> list[str]:
+    blockers = _string_list(check_result.get("blockers"))
+    if check_result.get("ok") is False and not isinstance(handoff, dict):
+        blockers.append("retorrent_check did not finish successfully.")
+    if not isinstance(handoff, dict):
+        blockers.append("submit_if_clear_handoff is missing.")
+        return list(dict.fromkeys(blockers))
+    blockers.extend(_string_list(handoff.get("blockers")))
+    if handoff.get("ready") is not True:
+        blockers.append("submit_if_clear_handoff.ready is not true.")
+    return list(dict.fromkeys(blockers))
+
+
+def _source_url_check_and_submit_response(
+    *,
+    check_result: dict[str, Any],
+    handoff: dict[str, Any] | None,
+    submitted_job: dict[str, Any] | None,
+    blockers: list[str],
+) -> dict[str, Any]:
+    duplicate_check = check_result.get("duplicate_check") if isinstance(check_result.get("duplicate_check"), dict) else {}
+    ready = bool(submitted_job and not blockers)
+    return {
+        "kind": "ptcli.source_url_check_and_submit",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "mutates_state": True,
+        "live_upload": bool(ready),
+        "check_result": check_result,
+        "duplicate_check": duplicate_check,
+        "submit_if_clear_handoff": handoff,
+        "job_id": submitted_job.get("job_id") if isinstance(submitted_job, dict) else None,
+        "submitted_job": submitted_job,
+        "status_endpoint": f"/v1/jobs/{submitted_job.get('job_id')}" if isinstance(submitted_job, dict) and submitted_job.get("job_id") else None,
+        "summary_endpoint": f"/v1/jobs/{submitted_job.get('job_id')}/summary" if isinstance(submitted_job, dict) and submitted_job.get("job_id") else None,
+        "agent_summary": _source_url_check_and_submit_agent_summary(duplicate_check, handoff, submitted_job, blockers),
+        "blockers": blockers,
+        "next_actions": _source_url_check_and_submit_next_actions(duplicate_check, handoff, submitted_job, blockers),
+    }
+
+
+def _source_url_check_and_submit_agent_summary(duplicate_check: dict[str, Any], handoff: dict[str, Any] | None, submitted_job: dict[str, Any] | None, blockers: list[str]) -> dict[str, Any]:
+    return {
+        "ready": bool(submitted_job and not blockers),
+        "duplicate_searched": duplicate_check.get("searched") is True,
+        "duplicate_exists": duplicate_check.get("exists"),
+        "duplicate_count": duplicate_check.get("count"),
+        "submit_ready": isinstance(handoff, dict) and handoff.get("ready") is True,
+        "job_id": submitted_job.get("job_id") if isinstance(submitted_job, dict) else None,
+        "job_status": submitted_job.get("status") if isinstance(submitted_job, dict) else None,
+        "blocker_count": len(blockers),
+    }
+
+
+def _source_url_check_and_submit_next_actions(duplicate_check: dict[str, Any], handoff: dict[str, Any] | None, submitted_job: dict[str, Any] | None, blockers: list[str]) -> list[str]:
+    if submitted_job and not blockers:
+        job_id = submitted_job.get("job_id")
+        return [f"Poll get_job_status at /v1/jobs/{job_id}; when terminal, read /v1/jobs/{job_id}/summary and follow closure_summary.next_step."]
+    if duplicate_check.get("exists") is True:
+        return ["Do not upload; target duplicate exists. Report duplicate_check.dupes to the user."]
+    if isinstance(handoff, dict) and _string_list(handoff.get("blockers")):
+        return ["Resolve submit_if_clear_handoff.blockers, then retry check-and-submit or use submit_checked_retorrent_job after a clear check job."]
+    return ["Inspect check_result.blockers and duplicate_check before retrying source_url_check_and_submit."]
 
 
 def _candidate_submission_payload(candidate_job_id: str, candidate_item: dict[str, Any], digest: dict[str, Any], submit_request: dict[str, Any], submit_overrides: dict[str, Any], effective_request: dict[str, Any]) -> dict[str, Any]:
@@ -7349,6 +7466,8 @@ def agent_run_preview_payload(request: dict[str, Any] | None = None) -> dict[str
     request_template = _agent_preview_request_template(str(workflow.get("name") or ""), source_url, source_tracker, target_trackers, accept_rules, confirm_upload, request)
     blockers = _agent_preview_blockers(str(workflow.get("name") or ""), source_url, source_tracker, target_trackers, accept_rules, confirm_upload, request)
     steps = _agent_preview_steps(workflow, request_template)
+    one_call_handoff = _agent_preview_one_call_handoff(workflow, request_template)
+    one_call_ready = not blockers and one_call_handoff.get("ready")
     closure_contract = _agent_closure_contract()
     return {
         "status": "ok" if not blockers else "blocked",
@@ -7373,11 +7492,12 @@ def agent_run_preview_payload(request: dict[str, Any] | None = None) -> dict[str
         "request_template": request_template,
         "closure_contract": closure_contract,
         "closure_handoff_examples": _agent_preview_closure_examples(),
+        "one_call_handoff": one_call_handoff,
         "steps": steps,
-        "next_step": steps[0] if steps else None,
-        "recommended_tool": steps[0].get("tool") if steps else None,
-        "recommended_endpoint": steps[0].get("endpoint") if steps else None,
-        "recommended_request": steps[0].get("request") if steps else None,
+        "next_step": one_call_handoff.get("next_step") if one_call_ready else steps[0] if steps else None,
+        "recommended_tool": one_call_handoff.get("tool") if one_call_ready else steps[0].get("tool") if steps else None,
+        "recommended_endpoint": one_call_handoff.get("endpoint") if one_call_ready else steps[0].get("endpoint") if steps else None,
+        "recommended_request": one_call_handoff.get("request") if one_call_ready else steps[0].get("request") if steps else None,
         "blockers": blockers,
         "next_actions": _agent_preview_next_actions(str(workflow.get("name") or ""), blockers, closure_contract),
     }
@@ -7475,6 +7595,37 @@ def _agent_preview_steps(workflow: dict[str, Any], request_template: dict[str, A
     return steps
 
 
+def _agent_preview_one_call_handoff(workflow: dict[str, Any], request_template: dict[str, Any]) -> dict[str, Any]:
+    one_call = workflow.get("one_call") if isinstance(workflow.get("one_call"), dict) else {}
+    tool = str(one_call.get("tool") or "")
+    if not tool:
+        return {"ready": False, "tool": None, "endpoint": None, "method": None, "request": None, "blockers": ["workflow has no one_call tool"]}
+    endpoints = {item["name"]: item.get("path") for item in _agent_tool_schemas()}
+    methods = {item["name"]: item.get("method") for item in _agent_tool_schemas()}
+    request = _agent_preview_step_request(tool, request_template)
+    blockers = [] if request else ["one_call request template is unavailable"]
+    return {
+        "ready": not blockers,
+        "tool": tool,
+        "endpoint": endpoints.get(tool) or one_call.get("endpoint"),
+        "method": methods.get(tool) or one_call.get("method"),
+        "request": request,
+        "continue_when": one_call.get("continue_when"),
+        "stop_when": one_call.get("stop_when"),
+        "then_follow": one_call.get("then_follow"),
+        "next_step": {
+            "tool": tool,
+            "endpoint": endpoints.get(tool) or one_call.get("endpoint"),
+            "method": methods.get(tool) or one_call.get("method"),
+            "request": request,
+            "reason": "one_call_check_duplicates_then_submit_job",
+        }
+        if not blockers
+        else None,
+        "blockers": blockers,
+    }
+
+
 def _agent_preview_step_request(tool: str, request_template: dict[str, Any]) -> dict[str, Any] | None:
     if tool == "readiness_bundle":
         return request_template
@@ -7485,6 +7636,8 @@ def _agent_preview_step_request(tool: str, request_template: dict[str, Any]) -> 
     if tool == "retorrent_check":
         return {"source": request_template.get("source_url"), "source_url": request_template.get("source_url"), "target": request_template.get("target"), "accept_rules": request_template.get("accept_rules")}
     if tool == "source_url_retorrent_job":
+        return request_template
+    if tool == "source_url_check_and_submit":
         return request_template
     if tool == "get_job_status":
         return {"job_id": "<job_id from source_url_retorrent_job>"}
@@ -7512,13 +7665,14 @@ def _agent_preview_next_actions(workflow: str, blockers: list[str], closure_cont
         return ["Resolve preview blockers before submitting live-capable jobs. This preview does not contact trackers or qBittorrent."]
     if workflow == "daily_candidates":
         return [f"Create daily candidate schedule jobs, read schedule_digest.submission_handoff, submit one approved candidate, then follow {closure_contract['next_step_source']} until {closure_contract['complete_when']}."]
-    return [f"Submit request_template to source_url_retorrent_job, poll get_job_status, then follow {closure_contract['next_step_source']} until {closure_contract['complete_when']}."]
+    return [f"Submit one_call_handoff.request to source_url_check_and_submit, poll get_job_status when job_id is returned, then follow {closure_contract['next_step_source']} until {closure_contract['complete_when']}."]
 
 
 def _agent_tool_schemas() -> list[dict[str, Any]]:
     retorrent_request_schema = _retorrent_tool_request_schema()
     manual_retorrent_request_schema = _manual_retorrent_tool_request_schema()
     source_url_retorrent_request_schema = _source_url_retorrent_tool_request_schema()
+    source_url_check_submit_request_schema = _source_url_retorrent_tool_request_schema()
     candidate_request_schema = _daily_candidate_tool_request_schema()
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
@@ -7622,6 +7776,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "input_schema": source_url_retorrent_request_schema,
             "response_contract": _job_response_contract(),
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "resume_with": "resume_job"},
+            "safety": _live_upload_safety_contract(),
+        },
+        {
+            "name": "source_url_check_and_submit",
+            "method": "POST",
+            "path": "/v1/jobs/retorrent/from-url/check-and-submit",
+            "description": "One-call AI-safe manual workflow: run target duplicate check now, stop if a duplicate exists, otherwise create a live source-url retorrent job and return its job_id. Live upload still requires accept_rules=true and confirm_upload=true.",
+            "input_schema": source_url_check_submit_request_schema,
+            "response_contract": _source_url_check_and_submit_response_contract(),
+            "workflow_hints": {"checks_with": "retorrent_check", "poll_with": "get_job_status", "summary_with": "get_job_summary", "resume_with": "resume_job"},
             "safety": _live_upload_safety_contract(),
         },
         {
@@ -8215,8 +8379,9 @@ def _sync_response_contract() -> dict[str, Any]:
 
 def _agent_run_preview_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "kind", "dry_run", "mutates_state", "live_upload", "workflow", "tool", "request", "request_template", "closure_contract", "closure_handoff_examples", "steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "kind", "dry_run", "mutates_state", "live_upload", "workflow", "tool", "request", "request_template", "closure_contract", "closure_handoff_examples", "one_call_handoff", "steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "workflows": ["source_url_retorrent", "daily_candidates"],
+        "one_call_fields": ["ready", "tool", "endpoint", "method", "request", "continue_when", "stop_when", "then_follow", "next_step", "blockers"],
         "step_fields": ["index", "step", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when", "complete_when", "resume_with"],
         "closure_examples": ["complete", "resume", "stop"],
         "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_create_jobs", "does_not_upload"],
@@ -8232,6 +8397,17 @@ def _source_url_preflight_response_contract() -> dict[str, Any]:
         "job_template_fields": ["tool", "endpoint", "request"],
         "job_creation_handoff_fields": ["ready_after_duplicate_clear", "tool", "endpoint", "method", "request", "requires_before_call"],
         "safety": ["does_not_create_job", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_job_requires_accept_rules_confirm_upload_policy_and_duplicate_clear"],
+    }
+
+
+def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "agent_summary", "blockers", "next_actions"],
+        "status_values": ["ok", "blocked"],
+        "duplicate_check_fields": ["searched", "exists", "count", "dupes"],
+        "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "request", "requires_before_call", "blockers", "next_step"],
+        "agent_summary_fields": ["ready", "duplicate_searched", "duplicate_exists", "duplicate_count", "submit_ready", "job_id", "job_status", "blocker_count"],
+        "safety": ["runs_duplicate_check_before_job_creation", "stops_when_duplicate_exists", "live_upload_requires_accept_rules_and_confirm_upload"],
     }
 
 
@@ -8504,10 +8680,19 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
     return [
         {
             "name": "source_url_retorrent",
-            "tool": "source_url_retorrent_job",
+            "tool": "source_url_check_and_submit",
+            "fallback_tool": "source_url_retorrent_job",
             "description": "Recommended flow when a user sends one source tracker link and a target tracker. The service infers tracker/torrent id, checks duplicates, then proceeds only when rules and confirmations allow.",
             "required_fields": ["source_url", "target"],
             "recommended_fields": ["save_path", "accept_rules", "confirm_upload", "uploaded_qbit_category", "uploaded_qbit_tags"],
+            "one_call": {
+                "tool": "source_url_check_and_submit",
+                "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+                "method": "POST",
+                "continue_when": "ok=true and job_id is present",
+                "stop_when": ["duplicate_check.exists=true", "submit_if_clear_handoff.ready=false", "status=blocked"],
+                "then_follow": "poll",
+            },
             "runbook": [
                 {
                     "step": "preflight",
@@ -8696,6 +8881,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "description": "User-provided source tracker details/download URL. The service infers source_tracker and torrent id from this URL.",
         }
         source_url_properties["source"]["description"] = "Alias for source_url; source_url is preferred for this endpoint."
+    source_url_check_submit_request_schema = json.loads(json.dumps(source_url_request_schema))
     resume_request_schema = _job_resume_tool_request_schema()
     resume_request_schema["required"] = []
     resume_request_schema["properties"].pop("job_id", None)
@@ -8759,6 +8945,25 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "source_reference": {"type": ["object", "null"]},
             "workflow_context": {"type": ["object", "null"]},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
+        },
+    }
+    source_url_check_submit_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "mutates_state": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "check_result": {"type": "object"},
+            "duplicate_check": {"type": "object"},
+            "submit_if_clear_handoff": {"type": ["object", "null"]},
+            "job_id": {"type": ["string", "null"]},
+            "submitted_job": {"type": ["object", "null"]},
+            "status_endpoint": {"type": ["string", "null"]},
+            "summary_endpoint": {"type": ["string", "null"]},
+            "agent_summary": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
     job_summary_response_schema = {
@@ -9061,6 +9266,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "request_template": {"type": "object"},
             "closure_contract": {"type": "object"},
             "closure_handoff_examples": {"type": "object"},
+            "one_call_handoff": {"type": "object"},
             "steps": {"type": "array", "items": {"type": "object"}},
             "next_step": {"type": ["object", "null"]},
             "recommended_tool": {"type": ["string", "null"]},
@@ -9407,6 +9613,19 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                         "200": {
                             "description": "Queued source-URL retorrent job that infers tracker/torrent id and executes only when gates allow.",
                             "content": {"application/json": {"schema": job_response_schema}},
+                        }
+                    },
+                }
+            },
+            "/v1/jobs/retorrent/from-url/check-and-submit": {
+                "post": {
+                    "operationId": "checkAndSubmitSourceUrlRetorrentJob",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": source_url_check_submit_request_schema}}},
+                    "responses": {
+                        "200": {
+                            "description": "Runs duplicate check first, then creates a source-URL retorrent job only when clear.",
+                            "content": {"application/json": {"schema": source_url_check_submit_response_schema}},
                         }
                     },
                 }
