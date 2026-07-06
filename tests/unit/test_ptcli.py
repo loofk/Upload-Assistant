@@ -13889,6 +13889,12 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["submission_handoff"]["ready"] is True
     assert payload["schedule_digest"]["submission_handoff"]["submit_tool"] == "submit_daily_candidate_job"
     assert payload["schedule_digest"]["submission_handoff"]["submit_endpoint_template"] == "/v1/jobs/candidates/{candidate_job_id}/submit"
+    assert payload["schedule_digest"]["submission_handoff"]["next_step"]["tool"] == "submit_daily_candidate_job"
+    assert payload["schedule_digest"]["submission_handoff"]["next_step"]["endpoint"].startswith("/v1/jobs/candidates/")
+    assert payload["schedule_digest"]["submission_handoff"]["next_step"]["request"]["confirm_upload"] is True
+    assert payload["schedule_digest"]["submission_handoff"]["next_step"]["reason"] == "submit_top_candidate_when_user_confirms"
+    assert payload["schedule_digest"]["submission_handoff"]["recommended_tool"] == "submit_daily_candidate_job"
+    assert payload["schedule_digest"]["submission_handoff"]["recommended_endpoint"].startswith("/v1/jobs/candidates/")
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["submit_endpoint"].startswith("/v1/jobs/candidates/")
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["selector"] == {"rank": 1, "source_id": "60635"}
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["confirm_upload"] is True
@@ -13909,6 +13915,9 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["notification_payload"]["status"] == "ready"
     assert payload["notification_payload"]["counts"]["ready_candidates"] == 1
     assert payload["notification_payload"]["top_item"]["source_id"] == "60635"
+    assert payload["notification_payload"]["next_step"] == payload["schedule_digest"]["submission_handoff"]["next_step"]
+    assert payload["notification_payload"]["recommended_tool"] == "submit_daily_candidate_job"
+    assert payload["notification_payload"]["recommended_endpoint"] == payload["schedule_digest"]["submission_handoff"]["recommended_endpoint"]
     assert payload["notification_payload"]["submit_items"][0]["submit_tool"] == "submit_daily_candidate_job"
     assert payload["agent_decision"]["decision"] == "review_candidates"
     assert payload["agent_decision"]["can_submit_any"] is True
@@ -14290,8 +14299,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "submission_ready" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "submit_items" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
+    assert "next_step" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
     assert "submission_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "submit_endpoint_template" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
+    assert "next_step" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
+    assert "recommended_tool" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
     assert tool_by_name["deployment_check"]["method"] == "GET"
     assert "qbit" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "mounts" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -14515,8 +14527,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "submission_ready" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
         assert "submit_items" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
+        assert "next_step" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
         assert "submission_handoff" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "submit_endpoint_template" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
+        assert "next_step" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
+        assert "recommended_tool" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "digest" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
         assert "candidate_digest" in tools_by_name["daily_candidates_job"]["response_contract"]["required_fields"]

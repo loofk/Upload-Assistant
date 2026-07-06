@@ -1774,6 +1774,10 @@ def _daily_candidate_schedule_notification_payload(schedule_digest: dict[str, An
         "top_item": top_item,
         "items": items,
         "submission_handoff": submission_handoff,
+        "next_step": submission_handoff.get("next_step"),
+        "recommended_tool": submission_handoff.get("recommended_tool"),
+        "recommended_endpoint": submission_handoff.get("recommended_endpoint"),
+        "recommended_request": submission_handoff.get("recommended_request"),
         "submit_items": submit_items,
         "top_submit_requests": schedule_digest.get("top_submit_requests", []),
         "blockers": _string_list(schedule_digest.get("blockers")),
@@ -1852,6 +1856,7 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
 
 
 def _daily_candidate_schedule_submission_handoff(submission_items: list[dict[str, Any]], blockers: list[str]) -> dict[str, Any]:
+    next_step = _daily_candidate_submission_next_step(submission_items, blockers)
     return {
         "kind": "ptcli.daily_candidate_submission_handoff",
         "ready": bool(submission_items) and not blockers,
@@ -1860,8 +1865,45 @@ def _daily_candidate_schedule_submission_handoff(submission_items: list[dict[str
         "submit_endpoint_template": "/v1/jobs/candidates/{candidate_job_id}/submit",
         "preferred_flow": "Poll daily candidate jobs until complete, review candidate rules, then submit via submit_daily_candidate_job so source/target identity is inherited from the candidate job.",
         "required_overrides": ["confirm_upload=true", "save_path or path"],
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
         "items": submission_items,
         "blockers": blockers,
+    }
+
+
+def _daily_candidate_submission_next_step(submission_items: list[dict[str, Any]], blockers: list[str]) -> dict[str, Any]:
+    if blockers:
+        return {
+            "tool": None,
+            "endpoint": None,
+            "method": None,
+            "request": None,
+            "reason": "schedule_blocked",
+            "blockers": blockers,
+        }
+    if not submission_items:
+        return {
+            "tool": None,
+            "endpoint": None,
+            "method": None,
+            "request": None,
+            "reason": "no_submittable_candidates",
+            "blockers": [],
+        }
+    item = submission_items[0]
+    return {
+        "tool": item.get("submit_tool") or "submit_daily_candidate_job",
+        "endpoint": item.get("submit_endpoint"),
+        "method": item.get("method") or "POST",
+        "request": item.get("request_template"),
+        "reason": "submit_top_candidate_when_user_confirms",
+        "candidate_job_id": item.get("candidate_job_id"),
+        "selector": item.get("selector") if isinstance(item.get("selector"), dict) else {},
+        "required_overrides": item.get("required_overrides") if isinstance(item.get("required_overrides"), list) else ["confirm_upload=true", "save_path or path"],
+        "identity_inherited_from_candidate": item.get("identity_inherited_from_candidate") if isinstance(item.get("identity_inherited_from_candidate"), dict) else {},
     }
 
 
@@ -4936,8 +4978,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
                 "digest_fields": ["items", "push_items", "push_payload", "top_submit_requests", "submission_handoff", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
                 "push_payload_fields": ["title", "summary", "message", "format", "items", "top_item", "decision_summary", "submission_ready", "recommended_action"],
-                "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "submit_items", "submission_handoff", "next_actions"],
-                "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "items"],
+                "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "submit_items", "submission_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
+                "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items"],
             },
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},

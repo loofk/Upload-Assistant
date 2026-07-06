@@ -2533,6 +2533,10 @@
           "items",
           "submit_items",
           "submission_handoff",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "next_actions"
         ],
         "submission_handoff_fields": [
@@ -2540,6 +2544,10 @@
           "submit_tool",
           "submit_endpoint_template",
           "required_overrides",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "items"
         ]
       },
