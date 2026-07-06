@@ -14,10 +14,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from torf import Torrent
 
@@ -125,6 +128,22 @@ def build_parser() -> argparse.ArgumentParser:
     daily_schedule.add_argument("--write-summary", action="store_true", help="Write ptcli-daily-schedule-summary.json for cron/agent pickup.")
     daily_schedule.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --job-dir or PTCLI_JOB_DIR/TMPDIR.")
     daily_schedule.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
+    daily_scheduler = subparsers.add_parser(
+        "daily-scheduler",
+        help="Run daily candidate schedules continuously inside Docker/seedbox deployments.",
+        description=(
+            "Run configured daily candidate schedules at their configured HH:MM time. "
+            "This is a lightweight in-container scheduler for Docker Compose; it scans candidates only and never uploads."
+        ),
+    )
+    daily_scheduler.add_argument("--job-dir", help="Directory for file-backed job evidence. Defaults to PTCLI_JOB_DIR or TMPDIR/ptcli-jobs.")
+    daily_scheduler.add_argument("--schedules-json", help="JSON array/object of daily candidate schedules. Defaults to PTCLI_DAILY_CANDIDATE_SCHEDULES.")
+    daily_scheduler.add_argument("--schedules-file", help="File containing a JSON array/object of daily candidate schedules.")
+    daily_scheduler.add_argument("--write-summary", action="store_true", default=True, help="Write ptcli-daily-schedule-summary.json after each run. Enabled by default.")
+    daily_scheduler.add_argument("--summary-output-dir", help="Directory for --write-summary. Defaults to --job-dir or PTCLI_JOB_DIR/TMPDIR.")
+    daily_scheduler.add_argument("--once", action="store_true", help="Run one scheduled scan immediately and exit. Useful for smoke tests.")
+    daily_scheduler.add_argument("--json", action="store_true", help="Print machine-readable JSON for --once; continuous mode writes line-delimited JSON events.")
 
     readiness_bundle = subparsers.add_parser(
         "readiness-bundle",
@@ -11604,6 +11623,110 @@ def daily_schedule_payload(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def daily_scheduler_plan(args: argparse.Namespace, *, now: datetime | None = None) -> dict[str, Any]:
+    from src.ptcli.service import daily_candidate_schedule_payload
+
+    request = _daily_schedule_request_from_args(args)
+    plan = daily_candidate_schedule_payload(request)
+    now = now or datetime.now().astimezone()
+    next_runs = [_daily_scheduler_next_run(schedule, now=now) for schedule in plan.get("schedules", []) if isinstance(schedule, dict) and schedule.get("enabled") is not False]
+    next_runs = [run for run in next_runs if run is not None]
+    next_runs.sort(key=lambda item: item["seconds_until_run"])
+    return {
+        "kind": "ptcli.daily_scheduler.plan",
+        "status": "ok" if next_runs else "blocked",
+        "ok": bool(next_runs),
+        "source": plan.get("source"),
+        "env": plan.get("env"),
+        "schedule_count": plan.get("count", 0),
+        "enabled_count": len(next_runs),
+        "now": now.isoformat(),
+        "next_run": next_runs[0] if next_runs else None,
+        "next_runs": next_runs,
+        "blockers": plan.get("blockers", []) if not next_runs else [],
+        "next_actions": ["Configure at least one enabled daily candidate schedule."] if not next_runs else ["Keep the scheduler running; it will execute the next due schedule batch automatically."],
+        "schedule_plan": plan,
+    }
+
+
+def daily_scheduler_once_payload(args: argparse.Namespace) -> dict[str, Any]:
+    plan = daily_scheduler_plan(args)
+    run_payload = daily_schedule_payload(args)
+    return {
+        "kind": "ptcli.cli.daily_scheduler",
+        "status": run_payload.get("status"),
+        "ok": bool(run_payload.get("ok")),
+        "mode": "once",
+        "scheduler": plan,
+        "last_run": run_payload,
+        "summary_file": run_payload.get("summary_file"),
+        "blockers": run_payload.get("blockers", []),
+        "next_actions": run_payload.get("next_actions", []),
+    }
+
+
+def run_daily_scheduler(args: argparse.Namespace, *, json_output: bool = False) -> int:
+    if args.once:
+        payload = _with_captured_stdout(lambda: daily_scheduler_once_payload(args), json_output)
+        _print_payload(payload, json_output)
+        return 0 if payload.get("status") in {"ok", "partial"} else 1
+
+    while True:
+        plan = daily_scheduler_plan(args)
+        if not plan.get("ok"):
+            _print_payload({**plan, "event": "scheduler_blocked"}, json_output=True)
+            time.sleep(300)
+            continue
+        next_run = plan.get("next_run") if isinstance(plan.get("next_run"), dict) else {}
+        sleep_seconds = max(1, int(next_run.get("seconds_until_run") or 1))
+        _print_payload({**plan, "event": "scheduler_sleep"}, json_output=True)
+        time.sleep(sleep_seconds)
+        run_payload = daily_schedule_payload(args)
+        _print_payload({"kind": "ptcli.cli.daily_scheduler", "event": "scheduled_run", "scheduler": plan, "last_run": run_payload, "summary_file": run_payload.get("summary_file")}, json_output=True)
+        time.sleep(60)
+
+
+def _daily_schedule_request_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    request: dict[str, Any] = {}
+    if getattr(args, "schedules_file", None):
+        request["schedules"] = json.loads(Path(args.schedules_file).expanduser().read_text(encoding="utf-8"))
+    elif getattr(args, "schedules_json", None):
+        request["schedules"] = json.loads(args.schedules_json)
+    return request
+
+
+def _daily_scheduler_next_run(schedule: dict[str, Any], *, now: datetime) -> dict[str, Any] | None:
+    schedule_info = schedule.get("schedule") if isinstance(schedule.get("schedule"), dict) else {}
+    time_text = str(schedule_info.get("time") or "09:00")
+    try:
+        hour_text, minute_text = time_text.split(":", 1)
+        hour = int(hour_text)
+        minute = int(minute_text)
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError
+    except ValueError:
+        return None
+    timezone = str(schedule_info.get("timezone") or os.environ.get("TZ") or "Asia/Shanghai")
+    try:
+        tz = ZoneInfo(timezone)
+    except Exception:
+        tz = ZoneInfo("Asia/Shanghai")
+        timezone = "Asia/Shanghai"
+    local_now = now.astimezone(tz)
+    run_at = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if run_at <= local_now:
+        run_at += timedelta(days=1)
+    return {
+        "name": schedule.get("name"),
+        "time": time_text,
+        "timezone": timezone,
+        "run_at": run_at.isoformat(),
+        "seconds_until_run": max(1, int((run_at - local_now).total_seconds())),
+        "job_endpoint": schedule.get("job_endpoint"),
+        "job_tool": schedule.get("job_tool"),
+    }
+
+
 def _write_daily_schedule_summary(payload: dict[str, Any], args: argparse.Namespace, job_dir: Path) -> str:
     destination_dir = Path(args.summary_output_dir or job_dir).expanduser()
     destination_dir.mkdir(parents=True, exist_ok=True)
@@ -11698,6 +11821,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = _with_captured_stdout(lambda: daily_schedule_payload(args), json_output)
             _print_payload(payload, json_output)
             return 0 if payload.get("status") in {"ok", "partial"} else 1
+
+        if args.command == "daily-scheduler":
+            return run_daily_scheduler(args, json_output=json_output)
 
         if args.command == "rules":
             _print_payload(build_rules_payload(args), json_output)

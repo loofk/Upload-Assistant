@@ -81,6 +81,29 @@ services:
       - /mnt/user/appdata/Upload-Assistant/tmp/:/Upload-Assistant/tmp/:rw
     command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]
 
+  ptcli-daily-scheduler:
+    image: ghcr.io/loofk/upload-assistant:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ptcli
+    profiles:
+      - daily
+    restart: unless-stopped
+    networks:
+      - ptcli-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+      - PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}
+    volumes:
+      - /path/to/torrents/:/downloads/:rw # map this to qBittorrent download location with matching container paths
+      - /mnt/user/appdata/Upload-Assistant/data/config.py:/Upload-Assistant/data/config.py:rw
+      - /mnt/user/appdata/Upload-Assistant/data/cookies/:/Upload-Assistant/data/cookies/:rw
+      - /mnt/user/appdata/Upload-Assistant/tmp/:/Upload-Assistant/tmp/:rw
+    command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]
+
   legacy-webui:
     image: ghcr.io/loofk/upload-assistant:latest-legacy-webui
     build:

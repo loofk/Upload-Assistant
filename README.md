@@ -154,6 +154,10 @@ python3 ptcli.py daily-schedule --write-summary --summary-output-dir ./tmp/daily
 docker compose --profile cli run --rm ptcli daily-schedule --write-summary --summary-output-dir /Upload-Assistant/tmp/daily-candidates --json
 python3 ptcli.py summary-check --summary-file ./tmp/daily-candidates/ptcli-daily-schedule-summary.json --json
 
+# Docker Compose 常驻每日触发器：按每个 schedule 的 time/timezone 每天执行候选扫描并写 summary；不会上传
+python3 ptcli.py daily-scheduler --once --summary-output-dir ./tmp/daily-candidates --json
+docker compose --profile daily up -d ptcli-daily-scheduler
+
 # 站点策略矩阵：审计自动化 gate、QB 限速、做种要求、规则 URL 和人工确认状态；不会联系站点
 curl -X POST http://127.0.0.1:8080/v1/site-policies \
   -H "Content-Type: application/json" \
@@ -208,7 +212,7 @@ OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/opencla
 - 默认发布构建使用 `Dockerfile.ptcli`，镜像入口是 `ptcli.py`；release 工作流会额外发布 `*-legacy-webui` 标签给旧 Web UI 镜像。
 - 旧 `upload.py` 需要显式覆盖 entrypoint、使用 legacy Dockerfile，或拉取 `*-legacy-webui` 标签才会运行。
 - `docker-compose.yml` 默认提供 `ptcli-api` 常驻 HTTP API 服务，使用项目内 `ptcli-net` 网络并带 `/health` healthcheck；一次性 CLI 服务放在 `cli` profile，可用 `docker compose --profile cli run --rm ptcli retorrent ...` 在盒子上执行；legacy Web UI 需要显式 `--profile legacy-webui`。
-- `/v1/deployment/check` 会输出 `mounts`、`qbit`、`daily_candidates`、`docker_compose`、`agent_summary` 和 `agent_handoff`：AI 可以直接判断 config/cookies/tmp/job/downloads 挂载是否就绪、qBittorrent 是否配置、`PTCLI_DAILY_CANDIDATE_SCHEDULES` 是否已提供每日候选计划，以及 `docker-compose.yml` 是否包含可用的 `ptcli-daily-schedule` daily profile 服务；`agent_handoff` 会给出手动转种和每日候选的推荐工具、端点、最小请求模板、必需确认和阻塞原因。`/v1/readiness/bundle` 会进一步把 deployment、site policies、daily schedule、非 live `live_verification` 凭据/图床/素材链路清单、doctor 命令模板和 `source_url_retorrent_job` 请求模板汇总到 `live_readiness`/`agent_decision`，用于 AI 在 live 前一次性判断是否还缺 cookie、MTEAM API key、qBittorrent 配置、图床、规则确认、目标站点、源站链接或盒子配置；`live_test_handoff.next_step` 会在就绪时给出可执行 `ptcli doctor` argv，未就绪时指向 deployment/site policy/readiness 修复路径。doctor 写出 `ptcli-doctor-summary.json` 后，`summary-check --json` 会返回 `doctor_result_handoff`，把 `live_safe_to_attempt`、blockers、summary-check 命令和通过后的 `source_url_retorrent_job` 入口压缩到固定路径。每日候选或 compose 定时服务未配置只作为 warning，不阻塞手动转种 API。
+- `/v1/deployment/check` 会输出 `mounts`、`qbit`、`daily_candidates`、`docker_compose`、`agent_summary` 和 `agent_handoff`：AI 可以直接判断 config/cookies/tmp/job/downloads 挂载是否就绪、qBittorrent 是否配置、`PTCLI_DAILY_CANDIDATE_SCHEDULES` 是否已提供每日候选计划，以及 `docker-compose.yml` 是否包含可用的 `ptcli-daily-scheduler` 常驻 daily profile 服务或一次性 `ptcli-daily-schedule` 服务；`agent_handoff` 会给出手动转种和每日候选的推荐工具、端点、最小请求模板、必需确认和阻塞原因。`/v1/readiness/bundle` 会进一步把 deployment、site policies、daily schedule、非 live `live_verification` 凭据/图床/素材链路清单、doctor 命令模板和 `source_url_retorrent_job` 请求模板汇总到 `live_readiness`/`agent_decision`，用于 AI 在 live 前一次性判断是否还缺 cookie、MTEAM API key、qBittorrent 配置、图床、规则确认、目标站点、源站链接或盒子配置；`live_test_handoff.next_step` 会在就绪时给出可执行 `ptcli doctor` argv，未就绪时指向 deployment/site policy/readiness 修复路径。doctor 写出 `ptcli-doctor-summary.json` 后，`summary-check --json` 会返回 `doctor_result_handoff`，把 `live_safe_to_attempt`、blockers、summary-check 命令和通过后的 `source_url_retorrent_job` 入口压缩到固定路径。每日候选或 compose 定时服务未配置只作为 warning，不阻塞手动转种 API。
 - 如果 qBittorrent 跑在宿主机上，容器内的 `data/config.py` 可把 `qbit_url` 写成 `http://host.docker.internal` 并保持对应 `qbit_port`；如果 qBittorrent 也是 Docker 容器，把两边放到同一个 Docker 网络后使用 qBittorrent 的服务名作为 host。
 - live 验证需要在真实盒子环境中提供有效 cookie、MTEAM API key、qBittorrent 连接和实际内容路径。
 
@@ -236,6 +240,9 @@ docker compose --profile cli run --rm ptcli readiness-bundle --from U2 --source-
 
 # 执行一次每日候选扫描；适合放进宿主机 cron，结果写到挂载的 tmp/daily-candidates
 docker compose --profile daily run --rm ptcli-daily-schedule
+
+# 启动常驻每日候选触发器；按 PTCLI_DAILY_CANDIDATE_SCHEDULES 中的 time/timezone 每天扫描
+docker compose --profile daily up -d ptcli-daily-scheduler
 
 # 盒子上一键闭环示例
 docker compose --profile cli run --rm ptcli retorrent --from U2 --source-id 60635 --to MTEAM --execute --accept-rules --confirm-upload --save-path "/downloads" --uploaded-qbit-category MTEAM --uploaded-qbit-tags retorrent --write-summary --json

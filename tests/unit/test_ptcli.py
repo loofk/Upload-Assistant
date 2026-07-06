@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import threading
 import time
+from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
 
@@ -14039,6 +14040,75 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert check_payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
 
 
+def test_daily_scheduler_once_runs_schedule_and_writes_summary(monkeypatch, tmp_path, capsys) -> None:
+    digest = {
+        "kind": "ptcli.daily_candidates_digest",
+        "recommendation": "submit_top_candidate_when_confirmed",
+        "ready_count": 1,
+        "top_candidate": {"source_tracker": "U2", "source_id": "60635"},
+        "top_submit_request": {"source": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"},
+        "top_submit_job_endpoint": "/v1/jobs/retorrent/from-url",
+        "top_submit_tool": "source_url_retorrent_job",
+        "push_items": [{"rank": 1, "source_id": "60635", "title": "Example"}],
+    }
+
+    async def fake_daily_candidates(_request):
+        return {
+            "kind": "ptcli.service.daily_candidates",
+            "status": "ok",
+            "ok": True,
+            "digest": digest,
+            "candidates": [{"status": "ready"}],
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
+    schedules_file = tmp_path / "schedules.json"
+    schedules_file.write_text(json.dumps([{"name": "u2-to-mteam", "source_tracker": "U2", "target": "MTEAM", "time": "09:30", "timezone": "Asia/Shanghai", "accept_rules": True}]), encoding="utf-8")
+
+    code = main(
+        [
+            "daily-scheduler",
+            "--once",
+            "--job-dir",
+            str(tmp_path / "jobs"),
+            "--schedules-file",
+            str(schedules_file),
+            "--summary-output-dir",
+            str(tmp_path / "summary"),
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["kind"] == "ptcli.cli.daily_scheduler"
+    assert payload["mode"] == "once"
+    assert payload["scheduler"]["kind"] == "ptcli.daily_scheduler.plan"
+    assert payload["scheduler"]["next_run"]["name"] == "u2-to-mteam"
+    assert payload["scheduler"]["next_run"]["job_tool"] == "daily_candidates_job"
+    assert payload["last_run"]["kind"] == "ptcli.cli.daily_schedule"
+    assert payload["last_run"]["schedule_digest"]["push_items"][0]["source_id"] == "60635"
+    summary_path = Path(payload["summary_file"])
+    assert summary_path == tmp_path / "summary" / "ptcli-daily-schedule-summary.json"
+    assert json.loads(summary_path.read_text(encoding="utf-8"))["notification_payload"]["top_item"]["source_id"] == "60635"
+
+
+def test_daily_scheduler_plan_calculates_next_run(tmp_path) -> None:
+    schedules_file = tmp_path / "schedules.json"
+    schedules_file.write_text(json.dumps([{"name": "u2-to-mteam", "source_tracker": "U2", "target": "MTEAM", "time": "09:30", "timezone": "Asia/Shanghai"}]), encoding="utf-8")
+    args = argparse.Namespace(schedules_file=str(schedules_file), schedules_json=None)
+
+    payload = ptcli_cli.daily_scheduler_plan(args, now=datetime.fromisoformat("2026-07-06T09:31:00+08:00"))
+
+    assert payload["status"] == "ok"
+    assert payload["enabled_count"] == 1
+    assert payload["next_run"]["name"] == "u2-to-mteam"
+    assert payload["next_run"]["run_at"] == "2026-07-07T09:30:00+08:00"
+    assert payload["next_run"]["seconds_until_run"] == 86340
+
+
 def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> None:
     config = {
         "PTCLI": {
@@ -14855,6 +14925,10 @@ services:
     profiles:
       - daily
     command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]
+  ptcli-daily-scheduler:
+    profiles:
+      - daily
+    command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]
 """,
         encoding="utf-8",
     )
@@ -14872,6 +14946,7 @@ services:
     assert payload["daily_candidates"]["configured"] is True
     assert payload["daily_candidates"]["count"] == 1
     assert payload["docker_compose"]["daily_schedule_service_ready"] is True
+    assert payload["docker_compose"]["daily_scheduler_service_ready"] is True
     assert payload["queue"]["max_concurrent_jobs"] == 2
     assert payload["agent_summary"]["ready_for_ai"] is True
     assert payload["agent_summary"]["ready_for_daily_candidates"] is True
@@ -14886,6 +14961,7 @@ services:
     assert payload["agent_handoff"]["daily_candidates"]["ready"] is True
     assert payload["agent_handoff"]["daily_candidates"]["tool"] == "daily_candidates_schedule_job"
     assert payload["agent_handoff"]["daily_candidates"]["configured_schedule_count"] == 1
+    assert payload["agent_handoff"]["docker_compose"]["daily_scheduler_ready"] is True
     assert payload["agent_handoff"]["safety"]["live_upload_requires"] == ["accept_rules=true", "confirm_upload=true", "non-duplicate target", "ready site policy gate"]
     assert payload["qbit"]["configured"] is True
     assert payload["qbit"]["qbit_url"] == "http://host.docker.internal"

@@ -4976,7 +4976,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     checks.append(
         {
             "name": "docker.compose_daily_schedule",
-            "ok": bool(docker_compose.get("daily_schedule_service_ready")),
+            "ok": bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready")),
             "blocking": False,
             "message": _deployment_docker_compose_message(docker_compose),
             "path": str(compose_path),
@@ -5124,25 +5124,41 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
                 "error": str(exc),
                 "ptcli_api_service": False,
                 "daily_schedule_service": False,
+                "daily_scheduler_service": False,
                 "daily_profile": False,
                 "daily_schedule_command": False,
+                "daily_scheduler_command": False,
                 "daily_schedule_service_ready": False,
+                "daily_scheduler_service_ready": False,
             }
+    scheduler_command = 'command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]'
+    schedule_command = 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]'
     return {
         "present": exists,
         "readable": exists,
         "path": str(compose_path),
         "ptcli_api_service": "ptcli-api:" in text,
         "daily_schedule_service": "ptcli-daily-schedule:" in text,
+        "daily_scheduler_service": "ptcli-daily-scheduler:" in text,
         "daily_profile": "- daily" in text,
-        "daily_schedule_command": 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]' in text,
+        "daily_schedule_command": schedule_command in text,
+        "daily_scheduler_command": scheduler_command in text,
         "daily_schedule_service_ready": all(
             (
                 exists,
                 "ptcli-api:" in text,
                 "ptcli-daily-schedule:" in text,
                 "- daily" in text,
-                'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--json"]' in text,
+                schedule_command in text,
+            )
+        ),
+        "daily_scheduler_service_ready": all(
+            (
+                exists,
+                "ptcli-api:" in text,
+                "ptcli-daily-scheduler:" in text,
+                "- daily" in text,
+                scheduler_command in text,
             )
         ),
     }
@@ -5150,8 +5166,10 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
 
 def _deployment_docker_compose_message(summary: dict[str, Any]) -> str:
     path = summary.get("path")
+    if summary.get("daily_scheduler_service_ready"):
+        return f"Docker Compose daily scheduler service is configured: {path}"
     if summary.get("daily_schedule_service_ready"):
-        return f"Docker Compose daily schedule service is configured: {path}"
+        return f"Docker Compose one-shot daily schedule service is configured: {path}"
     if not summary.get("present"):
         return f"docker-compose.yml is not present at {path}; skip this warning if not using Docker Compose."
     if not summary.get("readable"):
@@ -5160,13 +5178,13 @@ def _deployment_docker_compose_message(summary: dict[str, Any]) -> str:
         name
         for name, ready in (
             ("ptcli-api service", summary.get("ptcli_api_service")),
-            ("ptcli-daily-schedule service", summary.get("daily_schedule_service")),
+            ("ptcli-daily-scheduler service", summary.get("daily_scheduler_service")),
             ("daily profile", summary.get("daily_profile")),
-            ("daily-schedule summary command", summary.get("daily_schedule_command")),
+            ("daily-scheduler command", summary.get("daily_scheduler_command")),
         )
         if not ready
     ]
-    return f"Docker Compose daily schedule service is incomplete at {path}: {', '.join(missing)}."
+    return f"Docker Compose daily scheduler service is incomplete at {path}: {', '.join(missing)}."
 
 
 def _deployment_mount_summary(checks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -5214,7 +5232,7 @@ def _deployment_agent_summary(
         "api_token_configured": bool(api_token_check.get("configured")),
         "qbit_configured": bool(qbit.get("configured")),
         "daily_candidates_configured": bool(daily_candidate_plan.get("configured")),
-        "docker_compose_daily_ready": bool(docker_compose.get("daily_schedule_service_ready")),
+        "docker_compose_daily_ready": bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready")),
         "missing_mounts": mounts.get("missing", []),
         "blocking_checks": blocking_failures,
         "warning_checks": warning_failures,
@@ -5269,7 +5287,8 @@ def _deployment_agent_handoff(
             "connectivity_checked": bool(qbit.get("connectivity_checked")),
         },
         "docker_compose": {
-            "daily_schedule_ready": bool(docker_compose.get("daily_schedule_service_ready")),
+            "daily_schedule_ready": bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready")),
+            "daily_scheduler_ready": bool(docker_compose.get("daily_scheduler_service_ready")),
             "compose_file": docker_compose.get("path"),
         },
         "safety": {
