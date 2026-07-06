@@ -8,7 +8,7 @@
     "Hermes",
     "OpenAPI-compatible agents"
   ],
-  "base_url": "http://ptcli.local:8080",
+  "base_url": "http://127.0.0.1:8080",
   "auth": {
     "type": "bearer",
     "header": "Authorization",
@@ -17,13 +17,13 @@
     "env": "PTCLI_API_TOKEN"
   },
   "discovery": {
-    "health": "http://ptcli.local:8080/health",
-    "deployment_check": "http://ptcli.local:8080/v1/deployment/check",
-    "source_url_preflight": "http://ptcli.local:8080/v1/retorrent/source-url/preflight",
-    "readiness_bundle": "http://ptcli.local:8080/v1/readiness/bundle",
-    "openapi": "http://ptcli.local:8080/openapi.json",
-    "tools": "http://ptcli.local:8080/v1/tools",
-    "manifest": "http://ptcli.local:8080/.well-known/ptcli-agent.json"
+    "health": "http://127.0.0.1:8080/health",
+    "deployment_check": "http://127.0.0.1:8080/v1/deployment/check",
+    "source_url_preflight": "http://127.0.0.1:8080/v1/retorrent/source-url/preflight",
+    "readiness_bundle": "http://127.0.0.1:8080/v1/readiness/bundle",
+    "openapi": "http://127.0.0.1:8080/openapi.json",
+    "tools": "http://127.0.0.1:8080/v1/tools",
+    "manifest": "http://127.0.0.1:8080/.well-known/ptcli-agent.json"
   },
   "safety": {
     "live_upload_requires": [
@@ -1523,6 +1523,7 @@
           "resume_summary",
           "material_resolution",
           "candidate_submission",
+          "check_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -1746,6 +1747,17 @@
           "blockers",
           "next_actions"
         ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
+        ],
         "submit_if_clear_handoff_fields": [
           "ready",
           "duplicate_clear",
@@ -1802,6 +1814,668 @@
         "mutates_state": true,
         "live_upload": false,
         "requires_confirmation": []
+      }
+    },
+    {
+      "name": "submit_checked_retorrent_job",
+      "method": "POST",
+      "path": "/v1/jobs/retorrent/check/{job_id}/submit",
+      "description": "Create a live retorrent job from a completed duplicate-check job only when submit_if_clear_handoff.ready=true. Source and target identity are inherited from the check job; request body accepts execution overrides such as confirmations, paths, qBittorrent rate limits, and material files.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Completed retorrent_check_job id whose submit_if_clear_handoff.ready must be true."
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Optional execution overrides. Source/target identity is inherited from the completed duplicate-check job.",
+            "properties": {
+              "accept_rules": {
+                "type": "boolean",
+                "description": "Required for source download and live upload automation."
+              },
+              "confirm_upload": {
+                "type": "boolean",
+                "description": "Required before live target upload."
+              },
+              "path": {
+                "type": "string",
+                "description": "Existing completed content path on the seedbox."
+              },
+              "save_path": {
+                "type": "string",
+                "description": "qBittorrent save path for source torrent download/injection."
+              },
+              "uploaded_save_path": {
+                "type": "string",
+                "description": "qBittorrent save path for uploaded target torrent injection."
+              },
+              "qbit_category": {
+                "type": "string"
+              },
+              "qbit_tags": {
+                "type": "string"
+              },
+              "uploaded_qbit_category": {
+                "type": "string"
+              },
+              "uploaded_qbit_tags": {
+                "type": "string"
+              },
+              "qbit_upload_limit": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+              },
+              "qbit_download_limit": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+              },
+              "uploaded_qbit_upload_limit": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+              },
+              "uploaded_qbit_download_limit": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+              },
+              "metadata_file": {
+                "type": "string"
+              },
+              "ptgen_description_file": {
+                "type": "string"
+              },
+              "mediainfo_file": {
+                "type": "string",
+                "description": "Existing MediaInfo report file to include in the target upload package."
+              },
+              "bdinfo_file": {
+                "type": "string",
+                "description": "Existing BDInfo report file to include in the target upload package."
+              },
+              "image_host_file": {
+                "type": "string",
+                "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+              },
+              "image_host": {
+                "type": "string",
+                "description": "Optional image host selector used when upload_screenshots=true."
+              },
+              "screenshot_file": {
+                "type": "string",
+                "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+              },
+              "screenshot_files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Existing local screenshot files to include in the target upload package."
+              },
+              "screenshot_count": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "Screenshot count to generate when generate_screenshots=true."
+              },
+              "enrich_metadata": {
+                "type": "boolean",
+                "description": "Enrich source metadata before preparing the target package."
+              },
+              "fetch_ptgen": {
+                "type": "boolean",
+                "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+              },
+              "generate_mediainfo": {
+                "type": "boolean",
+                "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+              },
+              "generate_bdinfo": {
+                "type": "boolean",
+                "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+              },
+              "generate_screenshots": {
+                "type": "boolean",
+                "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+              },
+              "upload_screenshots": {
+                "type": "boolean",
+                "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
+              },
+              "imdb_id": {
+                "type": "string"
+              },
+              "tmdb_id": {
+                "type": "string"
+              },
+              "tmdb_type": {
+                "type": "string",
+                "enum": [
+                  "movie",
+                  "tv"
+                ]
+              },
+              "douban_id": {
+                "type": "string"
+              },
+              "douban_url": {
+                "type": "string"
+              },
+              "execute_if_no_duplicate": {
+                "type": "boolean",
+                "default": true,
+                "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work."
+              }
+            }
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Required before live target upload."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          },
+          "execute_if_no_duplicate": {
+            "type": "boolean",
+            "default": true,
+            "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "kind",
+          "request",
+          "command_argv",
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "summary_file",
+          "resume_state",
+          "agent_summary",
+          "agent_decision",
+          "candidate_digest",
+          "submit_if_clear_handoff",
+          "policy_coverage",
+          "policy_handoff",
+          "policy_qbit_defaults",
+          "qbit_plan",
+          "qbit_limit_audit",
+          "qbit_handoff",
+          "materials_handoff",
+          "target_upload_handoff",
+          "closure_handoff",
+          "closure_summary",
+          "manual_retorrent_handoff",
+          "candidate_submission_handoff",
+          "candidate_submission_summary",
+          "resume_plan",
+          "resume_requirements",
+          "resume_lineage",
+          "resume_context",
+          "resume_audit",
+          "resume_summary",
+          "material_resolution",
+          "candidate_submission",
+          "check_submission",
+          "source_reference",
+          "workflow_context"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete",
+          "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "resume_requirements",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_plan",
+          "material_options",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
+        ],
+        "material_option_fields": [
+          "metadata_file",
+          "ptgen_description_file",
+          "mediainfo_file",
+          "bdinfo_file",
+          "image_host_file",
+          "screenshot_files",
+          "enrich_metadata",
+          "fetch_ptgen",
+          "generate_mediainfo",
+          "generate_bdinfo",
+          "generate_screenshots",
+          "upload_screenshots"
+        ],
+        "resume_requirement_fields": [
+          "can_call_resume",
+          "resume_recommended",
+          "subcommand",
+          "missing_confirmations",
+          "required_overrides",
+          "suggested_overrides",
+          "request_template",
+          "dry_run_request",
+          "execute_request",
+          "recommended_inputs",
+          "allowed_overrides",
+          "current_flags"
+        ],
+        "resume_preview_fields": [
+          "dry_run",
+          "mutates_state",
+          "live_upload",
+          "command_argv",
+          "original_next_command_argv",
+          "applied_overrides",
+          "ignored_overrides",
+          "material_resolution",
+          "resume_context",
+          "resume_lineage",
+          "resume_plan",
+          "resume_requirements",
+          "agent_decision"
+        ],
+        "resume_audit_fields": [
+          "is_resume_job",
+          "parent_job_id",
+          "parent_status",
+          "parent_kind",
+          "child_status",
+          "resume_available",
+          "resume_allowed",
+          "resume_recommended",
+          "next_subcommand",
+          "next_command_argv",
+          "applied_override_keys",
+          "ignored_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "dry_run_request",
+          "execute_request",
+          "next_step",
+          "next_actions"
+        ],
+        "resume_summary_fields": [
+          "available",
+          "allowed",
+          "recommended",
+          "status",
+          "subcommand",
+          "missing_confirmations",
+          "recommended_input_keys",
+          "unresolved_recommended_inputs",
+          "dry_run_request",
+          "execute_request",
+          "next_step",
+          "recommended_tool",
+          "blockers",
+          "next_actions"
+        ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "blockers",
+          "next_actions"
+        ],
+        "policy_handoff_fields": [
+          "ready",
+          "accepted_rules",
+          "site_policy_ready",
+          "source",
+          "targets",
+          "missing_policy_fields",
+          "disabled_automation",
+          "qbit_defaults",
+          "qbit_plan",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "blockers",
+          "next_actions"
+        ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
+          "next_actions"
+        ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
+          "next_actions"
+        ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
+        ],
+        "submit_if_clear_handoff_fields": [
+          "ready",
+          "duplicate_clear",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "requires_before_call",
+          "next_step",
+          "blockers",
+          "next_actions"
+        ],
+        "closure_handoff_fields": [
+          "action",
+          "complete",
+          "closure_checklist",
+          "source",
+          "target",
+          "evidence",
+          "duplicate_check",
+          "target_upload_handoff",
+          "qbit_handoff",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "blockers",
+          "next_actions"
+        ],
+        "closure_summary_fields": [
+          "complete",
+          "ready_for_report",
+          "action",
+          "gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "materials",
+          "policy",
+          "qbit",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "blockers",
+          "next_actions"
+        ]
+      },
+      "workflow_hints": {
+        "requires": "submit_if_clear_handoff.ready=true",
+        "poll_with": "get_job_status",
+        "summary_with": "get_job_summary",
+        "resume_with": "resume_job"
+      },
+      "safety": {
+        "mutates_state": true,
+        "live_upload": true,
+        "requires_confirmation": [
+          "accept_rules=true",
+          "confirm_upload=true"
+        ],
+        "must_stop_when": [
+          "duplicate_check.exists=true",
+          "rule gate not ready",
+          "site policy not ready",
+          "uploaded target torrent cannot be injected for seeding"
+        ]
       }
     },
     {
@@ -2020,6 +2694,7 @@
           "resume_summary",
           "material_resolution",
           "candidate_submission",
+          "check_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -2242,6 +2917,17 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
         ],
         "submit_if_clear_handoff_fields": [
           "ready",
@@ -2527,6 +3213,7 @@
           "resume_summary",
           "material_resolution",
           "candidate_submission",
+          "check_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -2749,6 +3436,17 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
         ],
         "submit_if_clear_handoff_fields": [
           "ready",
@@ -3038,6 +3736,7 @@
           "resume_summary",
           "material_resolution",
           "candidate_submission",
+          "check_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -3260,6 +3959,17 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
         ],
         "submit_if_clear_handoff_fields": [
           "ready",
@@ -3565,6 +4275,7 @@
           "resume_summary",
           "material_resolution",
           "candidate_submission",
+          "check_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -3787,6 +4498,17 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
         ],
         "submit_if_clear_handoff_fields": [
           "ready",
@@ -4301,6 +5023,7 @@
           "resume_summary",
           "material_resolution",
           "candidate_submission",
+          "check_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -4523,6 +5246,17 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
         ],
         "submit_if_clear_handoff_fields": [
           "ready",
@@ -4890,6 +5624,7 @@
           "runtime",
           "summary_file",
           "candidate_submission",
+          "check_submission",
           "candidate_submission_handoff",
           "candidate_submission_summary",
           "source_reference",
@@ -4989,6 +5724,7 @@
           "resume_summary",
           "material_resolution",
           "candidate_submission",
+          "check_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -5212,6 +5948,17 @@
           "blockers",
           "next_actions"
         ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
+        ],
         "submit_if_clear_handoff_fields": [
           "ready",
           "duplicate_clear",
@@ -5315,6 +6062,7 @@
           "resume_summary",
           "material_resolution",
           "candidate_submission",
+          "check_submission",
           "source_reference",
           "workflow_context",
           "result",
@@ -5580,6 +6328,7 @@
           "resume_summary",
           "material_resolution",
           "candidate_submission",
+          "check_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -5802,6 +6551,17 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
         ],
         "submit_if_clear_handoff_fields": [
           "ready",
@@ -5924,6 +6684,7 @@
           "resume_summary",
           "material_resolution",
           "candidate_submission",
+          "check_submission",
           "source_reference",
           "workflow_context"
         ],
@@ -6146,6 +6907,17 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
         ],
         "submit_if_clear_handoff_fields": [
           "ready",
@@ -6839,15 +7611,15 @@
       }
     }
   ],
-  "tool_count": 22,
+  "tool_count": 23,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
-    "entrypoint": "http://ptcli.local:8080/openapi.json",
-    "manifest_url": "http://ptcli.local:8080/v1/openclaw/skill.json"
+    "entrypoint": "http://127.0.0.1:8080/openapi.json",
+    "manifest_url": "http://127.0.0.1:8080/v1/openclaw/skill.json"
   },
   "hermes": {
     "skill_id": "ptcli-retorrent",
-    "entrypoint": "http://ptcli.local:8080/openapi.json",
-    "manifest_url": "http://ptcli.local:8080/v1/hermes/skill.json"
+    "entrypoint": "http://127.0.0.1:8080/openapi.json",
+    "manifest_url": "http://127.0.0.1:8080/v1/hermes/skill.json"
   }
 }
