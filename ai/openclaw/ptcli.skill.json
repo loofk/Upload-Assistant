@@ -85,13 +85,14 @@
           "tool": "readiness_bundle",
           "read": [
             "live_readiness.ready_for_manual_retorrent",
+            "live_readiness.policy_execution_summary",
             "live_readiness.blockers",
             "live_readiness.manual_job_template.request"
           ],
           "continue_when": "live_readiness.ready_for_manual_retorrent=true",
           "stop_when": [
             "deployment.ready=false",
-            "site policy not ready",
+            "policy_execution_summary.ready=false",
             "accept_rules or confirm_upload missing"
           ]
         },
@@ -100,11 +101,15 @@
           "tool": "site_policies",
           "read": [
             "ready",
+            "policy_execution_summary.ready",
+            "policy_execution_summary.next_step",
+            "policy_execution_summary.qbit_limit_plan",
+            "policy_execution_summary.seeding_plan",
             "policy_gap_summary",
             "execution_readiness",
             "agent_summary.policy_recommendations"
           ],
-          "continue_when": "ready=true and execution_readiness.ready=true",
+          "continue_when": "ready=true and policy_execution_summary.ready=true",
           "stop_when": [
             "missing rule_review_fingerprint",
             "missing qBittorrent rate limits",
@@ -6158,6 +6163,7 @@
           "source",
           "target_trackers",
           "site_policy_ready",
+          "policy_execution_summary",
           "live_verification_ready",
           "credential_requirements",
           "doctor_template",
@@ -6172,6 +6178,7 @@
           "manual_job_ready",
           "doctor_template",
           "manual_job_template",
+          "policy_execution_summary",
           "next_step",
           "recommended_tool",
           "recommended_endpoint",

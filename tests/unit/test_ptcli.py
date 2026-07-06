@@ -14944,8 +14944,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_test_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
+    assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "credential_requirements" in tool_by_name["readiness_bundle"]["response_contract"]["live_verification_fields"]
     assert "after_doctor" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+    assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "recommended_tool" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "runbook_ref" in tool_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
     assert "confirm_upload=true" in tool_by_name["retorrent_job"]["safety"]["requires_confirmation"]
@@ -15103,6 +15105,9 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["request_template"]["target"] == "MTEAM"
     assert ready["request_template"]["save_path"] == "/downloads"
     assert [step["tool"] for step in ready["steps"]] == ["readiness_bundle", "site_policies", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
+    assert "live_readiness.policy_execution_summary" in ready["steps"][0]["read"]
+    assert "policy_execution_summary.ready" in ready["steps"][1]["read"]
+    assert ready["steps"][1]["continue_when"] == "ready=true and policy_execution_summary.ready=true"
     assert ready["steps"][2]["request"] == ready["request_template"]
     assert ready["steps"][4]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
     assert "Submit request_template to source_url_retorrent_job" in ready["next_actions"][0]
@@ -15152,6 +15157,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     assert [step["tool"] for step in source_url_workflow["runbook"]] == ["readiness_bundle", "site_policies", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
     assert source_url_workflow["runbook"][0]["continue_when"] == "live_readiness.ready_for_manual_retorrent=true"
+    assert "live_readiness.policy_execution_summary" in source_url_workflow["runbook"][0]["read"]
+    assert "policy_execution_summary.ready=false" in source_url_workflow["runbook"][0]["stop_when"]
+    assert source_url_workflow["runbook"][1]["continue_when"] == "ready=true and policy_execution_summary.ready=true"
     assert "closure_handoff" in source_url_workflow["runbook"][2]["read"]
     assert "closure_handoff.action=stop_duplicate" in source_url_workflow["runbook"][2]["stop_when"]
     assert source_url_workflow["runbook"][4]["step"] == "closure_decision"
@@ -15210,8 +15218,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_verification" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "live_test_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
         assert "credential_requirements" in tools_by_name["readiness_bundle"]["response_contract"]["live_verification_fields"]
         assert "after_doctor" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+        assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "recommended_tool" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "runbook_ref" in tools_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
         source_url_workflow = next(workflow for workflow in payload["default_workflows"] if workflow["name"] == "source_url_retorrent")
@@ -15636,6 +15646,7 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert payload["kind"] == "ptcli.readiness_bundle"
     assert payload["deployment"]["ready"] is True
     assert payload["site_policies"]["ready"] is True
+    assert payload["site_policies"]["policy_execution_summary"]["ready"] is True
     assert payload["daily_schedule"]["count"] == 1
     assert payload["live_verification"]["ready"] is True
     assert payload["live_verification"]["materials"]["image_host_ready"] is True
@@ -15643,6 +15654,8 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert payload["live_readiness"]["ready_for_manual_retorrent"] is True
     assert payload["live_readiness"]["live_verification_ready"] is True
     assert payload["live_readiness"]["ready_for_daily_candidates"] is True
+    assert payload["live_readiness"]["policy_execution_summary"] == payload["site_policies"]["policy_execution_summary"]
+    assert payload["live_readiness"]["policy_execution_summary"]["recommended_tool"] == "readiness_bundle"
     assert payload["live_readiness"]["source"]["tracker"] == "U2"
     assert payload["live_readiness"]["manual_job_template"]["endpoint"] == "/v1/jobs/retorrent/from-url"
     assert payload["live_readiness"]["manual_job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
@@ -15650,6 +15663,7 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert "--accept-rules" in payload["live_readiness"]["doctor_template"]["argv"]
     assert "--confirm-upload" in payload["live_readiness"]["doctor_template"]["argv"]
     assert payload["live_test_handoff"]["ready"] is True
+    assert payload["live_test_handoff"]["policy_execution_summary"] == payload["site_policies"]["policy_execution_summary"]
     assert payload["live_test_handoff"]["next_step"]["tool"] == "ptcli_doctor"
     assert payload["live_test_handoff"]["next_step"]["method"] == "CLI"
     assert payload["live_test_handoff"]["next_step"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
@@ -15762,6 +15776,8 @@ def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path
 
     assert payload["live_readiness"]["accept_rules"] is False
     assert payload["live_readiness"]["confirm_upload"] is False
+    assert payload["live_readiness"]["policy_execution_summary"]["ready"] is False
+    assert payload["live_test_handoff"]["policy_execution_summary"] == payload["live_readiness"]["policy_execution_summary"]
     assert "accept_rules=true is required before live execution." in payload["blockers"]
     assert "confirm_upload=true is required before live upload." in payload["blockers"]
     assert "--accept-rules" not in payload["live_readiness"]["doctor_template"]["argv"]
@@ -15771,6 +15787,7 @@ def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path
     assert payload["agent_decision"]["next_tool"] == "readiness_bundle"
     assert payload["live_test_handoff"]["next_step"]["reason"] == "site_policy_not_ready"
     assert payload["live_test_handoff"]["next_step"]["tool"] == "edit_config"
+    assert payload["live_test_handoff"]["next_step"]["policy_execution_summary"]["recommended_tool"] == "edit_config"
 
 
 def test_readiness_bundle_blocks_live_when_credentials_and_image_host_are_missing(tmp_path, monkeypatch) -> None:
@@ -15808,6 +15825,9 @@ def test_readiness_bundle_blocks_live_when_credentials_and_image_host_are_missin
 
     assert payload["live_verification"]["ready"] is False
     assert payload["live_readiness"]["ready_for_manual_retorrent"] is False
+    assert payload["live_readiness"]["policy_execution_summary"]["ready"] is False
+    assert {"tracker": "U2", "field": "download_rate_limit"} in payload["live_readiness"]["policy_execution_summary"]["qbit_limit_plan"]["missing"]
+    assert {"tracker": "MTEAM", "field": "upload_rate_limit"} in payload["live_readiness"]["policy_execution_summary"]["qbit_limit_plan"]["missing"]
     check_names = {check["name"] for check in payload["live_verification"]["checks"] if check["ok"] is False}
     assert {"U2.passkey", "U2.cookie", "MTEAM.api_key", "materials.image_host"} <= check_names
     assert any("TRACKERS.MTEAM.api_key" in action for action in payload["next_actions"])
