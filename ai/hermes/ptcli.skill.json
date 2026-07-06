@@ -8,7 +8,7 @@
     "Hermes",
     "OpenAPI-compatible agents"
   ],
-  "base_url": "http://127.0.0.1:8080",
+  "base_url": "http://ptcli.local:8080",
   "auth": {
     "type": "bearer",
     "header": "Authorization",
@@ -17,12 +17,12 @@
     "env": "PTCLI_API_TOKEN"
   },
   "discovery": {
-    "health": "http://127.0.0.1:8080/health",
-    "deployment_check": "http://127.0.0.1:8080/v1/deployment/check",
-    "readiness_bundle": "http://127.0.0.1:8080/v1/readiness/bundle",
-    "openapi": "http://127.0.0.1:8080/openapi.json",
-    "tools": "http://127.0.0.1:8080/v1/tools",
-    "manifest": "http://127.0.0.1:8080/.well-known/ptcli-agent.json"
+    "health": "http://ptcli.local:8080/health",
+    "deployment_check": "http://ptcli.local:8080/v1/deployment/check",
+    "readiness_bundle": "http://ptcli.local:8080/v1/readiness/bundle",
+    "openapi": "http://ptcli.local:8080/openapi.json",
+    "tools": "http://ptcli.local:8080/v1/tools",
+    "manifest": "http://ptcli.local:8080/.well-known/ptcli-agent.json"
   },
   "safety": {
     "live_upload_requires": [
@@ -1164,6 +1164,7 @@
           "closure_summary",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
@@ -1360,6 +1361,22 @@
           "summary_endpoint",
           "parent_status_endpoint",
           "parent_summary_endpoint",
+          "next_actions"
+        ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -1614,6 +1631,7 @@
           "closure_summary",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
@@ -1810,6 +1828,22 @@
           "summary_endpoint",
           "parent_status_endpoint",
           "parent_summary_endpoint",
+          "next_actions"
+        ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -2074,6 +2108,7 @@
           "closure_summary",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
@@ -2270,6 +2305,22 @@
           "summary_endpoint",
           "parent_status_endpoint",
           "parent_summary_endpoint",
+          "next_actions"
+        ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -2538,6 +2589,7 @@
           "closure_summary",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
@@ -2734,6 +2786,22 @@
           "summary_endpoint",
           "parent_status_endpoint",
           "parent_summary_endpoint",
+          "next_actions"
+        ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -3018,6 +3086,7 @@
           "closure_summary",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
@@ -3214,6 +3283,22 @@
           "summary_endpoint",
           "parent_status_endpoint",
           "parent_summary_endpoint",
+          "next_actions"
+        ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -3707,6 +3792,7 @@
           "closure_summary",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
@@ -3903,6 +3989,22 @@
           "summary_endpoint",
           "parent_status_endpoint",
           "parent_summary_endpoint",
+          "next_actions"
+        ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -4260,6 +4362,7 @@
           "summary_file",
           "candidate_submission",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "source_reference",
           "duplicate_check",
           "policy_handoff",
@@ -4345,6 +4448,7 @@
           "closure_summary",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
@@ -4543,6 +4647,22 @@
           "parent_summary_endpoint",
           "next_actions"
         ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
+          "next_actions"
+        ],
         "closure_handoff_fields": [
           "action",
           "complete",
@@ -4623,6 +4743,7 @@
           "closure_summary",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "runtime",
           "resume_plan",
           "resume_requirements",
@@ -4886,6 +5007,7 @@
           "closure_summary",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
@@ -5082,6 +5204,22 @@
           "summary_endpoint",
           "parent_status_endpoint",
           "parent_summary_endpoint",
+          "next_actions"
+        ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -5183,6 +5321,7 @@
           "closure_summary",
           "manual_retorrent_handoff",
           "candidate_submission_handoff",
+          "candidate_submission_summary",
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
@@ -5379,6 +5518,22 @@
           "summary_endpoint",
           "parent_status_endpoint",
           "parent_summary_endpoint",
+          "next_actions"
+        ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
           "next_actions"
         ],
         "closure_handoff_fields": [
@@ -6045,12 +6200,12 @@
   "tool_count": 21,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
-    "entrypoint": "http://127.0.0.1:8080/openapi.json",
-    "manifest_url": "http://127.0.0.1:8080/v1/openclaw/skill.json"
+    "entrypoint": "http://ptcli.local:8080/openapi.json",
+    "manifest_url": "http://ptcli.local:8080/v1/openclaw/skill.json"
   },
   "hermes": {
     "skill_id": "ptcli-retorrent",
-    "entrypoint": "http://127.0.0.1:8080/openapi.json",
-    "manifest_url": "http://127.0.0.1:8080/v1/hermes/skill.json"
+    "entrypoint": "http://ptcli.local:8080/openapi.json",
+    "manifest_url": "http://ptcli.local:8080/v1/hermes/skill.json"
   }
 }
