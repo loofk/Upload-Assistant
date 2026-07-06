@@ -512,6 +512,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
                 "/v1/retorrent/check": lambda payload: asyncio.run(retorrent_check(payload)),
                 "/v1/retorrent": lambda payload: asyncio.run(retorrent(payload)),
+                "/v1/agent/run-preview": agent_run_preview_payload,
                 "/v1/site-policies": site_policies_payload,
                 "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
@@ -5234,6 +5235,139 @@ def tools_payload() -> dict[str, Any]:
     }
 
 
+def agent_run_preview_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    request = request if isinstance(request, dict) else {}
+    source_url = str(request.get("source_url") or request.get("source") or "").strip()
+    target = request.get("target") or request.get("target_trackers") or "MTEAM"
+    target_trackers = _preview_target_trackers(target)
+    workflow_name = str(request.get("workflow") or "source_url_retorrent")
+    workflows = {workflow["name"]: workflow for workflow in _agent_default_workflows()}
+    workflow = workflows.get(workflow_name) or workflows["source_url_retorrent"]
+    accept_rules = _truthy(request.get("accept_rules"))
+    confirm_upload = _truthy(request.get("confirm_upload"))
+    request_template = _agent_preview_request_template(source_url, target_trackers, accept_rules, confirm_upload, request)
+    blockers = _agent_preview_blockers(source_url, target_trackers, accept_rules, confirm_upload)
+    steps = _agent_preview_steps(workflow, request_template)
+    closure_contract = _agent_closure_contract()
+    return {
+        "status": "ok" if not blockers else "blocked",
+        "ok": not blockers,
+        "kind": "ptcli.agent_run_preview",
+        "dry_run": True,
+        "mutates_state": False,
+        "live_upload": False,
+        "workflow": workflow.get("name"),
+        "tool": workflow.get("tool"),
+        "request": {
+            "source_url": source_url or None,
+            "target": target_trackers,
+            "accept_rules": accept_rules,
+            "confirm_upload": confirm_upload,
+            "save_path": request.get("save_path"),
+            "uploaded_qbit_category": request.get("uploaded_qbit_category"),
+            "uploaded_qbit_tags": request.get("uploaded_qbit_tags"),
+        },
+        "request_template": request_template,
+        "closure_contract": closure_contract,
+        "closure_handoff_examples": _agent_preview_closure_examples(),
+        "steps": steps,
+        "next_step": steps[0] if steps else None,
+        "recommended_tool": steps[0].get("tool") if steps else None,
+        "recommended_endpoint": steps[0].get("endpoint") if steps else None,
+        "recommended_request": steps[0].get("request") if steps else None,
+        "blockers": blockers,
+        "next_actions": _agent_preview_next_actions(blockers, closure_contract),
+    }
+
+
+def _preview_target_trackers(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip().upper() for item in value if str(item).strip()]
+    return [item.strip().upper() for item in str(value or "MTEAM").split(",") if item.strip()]
+
+
+def _agent_preview_request_template(source_url: str, target_trackers: list[str], accept_rules: bool, confirm_upload: bool, request: dict[str, Any]) -> dict[str, Any]:
+    template: dict[str, Any] = {
+        "source_url": source_url or "<source tracker details URL>",
+        "target": target_trackers[0] if len(target_trackers) == 1 else target_trackers,
+        "accept_rules": accept_rules,
+        "confirm_upload": confirm_upload,
+    }
+    for key in ("save_path", "path", "uploaded_qbit_category", "uploaded_qbit_tags", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"):
+        if request.get(key) is not None:
+            template[key] = request[key]
+    return template
+
+
+def _agent_preview_blockers(source_url: str, target_trackers: list[str], accept_rules: bool, confirm_upload: bool) -> list[str]:
+    blockers: list[str] = []
+    if not source_url:
+        blockers.append("source_url is required before submitting source_url_retorrent_job.")
+    if not target_trackers:
+        blockers.append("target is required before submitting source_url_retorrent_job.")
+    if not accept_rules:
+        blockers.append("accept_rules=true is required before live retorrent automation.")
+    if not confirm_upload:
+        blockers.append("confirm_upload=true is required before live target upload.")
+    return blockers
+
+
+def _agent_preview_steps(workflow: dict[str, Any], request_template: dict[str, Any]) -> list[dict[str, Any]]:
+    endpoints = {tool["name"]: tool.get("path") for tool in _agent_tool_schemas()}
+    methods = {tool["name"]: tool.get("method") for tool in _agent_tool_schemas()}
+    steps: list[dict[str, Any]] = []
+    for index, step in enumerate(workflow.get("runbook") if isinstance(workflow.get("runbook"), list) else [], start=1):
+        if not isinstance(step, dict):
+            continue
+        tool = step.get("tool")
+        preview_step = {
+            "index": index,
+            "step": step.get("step"),
+            "tool": tool,
+            "endpoint": endpoints.get(tool),
+            "method": methods.get(tool),
+            "request": _agent_preview_step_request(str(tool or ""), request_template),
+            "read": step.get("read"),
+            "continue_when": step.get("continue_when"),
+            "repeat_when": step.get("repeat_when"),
+            "stop_when": step.get("stop_when"),
+            "complete_when": step.get("complete_when"),
+            "resume_with": step.get("resume_with"),
+        }
+        steps.append({key: value for key, value in preview_step.items() if value is not None})
+    return steps
+
+
+def _agent_preview_step_request(tool: str, request_template: dict[str, Any]) -> dict[str, Any] | None:
+    if tool == "readiness_bundle":
+        return request_template
+    if tool == "site_policies":
+        return {"source_url": request_template.get("source_url"), "target": request_template.get("target"), "accept_rules": request_template.get("accept_rules")}
+    if tool == "source_url_retorrent_job":
+        return request_template
+    if tool == "get_job_status":
+        return {"job_id": "<job_id from source_url_retorrent_job>"}
+    if tool == "get_job_summary":
+        return {"job_id": "<job_id from source_url_retorrent_job>"}
+    if tool == "resume_job":
+        return {"job_id": "<job_id from closure_handoff.next_step>", "overrides": "<allowlisted overrides only>"}
+    return None
+
+
+def _agent_preview_closure_examples() -> dict[str, Any]:
+    return {
+        "complete": {"closure_handoff": {"complete": True, "action": "done", "recommended_tool": "get_job_summary", "next_step": {"tool": "get_job_summary", "method": "GET"}}},
+        "resume": {"closure_handoff": {"complete": False, "action": "prepare_materials", "recommended_tool": "resume_job", "next_step": {"tool": "resume_job", "method": "POST", "request": {}}}},
+        "stop": {"closure_handoff": {"complete": False, "action": "stop_duplicate", "recommended_tool": None, "next_step": {"tool": None, "method": None}}},
+    }
+
+
+def _agent_preview_next_actions(blockers: list[str], closure_contract: dict[str, Any]) -> list[str]:
+    if blockers:
+        return ["Resolve preview blockers before submitting source_url_retorrent_job. This preview does not contact trackers or qBittorrent."]
+    return [f"Submit request_template to source_url_retorrent_job, poll get_job_status, then follow {closure_contract['next_step_source']} until {closure_contract['complete_when']}."]
+
+
 def _agent_tool_schemas() -> list[dict[str, Any]]:
     retorrent_request_schema = _retorrent_tool_request_schema()
     manual_retorrent_request_schema = _manual_retorrent_tool_request_schema()
@@ -5243,11 +5377,21 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
+    agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
     job_id_schema = _job_id_tool_request_schema()
     job_resume_schema = _job_resume_tool_request_schema()
     job_cancel_schema = _job_cancel_tool_request_schema()
     job_list_schema = _job_list_tool_request_schema()
     return [
+        {
+            "name": "agent_run_preview",
+            "method": "POST",
+            "path": "/v1/agent/run-preview",
+            "description": "Return a no-network, no-mutation walkthrough of the OpenClaw/Hermes source-url retorrent workflow, including request templates and closure_handoff handling.",
+            "input_schema": agent_run_preview_request_schema,
+            "response_contract": _agent_run_preview_response_contract(),
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
         {
             "name": "retorrent_check",
             "method": "POST",
@@ -5547,6 +5691,15 @@ def _source_url_retorrent_tool_request_schema() -> dict[str, Any]:
     return schema
 
 
+def _agent_run_preview_tool_request_schema() -> dict[str, Any]:
+    schema = json.loads(json.dumps(_source_url_retorrent_tool_request_schema()))
+    schema["required"] = []
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        properties["workflow"] = {"type": "string", "default": "source_url_retorrent", "enum": ["source_url_retorrent"], "description": "Agent workflow to preview without running live work."}
+    return schema
+
+
 def _daily_candidate_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -5690,6 +5843,15 @@ def _sync_response_contract() -> dict[str, Any]:
         "required_fields": ["status", "ok", "request", "duplicate_check", "blockers", "next_actions", "command_argv", "result"],
         "status_values": ["ok", "blocked", "error", "complete"],
         "blocked_fields": ["blockers", "next_actions"],
+    }
+
+
+def _agent_run_preview_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "kind", "dry_run", "mutates_state", "live_upload", "workflow", "tool", "request", "request_template", "closure_contract", "closure_handoff_examples", "steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "step_fields": ["index", "step", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when", "complete_when", "resume_with"],
+        "closure_examples": ["complete", "resume", "stop"],
+        "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_create_jobs", "does_not_upload"],
     }
 
 
@@ -6190,6 +6352,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
         },
     }
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
+    agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
@@ -6274,6 +6437,30 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "tools": {"type": "array", "items": {"type": "object"}},
         },
     }
+    agent_run_preview_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "kind": {"type": "string"},
+            "dry_run": {"type": "boolean"},
+            "mutates_state": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "workflow": {"type": "string"},
+            "tool": {"type": "string"},
+            "request": {"type": "object"},
+            "request_template": {"type": "object"},
+            "closure_contract": {"type": "object"},
+            "closure_handoff_examples": {"type": "object"},
+            "steps": {"type": "array", "items": {"type": "object"}},
+            "next_step": {"type": ["object", "null"]},
+            "recommended_tool": {"type": ["string", "null"]},
+            "recommended_endpoint": {"type": ["string", "null"]},
+            "recommended_request": {"type": ["object", "null"]},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
     deployment_response_schema = {
         "type": "object",
         "properties": {
@@ -6355,6 +6542,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                 "get": {
                     "operationId": "getPtcliHermesSkill",
                     "responses": {"200": {"description": "Hermes-compatible ptcli skill manifest.", "content": {"application/json": {"schema": manifest_response_schema}}}},
+                }
+            },
+            "/v1/agent/run-preview": {
+                "post": {
+                    "operationId": "previewPtcliAgentRun",
+                    "security": token_security,
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": agent_run_preview_request_schema}}},
+                    "responses": {"200": {"description": "No-network AI workflow preview for source-url retorrent automation.", "content": {"application/json": {"schema": agent_run_preview_response_schema}}}},
                 }
             },
             "/v1/deployment/check": {

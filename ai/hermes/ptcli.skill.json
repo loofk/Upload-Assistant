@@ -304,6 +304,188 @@
   ],
   "tools": [
     {
+      "name": "agent_run_preview",
+      "method": "POST",
+      "path": "/v1/agent/run-preview",
+      "description": "Return a no-network, no-mutation walkthrough of the OpenClaw/Hermes source-url retorrent workflow, including request templates and closure_handoff handling.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Alias for source_url; source_url is preferred for this tool."
+          },
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Target tracker code(s), currently live upload closure is MTEAM-focused."
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Required before live target upload."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          },
+          "execute_if_no_duplicate": {
+            "type": "boolean",
+            "default": true,
+            "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work."
+          },
+          "source_url": {
+            "type": "string",
+            "description": "User-provided source tracker details or download URL. The service infers tracker and torrent id from this URL."
+          },
+          "workflow": {
+            "type": "string",
+            "default": "source_url_retorrent",
+            "enum": [
+              "source_url_retorrent"
+            ],
+            "description": "Agent workflow to preview without running live work."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "kind",
+          "dry_run",
+          "mutates_state",
+          "live_upload",
+          "workflow",
+          "tool",
+          "request",
+          "request_template",
+          "closure_contract",
+          "closure_handoff_examples",
+          "steps",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "blockers",
+          "next_actions"
+        ],
+        "step_fields": [
+          "index",
+          "step",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when",
+          "complete_when",
+          "resume_with"
+        ],
+        "closure_examples": [
+          "complete",
+          "resume",
+          "stop"
+        ],
+        "safety": [
+          "does_not_contact_trackers",
+          "does_not_contact_qbittorrent",
+          "does_not_create_jobs",
+          "does_not_upload"
+        ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
       "name": "retorrent_check",
       "method": "POST",
       "path": "/v1/retorrent/check",
@@ -3987,7 +4169,7 @@
       }
     }
   ],
-  "tool_count": 20,
+  "tool_count": 21,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

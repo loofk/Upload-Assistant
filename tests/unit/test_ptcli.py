@@ -14221,6 +14221,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/{job_id}/cancel" in paths
     assert "/.well-known/ptcli-agent.json" in paths
     tool_by_name = {tool["name"]: tool for tool in tools["tools"]}
+    assert tool_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
+    assert tool_by_name["agent_run_preview"]["safety"]["mutates_state"] is False
+    assert "closure_contract" in tool_by_name["agent_run_preview"]["response_contract"]["required_fields"]
+    assert "steps" in tool_by_name["agent_run_preview"]["response_contract"]["required_fields"]
     assert tool_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
     assert tool_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
     assert tool_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
@@ -14406,6 +14410,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/agent-manifest" in openapi["paths"]
     assert "/v1/openclaw/skill.json" in openapi["paths"]
     assert "/v1/hermes/skill.json" in openapi["paths"]
+    assert "/v1/agent/run-preview" in openapi["paths"]
     assert "/v1/deployment/check" in openapi["paths"]
     assert "/v1/readiness/bundle" in openapi["paths"]
     assert "/v1/site-policies" in openapi["paths"]
@@ -14477,6 +14482,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "jobs" in job_list_schema["properties"]
     assert "status_counts" in job_list_schema["properties"]
     assert "queue" in job_list_schema["properties"]
+    preview_schema = openapi["paths"]["/v1/agent/run-preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "closure_contract" in preview_schema["properties"]
+    assert "steps" in preview_schema["properties"]
     deployment_schema = openapi["paths"]["/v1/deployment/check"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "mounts" in deployment_schema["properties"]
     assert "queue" in deployment_schema["properties"]
@@ -14487,6 +14495,37 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     readiness_schema = openapi["paths"]["/v1/readiness/bundle"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "live_readiness" in readiness_schema["properties"]
     assert "agent_decision" in readiness_schema["properties"]
+
+
+def test_agent_run_preview_exposes_closure_walkthrough() -> None:
+    blocked = ptcli_service.agent_run_preview_payload({"source_url": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"})
+    assert blocked["status"] == "blocked"
+    assert blocked["dry_run"] is True
+    assert blocked["mutates_state"] is False
+    assert "accept_rules=true is required before live retorrent automation." in blocked["blockers"]
+    assert blocked["recommended_tool"] == "readiness_bundle"
+    assert blocked["next_step"]["endpoint"] == "/v1/readiness/bundle"
+    assert blocked["closure_contract"]["primary_field"] == "closure_handoff"
+    assert blocked["closure_handoff_examples"]["resume"]["closure_handoff"]["recommended_tool"] == "resume_job"
+
+    ready = ptcli_service.agent_run_preview_payload(
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+            "uploaded_qbit_category": "MTEAM",
+        }
+    )
+    assert ready["status"] == "ok"
+    assert ready["request_template"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert ready["request_template"]["target"] == "MTEAM"
+    assert ready["request_template"]["save_path"] == "/downloads"
+    assert [step["tool"] for step in ready["steps"]] == ["readiness_bundle", "site_policies", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
+    assert ready["steps"][2]["request"] == ready["request_template"]
+    assert ready["steps"][4]["complete_when"] == "closure_handoff.complete=true"
+    assert "Submit request_template to source_url_retorrent_job" in ready["next_actions"][0]
 
 
 def test_agent_manifest_exposes_ai_safe_workflows() -> None:
@@ -14503,7 +14542,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["primary_field"] == "closure_handoff"
     assert manifest["closure_contract"]["complete_when"] == "closure_handoff.complete=true"
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
-    assert {tool["name"] for tool in manifest["tools"]} >= {"deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_retorrent_job"
     assert [step["tool"] for step in source_url_workflow["runbook"]] == ["readiness_bundle", "site_policies", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
@@ -14543,7 +14582,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         assert payload["discovery"]["readiness_bundle"].endswith("/v1/readiness/bundle")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+        assert set(tools_by_name) >= {"agent_run_preview", "deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+        assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
+        assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "queue" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
