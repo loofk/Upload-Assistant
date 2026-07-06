@@ -393,6 +393,64 @@
           "ptgen_description_file": {
             "type": "string"
           },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
+          },
           "imdb_id": {
             "type": "string"
           },
@@ -584,6 +642,64 @@
           "ptgen_description_file": {
             "type": "string"
           },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
+          },
           "imdb_id": {
             "type": "string"
           },
@@ -729,6 +845,64 @@
           },
           "ptgen_description_file": {
             "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
           },
           "imdb_id": {
             "type": "string"
@@ -876,6 +1050,64 @@
           },
           "ptgen_description_file": {
             "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
           },
           "imdb_id": {
             "type": "string"
@@ -1180,6 +1412,64 @@
           },
           "ptgen_description_file": {
             "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
           },
           "imdb_id": {
             "type": "string"
@@ -1489,6 +1779,64 @@
           },
           "ptgen_description_file": {
             "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
           },
           "imdb_id": {
             "type": "string"
@@ -1803,6 +2151,64 @@
           },
           "ptgen_description_file": {
             "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
           },
           "imdb_id": {
             "type": "string"
@@ -2593,6 +2999,64 @@
               "ptgen_description_file": {
                 "type": "string"
               },
+              "mediainfo_file": {
+                "type": "string",
+                "description": "Existing MediaInfo report file to include in the target upload package."
+              },
+              "bdinfo_file": {
+                "type": "string",
+                "description": "Existing BDInfo report file to include in the target upload package."
+              },
+              "image_host_file": {
+                "type": "string",
+                "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+              },
+              "image_host": {
+                "type": "string",
+                "description": "Optional image host selector used when upload_screenshots=true."
+              },
+              "screenshot_file": {
+                "type": "string",
+                "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+              },
+              "screenshot_files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Existing local screenshot files to include in the target upload package."
+              },
+              "screenshot_count": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "description": "Screenshot count to generate when generate_screenshots=true."
+              },
+              "enrich_metadata": {
+                "type": "boolean",
+                "description": "Enrich source metadata before preparing the target package."
+              },
+              "fetch_ptgen": {
+                "type": "boolean",
+                "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+              },
+              "generate_mediainfo": {
+                "type": "boolean",
+                "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+              },
+              "generate_bdinfo": {
+                "type": "boolean",
+                "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+              },
+              "generate_screenshots": {
+                "type": "boolean",
+                "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+              },
+              "upload_screenshots": {
+                "type": "boolean",
+                "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
+              },
               "imdb_id": {
                 "type": "string"
               },
@@ -2684,6 +3148,64 @@
           },
           "ptgen_description_file": {
             "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
           },
           "imdb_id": {
             "type": "string"
@@ -4302,6 +4824,64 @@
           },
           "ptgen_description_file": {
             "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
           },
           "imdb_id": {
             "type": "string"

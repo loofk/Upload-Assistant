@@ -14478,6 +14478,25 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["source_url_retorrent_job"]["input_schema"]["required"] == ["source_url", "target"]
     assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
+    manual_properties = tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
+    source_url_properties = tool_by_name["source_url_retorrent_job"]["input_schema"]["properties"]
+    for key in (
+        "metadata_file",
+        "ptgen_description_file",
+        "mediainfo_file",
+        "bdinfo_file",
+        "screenshot_files",
+        "image_host_file",
+        "image_host",
+        "enrich_metadata",
+        "fetch_ptgen",
+        "generate_mediainfo",
+        "generate_bdinfo",
+        "generate_screenshots",
+        "upload_screenshots",
+    ):
+        assert key in manual_properties
+        assert key in source_url_properties
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
     assert "policy_coverage" in tool_by_name["retorrent_job"]["response_contract"]["required_fields"]
@@ -14532,6 +14551,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "confirm_upload" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "save_path" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "screenshot_files" in tool_by_name["resume_job"]["input_schema"]["properties"]
+    assert "fetch_ptgen" in tool_by_name["resume_job"]["input_schema"]["properties"]
+    assert "generate_screenshots" in tool_by_name["resume_job"]["input_schema"]["properties"]
+    assert "upload_screenshots" in tool_by_name["resume_job"]["input_schema"]["properties"]
+    assert "image_host" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "uploaded_qbit_upload_limit" in tool_by_name["resume_job"]["input_schema"]["properties"]
     assert "resume_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -14912,6 +14935,25 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["manual_retorrent_job"]["path"] == "/v1/jobs/retorrent/submit"
         assert tools_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
         assert tools_by_name["source_url_retorrent_job"]["input_schema"]["required"] == ["source_url", "target"]
+        manual_properties = tools_by_name["manual_retorrent_job"]["input_schema"]["properties"]
+        source_url_properties = tools_by_name["source_url_retorrent_job"]["input_schema"]["properties"]
+        for key in (
+            "metadata_file",
+            "ptgen_description_file",
+            "mediainfo_file",
+            "bdinfo_file",
+            "screenshot_files",
+            "image_host_file",
+            "image_host",
+            "enrich_metadata",
+            "fetch_ptgen",
+            "generate_mediainfo",
+            "generate_bdinfo",
+            "generate_screenshots",
+            "upload_screenshots",
+        ):
+            assert key in manual_properties
+            assert key in source_url_properties
         assert tools_by_name["daily_candidates_schedule"]["path"] == "/v1/candidates/daily/schedule"
         assert tools_by_name["submit_daily_candidate_job"]["path"] == "/v1/jobs/candidates/{job_id}/submit"
         assert tools_by_name["submit_daily_candidate_job"]["input_schema"]["required"] == ["job_id"]
@@ -14985,6 +15027,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "confirm_upload" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "save_path" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "screenshot_files" in tools_by_name["resume_job"]["input_schema"]["properties"]
+        assert "fetch_ptgen" in tools_by_name["resume_job"]["input_schema"]["properties"]
+        assert "generate_screenshots" in tools_by_name["resume_job"]["input_schema"]["properties"]
+        assert "upload_screenshots" in tools_by_name["resume_job"]["input_schema"]["properties"]
+        assert "image_host" in tools_by_name["resume_job"]["input_schema"]["properties"]
         assert "resume_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_requirements" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
