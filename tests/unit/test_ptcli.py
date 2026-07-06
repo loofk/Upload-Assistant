@@ -14770,6 +14770,11 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert payload["policy_execution_summary"]["transfer_rule_plan"]["by_tracker"]["MTEAM"]["freeleech_required"] is True
     assert payload["policy_execution_summary"]["recommended_tool"] == "readiness_bundle"
     assert payload["policy_execution_summary"]["next_actions"] == ["Policy execution summary is ready; continue with readiness_bundle or manual/source-url retorrent preflight."]
+    assert payload["policy_setup_summary"]["kind"] == "ptcli.site_policy_setup_summary"
+    assert payload["policy_setup_summary"]["ready"] is True
+    assert payload["policy_setup_summary"]["missing_fingerprints"] == []
+    assert payload["policy_setup_summary"]["placeholder_fingerprints"] == []
+    assert payload["policy_setup_summary"]["recommended_tool"] == "readiness_bundle"
     assert payload["config_templates"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]'
     assert payload["config_templates"]["trackers"]["MTEAM"]["min_ratio"] == 1.0
     assert payload["agent_summary"]["qbit_limits_present"] == ["U2", "MTEAM"]
@@ -15313,6 +15318,13 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert {"tracker": "MTEAM", "field": "min_ratio"} in payload["policy_execution_summary"]["seeding_plan"]["missing"]
     assert payload["policy_execution_summary"]["recommended_tool"] == "edit_config"
     assert "U2: download_rate_limit" in payload["policy_execution_summary"]["blockers"]
+    assert payload["policy_setup_summary"]["ready"] is False
+    assert payload["policy_setup_summary"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]'
+    assert payload["policy_setup_summary"]["missing_fingerprint_count"] == 2
+    assert {item["tracker"] for item in payload["policy_setup_summary"]["missing_fingerprints"]} == {"U2", "MTEAM"}
+    assert payload["policy_setup_summary"]["placeholder_fingerprint_count"] == 0
+    assert payload["policy_setup_summary"]["recommended_tool"] == "edit_config"
+    assert payload["policy_setup_summary"]["copyable_templates"]["U2"]["rule_review_fingerprint"] == "manual-review-YYYY-MM-DD"
     assert payload["agent_summary"]["policy_coverage_ready"] is False
     assert payload["agent_summary"]["execution_ready"] is False
     assert payload["agent_summary"]["policy_execution_summary"] == payload["policy_execution_summary"]
@@ -15341,6 +15353,42 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert payload["policy_handoff"]["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert payload["recommended_tool"] == "edit_config"
     assert payload["recommended_request"] == payload["policy_handoff"]["next_step"]["request"]
+
+
+def test_service_site_policies_blocks_placeholder_rule_review_fingerprint(monkeypatch) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "rule_review_fingerprint": "manual-review-YYYY-MM-DD",
+                },
+                "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
+                    "upload_rate_limit": "2MiB/s",
+                    "min_ratio": 1.0,
+                    "rule_review_fingerprint": "mteam-review",
+                },
+            }
+        }
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+
+    payload = ptcli_service.site_policies_payload({"source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
+
+    assert payload["status"] == "blocked"
+    assert payload["ready"] is False
+    assert payload["policy_execution_summary"]["ready"] is True
+    assert payload["policy_setup_summary"]["ready"] is False
+    assert payload["policy_setup_summary"]["missing_fingerprints"] == []
+    assert payload["policy_setup_summary"]["placeholder_fingerprint_count"] == 1
+    assert payload["policy_setup_summary"]["placeholder_fingerprints"][0]["tracker"] == "U2"
+    assert "U2: rule_review_fingerprint still looks like a placeholder." in payload["policy_setup_summary"]["blockers"]
+    assert "U2: rule_review_fingerprint still looks like a placeholder." in payload["blockers"]
 
 
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
@@ -15549,6 +15597,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "template" in tool_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "policy_setup_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -15556,6 +15605,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_execution_summary_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "qbit_limit_plan" in tool_by_name["site_policies"]["response_contract"]["policy_execution_summary_fields"]
     assert "seeding_plan" in tool_by_name["site_policies"]["response_contract"]["policy_execution_summary_fields"]
+    assert "policy_setup_summary_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "missing_fingerprints" in tool_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
+    assert "placeholder_fingerprints" in tool_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
     assert "policy_gap_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "missing_by_category" in tool_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
@@ -15626,6 +15678,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "next_step" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
+    assert "policy_setup_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "credential_requirements" in tool_by_name["readiness_bundle"]["response_contract"]["live_verification_fields"]
     assert "after_doctor" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
@@ -15719,6 +15772,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     site_policy_schema = openapi["paths"]["/v1/site-policies"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_gap_summary" in site_policy_schema["properties"]
     assert "policy_execution_summary" in site_policy_schema["properties"]
+    assert "policy_setup_summary" in site_policy_schema["properties"]
     assert "config_templates" in site_policy_schema["properties"]
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "capability_matrix" in site_profiles_schema["properties"]
@@ -15979,6 +16033,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_test_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
+        assert "policy_setup_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
         assert "credential_requirements" in tools_by_name["readiness_bundle"]["response_contract"]["live_verification_fields"]
         assert "after_doctor" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
@@ -16009,6 +16064,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "template" in tools_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "policy_setup_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_handoff" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -16016,6 +16072,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_execution_summary_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "qbit_limit_plan" in tools_by_name["site_policies"]["response_contract"]["policy_execution_summary_fields"]
         assert "seeding_plan" in tools_by_name["site_policies"]["response_contract"]["policy_execution_summary_fields"]
+        assert "policy_setup_summary_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "missing_fingerprints" in tools_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
+        assert "placeholder_fingerprints" in tools_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
         assert "policy_gap_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "missing_by_category" in tools_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
         assert "next_step" in tools_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
@@ -16417,6 +16476,7 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert payload["deployment"]["ready"] is True
     assert payload["site_policies"]["ready"] is True
     assert payload["site_policies"]["policy_execution_summary"]["ready"] is True
+    assert payload["site_policies"]["policy_setup_summary"]["ready"] is True
     assert payload["daily_schedule"]["count"] == 1
     assert payload["live_verification"]["ready"] is True
     assert payload["live_verification"]["materials"]["image_host_ready"] is True
@@ -16425,6 +16485,7 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert payload["live_readiness"]["live_verification_ready"] is True
     assert payload["live_readiness"]["ready_for_daily_candidates"] is True
     assert payload["live_readiness"]["policy_execution_summary"] == payload["site_policies"]["policy_execution_summary"]
+    assert payload["live_readiness"]["policy_setup_summary"] == payload["site_policies"]["policy_setup_summary"]
     assert payload["live_readiness"]["policy_execution_summary"]["recommended_tool"] == "readiness_bundle"
     assert payload["live_readiness"]["source"]["tracker"] == "U2"
     assert payload["live_readiness"]["manual_job_template"]["endpoint"] == "/v1/jobs/retorrent/from-url"
