@@ -1612,6 +1612,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
     live_readiness = _readiness_bundle_live_readiness(request, deployment, source, target_trackers, site_policies, daily_schedule, live_verification)
     agent_decision = _readiness_bundle_agent_decision(live_readiness)
     live_test_handoff = _readiness_bundle_live_test_handoff(live_readiness, agent_decision, deployment, site_policies, live_verification)
+    seedbox_live_validation_handoff = _readiness_bundle_seedbox_live_validation_handoff(deployment, live_readiness, live_test_handoff, site_policies, live_verification)
     return {
         "kind": "ptcli.readiness_bundle",
         "status": "ok" if live_readiness.get("ready_for_ai") else "blocked",
@@ -1624,6 +1625,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
         "live_verification": live_verification,
         "live_readiness": live_readiness,
         "live_test_handoff": live_test_handoff,
+        "seedbox_live_validation_handoff": seedbox_live_validation_handoff,
         "next_step": live_test_handoff.get("next_step"),
         "recommended_tool": live_test_handoff.get("recommended_tool"),
         "recommended_endpoint": live_test_handoff.get("recommended_endpoint"),
@@ -2047,6 +2049,103 @@ def _readiness_bundle_live_test_handoff(
             "then_tool": "source_url_retorrent_job",
             "then_request": manual_job_template.get("request") if isinstance(manual_job_template, dict) else None,
         },
+    }
+
+
+def _readiness_bundle_seedbox_live_validation_handoff(
+    deployment: dict[str, Any],
+    live_readiness: dict[str, Any],
+    live_test_handoff: dict[str, Any],
+    site_policies: dict[str, Any] | None,
+    live_verification: dict[str, Any],
+) -> dict[str, Any]:
+    """Summarize the first safe seedbox live validation attempt for AI agents."""
+    next_step = live_test_handoff.get("next_step") if isinstance(live_test_handoff.get("next_step"), dict) else {}
+    doctor_template = live_test_handoff.get("doctor_template") if isinstance(live_test_handoff.get("doctor_template"), dict) else None
+    manual_job_template = live_test_handoff.get("manual_job_template") if isinstance(live_test_handoff.get("manual_job_template"), dict) else None
+    preflight_checklist = live_test_handoff.get("preflight_checklist") if isinstance(live_test_handoff.get("preflight_checklist"), dict) else {}
+    execution_plan = live_test_handoff.get("execution_plan") if isinstance(live_test_handoff.get("execution_plan"), dict) else {}
+    deployment_handoff = deployment.get("deployment_handoff") if isinstance(deployment.get("deployment_handoff"), dict) else {}
+    agent_handoff = deployment.get("agent_handoff") if isinstance(deployment.get("agent_handoff"), dict) else {}
+    docker_compose = deployment.get("docker_compose") if isinstance(deployment.get("docker_compose"), dict) else {}
+    qbit = deployment.get("qbit") if isinstance(deployment.get("qbit"), dict) else {}
+    policy_execution_summary = live_readiness.get("policy_execution_summary") if isinstance(live_readiness.get("policy_execution_summary"), dict) else {}
+    policy_setup_summary = live_readiness.get("policy_setup_summary") if isinstance(live_readiness.get("policy_setup_summary"), dict) else {}
+    ready = bool(live_readiness.get("ready_for_manual_retorrent") and preflight_checklist.get("ready") and doctor_template and manual_job_template)
+    phase = "run_doctor" if ready else str(next_step.get("reason") or "fix_preflight")
+    doctor_request = {"argv": doctor_template.get("argv")} if isinstance(doctor_template, dict) and doctor_template.get("argv") else None
+    manual_request = manual_job_template.get("request") if isinstance(manual_job_template, dict) else None
+    return {
+        "kind": "ptcli.seedbox_live_validation_handoff",
+        "ready": ready,
+        "phase": phase,
+        "connectivity_checked": bool(live_verification.get("connectivity_checked")),
+        "preflight_ready": bool(preflight_checklist.get("ready")),
+        "preflight_checklist": preflight_checklist,
+        "execution_plan": execution_plan,
+        "docker_compose": {
+            "api_ready": bool(docker_compose.get("ptcli_api_service_ready")),
+            "api_healthcheck": bool(docker_compose.get("ptcli_api_healthcheck")),
+            "localhost_port": bool(docker_compose.get("ptcli_api_localhost_port")),
+            "downloads_mount": bool(docker_compose.get("downloads_mount")),
+            "config_mount": bool(docker_compose.get("config_mount")),
+            "cookies_mount": bool(docker_compose.get("cookies_mount")),
+            "tmp_mount": bool(docker_compose.get("tmp_mount")),
+            "daily_ready": bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready")),
+            "api": deployment_handoff.get("api") or (agent_handoff.get("api") if isinstance(agent_handoff.get("api"), dict) else None),
+        },
+        "qbit": {
+            "configured": bool(qbit.get("configured")),
+            "client": qbit.get("client"),
+            "torrent_client": qbit.get("torrent_client"),
+            "qbit_url": qbit.get("qbit_url"),
+            "qbit_port": qbit.get("qbit_port"),
+            "connectivity_checked": bool(qbit.get("connectivity_checked")),
+        },
+        "site_policy": {
+            "ready": bool(live_readiness.get("site_policy_ready")),
+            "policy_execution_summary": policy_execution_summary,
+            "policy_setup_summary": policy_setup_summary,
+            "rule_obligations": (site_policies or {}).get("rule_obligations") if isinstance(site_policies, dict) else None,
+        },
+        "credentials": {
+            "ready": bool(live_verification.get("ready")),
+            "credential_requirements": _string_list(live_verification.get("credential_requirements")),
+            "materials": live_verification.get("materials") if isinstance(live_verification.get("materials"), dict) else {},
+            "blockers": _string_list(live_verification.get("blockers")),
+        },
+        "doctor": {
+            "ready": bool(doctor_request),
+            "tool": "ptcli_doctor",
+            "method": "CLI",
+            "request": doctor_request,
+            "continue_when": "doctor_result_handoff.live_safe_to_attempt=true",
+            "summary_check": (live_test_handoff.get("after_doctor") or {}).get("summary_check_argv_template") if isinstance(live_test_handoff.get("after_doctor"), dict) else None,
+        },
+        "manual_job": {
+            "ready": bool(manual_request) and ready,
+            "tool": "source_url_check_and_submit",
+            "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": "POST",
+            "request": manual_request,
+            "continue_when": "job_id is returned; poll get_job_status then read get_job_summary.closure_handoff",
+        },
+        "recommended_tool": "ptcli_doctor" if ready else next_step.get("tool"),
+        "recommended_endpoint": None if ready else next_step.get("endpoint"),
+        "recommended_request": doctor_request if ready else next_step.get("request"),
+        "next_step": {
+            "tool": "ptcli_doctor",
+            "method": "CLI",
+            "request": doctor_request,
+            "reason": "run_seedbox_live_doctor_before_submission",
+        }
+        if ready
+        else next_step,
+        "continue_when": "doctor_result_handoff.live_safe_to_attempt=true, then submit manual_job.request through source_url_check_and_submit",
+        "stop_when": "any blocker is present, duplicate_check.exists=true, or doctor_result_handoff.live_safe_to_attempt=false",
+        "blockers": _string_list(live_test_handoff.get("blockers")) or _string_list(live_readiness.get("blockers")),
+        "warnings": _string_list(live_test_handoff.get("warnings")) or _string_list(live_readiness.get("warnings")),
+        "next_actions": _string_list(preflight_checklist.get("next_actions")) or _string_list(live_readiness.get("next_actions")),
     }
 
 
@@ -9293,10 +9392,11 @@ def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
 
 def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
         "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
+        "seedbox_live_validation_handoff_fields": ["ready", "phase", "connectivity_checked", "preflight_ready", "preflight_checklist", "execution_plan", "docker_compose", "qbit", "site_policy", "credentials", "doctor", "manual_job", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
         "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
     }

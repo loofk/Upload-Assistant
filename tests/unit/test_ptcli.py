@@ -15865,6 +15865,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_readiness" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "live_verification" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "live_test_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "seedbox_live_validation_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
@@ -15875,6 +15876,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "recommended_tool" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "preflight_checklist" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "execution_plan" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+    assert "seedbox_live_validation_handoff_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "doctor" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+    assert "manual_job" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
     assert "runbook_ref" in tool_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
     assert tool_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
     assert "ready_to_create_job" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
@@ -16249,6 +16253,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_readiness" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "live_verification" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "live_test_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "seedbox_live_validation_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
         assert "policy_setup_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
@@ -16258,6 +16263,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "recommended_tool" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "preflight_checklist" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "execution_plan" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+        assert "seedbox_live_validation_handoff_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "doctor" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+        assert "manual_job" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
         assert "runbook_ref" in tools_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
         assert "submit_if_clear_handoff" in tools_by_name["retorrent_check"]["response_contract"]["required_fields"]
         assert "submit_if_clear_handoff_fields" in tools_by_name["retorrent_check"]["response_contract"]
@@ -16732,6 +16740,37 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
         },
     }
     monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    (tmp_path / "docker-compose.yml").write_text(
+        """
+services:
+  ptcli-api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+      - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+    volumes:
+      - /downloads:/downloads/:rw
+      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
+      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
+      - /app/tmp/:/Upload-Assistant/tmp/:rw
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+  ptcli-daily-schedule:
+    profiles:
+      - daily
+    command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
+  ptcli-daily-scheduler:
+    profiles:
+      - daily
+    command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
+""",
+        encoding="utf-8",
+    )
     monkeypatch.setenv("TMPDIR", str(tmp_dir))
     monkeypatch.setenv(
         "PTCLI_DAILY_CANDIDATE_SCHEDULES",
@@ -16789,6 +16828,21 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert payload["live_test_handoff"]["after_doctor"]["summary_check_tool"] == "summary_check"
     assert payload["live_test_handoff"]["after_doctor"]["summary_check_argv_template"] == ["python3", "ptcli.py", "summary-check", "--summary-file", "<ptcli-doctor-summary.json>", "--json"]
     assert "doctor_result_handoff" in payload["live_test_handoff"]["after_doctor"]["read_fields"]
+    assert payload["seedbox_live_validation_handoff"]["kind"] == "ptcli.seedbox_live_validation_handoff"
+    assert payload["seedbox_live_validation_handoff"]["ready"] is True
+    assert payload["seedbox_live_validation_handoff"]["phase"] == "run_doctor"
+    assert payload["seedbox_live_validation_handoff"]["preflight_ready"] is True
+    assert payload["seedbox_live_validation_handoff"]["docker_compose"]["api_ready"] is True
+    assert payload["seedbox_live_validation_handoff"]["qbit"]["configured"] is True
+    assert payload["seedbox_live_validation_handoff"]["site_policy"]["ready"] is True
+    assert payload["seedbox_live_validation_handoff"]["credentials"]["ready"] is True
+    assert payload["seedbox_live_validation_handoff"]["doctor"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
+    assert payload["seedbox_live_validation_handoff"]["doctor"]["continue_when"] == "doctor_result_handoff.live_safe_to_attempt=true"
+    assert payload["seedbox_live_validation_handoff"]["manual_job"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert payload["seedbox_live_validation_handoff"]["manual_job"]["request"] == payload["live_readiness"]["manual_job_template"]["request"]
+    assert payload["seedbox_live_validation_handoff"]["recommended_tool"] == "ptcli_doctor"
+    assert payload["seedbox_live_validation_handoff"]["recommended_request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
+    assert "duplicate_check.exists=true" in payload["seedbox_live_validation_handoff"]["stop_when"]
     assert payload["recommended_tool"] == "ptcli_doctor"
     assert payload["recommended_request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
     assert payload["agent_decision"]["decision"] == "ready_for_manual_retorrent"
