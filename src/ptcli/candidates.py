@@ -696,6 +696,14 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
     submit_request = candidate.get("submit_request") if isinstance(candidate.get("submit_request"), dict) else None
     can_submit = bool(status == "ready" and submit_request)
     action_label = "submit_when_confirmed" if can_submit else "review_blockers"
+    metadata = {
+        "imdb_id": source_info.get("imdb_id"),
+        "tmdb_id": source_info.get("tmdb_id"),
+        "douban_id": source_info.get("douban_id"),
+        "douban_url": source_info.get("douban_url"),
+        "name": source_info.get("name"),
+    }
+    policy_digest = _candidate_digest_policy_summary(policy_summary)
     return {
         "rank": rank,
         "status": status,
@@ -708,16 +716,25 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "size": source.get("size"),
         "published_at": source.get("published_at"),
         "promotion": source.get("promotion"),
-        "metadata": {
-            "imdb_id": source_info.get("imdb_id"),
-            "tmdb_id": source_info.get("tmdb_id"),
-            "douban_id": source_info.get("douban_id"),
-            "douban_url": source_info.get("douban_url"),
-            "name": source_info.get("name"),
-        },
+        "metadata": metadata,
         "duplicate_status": duplicate_check.get("status"),
         "duplicate_count": duplicate_check.get("count"),
         "decision_summary": decision_summary,
+        "audit_summary": _candidate_audit_summary(
+            rank=rank,
+            status=status,
+            can_submit=can_submit,
+            source=source,
+            metadata=metadata,
+            duplicate_check=duplicate_check,
+            policy_summary=policy_digest,
+            decision_summary=decision_summary,
+            blockers=blockers,
+            workflow=workflow,
+            submit_request=submit_request,
+            submit_endpoint=candidate.get("submit_job_endpoint"),
+            submit_tool=candidate.get("submit_tool"),
+        ),
         "blocker_count": len(blockers),
         "blockers": blockers,
         "next_actions": _candidate_push_next_actions(candidate, workflow),
@@ -728,10 +745,79 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "action_endpoint": candidate.get("submit_job_endpoint") if can_submit else None,
         "can_submit": can_submit,
         "policy_coverage": policy_summary.get("policy_coverage"),
-        "policy_summary": _candidate_digest_policy_summary(policy_summary),
+        "policy_summary": policy_digest,
         "submit_request": submit_request if can_submit else None,
         "submit_job_endpoint": candidate.get("submit_job_endpoint"),
         "submit_tool": candidate.get("submit_tool"),
+    }
+
+
+def _candidate_audit_summary(
+    *,
+    rank: int,
+    status: str,
+    can_submit: bool,
+    source: dict[str, Any],
+    metadata: dict[str, Any],
+    duplicate_check: dict[str, Any],
+    policy_summary: dict[str, Any],
+    decision_summary: dict[str, Any],
+    blockers: list[str],
+    workflow: dict[str, Any],
+    submit_request: dict[str, Any] | None,
+    submit_endpoint: Any,
+    submit_tool: Any,
+) -> dict[str, Any]:
+    duplicate_clear = duplicate_check.get("searched") is True and duplicate_check.get("exists") is False
+    qbit_limits = policy_summary.get("qbit_limits") if isinstance(policy_summary.get("qbit_limits"), dict) else {}
+    return {
+        "rank": rank,
+        "status": status,
+        "can_submit": can_submit,
+        "action": decision_summary.get("action") or workflow.get("decision"),
+        "risk_level": decision_summary.get("risk_level"),
+        "source": {
+            "tracker": source.get("tracker"),
+            "torrent_id": source.get("torrent_id"),
+            "url": source.get("details_url"),
+            "title": source.get("title"),
+            "size": source.get("size"),
+            "published_at": source.get("published_at"),
+            "promotion": source.get("promotion"),
+        },
+        "metadata": {
+            "ready": bool([value for value in metadata.values() if value]),
+            "imdb_id": metadata.get("imdb_id"),
+            "tmdb_id": metadata.get("tmdb_id"),
+            "douban_id": metadata.get("douban_id"),
+            "douban_url": metadata.get("douban_url"),
+            "name": metadata.get("name"),
+            "missing": [key for key in ("imdb_id", "tmdb_id", "douban_id") if not metadata.get(key)],
+        },
+        "duplicate_check": {
+            "searched": duplicate_check.get("searched"),
+            "status": duplicate_check.get("status"),
+            "exists": duplicate_check.get("exists"),
+            "count": duplicate_check.get("count"),
+            "clear": duplicate_clear,
+        },
+        "policy": {
+            "ready": (policy_summary.get("policy_coverage") or {}).get("ready") if isinstance(policy_summary.get("policy_coverage"), dict) else None,
+            "manual_review_ready": policy_summary.get("manual_review_ready"),
+            "rule_obligations_ready": (policy_summary.get("policy_coverage") or {}).get("rule_obligations_ready") if isinstance(policy_summary.get("policy_coverage"), dict) else None,
+            "qbit_limits": qbit_limits,
+            "seeding_requirements": policy_summary.get("seeding_requirements"),
+            "rules": policy_summary.get("rules"),
+        },
+        "submit": {
+            "tool": submit_tool,
+            "endpoint": submit_endpoint,
+            "request": submit_request if can_submit else None,
+            "requires": workflow.get("requires") if isinstance(workflow.get("requires"), list) else ["accept_rules=true", "confirm_upload=true", "save_path or path"],
+        },
+        "blockers": blockers,
+        "primary_blocker": blockers[0] if blockers else None,
+        "recommended_action": workflow.get("recommended_action"),
     }
 
 

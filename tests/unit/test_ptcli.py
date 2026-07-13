@@ -15951,6 +15951,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "policy_coverage" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "audit_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "rules" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
     assert "rule_obligations_ready" in tool_by_name["daily_candidates"]["response_contract"]["policy_coverage_fields"]
@@ -15959,6 +15960,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "submit_job_endpoint" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "summary_text" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
+    assert "audit_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "can_submit" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "response_contract" in tool_by_name["get_job_status"]
     assert tool_by_name["list_jobs"]["method"] == "GET"
@@ -16575,6 +16577,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "audit_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "rules" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
         assert "rule_obligations_ready" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_coverage_fields"]
@@ -16582,6 +16585,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "placeholder" in tools_by_name["daily_candidates_job"]["response_contract"]["rule_fingerprint_status_fields"]
         assert "summary_text" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
+        assert "audit_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "can_submit" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "candidate_digest" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert tools_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
@@ -17321,6 +17325,22 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["summary_text"].startswith("#1 [ready] U2-60635")
     assert result["digest"]["push_items"][0]["metadata"]["imdb_id"] == 1234567
     assert result["digest"]["push_items"][0]["metadata"]["tmdb_id"] == 999
+    assert result["digest"]["push_items"][0]["audit_summary"]["rank"] == 1
+    assert result["digest"]["push_items"][0]["audit_summary"]["can_submit"] is True
+    assert result["digest"]["push_items"][0]["audit_summary"]["action"] == "submit_when_confirmed"
+    assert result["digest"]["push_items"][0]["audit_summary"]["risk_level"] == "low"
+    assert result["digest"]["push_items"][0]["audit_summary"]["source"]["tracker"] == "U2"
+    assert result["digest"]["push_items"][0]["audit_summary"]["metadata"]["ready"] is True
+    assert result["digest"]["push_items"][0]["audit_summary"]["metadata"]["imdb_id"] == 1234567
+    assert result["digest"]["push_items"][0]["audit_summary"]["metadata"]["tmdb_id"] == 999
+    assert result["digest"]["push_items"][0]["audit_summary"]["duplicate_check"]["clear"] is True
+    assert result["digest"]["push_items"][0]["audit_summary"]["duplicate_check"]["status"] == "not_found"
+    assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["ready"] is True
+    assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["rule_obligations_ready"] is True
+    assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["qbit_limits"]["target"]["upload_limit"] == 2 * 1024 * 1024
+    assert result["digest"]["push_items"][0]["audit_summary"]["submit"]["tool"] == "source_url_retorrent_job"
+    assert result["digest"]["push_items"][0]["audit_summary"]["submit"]["endpoint"] == "/v1/jobs/retorrent/from-url"
+    assert result["digest"]["push_items"][0]["audit_summary"]["submit"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["push_items"][0]["decision_summary"]["action"] == "submit_when_confirmed"
     assert result["digest"]["push_items"][0]["decision_summary"]["risk_level"] == "low"
     assert result["digest"]["push_items"][0]["decision_summary"]["metadata_ready"] is True
