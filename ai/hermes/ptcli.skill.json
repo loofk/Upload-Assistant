@@ -1753,6 +1753,7 @@
           "target_preflight",
           "material_plan",
           "resume_request_template",
+          "resume_handoff",
           "recommended_inputs",
           "blockers",
           "next_actions"
@@ -1773,6 +1774,22 @@
           "blocking_keys",
           "next_step",
           "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -2500,6 +2517,7 @@
           "target_preflight",
           "material_plan",
           "resume_request_template",
+          "resume_handoff",
           "recommended_inputs",
           "blockers",
           "next_actions"
@@ -2520,6 +2538,22 @@
           "blocking_keys",
           "next_step",
           "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -3114,6 +3148,7 @@
           "target_preflight",
           "material_plan",
           "resume_request_template",
+          "resume_handoff",
           "recommended_inputs",
           "blockers",
           "next_actions"
@@ -3134,6 +3169,22 @@
           "blocking_keys",
           "next_step",
           "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -3728,6 +3779,7 @@
           "target_preflight",
           "material_plan",
           "resume_request_template",
+          "resume_handoff",
           "recommended_inputs",
           "blockers",
           "next_actions"
@@ -3748,6 +3800,22 @@
           "blocking_keys",
           "next_step",
           "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -4346,6 +4414,7 @@
           "target_preflight",
           "material_plan",
           "resume_request_template",
+          "resume_handoff",
           "recommended_inputs",
           "blockers",
           "next_actions"
@@ -4366,6 +4435,22 @@
           "blocking_keys",
           "next_step",
           "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -5281,6 +5366,7 @@
           "target_preflight",
           "material_plan",
           "resume_request_template",
+          "resume_handoff",
           "recommended_inputs",
           "blockers",
           "next_actions"
@@ -5301,6 +5387,22 @@
           "blocking_keys",
           "next_step",
           "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -6167,6 +6269,7 @@
           "target_preflight",
           "material_plan",
           "resume_request_template",
+          "resume_handoff",
           "recommended_inputs",
           "blockers",
           "next_actions"
@@ -6187,6 +6290,22 @@
           "blocking_keys",
           "next_step",
           "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -7656,6 +7775,7 @@
           "target_preflight",
           "material_plan",
           "resume_request_template",
+          "resume_handoff",
           "recommended_inputs",
           "blockers",
           "next_actions"
@@ -7676,6 +7796,22 @@
           "blocking_keys",
           "next_step",
           "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -8358,6 +8494,7 @@
           "target_preflight",
           "material_plan",
           "resume_request_template",
+          "resume_handoff",
           "recommended_inputs",
           "blockers",
           "next_actions"
@@ -8378,6 +8515,22 @@
           "blocking_keys",
           "next_step",
           "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
         ],
         "material_resolution_fields": [
           "ready_before_resume",
@@ -8809,6 +8962,7 @@
           "target_preflight",
           "material_plan",
           "resume_request_template",
+          "resume_handoff",
           "recommended_inputs",
           "blockers",
           "next_actions"
@@ -8829,6 +8983,22 @@
           "blocking_keys",
           "next_step",
           "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
         ],
         "material_resolution_fields": [
           "ready_before_resume",

@@ -12906,6 +12906,21 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert plan_items["screenshots"]["ready"] is True
     assert job["materials_handoff"]["resume_request_template"]["dry_run"] is True
     assert job["materials_handoff"]["resume_request_template"]["path"] == "/downloads/Example.Release"
+    assert job["materials_handoff"]["resume_handoff"]["kind"] == "ptcli.materials_resume_handoff"
+    assert job["materials_handoff"]["resume_handoff"]["resume_recommended"] is True
+    assert job["materials_handoff"]["resume_handoff"]["recommended_tool"] == "resume_job"
+    assert job["materials_handoff"]["resume_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
+    assert job["materials_handoff"]["resume_handoff"]["recommended_request"]["job_id"] == job["job_id"]
+    assert job["materials_handoff"]["resume_handoff"]["recommended_request"]["dry_run"] is True
+    assert job["materials_handoff"]["resume_handoff"]["execute_request"]["job_id"] == job["job_id"]
+    assert "dry_run" not in job["materials_handoff"]["resume_handoff"]["execute_request"]
+    assert job["materials_handoff"]["resume_handoff"]["dry_run_request"]["metadata_file"] == "/tmp/materials/metadata.json"
+    assert job["materials_handoff"]["resume_handoff"]["dry_run_request"]["ptgen_description_file"] == "/tmp/materials/ptgen-description.txt"
+    assert job["materials_handoff"]["resume_handoff"]["next_item"]["key"] == "source_content"
+    assert [item["key"] for item in job["materials_handoff"]["resume_handoff"]["staged_requests"]][:3] == ["source_content", "metadata_ids", "ptgen_description"]
+    assert job["materials_handoff"]["resume_handoff"]["staged_requests"][1]["dry_run_request"]["metadata_file"] == "/tmp/materials/metadata.json"
+    assert "metadata_file" in job["materials_handoff"]["resume_handoff"]["accepted_override_keys"]
+    assert "resume preview covers material_resolution" in job["materials_handoff"]["resume_handoff"]["continue_when"]
     assert "Provide missing upload materials" in job["materials_handoff"]["next_actions"][0]
     assert job["agent_decision"]["materials_handoff"] == job["materials_handoff"]
     assert job["target_upload_handoff"]["kind"] == "ptcli.target_upload_handoff"
@@ -15641,7 +15656,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "materials_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
     assert "resume_request_template" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
+    assert "resume_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
     assert "resume_overrides" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_plan_item_fields"]
+    assert "materials_resume_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
+    assert "staged_requests" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
     assert "target_upload_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_upload_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_upload_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -16392,7 +16411,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "materials_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "material_plan" in tools_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
         assert "resume_request_template" in tools_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
+        assert "resume_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
         assert "resume_overrides" in tools_by_name["manual_retorrent_job"]["response_contract"]["material_plan_item_fields"]
+        assert "materials_resume_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "dry_run_request" in tools_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
+        assert "staged_requests" in tools_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
         assert "target_upload_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "target_upload_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "target_upload_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]

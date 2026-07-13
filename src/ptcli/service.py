@@ -5496,6 +5496,7 @@ def _job_materials_handoff(job: dict[str, Any], summary_payload: dict[str, Any] 
     recommended_inputs = _materials_handoff_recommended_inputs(request, metadata, materials, target_preflight, blockers)
     ready = _materials_handoff_ready(metadata, materials, target_preflight, blockers)
     material_plan = _materials_handoff_plan(request, metadata, materials, target_preflight, recommended_inputs)
+    resume_handoff = _materials_handoff_resume_handoff(job, material_plan)
     return {
         "kind": "ptcli.materials_handoff",
         "ready": ready,
@@ -5537,6 +5538,7 @@ def _job_materials_handoff(job: dict[str, Any], summary_payload: dict[str, Any] 
         },
         "material_plan": material_plan,
         "resume_request_template": _materials_handoff_resume_request_template(material_plan),
+        "resume_handoff": resume_handoff,
         "recommended_inputs": recommended_inputs,
         "blockers": blockers,
         "next_actions": _materials_handoff_next_actions(ready, recommended_inputs, blockers),
@@ -5761,6 +5763,59 @@ def _materials_handoff_resume_request_template(material_plan: dict[str, Any]) ->
         "dry_run": True,
         **(next_item.get("resume_overrides") if isinstance(next_item.get("resume_overrides"), dict) else {}),
     }
+
+
+def _materials_handoff_resume_handoff(job: dict[str, Any], material_plan: dict[str, Any]) -> dict[str, Any]:
+    job_id = job.get("job_id")
+    endpoint = f"/v1/jobs/{job_id}/resume" if job_id else "/v1/jobs/{job_id}/resume"
+    missing_items = [item for item in material_plan.get("items", []) if isinstance(item, dict) and item.get("ready") is False]
+    combined_overrides: dict[str, Any] = {}
+    staged_requests: list[dict[str, Any]] = []
+    for item in missing_items:
+        overrides = item.get("resume_overrides") if isinstance(item.get("resume_overrides"), dict) else {}
+        combined_overrides.update(overrides)
+        staged_requests.append(
+            {
+                "key": item.get("key"),
+                "label": item.get("label"),
+                "stage": item.get("stage"),
+                "recommended_input_key": item.get("recommended_input_key"),
+                "accepted_keys": _string_list(item.get("accepted_keys")),
+                "blocking_keys": _string_list(item.get("blocking_keys")),
+                "dry_run_request": _materials_handoff_resume_request(job_id, overrides, dry_run=True),
+                "execute_request": _materials_handoff_resume_request(job_id, overrides, dry_run=False),
+            }
+        )
+    dry_run_request = _materials_handoff_resume_request(job_id, combined_overrides, dry_run=True)
+    execute_request = _materials_handoff_resume_request(job_id, combined_overrides, dry_run=False)
+    next_item = material_plan.get("next_item") if isinstance(material_plan.get("next_item"), dict) else None
+    return {
+        "kind": "ptcli.materials_resume_handoff",
+        "ready": bool(material_plan.get("ready")),
+        "resume_recommended": bool(missing_items),
+        "recommended_tool": "resume_job" if missing_items else None,
+        "recommended_endpoint": endpoint if missing_items else None,
+        "method": "POST" if missing_items else None,
+        "next_item": next_item,
+        "missing": _string_list(material_plan.get("missing")),
+        "accepted_override_keys": sorted({key for item in missing_items for key in _string_list(item.get("accepted_keys"))}),
+        "dry_run_request": dry_run_request if missing_items else None,
+        "execute_request": execute_request if missing_items else None,
+        "recommended_request": dry_run_request if missing_items else None,
+        "staged_requests": staged_requests,
+        "continue_when": "resume preview covers material_resolution.unresolved_recommended_inputs, then rerun without dry_run and inspect the resumed job summary." if missing_items else None,
+        "stop_when": "resume_context.ignored_overrides is non-empty for required material keys or material_resolution.unresolved_recommended_inputs remains non-empty." if missing_items else None,
+    }
+
+
+def _materials_handoff_resume_request(job_id: Any, overrides: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
+    request: dict[str, Any] = {}
+    if job_id:
+        request["job_id"] = job_id
+    request.update(overrides)
+    if dry_run:
+        request["dry_run"] = True
+    return request
 
 
 def _job_target_upload_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -9479,9 +9534,10 @@ def _job_response_contract() -> dict[str, Any]:
         "job_lineage_fields": ["job_id", "parent_job_id", "root_job_id", "depth", "is_resume_job", "chain", "child_count", "children", "latest_child", "has_active_child", "terminal_child_count", "next_actions"],
         "resume_summary_fields": ["available", "allowed", "recommended", "status", "subcommand", "missing_confirmations", "recommended_input_keys", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "recommended_tool", "blockers", "next_actions"],
         "recommended_input_fields": ["key", "accepted_keys", "required", "reason", "stage", "resume_tool", "resume_endpoint_hint", "blocking_keys", "examples"],
-        "materials_handoff_fields": ["ready", "can_prepare_upload_payload", "metadata", "materials", "target_preflight", "material_plan", "resume_request_template", "recommended_inputs", "blockers", "next_actions"],
+        "materials_handoff_fields": ["ready", "can_prepare_upload_payload", "metadata", "materials", "target_preflight", "material_plan", "resume_request_template", "resume_handoff", "recommended_inputs", "blockers", "next_actions"],
         "material_plan_fields": ["ready", "missing", "next_item", "items"],
         "material_plan_item_fields": ["key", "label", "ready", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "next_step", "resume_overrides"],
+        "materials_resume_handoff_fields": ["ready", "resume_recommended", "recommended_tool", "recommended_endpoint", "method", "next_item", "missing", "accepted_override_keys", "dry_run_request", "execute_request", "recommended_request", "staged_requests", "continue_when", "stop_when"],
         "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
