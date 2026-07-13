@@ -1163,6 +1163,7 @@ def _source_url_check_and_submit_next_actions(duplicate_check: dict[str, Any], h
 def _candidate_submission_payload(candidate_job_id: str, candidate_item: dict[str, Any], digest: dict[str, Any], submit_request: dict[str, Any], submit_overrides: dict[str, Any], effective_request: dict[str, Any]) -> dict[str, Any]:
     inherited_keys = ("source", "source_url", "source_tracker", "target", "target_tracker", "target_trackers")
     qbit_keys = ("qbit_category", "qbit_tags", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_category", "uploaded_qbit_tags", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit")
+    policy_execution_handoff = _candidate_item_policy_execution_handoff(candidate_item)
     return {
         "candidate_job_id": candidate_job_id,
         "candidate_rank": candidate_item.get("rank"),
@@ -1174,7 +1175,20 @@ def _candidate_submission_payload(candidate_job_id: str, candidate_item: dict[st
         "submitted_overrides": submit_overrides,
         "material_options": _request_material_options(effective_request),
         "qbit_overrides": {key: effective_request.get(key) for key in qbit_keys if effective_request.get(key) is not None},
+        "policy_execution_handoff": policy_execution_handoff,
     }
+
+
+def _candidate_item_policy_execution_handoff(candidate_item: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(candidate_item.get("policy_execution_handoff"), dict):
+        return candidate_item["policy_execution_handoff"]
+    policy_summary = candidate_item.get("policy_summary") if isinstance(candidate_item.get("policy_summary"), dict) else {}
+    if isinstance(policy_summary.get("policy_execution_handoff"), dict):
+        return policy_summary["policy_execution_handoff"]
+    policy_execution = candidate_item.get("policy_execution") if isinstance(candidate_item.get("policy_execution"), dict) else {}
+    if isinstance(policy_execution.get("policy_execution_handoff"), dict):
+        return policy_execution["policy_execution_handoff"]
+    return {}
 
 
 def _create_ai_retorrent_job(job_store: JobStore, request: dict[str, Any], *, kind: str, mode: str) -> dict[str, Any]:
@@ -7034,6 +7048,7 @@ def _job_candidate_submission_handoff(job: dict[str, Any], summary_payload: dict
     job_id = job.get("job_id")
     request = job.get("request") if isinstance(job.get("request"), dict) else {}
     manual_handoff = _job_manual_retorrent_handoff(job, summary_payload)
+    policy_execution_handoff = submission.get("policy_execution_handoff") if isinstance(submission.get("policy_execution_handoff"), dict) else {}
     return {
         "kind": "ptcli.candidate_submission_handoff",
         "candidate_job_id": submission.get("candidate_job_id"),
@@ -7046,6 +7061,7 @@ def _job_candidate_submission_handoff(job: dict[str, Any], summary_payload: dict
         "submitted_overrides": submission.get("submitted_overrides") if isinstance(submission.get("submitted_overrides"), dict) else {},
         "material_options": submission.get("material_options") if isinstance(submission.get("material_options"), dict) else {},
         "qbit_overrides": submission.get("qbit_overrides") if isinstance(submission.get("qbit_overrides"), dict) else {},
+        "policy_execution_handoff": policy_execution_handoff,
         "retorrent_job_id": job_id,
         "retorrent_status": job.get("status"),
         "source_reference": _job_source_reference(job),
@@ -7071,6 +7087,7 @@ def _job_candidate_submission_summary(job: dict[str, Any], summary_payload: dict
     submitted_overrides = submission.get("submitted_overrides") if isinstance(submission.get("submitted_overrides"), dict) else {}
     material_options = submission.get("material_options") if isinstance(submission.get("material_options"), dict) else {}
     qbit_overrides = submission.get("qbit_overrides") if isinstance(submission.get("qbit_overrides"), dict) else {}
+    policy_execution_handoff = submission.get("policy_execution_handoff") if isinstance(submission.get("policy_execution_handoff"), dict) else {}
     next_step = closure_summary.get("next_step") if isinstance(closure_summary.get("next_step"), dict) else {}
     blockers = list(
         dict.fromkeys(
@@ -7093,6 +7110,8 @@ def _job_candidate_submission_summary(job: dict[str, Any], summary_payload: dict
         "submitted_override_keys": sorted(submitted_overrides),
         "material_option_keys": sorted(material_options),
         "qbit_override_keys": sorted(qbit_overrides),
+        "policy_execution_handoff": policy_execution_handoff,
+        "policy_execution_ready": policy_execution_handoff.get("ready") if policy_execution_handoff else None,
         "manual_action": manual_handoff.get("action"),
         "closure_action": closure_summary.get("action"),
         "closure_complete": closure_summary.get("complete") is True,
@@ -9928,8 +9947,8 @@ def _job_response_contract() -> dict[str, Any]:
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
         "candidate_batch_handoff_fields": ["ready", "candidate_job_id", "status", "submit_count", "submit_tool", "submit_endpoint", "submit_endpoint_template", "required_overrides", "allowed_selector_fields", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items", "blockers", "next_actions"],
         "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
-        "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
-        "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
+        "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
+        "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "policy_execution_ready", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
         "check_submission_fields": ["check_job_id", "check_status", "check_kind", "check_summary_file", "duplicate_check", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides"],
         "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "tool", "endpoint", "method", "request", "requires_before_call", "next_step", "blockers", "next_actions"],
         "closure_handoff_fields": ["action", "complete", "closure_checklist", "source", "target", "evidence", "duplicate_check", "target_upload_handoff", "qbit_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
