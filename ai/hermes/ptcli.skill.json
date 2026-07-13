@@ -21,6 +21,7 @@
     "deployment_check": "http://127.0.0.1:8080/v1/deployment/check",
     "source_url_preflight": "http://127.0.0.1:8080/v1/retorrent/source-url/preflight",
     "readiness_bundle": "http://127.0.0.1:8080/v1/readiness/bundle",
+    "summary_check": "http://127.0.0.1:8080/v1/summary/check",
     "openapi": "http://127.0.0.1:8080/openapi.json",
     "tools": "http://127.0.0.1:8080/v1/tools",
     "manifest": "http://127.0.0.1:8080/.well-known/ptcli-agent.json"
@@ -8857,6 +8858,101 @@
       }
     },
     {
+      "name": "summary_check",
+      "method": "POST",
+      "path": "/v1/summary/check",
+      "description": "Read a ptcli summary JSON and return the same automation verdict as summary-check --json, including doctor_result_handoff for seedbox live validation. This endpoint is read-only and never runs the next command.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "summary_file"
+        ],
+        "properties": {
+          "summary_file": {
+            "type": "string",
+            "description": "Path to a ptcli summary JSON, e.g. ptcli-doctor-summary.json or ptcli-run-summary.json."
+          },
+          "path": {
+            "type": "string",
+            "description": "Alias for summary_file."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "summary_file",
+          "summary_kind",
+          "schema_version_ok",
+          "kind_supported",
+          "automation_action",
+          "automation_handoff",
+          "readiness_summary",
+          "doctor_result_handoff",
+          "service",
+          "blockers",
+          "next_actions"
+        ],
+        "status_values": [
+          "ok",
+          "blocked"
+        ],
+        "automation_handoff_fields": [
+          "json",
+          "print_next_command",
+          "print_next_argv",
+          "print_shell",
+          "run_next_command"
+        ],
+        "doctor_result_handoff_fields": [
+          "ready",
+          "live_safe_to_attempt",
+          "summary_file",
+          "summary_check",
+          "next_step",
+          "after_safe",
+          "blockers",
+          "next_actions"
+        ],
+        "readiness_summary_fields": [
+          "ready",
+          "flow_ready",
+          "source_mode",
+          "target_mode",
+          "rules_ready",
+          "target_upload_ready",
+          "uploaded_seeding_ready",
+          "daily_candidate_targets",
+          "blockers",
+          "next_actions"
+        ],
+        "service_fields": [
+          "read_only",
+          "mutates_state",
+          "endpoint",
+          "request"
+        ],
+        "safety": [
+          "read_only",
+          "does_not_run_next_command",
+          "does_not_contact_trackers",
+          "does_not_contact_qbittorrent",
+          "does_not_upload"
+        ]
+      },
+      "workflow_hints": {
+        "after_doctor": "read doctor_result_handoff.live_safe_to_attempt before source_url_check_and_submit",
+        "resume_with": "use get_job_status.recovery_handoff for job recovery"
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": [],
+        "does_not_run_next_command": true
+      }
+    },
+    {
       "name": "list_jobs",
       "method": "GET",
       "path": "/v1/jobs",
@@ -11849,7 +11945,7 @@
       }
     }
   ],
-  "tool_count": 30,
+  "tool_count": 31,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

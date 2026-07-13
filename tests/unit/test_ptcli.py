@@ -10522,6 +10522,77 @@ def test_summary_check_reports_doctor_live_safety(tmp_path, capsys) -> None:
     assert "export PTCLI_MATERIAL_CRITICAL_PATH_READY=1\n" in out
 
 
+def test_service_summary_check_exposes_doctor_handoff(tmp_path) -> None:
+    summary_file = tmp_path / "ptcli-doctor-summary.json"
+    summary_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "ptcli.doctor.live_readiness",
+                "mode": "live_upload",
+                "target_mode": "live_upload",
+                "ready": True,
+                "live_safe_to_attempt": True,
+                "failed_check_names": [],
+                "artifacts": {
+                    "target_preflight_gates": {
+                        "present": True,
+                        "source": "doctor",
+                        "status": "ready",
+                        "ready": True,
+                        "blockers": [],
+                        "target_preparation_ready": True,
+                        "materials_ready": True,
+                        "metadata_ready": True,
+                        "assets_ready": True,
+                        "description_ready": True,
+                        "payload_ready": True,
+                        "payload_checks_ready": True,
+                        "description_checks_ready": True,
+                        "materials_ready_required": True,
+                        "torrent_file": {"path": "/tmp/exported/mteam.torrent", "mteam_safe": True, "metadata_readable": True, "source_flag": "MTEAM"},
+                    },
+                    "target_preparation_audit": {"ready": True, "materials_ready": True, "metadata_ready": True, "assets_ready": True, "description_ready": True, "payload_ready": True, "missing": []},
+                    "target_preparation_ready": True,
+                    "target_preparation_missing": [],
+                    "target_materials_ready": True,
+                },
+                "resume_state": {
+                    "next_stage": "pipeline-live",
+                    "next_command": "python3 ptcli.py pipeline --target-execute",
+                    "available_stages": ["pipeline-live"],
+                    "artifacts": {
+                        "flow_check_ready": True,
+                        "rule_check_ready": True,
+                        "rules_acknowledged": True,
+                        "live_upload_confirmation": True,
+                        "target_rule_obligations": True,
+                        "target_preparation_ready": True,
+                        "target_package_preflight_ready": True,
+                        "download_uploaded_torrent": True,
+                        "inject_uploaded_torrent": True,
+                        "effective_uploaded_save_path": True,
+                        "wait_uploaded_complete": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = ptcli_service.summary_check_service_payload({"summary_file": str(summary_file)})
+
+    assert payload["status"] == "ok"
+    assert payload["ok"] is True
+    assert payload["service"]["read_only"] is True
+    assert payload["service"]["endpoint"] == "/v1/summary/check"
+    assert payload["service"]["request"] == {"summary_file": str(summary_file)}
+    assert payload["doctor_result_handoff"]["ready"] is True
+    assert payload["doctor_result_handoff"]["live_safe_to_attempt"] is True
+    assert payload["doctor_result_handoff"]["summary_check"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_file), "--json"]
+    assert payload["doctor_result_handoff"]["next_step"]["tool"] == "source_url_retorrent_job"
+
+
 def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
@@ -16205,6 +16276,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/candidates/daily/schedule" in paths
     assert "/v1/qbit/inject" in paths
     assert "/v1/qbit/wait" in paths
+    assert "/v1/summary/check" in paths
     assert "/v1/jobs" in paths
     assert "/v1/jobs/{job_id}" in paths
     assert "/v1/jobs/{job_id}/summary" in paths
@@ -16225,6 +16297,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["source_url_check_and_submit"]["input_schema"]["required"] == ["source_url", "target"]
     assert "runs_duplicate_check_before_job_creation" in tool_by_name["source_url_check_and_submit"]["response_contract"]["safety"]
     assert tool_by_name["source_url_check_and_submit"]["safety"]["live_upload"] is True
+    assert tool_by_name["summary_check"]["path"] == "/v1/summary/check"
+    assert tool_by_name["summary_check"]["input_schema"]["required"] == ["summary_file"]
+    assert tool_by_name["summary_check"]["safety"]["does_not_run_next_command"] is True
+    assert "doctor_result_handoff" in tool_by_name["summary_check"]["response_contract"]["required_fields"]
+    assert "doctor_result_handoff_fields" in tool_by_name["summary_check"]["response_contract"]
+    assert "live_safe_to_attempt" in tool_by_name["summary_check"]["response_contract"]["doctor_result_handoff_fields"]
     assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     manual_properties = tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
@@ -16686,6 +16764,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/qbit/export" in openapi["paths"]
     assert "/v1/qbit/inject" in openapi["paths"]
     assert "/v1/qbit/wait" in openapi["paths"]
+    assert "/v1/summary/check" in openapi["paths"]
     assert "/v1/site-policies" in openapi["paths"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent/check/{job_id}/submit" in openapi["paths"]
@@ -16746,6 +16825,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     qbit_wait_schema = openapi["paths"]["/v1/qbit/wait"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "completion_verification" in qbit_wait_schema["properties"]
     assert "matches" in qbit_wait_schema["properties"]
+    summary_check_request_schema = openapi["paths"]["/v1/summary/check"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert summary_check_request_schema["required"] == ["summary_file"]
+    summary_check_schema = openapi["paths"]["/v1/summary/check"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "doctor_result_handoff" in summary_check_schema["properties"]
+    assert "service" in summary_check_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "qbit_plan" in summary_schema["properties"]
     assert "qbit_limit_audit" in summary_schema["properties"]
@@ -16910,6 +16994,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["discovery"]["deployment_check"] == "http://ptcli.local:8080/v1/deployment/check"
     assert manifest["discovery"]["source_url_preflight"] == "http://ptcli.local:8080/v1/retorrent/source-url/preflight"
     assert manifest["discovery"]["readiness_bundle"] == "http://ptcli.local:8080/v1/readiness/bundle"
+    assert manifest["discovery"]["summary_check"] == "http://ptcli.local:8080/v1/summary/check"
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
@@ -16918,7 +17003,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["complete_when"] == "closure_handoff.complete=true"
     assert manifest["closure_contract"]["next_step_source"].startswith("job_handoff")
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
-    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_check_and_submit"
     assert source_url_workflow["fallback_tool"] == "source_url_retorrent_job"
@@ -16972,8 +17057,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["deployment_check"].endswith("/v1/deployment/check")
         assert payload["discovery"]["source_url_preflight"].endswith("/v1/retorrent/source-url/preflight")
         assert payload["discovery"]["readiness_bundle"].endswith("/v1/readiness/bundle")
+        assert payload["discovery"]["summary_check"].endswith("/v1/summary/check")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+        assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]
@@ -17696,6 +17782,8 @@ services:
     assert payload["live_test_handoff"]["after_doctor"]["then_tool"] == "source_url_retorrent_job"
     assert payload["live_test_handoff"]["after_doctor"]["then_request"] == payload["live_readiness"]["manual_job_template"]["request"]
     assert payload["live_test_handoff"]["after_doctor"]["summary_check_tool"] == "summary_check"
+    assert payload["live_test_handoff"]["after_doctor"]["summary_check_endpoint"] == "/v1/summary/check"
+    assert payload["live_test_handoff"]["after_doctor"]["summary_check_request_template"] == {"summary_file": "<ptcli-doctor-summary.json>"}
     assert payload["live_test_handoff"]["after_doctor"]["summary_check_argv_template"] == ["python3", "ptcli.py", "summary-check", "--summary-file", "<ptcli-doctor-summary.json>", "--json"]
     assert "doctor_result_handoff" in payload["live_test_handoff"]["after_doctor"]["read_fields"]
     assert payload["seedbox_live_validation_handoff"]["kind"] == "ptcli.seedbox_live_validation_handoff"
@@ -17709,6 +17797,9 @@ services:
     assert payload["seedbox_live_validation_handoff"]["credentials"]["ready"] is True
     assert payload["seedbox_live_validation_handoff"]["doctor"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
     assert payload["seedbox_live_validation_handoff"]["doctor"]["continue_when"] == "doctor_result_handoff.live_safe_to_attempt=true"
+    assert payload["seedbox_live_validation_handoff"]["doctor"]["summary_check_endpoint"] == "/v1/summary/check"
+    assert payload["seedbox_live_validation_handoff"]["doctor"]["summary_check_request_template"] == {"summary_file": "<ptcli-doctor-summary.json>"}
+    assert payload["seedbox_live_validation_handoff"]["doctor"]["summary_check_argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", "<ptcli-doctor-summary.json>", "--json"]
     assert payload["seedbox_live_validation_handoff"]["manual_job"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert payload["seedbox_live_validation_handoff"]["manual_job"]["request"] == payload["live_readiness"]["manual_job_template"]["request"]
     assert payload["seedbox_live_validation_handoff"]["validation_plan"]["kind"] == "ptcli.seedbox_live_validation_plan"
@@ -17717,7 +17808,10 @@ services:
     assert payload["seedbox_live_validation_handoff"]["validation_plan"]["required_order"] == ["preflight", "doctor", "check_and_submit", "poll_job", "recover_or_finish"]
     validation_steps = {step["name"]: step for step in payload["seedbox_live_validation_handoff"]["validation_plan"]["steps"]}
     assert validation_steps["doctor"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
-    assert validation_steps["doctor"]["summary_check"] == ["python3", "ptcli.py", "summary-check", "--summary-file", "<ptcli-doctor-summary.json>", "--json"]
+    assert validation_steps["doctor"]["summary_check_tool"] == "summary_check"
+    assert validation_steps["doctor"]["summary_check_endpoint"] == "/v1/summary/check"
+    assert validation_steps["doctor"]["summary_check_request"] == {"summary_file": "<ptcli-doctor-summary.json>"}
+    assert validation_steps["doctor"]["summary_check_argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", "<ptcli-doctor-summary.json>", "--json"]
     assert validation_steps["check_and_submit"]["tool"] == "source_url_check_and_submit"
     assert validation_steps["check_and_submit"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert validation_steps["check_and_submit"]["request"] == payload["live_readiness"]["manual_job_template"]["request"]

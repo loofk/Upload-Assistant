@@ -20,7 +20,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, build_daily_candidates
-from src.ptcli.cli import build_parser, build_sites_payload, pipeline_payload, retorrent_payload
+from src.ptcli.cli import build_parser, build_sites_payload, pipeline_payload, retorrent_payload, summary_check_payload
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
@@ -607,6 +607,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/qbit/inject": lambda payload: asyncio.run(qbit_inject_payload(payload)),
                 "/v1/qbit/wait": lambda payload: asyncio.run(qbit_wait_payload(payload)),
                 "/v1/readiness/bundle": readiness_bundle_payload,
+                "/v1/summary/check": summary_check_service_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
                 "/v1/candidates/daily/schedule": daily_candidate_schedule_payload,
                 "/v1/jobs/retorrent/check": lambda payload: create_retorrent_check_job(job_store, payload),
@@ -737,6 +738,28 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
             return f"{proto}://{host}".rstrip("/")
 
     return PtcliServiceHandler
+
+
+def summary_check_service_payload(request: dict[str, Any]) -> dict[str, Any]:
+    summary_file = str(request.get("summary_file") or request.get("path") or "").strip()
+    if not summary_file:
+        raise ServiceError("summary_file is required.", status=HTTPStatus.BAD_REQUEST)
+    payload = summary_check_payload(argparse.Namespace(summary_file=summary_file))
+    payload.setdefault("doctor_result_handoff", None)
+    payload.setdefault("readiness_summary", None)
+    payload.setdefault("automation_handoff", None)
+    payload.setdefault("summary_kind", payload.get("kind"))
+    payload.setdefault("ok", payload.get("status") == "ok")
+    return {
+        **payload,
+        "service": {
+            "kind": "ptcli.service.summary_check",
+            "read_only": True,
+            "mutates_state": False,
+            "endpoint": "/v1/summary/check",
+            "request": {"summary_file": summary_file},
+        },
+    }
 
 
 def create_retorrent_check_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
@@ -2074,6 +2097,8 @@ def _readiness_bundle_live_test_handoff(
         "warnings": _string_list(live_readiness.get("warnings")),
         "after_doctor": {
             "summary_check_tool": "summary_check",
+            "summary_check_endpoint": "/v1/summary/check",
+            "summary_check_request_template": {"summary_file": "<ptcli-doctor-summary.json>"},
             "summary_check_argv_template": ["python3", "ptcli.py", "summary-check", "--summary-file", "<ptcli-doctor-summary.json>", "--json"],
             "read_fields": ["doctor_result_handoff", "live_safe_to_attempt", "blockers", "credential_requirements", "summary_file", "next_actions"],
             "continue_when": "live_safe_to_attempt=true",
@@ -2155,7 +2180,10 @@ def _readiness_bundle_seedbox_live_validation_handoff(
             "method": "CLI",
             "request": doctor_request,
             "continue_when": "doctor_result_handoff.live_safe_to_attempt=true",
-            "summary_check": (live_test_handoff.get("after_doctor") or {}).get("summary_check_argv_template") if isinstance(live_test_handoff.get("after_doctor"), dict) else None,
+            "summary_check_tool": "summary_check",
+            "summary_check_endpoint": "/v1/summary/check",
+            "summary_check_request_template": {"summary_file": "<ptcli-doctor-summary.json>"},
+            "summary_check_argv": (live_test_handoff.get("after_doctor") or {}).get("summary_check_argv_template") if isinstance(live_test_handoff.get("after_doctor"), dict) else None,
         },
         "manual_job": {
             "ready": bool(manual_request) and ready,
@@ -2195,6 +2223,7 @@ def _seedbox_live_validation_plan(
     live_test_handoff: dict[str, Any],
 ) -> dict[str, Any]:
     summary_check = (live_test_handoff.get("after_doctor") or {}).get("summary_check_argv_template") if isinstance(live_test_handoff.get("after_doctor"), dict) else None
+    summary_check_request = (live_test_handoff.get("after_doctor") or {}).get("summary_check_request_template") if isinstance(live_test_handoff.get("after_doctor"), dict) else None
     steps = [
         {
             "index": 1,
@@ -2216,7 +2245,10 @@ def _seedbox_live_validation_plan(
             "read": ["ptcli-doctor-summary.json", "doctor_result_handoff.live_safe_to_attempt", "doctor_result_handoff.blockers"],
             "continue_when": "doctor_result_handoff.live_safe_to_attempt=true",
             "stop_when": "doctor_result_handoff.live_safe_to_attempt=false or doctor_result_handoff.blockers is non-empty",
-            "summary_check": summary_check,
+            "summary_check_tool": "summary_check",
+            "summary_check_endpoint": "/v1/summary/check",
+            "summary_check_request": summary_check_request,
+            "summary_check_argv": summary_check,
         },
         {
             "index": 3,
@@ -9971,6 +10003,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     qbit_wait_request_schema = _qbit_wait_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
+    summary_check_request_schema = _summary_check_tool_request_schema()
     agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
     job_id_schema = _job_id_tool_request_schema()
     job_resume_schema = _job_resume_tool_request_schema()
@@ -10191,6 +10224,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "input_schema": qbit_wait_request_schema,
             "response_contract": _qbit_wait_response_contract(),
             "safety": {"mutates_state": False, "mutates_qbittorrent": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "summary_check",
+            "method": "POST",
+            "path": "/v1/summary/check",
+            "description": "Read a ptcli summary JSON and return the same automation verdict as summary-check --json, including doctor_result_handoff for seedbox live validation. This endpoint is read-only and never runs the next command.",
+            "input_schema": summary_check_request_schema,
+            "response_contract": _summary_check_response_contract(),
+            "workflow_hints": {"after_doctor": "read doctor_result_handoff.live_safe_to_attempt before source_url_check_and_submit", "resume_with": "use get_job_status.recovery_handoff for job recovery"},
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": [], "does_not_run_next_command": True},
         },
         {
             "name": "list_jobs",
@@ -10643,6 +10686,17 @@ def _job_cancel_tool_request_schema() -> dict[str, Any]:
     return schema
 
 
+def _summary_check_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["summary_file"],
+        "properties": {
+            "summary_file": {"type": "string", "description": "Path to a ptcli summary JSON, e.g. ptcli-doctor-summary.json or ptcli-run-summary.json."},
+            "path": {"type": "string", "description": "Alias for summary_file."},
+        },
+    }
+
+
 def _job_list_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -10720,6 +10774,18 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "seedbox_live_evidence_contract_fields": ["final_read", "complete_when", "required_fields", "audit_notes"],
         "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
+    }
+
+
+def _summary_check_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "summary_file", "summary_kind", "schema_version_ok", "kind_supported", "automation_action", "automation_handoff", "readiness_summary", "doctor_result_handoff", "service", "blockers", "next_actions"],
+        "status_values": ["ok", "blocked"],
+        "automation_handoff_fields": ["json", "print_next_command", "print_next_argv", "print_shell", "run_next_command"],
+        "doctor_result_handoff_fields": ["ready", "live_safe_to_attempt", "summary_file", "summary_check", "next_step", "after_safe", "blockers", "next_actions"],
+        "readiness_summary_fields": ["ready", "flow_ready", "source_mode", "target_mode", "rules_ready", "target_upload_ready", "uploaded_seeding_ready", "daily_candidate_targets", "blockers", "next_actions"],
+        "service_fields": ["read_only", "mutates_state", "endpoint", "request"],
+        "safety": ["read_only", "does_not_run_next_command", "does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_upload"],
     }
 
 
@@ -11009,6 +11075,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             "deployment_check": f"{public_base_url}/v1/deployment/check",
             "source_url_preflight": f"{public_base_url}/v1/retorrent/source-url/preflight",
             "readiness_bundle": f"{public_base_url}/v1/readiness/bundle",
+            "summary_check": f"{public_base_url}/v1/summary/check",
             "openapi": f"{public_base_url}/openapi.json",
             "tools": f"{public_base_url}/v1/tools",
             "manifest": f"{public_base_url}/.well-known/ptcli-agent.json",
@@ -11412,6 +11479,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     qbit_export_request_schema = _qbit_export_tool_request_schema()
     qbit_inject_request_schema = _qbit_inject_tool_request_schema()
     qbit_wait_request_schema = _qbit_wait_tool_request_schema()
+    summary_check_request_schema = _summary_check_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
         "properties": {
@@ -11722,6 +11790,24 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
+    summary_check_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "summary_file": {"type": "string"},
+            "summary_kind": {"type": ["string", "null"]},
+            "schema_version_ok": {"type": ["boolean", "null"]},
+            "kind_supported": {"type": ["boolean", "null"]},
+            "automation_action": {"type": ["string", "null"]},
+            "automation_handoff": {"type": ["object", "null"]},
+            "readiness_summary": {"type": ["object", "null"]},
+            "doctor_result_handoff": {"type": ["object", "null"]},
+            "service": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
     return {
         "openapi": "3.1.0",
         "info": {"title": "ptcli Retorrent API", "version": "1.0.0"},
@@ -11812,6 +11898,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "requestBody": {"required": False, "content": {"application/json": {"schema": _readiness_bundle_tool_request_schema()}}},
                     "responses": {"200": {"description": "AI readiness bundle.", "content": {"application/json": {"schema": readiness_bundle_response_schema}}}},
                 },
+            },
+            "/v1/summary/check": {
+                "post": {
+                    "operationId": "checkPtcliSummary",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": summary_check_request_schema}}},
+                    "responses": {"200": {"description": "Read-only ptcli summary-check automation verdict.", "content": {"application/json": {"schema": summary_check_response_schema}}}},
+                }
             },
             "/v1/sites": {
                 "get": {
