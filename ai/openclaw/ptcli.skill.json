@@ -4914,6 +4914,15 @@
           "seeding_requirements",
           "rules"
         ],
+        "policy_coverage_fields": [
+          "ready",
+          "rule_obligations_ready",
+          "source",
+          "targets",
+          "missing_policy_fields",
+          "disabled_automation",
+          "recommendations"
+        ],
         "rule_fields": [
           "source_rules_url",
           "target_rules_urls",
@@ -5497,6 +5506,15 @@
           "qbit_limits",
           "seeding_requirements",
           "rules"
+        ],
+        "policy_coverage_fields": [
+          "ready",
+          "rule_obligations_ready",
+          "source",
+          "targets",
+          "missing_policy_fields",
+          "disabled_automation",
+          "recommendations"
         ],
         "rule_fields": [
           "source_rules_url",

@@ -15829,6 +15829,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "rules" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
+    assert "rule_obligations_ready" in tool_by_name["daily_candidates"]["response_contract"]["policy_coverage_fields"]
     assert "fingerprint_status" in tool_by_name["daily_candidates"]["response_contract"]["rule_fields"]
     assert "placeholder" in tool_by_name["daily_candidates"]["response_contract"]["rule_fingerprint_status_fields"]
     assert "submit_job_endpoint" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
@@ -16432,6 +16433,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "rules" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
+        assert "rule_obligations_ready" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_coverage_fields"]
         assert "fingerprint_status" in tools_by_name["daily_candidates_job"]["response_contract"]["rule_fields"]
         assert "placeholder" in tools_by_name["daily_candidates_job"]["response_contract"]["rule_fingerprint_status_fields"]
         assert "summary_text" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
@@ -17142,6 +17144,9 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["decision"] == "submit_when_confirmed"
     assert result["digest"]["push_items"][0]["policy_summary"]["manual_review_ready"] is True
     assert result["digest"]["push_items"][0]["policy_summary"]["policy_coverage"]["ready"] is True
+    assert result["digest"]["push_items"][0]["policy_summary"]["policy_coverage"]["rule_obligations_ready"] is True
+    assert result["digest"]["push_items"][0]["policy_summary"]["policy_coverage"]["source"]["rule_obligations"]["ready"] is True
+    assert result["digest"]["push_items"][0]["policy_summary"]["policy_coverage"]["source"]["rule_obligations"]["missing_confirmations"] == []
     assert result["digest"]["push_items"][0]["policy_summary"]["qbit_limits"]["source"]["download_limit"] == 20 * 1024 * 1024
     assert result["digest"]["push_items"][0]["policy_summary"]["qbit_limits"]["target"]["upload_limit"] == 2 * 1024 * 1024
     assert result["digest"]["push_items"][0]["policy_summary"]["rules"]["fingerprint_status"]["source"]["ready"] is True
@@ -17169,6 +17174,9 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["policy_summary"]["rules"]["source_fingerprint"] == "u2-review"
     assert candidate["policy_summary"]["rules"]["target_fingerprints"] == ["mteam-review"]
     assert candidate["policy_summary"]["policy_coverage"]["ready"] is True
+    assert candidate["policy_summary"]["policy_coverage"]["rule_obligations_ready"] is True
+    assert candidate["policy_summary"]["policy_coverage"]["targets"][0]["rule_obligations"]["ready"] is True
+    assert candidate["policy_summary"]["policy_coverage"]["targets"][0]["rule_obligations"]["missing_confirmations"] == []
     assert candidate["policy_summary"]["policy_coverage"]["source"]["complete"] is True
     assert candidate["policy_summary"]["policy_coverage"]["targets"][0]["complete"] is True
     assert candidate["policy_coverage"]["ready"] is True

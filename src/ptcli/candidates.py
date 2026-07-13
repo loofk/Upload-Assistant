@@ -350,8 +350,8 @@ def _candidate_execute_request(config: dict[str, Any], seed: CandidateSeed, targ
 
 def _candidate_policy_summary(source_policy: dict[str, Any], target_policies: list[dict[str, Any]], execute_request: dict[str, Any], *, accept_rules: bool) -> dict[str, Any]:
     policies = [source_policy, *target_policies]
-    source_coverage = build_site_policy_coverage(source_policy, roles=["source"])
-    target_coverages = [build_site_policy_coverage(policy, roles=["target"]) for policy in target_policies]
+    source_coverage = build_site_policy_coverage(source_policy, roles=["source"], accept_rules=accept_rules)
+    target_coverages = [build_site_policy_coverage(policy, roles=["target"], accept_rules=accept_rules) for policy in target_policies]
     return {
         "accept_rules": bool(accept_rules),
         "manual_review_ready": bool(accept_rules) or not any(policy.get("manual_review_required") is True for policy in policies),
@@ -430,7 +430,8 @@ def _candidate_policy_coverage_summary(source_coverage: dict[str, Any], target_c
         if fields
     }
     return {
-        "ready": all(bool(coverage.get("complete")) for coverage in coverages),
+        "ready": all(bool(coverage.get("complete")) and bool((coverage.get("rule_obligations") or {}).get("ready")) for coverage in coverages),
+        "rule_obligations_ready": all(bool((coverage.get("rule_obligations") or {}).get("ready")) for coverage in coverages),
         "source": source_coverage,
         "targets": target_coverages,
         "missing_policy_fields": missing,
