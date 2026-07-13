@@ -7583,6 +7583,7 @@
           "items",
           "submit_items",
           "submission_handoff",
+          "execution_summary",
           "next_step",
           "recommended_tool",
           "recommended_endpoint",
@@ -7601,6 +7602,7 @@
           "counts",
           "notification_payload",
           "submission_handoff",
+          "execution_summary",
           "top_submit_requests",
           "publish_contract",
           "continue_when",
@@ -7617,7 +7619,22 @@
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
+          "execution_summary",
           "items"
+        ],
+        "execution_summary_fields": [
+          "ready",
+          "submit_count",
+          "blocked_count",
+          "counts",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "post_submit_flow",
+          "actions",
+          "items",
+          "blockers",
+          "next_actions"
         ],
         "submission_item_fields": [
           "candidate_job_id",

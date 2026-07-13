@@ -3475,6 +3475,7 @@ def _daily_candidate_schedule_push_payload(push_items: list[dict[str, Any]], ite
 def _daily_candidate_schedule_notification_payload(schedule_digest: dict[str, Any], agent_decision: dict[str, Any]) -> dict[str, Any]:
     push_payload = schedule_digest.get("push_payload") if isinstance(schedule_digest.get("push_payload"), dict) else {}
     submission_handoff = schedule_digest.get("submission_handoff") if isinstance(schedule_digest.get("submission_handoff"), dict) else {}
+    execution_summary = submission_handoff.get("execution_summary") if isinstance(submission_handoff.get("execution_summary"), dict) else {}
     top_item = push_payload.get("top_item") if isinstance(push_payload.get("top_item"), dict) else None
     items = push_payload.get("items") if isinstance(push_payload.get("items"), list) else []
     ready_items = [item for item in items if isinstance(item, dict) and item.get("can_submit") is True]
@@ -3515,6 +3516,7 @@ def _daily_candidate_schedule_notification_payload(schedule_digest: dict[str, An
         "top_item": top_item,
         "items": items,
         "submission_handoff": submission_handoff,
+        "execution_summary": execution_summary,
         "next_step": submission_handoff.get("next_step"),
         "recommended_tool": submission_handoff.get("recommended_tool"),
         "recommended_endpoint": submission_handoff.get("recommended_endpoint"),
@@ -3528,6 +3530,7 @@ def _daily_candidate_schedule_notification_payload(schedule_digest: dict[str, An
 
 def _daily_candidate_schedule_delivery_handoff(schedule_digest: dict[str, Any], notification_payload: dict[str, Any], agent_decision: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
     submission_handoff = schedule_digest.get("submission_handoff") if isinstance(schedule_digest.get("submission_handoff"), dict) else {}
+    execution_summary = submission_handoff.get("execution_summary") if isinstance(submission_handoff.get("execution_summary"), dict) else {}
     pending_count = int(schedule_digest.get("pending_job_count") or 0)
     target_count = int(schedule_digest.get("target_count") or 0)
     selected_count = int(schedule_digest.get("selected_count") or 0)
@@ -3558,6 +3561,7 @@ def _daily_candidate_schedule_delivery_handoff(schedule_digest: dict[str, Any], 
         },
         "notification_payload": notification_payload,
         "submission_handoff": submission_handoff,
+        "execution_summary": execution_summary,
         "top_submit_requests": schedule_digest.get("top_submit_requests", []),
         "publish_contract": {
             "payload_field": "delivery_handoff.notification_payload",
@@ -3752,6 +3756,7 @@ def _daily_candidate_submission_policy_execution(digest_item: dict[str, Any]) ->
 
 def _daily_candidate_schedule_submission_handoff(submission_items: list[dict[str, Any]], blockers: list[str]) -> dict[str, Any]:
     next_step = _daily_candidate_submission_next_step(submission_items, blockers)
+    execution_summary = _daily_candidate_submission_execution_summary(submission_items, blockers, next_step)
     return {
         "kind": "ptcli.daily_candidate_submission_handoff",
         "ready": bool(submission_items) and not blockers,
@@ -3764,9 +3769,84 @@ def _daily_candidate_schedule_submission_handoff(submission_items: list[dict[str
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
         "recommended_request": next_step.get("request"),
+        "execution_summary": execution_summary,
         "items": submission_items,
         "blockers": blockers,
     }
+
+
+def _daily_candidate_submission_execution_summary(submission_items: list[dict[str, Any]], blockers: list[str], next_step: dict[str, Any]) -> dict[str, Any]:
+    first_after_submit = next((item.get("after_submit") for item in submission_items if isinstance(item.get("after_submit"), dict)), {})
+    ready = bool(submission_items) and not blockers
+    items = [_daily_candidate_submission_execution_item(item) for item in submission_items]
+    post_submit_flow = {
+        "primary_read": "job_handoff",
+        "read_fields": first_after_submit.get("read_fields", []),
+        "poll_with": first_after_submit.get("poll_with") or "get_job_status",
+        "summary_with": first_after_submit.get("summary_with") or "get_job_summary",
+        "resume_when": first_after_submit.get("resume_when"),
+        "resume_request": "job_handoff.recommended_request",
+        "material_resume_request": first_after_submit.get("material_resume_request"),
+        "stop_when": first_after_submit.get("stop_when", []),
+        "state_source": "job_handoff.action",
+    }
+    return {
+        "kind": "ptcli.daily_candidate_submission_execution_summary",
+        "ready": ready,
+        "submit_count": len(submission_items),
+        "blocked_count": len(blockers),
+        "counts": {
+            "submittable": len(submission_items),
+            "blocked": len(blockers),
+            "policy_ready": sum(1 for item in submission_items if isinstance(item.get("policy_execution"), dict) and item["policy_execution"].get("ready") is True),
+            "needs_policy": sum(1 for item in submission_items if isinstance(item.get("policy_execution"), dict) and item["policy_execution"].get("ready") is not True),
+        },
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
+        "post_submit_flow": post_submit_flow,
+        "actions": {
+            "submit_candidates": "POST execution_summary.items[].request_template to execution_summary.items[].submit_endpoint after explicit user approval.",
+            "poll_submitted_jobs": "Use post_submit_flow.poll_with on the returned retorrent job id, then read post_submit_flow.read_fields.",
+            "resume_materials": "When job_handoff.action=prepare_materials, call resume_job with job_handoff.recommended_request after providing material files.",
+            "configure_policy": "When job_handoff.action=configure_policy, update site policy/rule review data before retrying.",
+            "stop_duplicate": "When job_handoff.action=stop_duplicate, do not upload; report duplicate evidence.",
+        },
+        "items": items,
+        "blockers": blockers,
+        "next_actions": _daily_candidate_submission_execution_next_actions(ready, submission_items, blockers),
+    }
+
+
+def _daily_candidate_submission_execution_item(item: dict[str, Any]) -> dict[str, Any]:
+    after_submit = item.get("after_submit") if isinstance(item.get("after_submit"), dict) else {}
+    policy_execution = item.get("policy_execution") if isinstance(item.get("policy_execution"), dict) else {}
+    return {
+        "candidate_job_id": item.get("candidate_job_id"),
+        "selector": item.get("selector") if isinstance(item.get("selector"), dict) else {},
+        "can_submit": True,
+        "policy_ready": policy_execution.get("ready"),
+        "submit_tool": item.get("submit_tool"),
+        "submit_endpoint": item.get("submit_endpoint"),
+        "request_template": item.get("request_template"),
+        "post_submit_read": "job_handoff",
+        "poll_with": after_submit.get("poll_with") or "get_job_status",
+        "summary_with": after_submit.get("summary_with") or "get_job_summary",
+        "resume_when": after_submit.get("resume_when"),
+        "material_resume_request": after_submit.get("material_resume_request"),
+        "stop_when": after_submit.get("stop_when", []),
+        "identity_inherited_from_candidate": item.get("identity_inherited_from_candidate") if isinstance(item.get("identity_inherited_from_candidate"), dict) else {},
+    }
+
+
+def _daily_candidate_submission_execution_next_actions(ready: bool, submission_items: list[dict[str, Any]], blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve execution_summary.blockers before submitting any daily candidate."]
+    if not submission_items:
+        return ["No submittable candidates are available; poll pending jobs or rerun the daily schedule later."]
+    if ready:
+        return ["Submit an approved execution_summary.items[] request, then poll the created retorrent job and read job_handoff for duplicate, policy, material, or live-upload decisions."]
+    return ["Review execution_summary.items[].policy_ready and candidate blockers before submission."]
 
 
 def _daily_candidate_submission_next_step(submission_items: list[dict[str, Any]], blockers: list[str]) -> dict[str, Any]:
@@ -9447,9 +9527,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
                 "digest_fields": ["items", "push_items", "push_payload", "top_submit_requests", "submission_handoff", "target_count", "selected_count", "ready_count", "shortfall_count", "target_met", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
                 "push_payload_fields": ["title", "summary", "message", "format", "target_count", "selected_count", "shortfall_count", "target_met", "items", "top_item", "decision_summary", "submission_ready", "recommended_action"],
-                "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "submit_items", "submission_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
-                "delivery_handoff_fields": ["ready", "publish_ready", "submission_ready", "target_met", "status", "recommended_tool", "recommended_endpoint", "recommended_request", "counts", "notification_payload", "submission_handoff", "top_submit_requests", "publish_contract", "continue_when", "stop_when", "blockers", "next_actions"],
-                "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items"],
+                "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "submit_items", "submission_handoff", "execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
+                "delivery_handoff_fields": ["ready", "publish_ready", "submission_ready", "target_met", "status", "recommended_tool", "recommended_endpoint", "recommended_request", "counts", "notification_payload", "submission_handoff", "execution_summary", "top_submit_requests", "publish_contract", "continue_when", "stop_when", "blockers", "next_actions"],
+                "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "execution_summary", "items"],
+                "execution_summary_fields": ["ready", "submit_count", "blocked_count", "counts", "recommended_tool", "recommended_endpoint", "recommended_request", "post_submit_flow", "actions", "items", "blockers", "next_actions"],
                 "submission_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
                 "after_submit_fields": ["read_fields", "poll_with", "summary_with", "stop_when", "resume_when", "material_resume_request"],
             },
