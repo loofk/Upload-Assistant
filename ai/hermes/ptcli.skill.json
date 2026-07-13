@@ -11578,6 +11578,9 @@
           "credentials",
           "doctor",
           "manual_job",
+          "validation_plan",
+          "post_submit_handoff",
+          "evidence_contract",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -11587,6 +11590,32 @@
           "blockers",
           "warnings",
           "next_actions"
+        ],
+        "seedbox_live_validation_plan_fields": [
+          "ready",
+          "first_step",
+          "steps",
+          "required_order",
+          "read_first"
+        ],
+        "seedbox_post_submit_handoff_fields": [
+          "ready",
+          "submit_tool",
+          "submit_endpoint",
+          "submit_request",
+          "poll_tool",
+          "poll_until",
+          "resume_tool",
+          "resume_when",
+          "finish_tool",
+          "complete_when",
+          "stop_when"
+        ],
+        "seedbox_live_evidence_contract_fields": [
+          "final_read",
+          "complete_when",
+          "required_fields",
+          "audit_notes"
         ],
         "agent_decision_fields": [
           "decision",

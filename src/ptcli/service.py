@@ -2107,6 +2107,8 @@ def _readiness_bundle_seedbox_live_validation_handoff(
     phase = "run_doctor" if ready else str(next_step.get("reason") or "fix_preflight")
     doctor_request = {"argv": doctor_template.get("argv")} if isinstance(doctor_template, dict) and doctor_template.get("argv") else None
     manual_request = manual_job_template.get("request") if isinstance(manual_job_template, dict) else None
+    validation_plan = _seedbox_live_validation_plan(ready, next_step, doctor_request, manual_request, live_test_handoff)
+    post_submit_handoff = _seedbox_post_submit_handoff(manual_request)
     return {
         "kind": "ptcli.seedbox_live_validation_handoff",
         "ready": ready,
@@ -2163,6 +2165,9 @@ def _readiness_bundle_seedbox_live_validation_handoff(
             "request": manual_request,
             "continue_when": "job_id is returned; poll get_job_status then read get_job_summary.closure_handoff",
         },
+        "validation_plan": validation_plan,
+        "post_submit_handoff": post_submit_handoff,
+        "evidence_contract": _seedbox_live_evidence_contract(),
         "recommended_tool": "ptcli_doctor" if ready else next_step.get("tool"),
         "recommended_endpoint": None if ready else next_step.get("endpoint"),
         "recommended_request": doctor_request if ready else next_step.get("request"),
@@ -2179,6 +2184,131 @@ def _readiness_bundle_seedbox_live_validation_handoff(
         "blockers": _string_list(live_test_handoff.get("blockers")) or _string_list(live_readiness.get("blockers")),
         "warnings": _string_list(live_test_handoff.get("warnings")) or _string_list(live_readiness.get("warnings")),
         "next_actions": _string_list(preflight_checklist.get("next_actions")) or _string_list(live_readiness.get("next_actions")),
+    }
+
+
+def _seedbox_live_validation_plan(
+    ready: bool,
+    next_step: dict[str, Any],
+    doctor_request: dict[str, Any] | None,
+    manual_request: dict[str, Any] | None,
+    live_test_handoff: dict[str, Any],
+) -> dict[str, Any]:
+    summary_check = (live_test_handoff.get("after_doctor") or {}).get("summary_check_argv_template") if isinstance(live_test_handoff.get("after_doctor"), dict) else None
+    steps = [
+        {
+            "index": 1,
+            "name": "preflight",
+            "tool": next_step.get("tool") if not ready else "readiness_bundle",
+            "endpoint": next_step.get("endpoint") if not ready else "/v1/readiness/bundle",
+            "method": next_step.get("method") if not ready else "POST",
+            "request": next_step.get("request") if not ready else None,
+            "read": ["seedbox_live_validation_handoff.preflight_checklist", "seedbox_live_validation_handoff.blockers"],
+            "continue_when": "seedbox_live_validation_handoff.preflight_ready=true and seedbox_live_validation_handoff.ready=true",
+            "stop_when": "seedbox_live_validation_handoff.blockers is non-empty",
+        },
+        {
+            "index": 2,
+            "name": "doctor",
+            "tool": "ptcli_doctor",
+            "method": "CLI",
+            "request": doctor_request,
+            "read": ["ptcli-doctor-summary.json", "doctor_result_handoff.live_safe_to_attempt", "doctor_result_handoff.blockers"],
+            "continue_when": "doctor_result_handoff.live_safe_to_attempt=true",
+            "stop_when": "doctor_result_handoff.live_safe_to_attempt=false or doctor_result_handoff.blockers is non-empty",
+            "summary_check": summary_check,
+        },
+        {
+            "index": 3,
+            "name": "check_and_submit",
+            "tool": "source_url_check_and_submit",
+            "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": "POST",
+            "request": manual_request,
+            "read": ["duplicate_check", "submit_if_clear_handoff", "job_id", "status_endpoint", "summary_endpoint"],
+            "continue_when": "duplicate_check.exists=false and job_id is returned",
+            "stop_when": "duplicate_check.exists=true or submit_if_clear_handoff.ready=false",
+        },
+        {
+            "index": 4,
+            "name": "poll_job",
+            "tool": "get_job_status",
+            "endpoint": "/v1/jobs/{job_id}",
+            "method": "GET",
+            "request": {"job_id": "<job_id from check_and_submit>"},
+            "read": ["status", "recovery_handoff", "job_handoff", "blockers", "next_actions"],
+            "repeat_when": "recovery_handoff.should_poll=true",
+            "continue_when": "status in blocked,failed,complete,cancelled",
+            "stop_when": "status=cancelled or recovery_handoff.action=stop",
+        },
+        {
+            "index": 5,
+            "name": "recover_or_finish",
+            "tool": "resume_job or get_job_summary",
+            "endpoint": "/v1/jobs/{job_id}/resume or /v1/jobs/{job_id}/summary",
+            "method": "POST or GET",
+            "request": "recovery_handoff.dry_run_request, recovery_handoff.execute_request, or null for summary",
+            "read": ["recovery_handoff", "closure_summary", "closure_handoff", "qbit_enforcement_summary", "evidence"],
+            "continue_when": "closure_summary.complete=true and closure_summary.blockers=[]",
+            "stop_when": "recovery_handoff.blockers remain after allowed resume or closure_summary.blockers is non-empty",
+        },
+    ]
+    return {
+        "kind": "ptcli.seedbox_live_validation_plan",
+        "ready": ready,
+        "first_step": "doctor" if ready else "preflight",
+        "steps": steps,
+        "required_order": ["preflight", "doctor", "check_and_submit", "poll_job", "recover_or_finish"],
+        "read_first": ["seedbox_live_validation_handoff", "validation_plan", "evidence_contract"],
+    }
+
+
+def _seedbox_post_submit_handoff(manual_request: dict[str, Any] | None) -> dict[str, Any]:
+    return {
+        "kind": "ptcli.seedbox_post_submit_handoff",
+        "ready": bool(manual_request),
+        "submit_tool": "source_url_check_and_submit",
+        "submit_endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+        "submit_method": "POST",
+        "submit_request": manual_request,
+        "after_submit_read": ["duplicate_check", "job_id", "status_endpoint", "summary_endpoint"],
+        "poll_tool": "get_job_status",
+        "poll_endpoint_template": "/v1/jobs/{job_id}",
+        "poll_until": "recovery_handoff.should_poll=false",
+        "resume_tool": "resume_job",
+        "resume_endpoint_template": "/v1/jobs/{job_id}/resume",
+        "resume_when": "recovery_handoff.should_resume=true and recovery_handoff.dry_run_request is present",
+        "resume_order": ["call dry_run_request", "review command_argv and ignored_overrides", "call execute_request only after user approval", "poll child job"],
+        "finish_tool": "get_job_summary",
+        "finish_endpoint_template": "/v1/jobs/{job_id}/summary",
+        "complete_when": "closure_summary.complete=true and closure_summary.blockers=[]",
+        "stop_when": ["duplicate_check.exists=true", "recovery_handoff.action=stop", "closure_summary.blockers is non-empty"],
+    }
+
+
+def _seedbox_live_evidence_contract() -> dict[str, Any]:
+    return {
+        "kind": "ptcli.seedbox_live_evidence_contract",
+        "final_read": "get_job_summary",
+        "complete_when": ["closure_summary.complete=true", "closure_summary.blockers=[]", "qbit_enforcement_summary.ready=true when rate limits are configured"],
+        "required_fields": [
+            "source_reference",
+            "duplicate_check.searched",
+            "duplicate_check.exists",
+            "closure_summary.source.torrent_hash",
+            "closure_summary.source.content_path",
+            "closure_summary.target.uploaded_torrent_hash",
+            "closure_summary.target.injected_torrent_hash",
+            "materials_handoff.ready",
+            "target_upload_handoff.uploaded_seeding_ready",
+            "qbit_enforcement_summary.status",
+            "summary_file",
+        ],
+        "audit_notes": [
+            "Do not treat the live validation as complete when duplicate_check.exists=true.",
+            "Do not skip accept_rules, confirm_upload, policy_execution_handoff, or rule_obligations.",
+            "Report missing hash/path/size/sha1 evidence from closure_summary or evidence before considering the first live run verified.",
+        ],
     }
 
 
@@ -10584,7 +10714,10 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "policy_execution_handoff", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
         "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "policy_execution_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
-        "seedbox_live_validation_handoff_fields": ["ready", "phase", "connectivity_checked", "preflight_ready", "preflight_checklist", "execution_plan", "docker_compose", "qbit", "site_policy", "credentials", "doctor", "manual_job", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
+        "seedbox_live_validation_handoff_fields": ["ready", "phase", "connectivity_checked", "preflight_ready", "preflight_checklist", "execution_plan", "docker_compose", "qbit", "site_policy", "credentials", "doctor", "manual_job", "validation_plan", "post_submit_handoff", "evidence_contract", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
+        "seedbox_live_validation_plan_fields": ["ready", "first_step", "steps", "required_order", "read_first"],
+        "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "complete_when", "stop_when"],
+        "seedbox_live_evidence_contract_fields": ["final_read", "complete_when", "required_fields", "audit_notes"],
         "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
     }

@@ -16591,6 +16591,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_validation_handoff_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "doctor" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
     assert "manual_job" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+    assert "validation_plan" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+    assert "post_submit_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+    assert "evidence_contract" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+    assert "seedbox_live_validation_plan_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "seedbox_post_submit_handoff_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "seedbox_live_evidence_contract_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "runbook_ref" in tool_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
     assert tool_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
     assert "ready_to_create_job" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
@@ -17017,6 +17023,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "seedbox_live_validation_handoff_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "doctor" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
         assert "manual_job" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+        assert "validation_plan" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+        assert "post_submit_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+        assert "evidence_contract" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+        assert "seedbox_live_validation_plan_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "seedbox_post_submit_handoff_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "seedbox_live_evidence_contract_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "runbook_ref" in tools_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
         assert "submit_if_clear_handoff" in tools_by_name["retorrent_check"]["response_contract"]["required_fields"]
         assert "submit_if_clear_handoff_fields" in tools_by_name["retorrent_check"]["response_contract"]
@@ -17699,6 +17711,25 @@ services:
     assert payload["seedbox_live_validation_handoff"]["doctor"]["continue_when"] == "doctor_result_handoff.live_safe_to_attempt=true"
     assert payload["seedbox_live_validation_handoff"]["manual_job"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert payload["seedbox_live_validation_handoff"]["manual_job"]["request"] == payload["live_readiness"]["manual_job_template"]["request"]
+    assert payload["seedbox_live_validation_handoff"]["validation_plan"]["kind"] == "ptcli.seedbox_live_validation_plan"
+    assert payload["seedbox_live_validation_handoff"]["validation_plan"]["ready"] is True
+    assert payload["seedbox_live_validation_handoff"]["validation_plan"]["first_step"] == "doctor"
+    assert payload["seedbox_live_validation_handoff"]["validation_plan"]["required_order"] == ["preflight", "doctor", "check_and_submit", "poll_job", "recover_or_finish"]
+    validation_steps = {step["name"]: step for step in payload["seedbox_live_validation_handoff"]["validation_plan"]["steps"]}
+    assert validation_steps["doctor"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
+    assert validation_steps["doctor"]["summary_check"] == ["python3", "ptcli.py", "summary-check", "--summary-file", "<ptcli-doctor-summary.json>", "--json"]
+    assert validation_steps["check_and_submit"]["tool"] == "source_url_check_and_submit"
+    assert validation_steps["check_and_submit"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert validation_steps["check_and_submit"]["request"] == payload["live_readiness"]["manual_job_template"]["request"]
+    assert validation_steps["poll_job"]["read"] == ["status", "recovery_handoff", "job_handoff", "blockers", "next_actions"]
+    assert validation_steps["recover_or_finish"]["read"] == ["recovery_handoff", "closure_summary", "closure_handoff", "qbit_enforcement_summary", "evidence"]
+    assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["kind"] == "ptcli.seedbox_post_submit_handoff"
+    assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["submit_tool"] == "source_url_check_and_submit"
+    assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["resume_when"] == "recovery_handoff.should_resume=true and recovery_handoff.dry_run_request is present"
+    assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["complete_when"] == "closure_summary.complete=true and closure_summary.blockers=[]"
+    assert payload["seedbox_live_validation_handoff"]["evidence_contract"]["kind"] == "ptcli.seedbox_live_evidence_contract"
+    assert "closure_summary.target.uploaded_torrent_hash" in payload["seedbox_live_validation_handoff"]["evidence_contract"]["required_fields"]
+    assert "qbit_enforcement_summary.ready=true when rate limits are configured" in payload["seedbox_live_validation_handoff"]["evidence_contract"]["complete_when"]
     assert payload["seedbox_live_validation_handoff"]["recommended_tool"] == "ptcli_doctor"
     assert payload["seedbox_live_validation_handoff"]["recommended_request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
     assert "duplicate_check.exists=true" in payload["seedbox_live_validation_handoff"]["stop_when"]
