@@ -7141,6 +7141,8 @@ def _candidate_submission_execution_handoff(job: dict[str, Any], manual_handoff:
     closure_action = str(closure_summary.get("action") or "")
     manual_action = str(manual_handoff.get("action") or "")
     next_step = closure_summary.get("next_step") if isinstance(closure_summary.get("next_step"), dict) else {}
+    materials_handoff = manual_handoff.get("materials_handoff") if isinstance(manual_handoff.get("materials_handoff"), dict) else None
+    material_input_template = _candidate_submission_material_input_template(materials_handoff)
     policy_ready = policy_execution_handoff.get("ready") if isinstance(policy_execution_handoff.get("ready"), bool) else None
     state, reason = _candidate_submission_execution_state(status, closure_summary, manual_handoff, policy_ready, blockers)
     recommended_tool = next_step.get("tool")
@@ -7162,10 +7164,40 @@ def _candidate_submission_execution_handoff(job: dict[str, Any], manual_handoff:
         "recommended_endpoint": recommended_endpoint,
         "recommended_method": next_step.get("method"),
         "recommended_request": recommended_request,
+        "material_input_template": material_input_template,
         "continue_when": _candidate_submission_execution_continue_when(state),
         "stop_when": _candidate_submission_execution_stop_when(state),
         "blockers": blockers,
-        "next_actions": _candidate_submission_execution_next_actions(state, next_step, blockers),
+        "next_actions": _candidate_submission_execution_next_actions(state, next_step, blockers, material_input_template),
+    }
+
+
+def _candidate_submission_material_input_template(materials_handoff: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(materials_handoff, dict):
+        return None
+    recommended_inputs = materials_handoff.get("recommended_inputs") if isinstance(materials_handoff.get("recommended_inputs"), list) else []
+    material_plan = materials_handoff.get("material_plan") if isinstance(materials_handoff.get("material_plan"), dict) else {}
+    resume_handoff = materials_handoff.get("resume_handoff") if isinstance(materials_handoff.get("resume_handoff"), dict) else {}
+    next_item = material_plan.get("next_item") if isinstance(material_plan.get("next_item"), dict) else None
+    return {
+        "kind": "ptcli.candidate_submission_material_input_template",
+        "ready": materials_handoff.get("ready") is True,
+        "recommended_input_keys": [item.get("key") for item in recommended_inputs if isinstance(item, dict) and item.get("key")],
+        "recommended_inputs": recommended_inputs,
+        "missing": _string_list(material_plan.get("missing")),
+        "next_item": next_item,
+        "accepted_override_keys": _string_list(resume_handoff.get("accepted_override_keys")),
+        "resume_request_template": materials_handoff.get("resume_request_template") if isinstance(materials_handoff.get("resume_request_template"), dict) else {},
+        "dry_run_request": resume_handoff.get("dry_run_request") if isinstance(resume_handoff.get("dry_run_request"), dict) else None,
+        "execute_request": resume_handoff.get("execute_request") if isinstance(resume_handoff.get("execute_request"), dict) else None,
+        "staged_requests": resume_handoff.get("staged_requests") if isinstance(resume_handoff.get("staged_requests"), list) else [],
+        "examples_by_key": {
+            str(item.get("key")): item.get("examples")
+            for item in recommended_inputs
+            if isinstance(item, dict) and item.get("key") and isinstance(item.get("examples"), dict)
+        },
+        "continue_when": resume_handoff.get("continue_when"),
+        "stop_when": resume_handoff.get("stop_when"),
     }
 
 
@@ -7221,7 +7253,7 @@ def _candidate_submission_execution_stop_when(state: str) -> list[str]:
     return []
 
 
-def _candidate_submission_execution_next_actions(state: str, next_step: dict[str, Any], blockers: list[str]) -> list[str]:
+def _candidate_submission_execution_next_actions(state: str, next_step: dict[str, Any], blockers: list[str], material_input_template: dict[str, Any] | None) -> list[str]:
     if state == "complete":
         return []
     if state == "wait":
@@ -7232,6 +7264,9 @@ def _candidate_submission_execution_next_actions(state: str, next_step: dict[str
         return ["Ask the user for explicit accept_rules/confirm_upload confirmation before resuming."]
     if state == "configure_policy":
         return ["Call site_policies or update PTCLI.SITE_POLICIES before attempting live work."]
+    if state == "prepare_materials" and isinstance(material_input_template, dict):
+        keys = ", ".join(_string_list(material_input_template.get("recommended_input_keys")))
+        return [f"Use candidate_submission_summary.execution_handoff.material_input_template to provide material overrides: {keys}."]
     if next_step.get("tool"):
         return [f"Use candidate_submission_summary.execution_handoff.recommended_request with {next_step['tool']} after reviewing blockers and site rules."]
     if blockers:
@@ -10060,7 +10095,8 @@ def _job_response_contract() -> dict[str, Any]:
         "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
         "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "execution_state", "execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
         "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "policy_execution_ready", "execution_state", "execution_handoff", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
-        "candidate_submission_execution_handoff_fields": ["state", "reason", "status", "ready_for_live", "should_poll", "should_resume", "should_stop", "manual_action", "closure_action", "policy_execution_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "continue_when", "stop_when", "blockers", "next_actions"],
+        "candidate_submission_execution_handoff_fields": ["state", "reason", "status", "ready_for_live", "should_poll", "should_resume", "should_stop", "manual_action", "closure_action", "policy_execution_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "material_input_template", "continue_when", "stop_when", "blockers", "next_actions"],
+        "candidate_submission_material_input_template_fields": ["ready", "recommended_input_keys", "recommended_inputs", "missing", "next_item", "accepted_override_keys", "resume_request_template", "dry_run_request", "execute_request", "staged_requests", "examples_by_key", "continue_when", "stop_when"],
         "check_submission_fields": ["check_job_id", "check_status", "check_kind", "check_summary_file", "duplicate_check", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides"],
         "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "tool", "endpoint", "method", "request", "requires_before_call", "next_step", "blockers", "next_actions"],
         "closure_handoff_fields": ["action", "complete", "closure_checklist", "source", "target", "evidence", "duplicate_check", "target_upload_handoff", "qbit_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],

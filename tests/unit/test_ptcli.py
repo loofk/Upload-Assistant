@@ -14270,6 +14270,40 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
             "ok": False,
             "blockers": ["qBittorrent save path needs live validation."],
             "next_actions": ["Poll or resume after checking qBittorrent."],
+            "material_diagnostics": {
+                "present": True,
+                "ready_for_mteam_upload": False,
+                "critical_ready": False,
+                "critical_missing": ["metadata.tmdb", "description.content"],
+                "critical_path": {"ready": False, "next_step": "metadata", "missing": ["metadata.tmdb", "description.content"]},
+                "metadata_fields": {
+                    "imdb_id": {"ready": True},
+                    "tmdb_id": {"ready": False},
+                    "douban_id": {"ready": False},
+                    "ptgen_description": {"ready": False},
+                },
+                "description": {
+                    "ready": False,
+                    "has_mediainfo_or_bdinfo": True,
+                    "has_screenshot_bbcode": False,
+                    "bbcode_image_count": 0,
+                    "external_id_missing": ["tmdb", "douban"],
+                    "external_id_readiness": {"imdb": True, "tmdb": False, "douban": False},
+                    "has_ptgen_description": False,
+                },
+                "upload_material_blockers": ["assets.screenshots", "assets.image_host_uploads"],
+            },
+            "target_preflight_diagnostics": {
+                "ready": False,
+                "payload_ready": False,
+                "materials_ready": False,
+                "metadata_ready": False,
+                "assets_ready": False,
+                "description_ready": False,
+                "missing": ["materials.metadata.tmdb", "assets.screenshots"],
+                "description_missing": ["materials.description.external_ids.tmdb"],
+                "blockers": ["description.screenshot_coverage"],
+            },
             "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
         }
 
@@ -14346,6 +14380,13 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["candidate_submission_handoff"]["execution_handoff"]["should_stop"] is True
     assert retorrent_job["candidate_submission_handoff"]["execution_handoff"]["policy_execution_ready"] is True
     assert "policy_execution_handoff.ready=false" in retorrent_job["candidate_submission_handoff"]["execution_handoff"]["stop_when"]
+    material_template = retorrent_job["candidate_submission_handoff"]["execution_handoff"]["material_input_template"]
+    assert material_template["kind"] == "ptcli.candidate_submission_material_input_template"
+    assert material_template["ready"] is False
+    assert {"metadata_file", "ptgen_description_file", "screenshot_files", "image_host_file"}.issubset(set(material_template["recommended_input_keys"]))
+    assert material_template["dry_run_request"]["metadata_file"] == "/tmp/materials/metadata.json"
+    assert material_template["execute_request"]["ptgen_description_file"] == "/tmp/materials/ptgen-description.txt"
+    assert material_template["examples_by_key"]["metadata_file"]["fetch_ptgen"] is True
     assert retorrent_job["candidate_submission_handoff"]["manual_retorrent_handoff"]["action"] == "configure_policy"
     assert retorrent_job["candidate_submission_summary"]["candidate_job_id"] == candidate_job["job_id"]
     assert retorrent_job["candidate_submission_summary"]["candidate_rank"] == 1
@@ -14369,6 +14410,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["candidate_submission_summary"]["execution_state"] == "configure_policy"
     assert retorrent_job["candidate_submission_summary"]["execution_handoff"] == retorrent_job["candidate_submission_handoff"]["execution_handoff"]
     assert retorrent_job["candidate_submission_summary"]["execution_handoff"]["recommended_tool"] == retorrent_job["closure_summary"]["recommended_tool"]
+    assert retorrent_job["candidate_submission_summary"]["execution_handoff"]["material_input_template"] == material_template
     assert retorrent_job["candidate_submission_summary"]["manual_action"] == "configure_policy"
     assert retorrent_job["candidate_submission_summary"]["closure_complete"] is False
     assert retorrent_job["candidate_submission_summary"]["recommended_tool"] == retorrent_job["closure_summary"]["recommended_tool"]
@@ -15840,6 +15882,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_submission_execution_handoff_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
     assert "state" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
     assert "should_resume" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
+    assert "material_input_template" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
+    assert "candidate_submission_material_input_template_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
+    assert "dry_run_request" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_material_input_template_fields"]
+    assert "examples_by_key" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_material_input_template_fields"]
     assert "recommended_tool" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_requirements" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
@@ -16655,6 +16701,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_submission_execution_handoff_fields" in tools_by_name["submit_daily_candidate_job"]["response_contract"]
         assert "state" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
         assert "should_resume" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
+        assert "material_input_template" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
+        assert "candidate_submission_material_input_template_fields" in tools_by_name["submit_daily_candidate_job"]["response_contract"]
+        assert "dry_run_request" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_material_input_template_fields"]
+        assert "examples_by_key" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_material_input_template_fields"]
         assert "recommended_tool" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_requirements" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
