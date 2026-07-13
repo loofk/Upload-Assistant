@@ -16367,12 +16367,16 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "push_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "recommended_action" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "policy_risk_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "policy_coverage" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "policy_execution_handoff" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "audit_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "rules" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
+    assert "policy_risk_summary" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
+    assert "policy_risk_summary_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "execution_priority" in tool_by_name["daily_candidates"]["response_contract"]["policy_risk_summary_fields"]
     assert "policy_execution_handoff" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
     assert "policy_execution_handoff_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "qbit" in tool_by_name["daily_candidates"]["response_contract"]["policy_execution_handoff_fields"]
@@ -16383,6 +16387,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "summary_text" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "audit_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
+    assert "policy_risk_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "policy_execution_handoff" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "can_submit" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "response_contract" in tool_by_name["get_job_status"]
@@ -17069,12 +17074,16 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "push_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "recommended_action" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "policy_risk_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "audit_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "rules" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
+        assert "policy_risk_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
+        assert "policy_risk_summary_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "execution_priority" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_risk_summary_fields"]
         assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
         assert "policy_execution_handoff_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "qbit" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_execution_handoff_fields"]
@@ -17084,6 +17093,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "summary_text" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "audit_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
+        assert "policy_risk_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "can_submit" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "candidate_digest" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -17826,6 +17836,7 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_payload"]["decision_summary"]["submit_ready"] is True
     assert result["digest"]["push_payload"]["decision_summary"]["top_action"] == "submit_when_confirmed"
     assert result["digest"]["push_payload"]["decision_summary"]["risk_counts"] == {"low": 1, "medium": 0, "high": 0}
+    assert result["digest"]["push_payload"]["decision_summary"]["policy_risk_counts"] == {"low": 1, "medium": 0, "high": 0}
     assert "#1 [ready] U2-60635" in result["digest"]["push_payload"]["message"]
     assert result["digest"]["recommended_action"].startswith("Review digest.top_candidate")
     assert result["digest"]["push_count"] == 1
@@ -17859,6 +17870,12 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["decision_summary"]["metadata_ready"] is True
     assert result["digest"]["push_items"][0]["decision_summary"]["duplicate_clear"] is True
     assert result["digest"]["push_items"][0]["decision_summary"]["freeleech_like"] is True
+    assert result["digest"]["push_items"][0]["decision_summary"]["policy_risk_level"] == "low"
+    assert result["digest"]["push_items"][0]["policy_risk_summary"]["risk_level"] == "low"
+    assert result["digest"]["push_items"][0]["policy_risk_summary"]["execution_priority"] == "preferred"
+    assert result["digest"]["push_items"][0]["policy_risk_summary"]["qbit_limit_ready"] is True
+    assert result["digest"]["push_items"][0]["policy_risk_summary"]["seeding_ready"] is True
+    assert result["digest"]["push_items"][0]["policy_risk_summary"]["strict_transfer_rule_count"] == 0
     assert result["digest"]["push_items"][0]["can_submit"] is True
     assert result["digest"]["push_items"][0]["action_label"] == "submit_when_confirmed"
     assert result["digest"]["push_items"][0]["action_endpoint"] == "/v1/jobs/retorrent/from-url"
@@ -17879,6 +17896,7 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["policy_execution_handoff"]["seeding"]["source"]["min_seed_time_hours"] == 72
     assert result["digest"]["push_items"][0]["policy_execution_handoff"]["rule_obligations"]["ready"] is True
     assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["policy_execution_handoff"]["ready"] is True
+    assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["policy_risk_summary"]["execution_priority"] == "preferred"
     assert result["digest"]["push_items"][0]["policy_summary"]["rules"]["fingerprint_status"]["source"]["ready"] is True
     assert result["digest"]["push_items"][0]["policy_summary"]["rules"]["fingerprint_status"]["targets"][0]["ready"] is True
     candidate = result["candidates"][0]
@@ -17890,6 +17908,8 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["decision_summary"]["action"] == "submit_when_confirmed"
     assert candidate["decision_summary"]["risk_level"] == "low"
     assert candidate["decision_summary"]["policy_coverage_ready"] is True
+    assert candidate["policy_risk_summary"]["risk_level"] == "low"
+    assert candidate["policy_risk_summary"]["execution_priority"] == "preferred"
     assert candidate["recommendation"]["score"] == candidate["ranking"]["score"]
     assert candidate["duplicate_check"]["status"] == "not_found"
     assert candidate["source_policy"]["tracker"] == "U2"
@@ -17912,6 +17932,7 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["policy_coverage"]["ready"] is True
     assert candidate["policy_execution_handoff"]["ready"] is True
     assert candidate["policy_summary"]["policy_execution_handoff"] == candidate["policy_execution_handoff"]
+    assert candidate["policy_summary"]["policy_risk_summary"] == candidate["policy_risk_summary"]
     assert candidate["agent_workflow"]["tool"] == "source_url_retorrent_job"
     assert candidate["agent_workflow"]["decision"] == "submit_when_confirmed"
     assert candidate["submit_tool"] == "source_url_retorrent_job"
@@ -17966,6 +17987,7 @@ async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers
     assert result["digest"]["push_payload"]["decision_summary"]["ready_source_ids"] == ["60636"]
     assert result["digest"]["push_payload"]["decision_summary"]["blocked_source_ids"] == ["60635"]
     assert result["digest"]["push_payload"]["decision_summary"]["risk_counts"]["high"] == 1
+    assert result["digest"]["push_payload"]["decision_summary"]["policy_risk_counts"]["low"] == 1
     assert any("target-duplicate" in blocker for blocker in result["digest"]["push_items"][1]["blockers"])
 
 
@@ -18073,6 +18095,11 @@ async def test_daily_candidates_blocks_for_transfer_policy_rules(monkeypatch) ->
     assert any("title matches forbidden pattern" in blocker for blocker in blockers)
     assert result["candidates"][0]["policy_summary"]["transfer_rules"]["source"]["required_promotions"] == ["free"]
     assert result["candidates"][0]["policy_summary"]["transfer_rules"]["targets"][0]["freeleech_required"] is True
+    assert result["candidates"][0]["policy_risk_summary"]["risk_level"] == "high"
+    assert result["candidates"][0]["policy_risk_summary"]["execution_priority"] == "blocked"
+    assert result["candidates"][0]["policy_risk_summary"]["strict_transfer_rule_count"] == 4
+    assert result["digest"]["push_items"][0]["policy_risk_summary"]["strict_transfer_rule_count"] == 4
+    assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["policy_risk_summary"]["risk_level"] == "high"
 
 
 def test_source_info_from_tuple_includes_meta_side_effects() -> None:

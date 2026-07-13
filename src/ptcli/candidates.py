@@ -203,6 +203,8 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
     blockers = _candidate_blockers(seed, source_info_payload, source_info_error, duplicate_check, source_policy, target_policies, accept_rules=accept_rules)
     execute_request = _candidate_execute_request(config, seed, targets, accept_rules=accept_rules)
     policy_summary = _candidate_policy_summary(source_policy, target_policies, execute_request, accept_rules=accept_rules)
+    policy_risk_summary = _candidate_policy_risk_summary(policy_summary, blockers=blockers)
+    policy_summary["policy_risk_summary"] = policy_risk_summary
     status = "ready" if not blockers else "blocked"
     ranking = _candidate_ranking(seed, source_info_payload, duplicate_check, blockers)
     return {
@@ -214,6 +216,7 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "source_policy": source_policy,
         "target_policies": target_policies,
         "policy_summary": policy_summary,
+        "policy_risk_summary": policy_risk_summary,
         "policy_coverage": policy_summary.get("policy_coverage"),
         "policy_execution_handoff": policy_summary.get("policy_execution_handoff"),
         "ranking": ranking,
@@ -532,6 +535,81 @@ def _candidate_policy_execution_next_actions(ready: bool, blockers: list[str]) -
     return ["Inspect policy_execution_handoff before deciding whether this candidate can be submitted."]
 
 
+def _candidate_policy_risk_summary(policy_summary: dict[str, Any], *, blockers: list[str] | None = None) -> dict[str, Any]:
+    execution = policy_summary.get("policy_execution_handoff") if isinstance(policy_summary.get("policy_execution_handoff"), dict) else {}
+    qbit = execution.get("qbit") if isinstance(execution.get("qbit"), dict) else {}
+    seeding = execution.get("seeding") if isinstance(execution.get("seeding"), dict) else {}
+    rule_obligations = execution.get("rule_obligations") if isinstance(execution.get("rule_obligations"), dict) else {}
+    transfer_rules = policy_summary.get("transfer_rules") if isinstance(policy_summary.get("transfer_rules"), dict) else {}
+    source_transfer = transfer_rules.get("source") if isinstance(transfer_rules.get("source"), dict) else {}
+    target_transfers = transfer_rules.get("targets") if isinstance(transfer_rules.get("targets"), list) else []
+    strict_rules = _candidate_strict_transfer_rules(source_transfer, target_transfers)
+    blockers = list(dict.fromkeys(_string_list(execution.get("blockers")) + _string_list(blockers)))
+    qbit_ready = qbit.get("ready") is True
+    seeding_ready = seeding.get("ready") is True
+    rule_ready = rule_obligations.get("ready") is True
+    manual_ready = policy_summary.get("manual_review_ready") is True
+    ready = execution.get("ready") is True and qbit_ready and seeding_ready and rule_ready and manual_ready and not blockers
+    if not ready or blockers:
+        risk_level = "high"
+        priority = "blocked"
+    elif strict_rules:
+        risk_level = "medium"
+        priority = "guarded"
+    else:
+        risk_level = "low"
+        priority = "preferred"
+    return {
+        "kind": "ptcli.daily_candidate_policy_risk_summary",
+        "ready": ready,
+        "risk_level": risk_level,
+        "execution_priority": priority,
+        "qbit_limit_ready": qbit_ready,
+        "seeding_ready": seeding_ready,
+        "rule_obligations_ready": rule_ready,
+        "manual_review_ready": manual_ready,
+        "strict_transfer_rule_count": len(strict_rules),
+        "strict_transfer_rules": strict_rules,
+        "qbit_missing": qbit.get("missing") if isinstance(qbit.get("missing"), list) else [],
+        "seeding_missing": seeding.get("missing") if isinstance(seeding.get("missing"), list) else [],
+        "blockers": blockers,
+        "next_actions": _candidate_policy_risk_next_actions(ready, strict_rules, blockers),
+    }
+
+
+def _candidate_strict_transfer_rules(source_transfer: dict[str, Any], target_transfers: list[Any]) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = []
+    if _string_list(source_transfer.get("required_promotions")):
+        rules.append({"scope": "source", "field": "required_promotions", "value": _string_list(source_transfer.get("required_promotions"))})
+    if source_transfer.get("freeleech_required") is True:
+        rules.append({"scope": "source", "field": "freeleech_required", "value": True})
+    for field in ("forbidden_title_patterns", "forbidden_release_groups"):
+        values = _string_list(source_transfer.get(field))
+        if values:
+            rules.append({"scope": "source", "field": field, "value": values})
+    for index, target_transfer in enumerate(target_transfers):
+        if not isinstance(target_transfer, dict):
+            continue
+        tracker = target_transfer.get("tracker") or f"target:{index}"
+        if target_transfer.get("freeleech_required") is True:
+            rules.append({"scope": str(tracker), "field": "freeleech_required", "value": True})
+        for field in ("required_promotions", "forbidden_title_patterns", "forbidden_release_groups"):
+            values = _string_list(target_transfer.get(field))
+            if values:
+                rules.append({"scope": str(tracker), "field": field, "value": values})
+    return rules
+
+
+def _candidate_policy_risk_next_actions(ready: bool, strict_rules: list[dict[str, Any]], blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve policy_risk_summary.blockers before considering this candidate for upload farming."]
+    if not ready:
+        return ["Read policy_execution_handoff and update SITE_POLICIES before submitting this candidate."]
+    if strict_rules:
+        return ["Recheck strict transfer rules against the source title/promotion before approving this candidate."]
+    return ["Candidate policy risk is low; still require confirm_upload and save_path/path before submission."]
+
+
 def _policy_seeding_requirements(policy: dict[str, Any]) -> dict[str, Any]:
     return {
         "tracker": policy.get("tracker"),
@@ -781,6 +859,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
     duplicate_check = candidate.get("duplicate_check") if isinstance(candidate.get("duplicate_check"), dict) else {}
     workflow = candidate.get("agent_workflow") if isinstance(candidate.get("agent_workflow"), dict) else {}
     policy_summary = candidate.get("policy_summary") if isinstance(candidate.get("policy_summary"), dict) else {}
+    policy_risk_summary = candidate.get("policy_risk_summary") if isinstance(candidate.get("policy_risk_summary"), dict) else {}
     decision_summary = candidate.get("decision_summary") if isinstance(candidate.get("decision_summary"), dict) else {}
     blockers = _string_list(candidate.get("blockers"))
     status = str(candidate.get("status") or "")
@@ -822,6 +901,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
             duplicate_check=duplicate_check,
             policy_summary=policy_digest,
             decision_summary=decision_summary,
+            policy_risk_summary=policy_risk_summary,
             blockers=blockers,
             workflow=workflow,
             submit_request=submit_request,
@@ -839,6 +919,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "can_submit": can_submit,
         "policy_coverage": policy_summary.get("policy_coverage"),
         "policy_summary": policy_digest,
+        "policy_risk_summary": policy_risk_summary,
         "policy_execution_handoff": policy_execution_handoff,
         "submit_request": submit_request if can_submit else None,
         "submit_job_endpoint": candidate.get("submit_job_endpoint"),
@@ -856,6 +937,7 @@ def _candidate_audit_summary(
     duplicate_check: dict[str, Any],
     policy_summary: dict[str, Any],
     decision_summary: dict[str, Any],
+    policy_risk_summary: dict[str, Any],
     blockers: list[str],
     workflow: dict[str, Any],
     submit_request: dict[str, Any] | None,
@@ -903,6 +985,7 @@ def _candidate_audit_summary(
             "seeding_requirements": policy_summary.get("seeding_requirements"),
             "rules": policy_summary.get("rules"),
             "policy_execution_handoff": policy_summary.get("policy_execution_handoff") if isinstance(policy_summary.get("policy_execution_handoff"), dict) else {},
+            "policy_risk_summary": policy_risk_summary,
         },
         "submit": {
             "tool": submit_tool,
@@ -961,6 +1044,7 @@ def _candidate_decision_summary(
         "duplicate_count": duplicate_check.get("count"),
         "policy_coverage_ready": policy_coverage.get("ready"),
         "manual_review_ready": policy_summary.get("manual_review_ready"),
+        "policy_risk_level": (policy_summary.get("policy_risk_summary") or {}).get("risk_level") if isinstance(policy_summary.get("policy_risk_summary"), dict) else None,
         "blocker_count": len(blockers),
         "primary_blocker": blockers[0] if blockers else None,
         "reasons": _string_list(ranking.get("reasons")),
@@ -979,12 +1063,18 @@ def _candidate_risk_level(blockers: list[str], duplicate_status: str, metadata_r
 def _push_decision_summary(items: list[dict[str, Any]], ready_items: list[dict[str, Any]], blocked_items: list[dict[str, Any]], recommendation: str) -> dict[str, Any]:
     review_items = [item for item in items if item.get("tier") == "review"]
     risk_counts = {"low": 0, "medium": 0, "high": 0}
+    policy_risk_counts = {"low": 0, "medium": 0, "high": 0}
     for item in items:
         summary = item.get("decision_summary") if isinstance(item.get("decision_summary"), dict) else {}
         risk = str(summary.get("risk_level") or "medium")
         if risk not in risk_counts:
             risk = "medium"
         risk_counts[risk] += 1
+        policy_summary = item.get("policy_risk_summary") if isinstance(item.get("policy_risk_summary"), dict) else {}
+        policy_risk = str(policy_summary.get("risk_level") or "medium")
+        if policy_risk not in policy_risk_counts:
+            policy_risk = "medium"
+        policy_risk_counts[policy_risk] += 1
     return {
         "recommendation": recommendation,
         "top_action": ready_items[0].get("decision_summary", {}).get("action") if ready_items and isinstance(ready_items[0].get("decision_summary"), dict) else "review_blockers" if items else "no_candidates",
@@ -992,6 +1082,7 @@ def _push_decision_summary(items: list[dict[str, Any]], ready_items: list[dict[s
         "review_count": len(review_items),
         "blocked_count": len(blocked_items),
         "risk_counts": risk_counts,
+        "policy_risk_counts": policy_risk_counts,
         "ready_source_ids": [item.get("source_id") for item in ready_items if item.get("source_id")],
         "blocked_source_ids": [item.get("source_id") for item in blocked_items if item.get("source_id")],
         "submit_ready": bool(ready_items),
@@ -1076,6 +1167,7 @@ def _candidate_digest_policy_summary(policy_summary: dict[str, Any]) -> dict[str
         "transfer_rules": policy_summary.get("transfer_rules"),
         "rules": policy_summary.get("rules"),
         "policy_execution_handoff": policy_summary.get("policy_execution_handoff") if isinstance(policy_summary.get("policy_execution_handoff"), dict) else {},
+        "policy_risk_summary": policy_summary.get("policy_risk_summary") if isinstance(policy_summary.get("policy_risk_summary"), dict) else {},
     }
 
 
