@@ -283,6 +283,7 @@ class JobStore:
             "candidate_submission_summary": _job_candidate_submission_summary(job, summary_payload),
             "source_reference": _job_source_reference(job),
             "workflow_context": _job_workflow_context(job, summary_payload),
+            "job_handoff": _job_handoff(job, summary_payload),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -4549,6 +4550,112 @@ def _job_runtime(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    job_id = str(job.get("job_id") or "")
+    status = str(job.get("status") or "unknown")
+    runtime = _job_runtime(job)
+    agent_decision = _agent_decision(job)
+    resume_plan = _job_resume_plan(job)
+    resume_requirements = _job_resume_requirements(job, payload if isinstance(payload, dict) else None)
+    resume_summary = _job_resume_summary(job)
+    submit_if_clear = _job_submit_if_clear_handoff(job)
+    closure_handoff = _job_closure_handoff(job, payload if isinstance(payload, dict) else None)
+    next_step = closure_handoff.get("next_step") if isinstance(closure_handoff.get("next_step"), dict) else {}
+    action = str(agent_decision.get("decision") or "inspect")
+    recommended_tool = agent_decision.get("next_tool")
+    recommended_endpoint = None
+    recommended_method = None
+    recommended_request = None
+    continue_when = None
+    stop_when: list[str] = []
+
+    if runtime.get("should_poll"):
+        action = "wait"
+        recommended_tool = "get_job_status"
+        recommended_endpoint = runtime.get("status_endpoint")
+        recommended_method = "GET"
+        continue_when = "status not in queued,running"
+        stop_when = ["status in blocked,failed,cancelled"]
+    elif action == "submit_if_clear" and isinstance(submit_if_clear, dict):
+        recommended_tool = submit_if_clear.get("tool")
+        recommended_endpoint = submit_if_clear.get("endpoint")
+        recommended_method = submit_if_clear.get("method")
+        recommended_request = submit_if_clear.get("request")
+        continue_when = "job_id is returned"
+        stop_when = ["duplicate_check.exists=true", "submit_if_clear_handoff.ready=false"]
+    elif resume_plan.get("recommended") or resume_summary.get("recommended"):
+        action = "resume"
+        recommended_tool = "resume_job"
+        recommended_endpoint = resume_plan.get("endpoint")
+        recommended_method = "POST"
+        recommended_request = resume_requirements.get("dry_run_request") or resume_requirements.get("request_template")
+        continue_when = "resume_preview.ok=true; then call execute_request after user review"
+        stop_when = ["resume_plan.allowed=false", "next_command_argv not allowlisted"]
+    elif status == "complete":
+        action = "done"
+        recommended_tool = "get_job_summary"
+        recommended_endpoint = runtime.get("summary_endpoint")
+        recommended_method = "GET"
+        continue_when = "report summary/evidence to user"
+    elif status == "cancelled":
+        action = "stop"
+        recommended_tool = None
+        stop_when = ["job.status=cancelled"]
+    elif isinstance(next_step, dict) and next_step.get("tool"):
+        recommended_tool = next_step.get("tool")
+        recommended_endpoint = next_step.get("endpoint")
+        recommended_method = next_step.get("method")
+        recommended_request = next_step.get("request")
+        continue_when = next_step.get("continue_when")
+    else:
+        recommended_tool = recommended_tool or agent_decision.get("recommended_tool")
+
+    return {
+        "kind": "ptcli.job_handoff",
+        "job_id": job_id or None,
+        "job_kind": job.get("kind"),
+        "status": status,
+        "terminal": bool(runtime.get("terminal")),
+        "action": action,
+        "recommended_tool": recommended_tool,
+        "recommended_endpoint": recommended_endpoint,
+        "recommended_method": recommended_method,
+        "recommended_request": recommended_request,
+        "continue_when": continue_when,
+        "stop_when": stop_when,
+        "status_endpoint": runtime.get("status_endpoint"),
+        "summary_endpoint": runtime.get("summary_endpoint"),
+        "resume_endpoint": runtime.get("resume_endpoint"),
+        "poll_after_seconds": runtime.get("poll_after_seconds"),
+        "should_poll": bool(runtime.get("should_poll")),
+        "can_resume": bool(resume_plan.get("allowed")),
+        "resume_recommended": bool(resume_plan.get("recommended")),
+        "can_attempt_live": bool(agent_decision.get("can_attempt_live")),
+        "summary_file": _job_summary_file(job),
+        "resume_plan": resume_plan,
+        "resume_requirements": resume_requirements,
+        "agent_decision": agent_decision,
+        "blockers": _string_list(job.get("blockers")),
+        "next_actions": _job_handoff_next_actions(status, runtime, resume_plan, recommended_tool, job_id, _string_list(job.get("next_actions"))),
+    }
+
+
+def _job_handoff_next_actions(status: str, runtime: dict[str, Any], resume_plan: dict[str, Any], recommended_tool: Any, job_id: str, job_actions: list[str]) -> list[str]:
+    actions: list[str] = []
+    if runtime.get("should_poll"):
+        actions.append(f"Poll /v1/jobs/{job_id} after {runtime.get('poll_after_seconds')} seconds.")
+    elif resume_plan.get("recommended"):
+        actions.append(f"Preview resume with POST /v1/jobs/{job_id}/resume dry_run=true, review command_argv, then execute when safe.")
+    elif status == "complete":
+        actions.append(f"Read /v1/jobs/{job_id}/summary and report closure_summary/evidence.")
+    elif status == "cancelled":
+        actions.append("Submit a new job if the work is still needed; cancelled jobs are terminal.")
+    elif recommended_tool:
+        actions.append(f"Call recommended_tool={recommended_tool} after reviewing blockers and site rules.")
+    actions.extend(job_actions)
+    return list(dict.fromkeys(action for action in actions if action))
+
+
 def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
     job_id = job.get("job_id")
     return {
@@ -4589,6 +4696,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "check_submission": _job_check_submission(job),
         "candidate_submission_handoff": _job_candidate_submission_handoff(job),
         "candidate_submission_summary": _job_candidate_submission_summary(job),
+        "job_handoff": _job_handoff(job),
         "status_endpoint": f"/v1/jobs/{job_id}" if job_id else None,
         "summary_endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
         "resume_endpoint": f"/v1/jobs/{job_id}/resume" if job_id else None,
@@ -4654,6 +4762,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "candidate_submission_summary": _job_candidate_submission_summary(job),
         "source_reference": _job_source_reference(job),
         "workflow_context": _job_workflow_context(job),
+        "job_handoff": _job_handoff(job),
         "result_status": _nested_value(job.get("result"), "status"),
         "next_stage": _nested_value(job.get("result"), "next_stage"),
         "next_command": _nested_value(job.get("result"), "next_command"),
@@ -8385,7 +8494,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -8946,11 +9055,12 @@ def _qbit_wait_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
+        "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "request_template", "dry_run_request", "execute_request", "recommended_inputs", "allowed_overrides", "current_flags"],
@@ -8995,7 +9105,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_lineage", "resume_summary", "material_resolution", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }

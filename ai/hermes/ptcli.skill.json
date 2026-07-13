@@ -1551,7 +1551,8 @@
           "candidate_submission",
           "check_submission",
           "source_reference",
-          "workflow_context"
+          "workflow_context",
+          "job_handoff"
         ],
         "status_values": [
           "queued",
@@ -1583,6 +1584,25 @@
           "cancellation",
           "agent_decision.stop_reason",
           "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
         ],
         "request_fields": [
           "policy_coverage",
@@ -2232,7 +2252,8 @@
           "candidate_submission",
           "check_submission",
           "source_reference",
-          "workflow_context"
+          "workflow_context",
+          "job_handoff"
         ],
         "status_values": [
           "queued",
@@ -2264,6 +2285,25 @@
           "cancellation",
           "agent_decision.stop_reason",
           "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
         ],
         "request_fields": [
           "policy_coverage",
@@ -2780,7 +2820,8 @@
           "candidate_submission",
           "check_submission",
           "source_reference",
-          "workflow_context"
+          "workflow_context",
+          "job_handoff"
         ],
         "status_values": [
           "queued",
@@ -2812,6 +2853,25 @@
           "cancellation",
           "agent_decision.stop_reason",
           "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
         ],
         "request_fields": [
           "policy_coverage",
@@ -3328,7 +3388,8 @@
           "candidate_submission",
           "check_submission",
           "source_reference",
-          "workflow_context"
+          "workflow_context",
+          "job_handoff"
         ],
         "status_values": [
           "queued",
@@ -3360,6 +3421,25 @@
           "cancellation",
           "agent_decision.stop_reason",
           "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
         ],
         "request_fields": [
           "policy_coverage",
@@ -3880,7 +3960,8 @@
           "candidate_submission",
           "check_submission",
           "source_reference",
-          "workflow_context"
+          "workflow_context",
+          "job_handoff"
         ],
         "status_values": [
           "queued",
@@ -3912,6 +3993,25 @@
           "cancellation",
           "agent_decision.stop_reason",
           "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
         ],
         "request_fields": [
           "policy_coverage",
@@ -4740,7 +4840,8 @@
           "candidate_submission",
           "check_submission",
           "source_reference",
-          "workflow_context"
+          "workflow_context",
+          "job_handoff"
         ],
         "status_values": [
           "queued",
@@ -4772,6 +4873,25 @@
           "cancellation",
           "agent_decision.stop_reason",
           "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
         ],
         "request_fields": [
           "policy_coverage",
@@ -5551,7 +5671,8 @@
           "candidate_submission",
           "check_submission",
           "source_reference",
-          "workflow_context"
+          "workflow_context",
+          "job_handoff"
         ],
         "status_values": [
           "queued",
@@ -5583,6 +5704,25 @@
           "cancellation",
           "agent_decision.stop_reason",
           "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
         ],
         "request_fields": [
           "policy_coverage",
@@ -6850,6 +6990,7 @@
           "resume_lineage",
           "resume_summary",
           "material_resolution",
+          "job_handoff",
           "status_endpoint",
           "summary_endpoint",
           "resume_endpoint"
@@ -6932,7 +7073,8 @@
           "candidate_submission",
           "check_submission",
           "source_reference",
-          "workflow_context"
+          "workflow_context",
+          "job_handoff"
         ],
         "status_values": [
           "queued",
@@ -6964,6 +7106,25 @@
           "cancellation",
           "agent_decision.stop_reason",
           "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
         ],
         "request_fields": [
           "policy_coverage",
@@ -7300,6 +7461,7 @@
           "check_submission",
           "source_reference",
           "workflow_context",
+          "job_handoff",
           "result",
           "blockers",
           "next_actions"
@@ -7565,7 +7727,8 @@
           "candidate_submission",
           "check_submission",
           "source_reference",
-          "workflow_context"
+          "workflow_context",
+          "job_handoff"
         ],
         "status_values": [
           "queued",
@@ -7597,6 +7760,25 @@
           "cancellation",
           "agent_decision.stop_reason",
           "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
         ],
         "request_fields": [
           "policy_coverage",
@@ -7950,7 +8132,8 @@
           "candidate_submission",
           "check_submission",
           "source_reference",
-          "workflow_context"
+          "workflow_context",
+          "job_handoff"
         ],
         "status_values": [
           "queued",
@@ -7982,6 +8165,25 @@
           "cancellation",
           "agent_decision.stop_reason",
           "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
         ],
         "request_fields": [
           "policy_coverage",

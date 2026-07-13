@@ -12668,10 +12668,15 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert job["runtime"]["summary_endpoint"] == f"/v1/jobs/{job_id}/summary"
     assert job["agent_decision"]["decision"] == "wait"
     assert job["agent_decision"]["runtime"]["should_poll"] is True
+    assert job["job_handoff"]["action"] == "wait"
+    assert job["job_handoff"]["recommended_tool"] == "get_job_status"
+    assert job["job_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
+    assert job["job_handoff"]["poll_after_seconds"] == 5
 
     payload = store.list({"status": "queued"})
     assert payload["jobs"][0]["runtime"]["should_poll"] is True
     assert payload["jobs"][0]["runtime"]["poll_after_seconds"] == 5
+    assert payload["jobs"][0]["job_handoff"]["action"] == "wait"
     assert any("Poll running jobs" in action for action in payload["next_actions"])
 
 
@@ -12987,6 +12992,11 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["workflow_context"]["gates"]["qbit_source_ready"] is True
     assert job["workflow_context"]["gates"]["qbit_target_ready"] is False
     assert job["workflow_context"]["gates"]["uploaded_seeding_evidence"] is False
+    assert job["job_handoff"]["action"] == "resume"
+    assert job["job_handoff"]["recommended_tool"] == "resume_job"
+    assert job["job_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
+    assert job["job_handoff"]["recommended_request"] == {"job_id": job["job_id"], "dry_run": True}
+    assert job["job_handoff"]["resume_recommended"] is True
     assert summary["agent_summary"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["agent_summary"]["resume"]["materials_missing"] == ["metadata.tmdb"]
     assert summary["materials_handoff"] == job["materials_handoff"]
@@ -12997,6 +13007,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["resume_plan"] == job["resume_plan"]
     assert summary["resume_requirements"] == job["resume_requirements"]
     assert summary["resume_summary"] == job["resume_summary"]
+    assert summary["job_handoff"] == job["job_handoff"]
     assert summary["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["workflow_context"]["target_preflight"]["missing"] == ["materials.metadata.tmdb"]
 
@@ -13267,6 +13278,9 @@ def test_job_store_lists_recent_jobs_with_filters(tmp_path) -> None:
     assert payload["jobs"][0]["resume_audit"]["resume_recommended"] is True
     assert payload["jobs"][0]["resume_audit"]["next_step"]["tool"] == "resume_job"
     assert payload["jobs"][0]["resume_audit"]["dry_run_request"] == {"job_id": blocked["job_id"], "dry_run": True}
+    assert payload["jobs"][0]["job_handoff"]["action"] == "resume"
+    assert payload["jobs"][0]["job_handoff"]["recommended_tool"] == "resume_job"
+    assert payload["jobs"][0]["job_handoff"]["recommended_request"] == {"job_id": blocked["job_id"], "dry_run": True}
     assert "Resume recommended blocked jobs" in payload["next_actions"][-1]
 
     limited = store.list({"limit": "1"})
@@ -15588,6 +15602,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "runtime" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "runtime" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "runtime.poll_after_seconds" in tool_by_name["get_job_status"]["response_contract"]["running_fields"]
+    assert "job_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "job_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "job_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "recommended_tool" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "resume_recommended" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert tool_by_name["cancel_job"]["path"] == "/v1/jobs/{job_id}/cancel"
     assert "cancelled" in tool_by_name["cancel_job"]["response_contract"]["status_values"]
     assert "cancellation" in tool_by_name["cancel_job"]["response_contract"]["required_fields"]
@@ -16099,6 +16118,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "submit_if_clear_handoff" in tools_by_name["retorrent_check_job"]["response_contract"]["required_fields"]
         assert "submit_if_clear_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "submit_if_clear_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "job_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "job_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "job_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "recommended_tool" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
         source_url_workflow = next(workflow for workflow in payload["default_workflows"] if workflow["name"] == "source_url_retorrent")
         assert source_url_workflow["runbook"][0]["tool"] == "source_url_retorrent_preflight"
         assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
