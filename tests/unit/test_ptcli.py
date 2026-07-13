@@ -14419,6 +14419,11 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["workflow_context"]["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
     assert retorrent_job["agent_decision"]["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
     assert retorrent_job["agent_decision"]["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
+    assert retorrent_job["agent_decision"]["candidate_submission_execution"] == retorrent_job["candidate_submission_summary"]["execution_handoff"]
+    assert retorrent_job["agent_decision"]["material_input_template"] == material_template
+    assert retorrent_job["job_handoff"]["candidate_submission_execution"] == retorrent_job["candidate_submission_summary"]["execution_handoff"]
+    assert retorrent_job["job_handoff"]["material_input_template"] == material_template
+    assert retorrent_job["job_handoff"]["action"] == "configure_policy"
     assert retorrent_job["request"]["source_reference"]["tracker"] == "U2"
     assert retorrent_job["request"]["source_reference"]["source_id"] == "60635"
     assert retorrent_job["request"]["target_trackers"] == "MTEAM"
@@ -15943,6 +15948,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "recommended_tool" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "resume_recommended" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "candidate_submission_execution" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "material_input_template" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "agent_candidate_submission_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
+    assert "candidate_submission_execution" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["agent_candidate_submission_fields"]
+    assert "material_input_template" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["agent_candidate_submission_fields"]
     assert tool_by_name["cancel_job"]["path"] == "/v1/jobs/{job_id}/cancel"
     assert "cancelled" in tool_by_name["cancel_job"]["response_contract"]["status_values"]
     assert "cancellation" in tool_by_name["cancel_job"]["response_contract"]["required_fields"]
@@ -16729,6 +16739,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_execution_handoff_fields" in tools_by_name["resume_job"]["response_contract"]
         assert "execute_request" in tools_by_name["resume_job"]["response_contract"]["resume_execution_handoff_fields"]
         assert "execute_request" in tools_by_name["resume_job"]["response_contract"]["job_handoff_fields"]
+        assert "candidate_submission_execution" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+        assert "material_input_template" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+        assert "agent_candidate_submission_fields" in tools_by_name["submit_daily_candidate_job"]["response_contract"]
+        assert "candidate_submission_execution" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["agent_candidate_submission_fields"]
+        assert "material_input_template" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["agent_candidate_submission_fields"]
         assert "dry_run_request" in tools_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
         assert "execute_request" in tools_by_name["resume_job"]["response_contract"]["resume_requirement_fields"]
         assert "resume_preview_fields" in tools_by_name["resume_job"]["response_contract"]

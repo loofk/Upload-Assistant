@@ -1637,6 +1637,8 @@
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
           "continue_when",
           "stop_when",
           "status_endpoint",
@@ -1993,6 +1995,13 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
         ],
         "candidate_submission_execution_handoff_fields": [
           "state",
@@ -2506,6 +2515,8 @@
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
           "continue_when",
           "stop_when",
           "status_endpoint",
@@ -2862,6 +2873,13 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
         ],
         "candidate_submission_execution_handoff_fields": [
           "state",
@@ -3242,6 +3260,8 @@
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
           "continue_when",
           "stop_when",
           "status_endpoint",
@@ -3598,6 +3618,13 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
         ],
         "candidate_submission_execution_handoff_fields": [
           "state",
@@ -3978,6 +4005,8 @@
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
           "continue_when",
           "stop_when",
           "status_endpoint",
@@ -4334,6 +4363,13 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
         ],
         "candidate_submission_execution_handoff_fields": [
           "state",
@@ -4718,6 +4754,8 @@
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
           "continue_when",
           "stop_when",
           "status_endpoint",
@@ -5074,6 +5112,13 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
         ],
         "candidate_submission_execution_handoff_fields": [
           "state",
@@ -5795,6 +5840,8 @@
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
           "continue_when",
           "stop_when",
           "status_endpoint",
@@ -6151,6 +6198,13 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
         ],
         "candidate_submission_execution_handoff_fields": [
           "state",
@@ -6823,6 +6877,8 @@
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
           "continue_when",
           "stop_when",
           "status_endpoint",
@@ -7179,6 +7235,13 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
         ],
         "candidate_submission_execution_handoff_fields": [
           "state",
@@ -8470,6 +8533,8 @@
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
           "continue_when",
           "stop_when",
           "status_endpoint",
@@ -8826,6 +8891,13 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
         ],
         "candidate_submission_execution_handoff_fields": [
           "state",
@@ -9295,6 +9367,8 @@
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
           "continue_when",
           "stop_when",
           "status_endpoint",
@@ -9651,6 +9725,13 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
         ],
         "candidate_submission_execution_handoff_fields": [
           "state",
@@ -9868,6 +9949,8 @@
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
           "continue_when",
           "stop_when",
           "status_endpoint",
@@ -10224,6 +10307,13 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
         ],
         "candidate_submission_execution_handoff_fields": [
           "state",

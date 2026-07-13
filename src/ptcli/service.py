@@ -5134,6 +5134,8 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
     resume_requirements = _job_resume_requirements(job, payload if isinstance(payload, dict) else None)
     resume_summary = _job_resume_summary(job)
     submit_if_clear = _job_submit_if_clear_handoff(job)
+    candidate_submission_summary = _job_candidate_submission_summary(job, payload if isinstance(payload, dict) else None)
+    candidate_execution = candidate_submission_summary.get("execution_handoff") if isinstance(candidate_submission_summary, dict) and isinstance(candidate_submission_summary.get("execution_handoff"), dict) else None
     closure_handoff = _job_closure_handoff(job, payload if isinstance(payload, dict) else None)
     next_step = closure_handoff.get("next_step") if isinstance(closure_handoff.get("next_step"), dict) else {}
     action = str(agent_decision.get("decision") or "inspect")
@@ -5151,6 +5153,14 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
         recommended_method = "GET"
         continue_when = "status not in queued,running"
         stop_when = ["status in blocked,failed,cancelled"]
+    elif isinstance(candidate_execution, dict):
+        action = str(candidate_execution.get("state") or action)
+        recommended_tool = candidate_execution.get("recommended_tool")
+        recommended_endpoint = candidate_execution.get("recommended_endpoint")
+        recommended_method = candidate_execution.get("recommended_method")
+        recommended_request = candidate_execution.get("recommended_request")
+        continue_when = candidate_execution.get("continue_when")
+        stop_when = _string_list(candidate_execution.get("stop_when"))
     elif action == "submit_if_clear" and isinstance(submit_if_clear, dict):
         recommended_tool = submit_if_clear.get("tool")
         recommended_endpoint = submit_if_clear.get("endpoint")
@@ -5210,6 +5220,8 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
         "resume_plan": resume_plan,
         "resume_requirements": resume_requirements,
         "resume_execution_handoff": _job_resume_execution_handoff(job, payload if isinstance(payload, dict) else None),
+        "candidate_submission_execution": candidate_execution,
+        "material_input_template": candidate_execution.get("material_input_template") if isinstance(candidate_execution, dict) else None,
         "dry_run_request": resume_requirements.get("dry_run_request") if isinstance(resume_requirements.get("dry_run_request"), dict) else None,
         "execute_request": resume_requirements.get("execute_request") if isinstance(resume_requirements.get("execute_request"), dict) else None,
         "agent_decision": agent_decision,
@@ -8036,6 +8048,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     closure_handoff = _job_closure_handoff(job)
     candidate_submission_handoff = _job_candidate_submission_handoff(job)
     candidate_submission_summary = _job_candidate_submission_summary(job)
+    candidate_submission_execution = candidate_submission_summary.get("execution_handoff") if isinstance(candidate_submission_summary, dict) and isinstance(candidate_submission_summary.get("execution_handoff"), dict) else None
     resume_plan = _job_resume_plan(job)
     resume_summary = _job_resume_summary(job)
     submit_if_clear_handoff = _job_submit_if_clear_handoff(job)
@@ -8128,6 +8141,8 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "resume_lineage": resume_lineage,
         "resume_context": resume_context,
         "material_resolution": material_resolution,
+        "candidate_submission_execution": candidate_submission_execution,
+        "material_input_template": candidate_submission_execution.get("material_input_template") if isinstance(candidate_submission_execution, dict) else None,
         "candidate_submission": _job_candidate_submission(job),
         "check_submission": _job_check_submission(job),
         "candidate_submission_summary": candidate_submission_summary,
@@ -10070,7 +10085,7 @@ def _job_response_contract() -> dict[str, Any]:
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
-        "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "resume_execution_handoff", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
+        "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "request_template", "dry_run_request", "execute_request", "recommended_inputs", "allowed_overrides", "current_flags"],
@@ -10095,6 +10110,7 @@ def _job_response_contract() -> dict[str, Any]:
         "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
         "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "execution_state", "execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
         "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "policy_execution_ready", "execution_state", "execution_handoff", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
+        "agent_candidate_submission_fields": ["candidate_submission", "candidate_submission_summary", "candidate_submission_handoff", "candidate_submission_execution", "material_input_template"],
         "candidate_submission_execution_handoff_fields": ["state", "reason", "status", "ready_for_live", "should_poll", "should_resume", "should_stop", "manual_action", "closure_action", "policy_execution_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "material_input_template", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_submission_material_input_template_fields": ["ready", "recommended_input_keys", "recommended_inputs", "missing", "next_item", "accepted_override_keys", "resume_request_template", "dry_run_request", "execute_request", "staged_requests", "examples_by_key", "continue_when", "stop_when"],
         "check_submission_fields": ["check_job_id", "check_status", "check_kind", "check_summary_file", "duplicate_check", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides"],
