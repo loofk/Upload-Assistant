@@ -1375,6 +1375,7 @@ def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
     flow_matrix = _site_flow_matrix(base.get("flows") if isinstance(base.get("flows"), list) else [], context["trackers"])
     blockers = _sites_payload_blockers(capability_matrix, context)
     extension_plan = _sites_extension_plan(capability_matrix, policy_matrix, flow_matrix, context)
+    extension_handoff = _sites_extension_handoff(extension_plan, flow_matrix, context)
     return {
         "kind": "ptcli.sites",
         "status": "ok" if not blockers else "blocked",
@@ -1389,6 +1390,7 @@ def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
         "policy_gap_summary": policy_gap_summary,
         "policy_execution_summary": _site_policy_execution_summary(policy_matrix, policy_gap_summary, execution_readiness, policy_handoff, report),
         "extension_plan": extension_plan,
+        "extension_handoff": extension_handoff,
         "flow_matrix": flow_matrix,
         "reference_flows": base.get("flows", []),
         "source_info_trackers": base.get("source_info_trackers", []),
@@ -2633,6 +2635,9 @@ def _sites_request_context(request: dict[str, Any]) -> dict[str, Any]:
 
 def _site_capability_matrix_item(tracker: str, capability: dict[str, Any], policy_item: dict[str, Any] | None) -> dict[str, Any]:
     target_upload = bool(capability.get("target_upload"))
+    roles = _string_list(policy_item.get("roles")) if isinstance(policy_item, dict) else []
+    extension_checklist = _site_extension_checklist(tracker, capability, roles or ["unknown"])
+    _apply_policy_profile_to_extension_checklist(extension_checklist, policy_item)
     adapter_profile = {
         "kind": "ptcli.site_adapter_profile",
         "tracker": tracker,
@@ -2647,7 +2652,7 @@ def _site_capability_matrix_item(tracker: str, capability: dict[str, Any], polic
         "full_live_closure_to_mteam": bool(capability.get("full_live_closure_to_mteam")),
         "implemented_roles": _site_implemented_roles(capability),
         "extension_notes": _site_extension_notes(tracker, capability),
-        "extension_checklist": _site_extension_checklist(tracker, capability),
+        "extension_checklist": extension_checklist,
     }
     policy_profile = policy_item.get("policy_profile") if isinstance(policy_item, dict) and isinstance(policy_item.get("policy_profile"), dict) else None
     execution_readiness = policy_item.get("execution_readiness") if isinstance(policy_item, dict) and isinstance(policy_item.get("execution_readiness"), dict) else None
@@ -2733,6 +2738,17 @@ def _site_extension_checklist(tracker: str, capability: dict[str, Any], roles: l
     return checklist
 
 
+def _apply_policy_profile_to_extension_checklist(checklist: list[dict[str, Any]], policy_item: dict[str, Any] | None) -> None:
+    policy_profile = policy_item.get("policy_profile") if isinstance(policy_item, dict) and isinstance(policy_item.get("policy_profile"), dict) else {}
+    execution = policy_item.get("execution_readiness") if isinstance(policy_item, dict) and isinstance(policy_item.get("execution_readiness"), dict) else {}
+    for item in checklist:
+        if item.get("key") != "policy_profile":
+            continue
+        item["ready"] = execution.get("ready") is True
+        item["missing_fields"] = policy_profile.get("missing_fields") if isinstance(policy_profile.get("missing_fields"), list) else []
+        item["template"] = policy_profile.get("template") if isinstance(policy_profile.get("template"), dict) else {}
+
+
 def _site_flow_matrix(flows: list[dict[str, Any]], trackers: list[str]) -> list[dict[str, Any]]:
     tracker_set = set(trackers)
     return [
@@ -2774,18 +2790,91 @@ def _sites_extension_plan(capability_matrix: list[dict[str, Any]], policy_matrix
     }
 
 
+def _sites_extension_handoff(extension_plan: dict[str, Any], flow_matrix: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
+    items = extension_plan.get("items") if isinstance(extension_plan.get("items"), list) else []
+    blocked_items = [item for item in items if isinstance(item, dict) and item.get("missing_components")]
+    next_item = extension_plan.get("next_item") if isinstance(extension_plan.get("next_item"), dict) else (blocked_items[0] if blocked_items else None)
+    reference_flow = _site_extension_reference_flow(flow_matrix, extension_plan)
+    recommended_tracker = str(next_item.get("tracker")) if isinstance(next_item, dict) and next_item.get("tracker") else None
+    return {
+        "kind": "ptcli.site_extension_handoff",
+        "ready": extension_plan.get("ready") is True,
+        "phase": "validate_ready_sites" if extension_plan.get("ready") is True else "extend_site_adapter_or_policy",
+        "recommended_next_tracker": recommended_tracker,
+        "reference_flow": reference_flow,
+        "implementation_order": _site_extension_implementation_order(items),
+        "tracker_steps": _site_extension_tracker_steps(items),
+        "endpoint_sequence": [
+            {"tool": "site_profiles", "endpoint": "/v1/sites", "purpose": "inspect adapter/profile gaps for the requested Chinese PT trackers"},
+            {"tool": "site_policies", "endpoint": "/v1/site-policies", "purpose": "copy SITE_POLICIES templates and confirm rule obligations"},
+            {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "purpose": "validate deployment, qBittorrent, credentials, policy gates, and live handoff"},
+            {"tool": "source_url_retorrent_preflight", "endpoint": "/v1/retorrent/source-url/check", "purpose": "validate a concrete source URL before creating or resuming a live job"},
+        ],
+        "validation_sequence": [
+            "adapter profile exposes required source_info/source_download/target_upload fields",
+            "SITE_POLICIES has a non-placeholder rule_review_fingerprint and required rate/seeding fields",
+            "readiness_bundle reports ready_for_ai=true for the concrete source and target",
+            "source_url_retorrent_preflight reports ready_to_create_job=true before live automation",
+        ],
+        "continue_when": "extension_plan.ready=true and readiness_bundle.live_readiness.ready_for_ai=true",
+        "stop_when": "extension_plan.blockers is non-empty or policy obligations require manual rule review",
+        "request": {"trackers": _string_list(context.get("trackers")), "roles": context.get("roles")},
+        "blockers": _string_list(extension_plan.get("blockers")),
+        "next_actions": _string_list(extension_plan.get("next_actions")),
+    }
+
+
+def _site_extension_reference_flow(flow_matrix: list[dict[str, Any]], extension_plan: dict[str, Any]) -> dict[str, Any] | None:
+    reference_sources = set(_string_list(extension_plan.get("reference_sources_to_mteam")))
+    for flow in flow_matrix:
+        if not isinstance(flow, dict):
+            continue
+        if flow.get("source_tracker") in reference_sources and flow.get("target_tracker") == "MTEAM":
+            return flow
+    return None
+
+
+def _site_extension_implementation_order(items: list[Any]) -> list[dict[str, Any]]:
+    ordered: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        missing = _string_list(item.get("missing_components"))
+        if not missing:
+            continue
+        ordered.append(
+            {
+                "tracker": item.get("tracker"),
+                "roles": _string_list(item.get("roles")),
+                "missing_components": missing,
+                "first_step": _site_extension_item_next_action(str(item.get("tracker") or "tracker"), missing),
+            }
+        )
+    return ordered
+
+
+def _site_extension_tracker_steps(items: list[Any]) -> dict[str, Any]:
+    steps: dict[str, Any] = {}
+    for item in items:
+        if not isinstance(item, dict) or not item.get("tracker"):
+            continue
+        tracker = str(item.get("tracker"))
+        steps[tracker] = {
+            "roles": _string_list(item.get("roles")),
+            "ready": not _string_list(item.get("missing_components")),
+            "missing_components": _string_list(item.get("missing_components")),
+            "checklist": item.get("checklist") if isinstance(item.get("checklist"), list) else [],
+            "next_action": item.get("next_action"),
+        }
+    return steps
+
+
 def _site_extension_plan_item(capability_item: dict[str, Any], policy_item: dict[str, Any] | None, flow_matrix: list[dict[str, Any]]) -> dict[str, Any]:
     tracker = str(capability_item.get("tracker") or "")
     adapter = capability_item.get("adapter_profile") if isinstance(capability_item.get("adapter_profile"), dict) else {}
-    policy_profile = policy_item.get("policy_profile") if isinstance(policy_item, dict) and isinstance(policy_item.get("policy_profile"), dict) else {}
-    execution = policy_item.get("execution_readiness") if isinstance(policy_item, dict) and isinstance(policy_item.get("execution_readiness"), dict) else {}
     roles = _string_list(policy_item.get("roles")) if isinstance(policy_item, dict) else ["unknown"]
     checklist = _site_extension_checklist(tracker, adapter, roles or ["unknown"])
-    for item in checklist:
-        if item.get("key") == "policy_profile":
-            item["ready"] = execution.get("ready") is True
-            item["missing_fields"] = policy_profile.get("missing_fields") if isinstance(policy_profile.get("missing_fields"), list) else []
-            item["template"] = policy_profile.get("template") if isinstance(policy_profile.get("template"), dict) else {}
+    _apply_policy_profile_to_extension_checklist(checklist, policy_item)
     missing = [item["key"] for item in checklist if item.get("ready") is not True]
     blockers = [f"{tracker}: {key}" for key in missing]
     return {
@@ -9521,12 +9610,13 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
 
 def _sites_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "policy_matrix", "policy_execution_summary", "extension_plan", "flow_matrix", "agent_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "policy_matrix", "policy_execution_summary", "extension_plan", "extension_handoff", "flow_matrix", "agent_summary", "blockers", "next_actions"],
         "capability_fields": ["tracker", "capabilities", "adapter_profile", "policy_profile", "execution_readiness", "ready_for_source", "ready_for_mteam_target_flow", "ready_as_target"],
         "adapter_profile_fields": ["tracker", "source_info", "source_info_adapter", "source_download", "source_download_adapter", "target_upload", "target_upload_adapter", "credential_requirements", "mteam_source_flow", "full_live_closure_to_mteam", "implemented_roles", "extension_notes", "extension_checklist"],
         "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "missing_fields", "template", "current_values", "next_actions"],
         "extension_plan_fields": ["ready", "trackers", "ready_sources", "ready_targets", "reference_sources_to_mteam", "items", "next_item", "blockers", "next_actions"],
         "extension_item_fields": ["tracker", "source_ready", "target_ready", "full_live_closure_to_mteam", "has_reference_flow", "implemented_roles", "missing_components", "checklist", "blockers", "next_action"],
+        "extension_handoff_fields": ["ready", "phase", "recommended_next_tracker", "reference_flow", "implementation_order", "tracker_steps", "endpoint_sequence", "validation_sequence", "continue_when", "stop_when", "blockers", "next_actions"],
         "agent_summary_fields": ["ready", "site_count", "source_info_count", "source_download_count", "target_upload_count", "full_live_closure_to_mteam_count", "policy_profile_count", "reference_flow_count", "extension_ready", "extension_blocker_count", "recommended_next_tool", "blocker_count"],
         "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_upload"],
     }
@@ -10241,6 +10331,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_matrix": {"type": "array", "items": {"type": "object"}},
             "policy_gap_summary": {"type": "object"},
             "policy_execution_summary": {"type": "object"},
+            "extension_plan": {"type": "object"},
+            "extension_handoff": {"type": "object"},
             "flow_matrix": {"type": "array", "items": {"type": "object"}},
             "reference_flows": {"type": "array", "items": {"type": "object"}},
             "agent_summary": {"type": "object"},

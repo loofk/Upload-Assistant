@@ -15043,6 +15043,13 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert payload["extension_plan"]["items"][1]["target_ready"] is True
     assert payload["extension_plan"]["items"][1]["missing_components"] == []
     assert payload["extension_plan"]["ready"] is True
+    assert payload["extension_handoff"]["ready"] is True
+    assert payload["extension_handoff"]["phase"] == "validate_ready_sites"
+    assert payload["extension_handoff"]["recommended_next_tracker"] is None
+    assert payload["extension_handoff"]["reference_flow"]["source_tracker"] == "U2"
+    assert payload["extension_handoff"]["tracker_steps"]["U2"]["ready"] is True
+    assert payload["extension_handoff"]["endpoint_sequence"][0]["tool"] == "site_profiles"
+    assert payload["extension_handoff"]["continue_when"] == "extension_plan.ready=true and readiness_bundle.live_readiness.ready_for_ai=true"
     assert payload["agent_summary"]["extension_ready"] is True
     assert payload["agent_summary"]["extension_blocker_count"] == 0
     assert payload["agent_summary"]["recommended_next_tool"] == "readiness_bundle"
@@ -15876,8 +15883,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["site_profiles"]["path"] == "/v1/sites"
     assert "adapter_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "extension_plan" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
+    assert "extension_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_checklist" in tool_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
     assert "extension_plan_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "extension_handoff_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "endpoint_sequence" in tool_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
     assert "missing_components" in tool_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
     assert "policy_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "full_live_closure_to_mteam_count" in tool_by_name["site_profiles"]["response_contract"]["agent_summary_fields"]
@@ -16022,6 +16032,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "capability_matrix" in site_profiles_schema["properties"]
     assert "adapter_profiles" in site_profiles_schema["properties"]
+    assert "extension_plan" in site_profiles_schema["properties"]
+    assert "extension_handoff" in site_profiles_schema["properties"]
     assert "flow_matrix" in site_profiles_schema["properties"]
     qbit_inspect_schema = openapi["paths"]["/v1/qbit/inspect"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "torrents" in qbit_inspect_schema["properties"]
@@ -16327,8 +16339,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][6]["stop_when"]
         assert tools_by_name["site_profiles"]["path"] == "/v1/sites"
         assert "extension_plan" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
+        assert "extension_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_checklist" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "extension_plan_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "extension_handoff_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "missing_components" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]

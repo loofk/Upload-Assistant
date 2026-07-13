@@ -7069,6 +7069,7 @@
           "policy_matrix",
           "policy_execution_summary",
           "extension_plan",
+          "extension_handoff",
           "flow_matrix",
           "agent_summary",
           "blockers",
@@ -7130,6 +7131,20 @@
           "checklist",
           "blockers",
           "next_action"
+        ],
+        "extension_handoff_fields": [
+          "ready",
+          "phase",
+          "recommended_next_tracker",
+          "reference_flow",
+          "implementation_order",
+          "tracker_steps",
+          "endpoint_sequence",
+          "validation_sequence",
+          "continue_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
         ],
         "agent_summary_fields": [
           "ready",
