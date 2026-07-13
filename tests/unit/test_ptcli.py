@@ -14038,7 +14038,24 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
         },
         "top_submit_job_endpoint": "/v1/jobs/retorrent/from-url",
         "top_submit_tool": "source_url_retorrent_job",
-        "push_items": [{"rank": 1, "source_id": "60635", "decision": "submit_when_confirmed"}],
+        "push_items": [
+            {
+                "rank": 1,
+                "source_id": "60635",
+                "title": "Example.Release",
+                "decision": "submit_when_confirmed",
+                "can_submit": True,
+                "submit_request": {
+                    "source": "https://u2.dmhy.org/details.php?id=60635",
+                    "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                    "source_tracker": "U2",
+                    "target": "MTEAM",
+                    "execute_if_no_duplicate": True,
+                    "accept_rules": True,
+                    "confirm_upload": False,
+                },
+            }
+        ],
         "blockers": [],
         "next_actions": [],
     }
@@ -14080,9 +14097,21 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert job["agent_decision"]["policy_coverage_ready"] is True
     assert job["agent_decision"]["can_submit_job"] is True
     assert job["agent_decision"]["missing_confirmations"] == ["confirm_upload=true"]
+    assert job["candidate_batch_handoff"]["ready"] is True
+    assert job["candidate_batch_handoff"]["submit_tool"] == "submit_daily_candidate_job"
+    assert job["candidate_batch_handoff"]["recommended_endpoint"] == f"/v1/jobs/candidates/{job['job_id']}/submit"
+    assert job["candidate_batch_handoff"]["recommended_request"]["rank"] == 1
+    assert job["candidate_batch_handoff"]["recommended_request"]["source_id"] == "60635"
+    assert job["candidate_batch_handoff"]["recommended_request"]["confirm_upload"] is True
+    assert job["candidate_batch_handoff"]["recommended_request"]["save_path"] == "/downloads"
+    assert job["candidate_batch_handoff"]["items"][0]["identity_inherited_from_candidate"]["source_tracker"] == "U2"
+    assert job["candidate_batch_handoff"]["items"][0]["identity_inherited_from_candidate"]["target_trackers"] == "MTEAM"
     assert summary["candidate_digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
     assert summary["candidate_digest"]["top_submit_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert summary["agent_decision"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/from-url"
+    assert summary["candidate_batch_handoff"] == job["candidate_batch_handoff"]
+    listed = store.list({"kind": "ptcli.daily_candidates"})["jobs"][0]
+    assert listed["candidate_batch_handoff"] == job["candidate_batch_handoff"]
 
 
 def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(monkeypatch, tmp_path) -> None:
@@ -16352,6 +16381,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "material_resolution_fields" in tools_by_name["resume_job"]["response_contract"]
         assert "candidate_submission" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "candidate_submission" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "candidate_batch_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
+        assert "candidate_batch_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "candidate_batch_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "candidate_batch_handoff_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "recommended_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_batch_handoff_fields"]
         assert "interruption" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "runtime" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "runtime" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -16365,6 +16399,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "interruption" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "cancellation" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "candidate_submission" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "candidate_batch_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "candidate_submission_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "candidate_submission_summary" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_plan" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
