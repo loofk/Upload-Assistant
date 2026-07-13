@@ -5617,8 +5617,10 @@ def _daily_schedule_summary_check(payload: dict[str, Any], summary_file: str) ->
     diagnostics = _summary_check_diagnostics(payload)
     schedule_digest = payload.get("schedule_digest") if isinstance(payload.get("schedule_digest"), dict) else {}
     agent_decision = payload.get("agent_decision") if isinstance(payload.get("agent_decision"), dict) else {}
+    delivery_result = payload.get("delivery_result") if isinstance(payload.get("delivery_result"), dict) else {}
     daily_candidate_targets = _daily_candidate_target_audit(schedule_digest, payload.get("notification_payload"))
     blockers = _string_list(payload.get("blockers")) or _string_list(schedule_digest.get("blockers"))
+    _extend_unique_string(blockers, _string_list(delivery_result.get("blockers")))
     ready_for_push = bool(schedule_digest.get("push_count")) and not blockers
     can_submit_any = bool(agent_decision.get("can_submit_any")) or bool(schedule_digest.get("submit_request_count"))
     pending_count = int(schedule_digest.get("pending_job_count") or 0)
@@ -5658,6 +5660,8 @@ def _daily_schedule_summary_check(payload: dict[str, Any], summary_file: str) ->
             "job_count": payload.get("job_count"),
             "schedule_digest": schedule_digest,
             "notification_payload": payload.get("notification_payload") or schedule_digest.get("notification_payload"),
+            "delivery_handoff": payload.get("delivery_handoff"),
+            "delivery_result": delivery_result,
             "agent_decision": agent_decision,
             "top_submit_requests": schedule_digest.get("top_submit_requests", []),
             "push_items": schedule_digest.get("push_items", []),
@@ -11686,6 +11690,9 @@ def daily_schedule_payload(args: argparse.Namespace) -> dict[str, Any]:
         result["notification_webhook"] = _post_daily_schedule_notification_webhook(result, webhook_url, timeout=float(getattr(args, "notification_webhook_timeout", 10.0) or 10.0))
         if args.write_summary:
             result["summary_file"] = _write_daily_schedule_summary(result, args, store.root)
+    result["delivery_result"] = _daily_schedule_delivery_result(result, webhook_url=webhook_url)
+    if args.write_summary:
+        result["summary_file"] = _write_daily_schedule_summary(result, args, store.root)
     return result
 
 
@@ -11810,8 +11817,10 @@ def _write_daily_schedule_summary(payload: dict[str, Any], args: argparse.Namesp
         "skipped": payload.get("skipped", []),
         "schedule_digest": payload.get("schedule_digest"),
         "notification_payload": payload.get("notification_payload"),
+        "delivery_handoff": payload.get("delivery_handoff"),
         "notification_files": payload.get("notification_files"),
         "notification_webhook": payload.get("notification_webhook"),
+        "delivery_result": payload.get("delivery_result"),
         "agent_decision": payload.get("agent_decision"),
         "blockers": payload.get("blockers", []),
         "next_actions": payload.get("next_actions", []),
@@ -11834,6 +11843,7 @@ def _write_daily_schedule_notification_files(payload: dict[str, Any], args: argp
         "ok": payload.get("ok"),
         "notification_payload": notification,
         "schedule_digest": payload.get("schedule_digest"),
+        "delivery_handoff": payload.get("delivery_handoff"),
         "agent_decision": payload.get("agent_decision"),
         "summary_file": payload.get("summary_file"),
         "blockers": payload.get("blockers", []),
@@ -11864,6 +11874,7 @@ def _post_daily_schedule_notification_webhook(payload: dict[str, Any], url: str,
         "ok": payload.get("ok"),
         "notification_payload": notification,
         "schedule_digest": payload.get("schedule_digest"),
+        "delivery_handoff": payload.get("delivery_handoff"),
         "agent_decision": payload.get("agent_decision"),
         "summary_file": payload.get("summary_file"),
         "notification_files": payload.get("notification_files"),
@@ -11886,6 +11897,74 @@ def _post_daily_schedule_notification_webhook(payload: dict[str, Any], url: str,
     except requests.RequestException as exc:
         result["error"] = str(exc)
     return result
+
+
+def _daily_schedule_delivery_result(payload: dict[str, Any], *, webhook_url: str | None) -> dict[str, Any]:
+    notification_files = payload.get("notification_files") if isinstance(payload.get("notification_files"), dict) else {}
+    notification_webhook = payload.get("notification_webhook") if isinstance(payload.get("notification_webhook"), dict) else {}
+    delivery_handoff = payload.get("delivery_handoff") if isinstance(payload.get("delivery_handoff"), dict) else {}
+    notification_payload = payload.get("notification_payload") if isinstance(payload.get("notification_payload"), dict) else {}
+    file_attempted = bool(notification_files)
+    json_file = notification_files.get("json")
+    text_file = notification_files.get("text")
+    json_exists = bool(json_file and Path(str(json_file)).exists())
+    text_exists = bool(text_file and Path(str(text_file)).exists())
+    file_ok = file_attempted and json_exists and text_exists
+    webhook_attempted = bool(notification_webhook.get("attempted"))
+    webhook_ok = bool(notification_webhook.get("ok"))
+    blockers: list[str] = []
+    if file_attempted and not file_ok:
+        blockers.append("Daily candidate notification files were requested but not all expected files were written.")
+    if webhook_attempted and not webhook_ok:
+        blockers.append(str(notification_webhook.get("error") or "Daily candidate notification webhook delivery failed."))
+    publish_ready = bool(delivery_handoff.get("publish_ready") or notification_payload.get("ready"))
+    channel_attempted = file_attempted or webhook_attempted
+    ok = not blockers
+    status = "blocked" if blockers else "delivered" if channel_attempted else "ready"
+    next_actions = _daily_schedule_delivery_next_actions(publish_ready, file_attempted, webhook_attempted, blockers)
+    return {
+        "kind": "ptcli.daily_schedule.delivery_result",
+        "status": status,
+        "ok": ok,
+        "publish_ready": publish_ready,
+        "channel_attempted": channel_attempted,
+        "file_delivery": {
+            "attempted": file_attempted,
+            "ok": file_ok if file_attempted else None,
+            "json": json_file,
+            "text": text_file,
+            "json_exists": json_exists,
+            "text_exists": text_exists,
+        },
+        "webhook_delivery": {
+            "attempted": webhook_attempted,
+            "ok": webhook_ok if webhook_attempted else None,
+            "url": notification_webhook.get("url") or webhook_url,
+            "status_code": notification_webhook.get("status_code"),
+            "error": notification_webhook.get("error"),
+        },
+        "agent_handoff": {
+            "read": "delivery_result",
+            "notification_payload": "notification_payload",
+            "delivery_handoff": "delivery_handoff",
+            "execution_summary": "delivery_handoff.execution_summary",
+            "summary_file": payload.get("summary_file"),
+            "retry_tool": "daily-schedule",
+            "retry_requires_upload_confirmation": False,
+        },
+        "blockers": blockers,
+        "next_actions": next_actions,
+    }
+
+
+def _daily_schedule_delivery_next_actions(publish_ready: bool, file_attempted: bool, webhook_attempted: bool, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Inspect delivery_result.blockers, then rerun daily-schedule with --write-notification or a working --notification-webhook-url. No upload has been attempted."]
+    if not publish_ready:
+        return ["Inspect delivery_handoff.blockers and schedule_digest before publishing daily candidates."]
+    if file_attempted or webhook_attempted:
+        return ["Consume delivery_result.file_delivery or delivery_result.webhook_delivery, then review delivery_handoff.submission_handoff before any candidate submission."]
+    return ["No delivery channel was requested; use --write-notification or --notification-webhook-url to hand daily candidates to an AI/IM/webhook consumer."]
 
 
 def site_policies_cli_payload(args: argparse.Namespace) -> dict[str, Any]:

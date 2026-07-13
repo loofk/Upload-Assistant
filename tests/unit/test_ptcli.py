@@ -14936,6 +14936,15 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert summary["notification_payload"]["ready"] is True
     assert summary["notification_files"] == payload["notification_files"]
     assert summary["notification_webhook"] == payload["notification_webhook"]
+    assert summary["delivery_handoff"] == payload["delivery_handoff"]
+    assert summary["delivery_result"] == payload["delivery_result"]
+    assert payload["delivery_result"]["kind"] == "ptcli.daily_schedule.delivery_result"
+    assert payload["delivery_result"]["status"] == "delivered"
+    assert payload["delivery_result"]["ok"] is True
+    assert payload["delivery_result"]["publish_ready"] is True
+    assert payload["delivery_result"]["file_delivery"]["ok"] is True
+    assert payload["delivery_result"]["webhook_delivery"]["ok"] is True
+    assert payload["delivery_result"]["agent_handoff"]["execution_summary"] == "delivery_handoff.execution_summary"
     assert payload["notification_webhook"]["ok"] is True
     assert payload["notification_webhook"]["status_code"] == 204
     assert webhook_calls[0]["url"] == "https://hooks.example/ptcli"
@@ -14967,6 +14976,8 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert check_payload["readiness_summary"]["daily_candidate_shortfall_count"] == 9
     assert check_payload["notification_payload"]["top_item"]["source_id"] == "12345"
     assert check_payload["notification_payload"]["submission_ready"] is True
+    assert check_payload["delivery_handoff"] == payload["delivery_handoff"]
+    assert check_payload["delivery_result"] == payload["delivery_result"]
     assert check_payload["live_safe_to_attempt"] is False
     assert check_payload["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
     assert check_payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
@@ -15029,8 +15040,13 @@ def test_daily_schedule_webhook_error_is_reported(monkeypatch, tmp_path, capsys)
     assert payload["notification_webhook"]["ok"] is False
     assert payload["notification_webhook"]["status_code"] is None
     assert "connection refused" in payload["notification_webhook"]["error"]
+    assert payload["delivery_result"]["status"] == "blocked"
+    assert payload["delivery_result"]["ok"] is False
+    assert payload["delivery_result"]["webhook_delivery"]["ok"] is False
+    assert "connection refused" in payload["delivery_result"]["blockers"][0]
     summary = json.loads(Path(payload["summary_file"]).read_text(encoding="utf-8"))
     assert summary["notification_webhook"] == payload["notification_webhook"]
+    assert summary["delivery_result"] == payload["delivery_result"]
 
 
 def test_daily_scheduler_once_runs_schedule_and_writes_summary(monkeypatch, tmp_path, capsys) -> None:
@@ -15084,6 +15100,9 @@ def test_daily_scheduler_once_runs_schedule_and_writes_summary(monkeypatch, tmp_
     assert payload["scheduler"]["next_run"]["job_tool"] == "daily_candidates_job"
     assert payload["last_run"]["kind"] == "ptcli.cli.daily_schedule"
     assert payload["last_run"]["schedule_digest"]["push_items"][0]["source_id"] == "60635"
+    assert payload["last_run"]["delivery_result"]["status"] == "delivered"
+    assert payload["last_run"]["delivery_result"]["file_delivery"]["ok"] is True
+    assert payload["last_run"]["delivery_result"]["webhook_delivery"]["attempted"] is False
     assert Path(payload["last_run"]["notification_files"]["json"]).exists()
     assert Path(payload["last_run"]["notification_files"]["text"]).exists()
     summary_path = Path(payload["summary_file"])
