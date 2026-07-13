@@ -13068,6 +13068,10 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert resume["request"]["resume_lineage"]["parent_workflow_context"]["source_reference"] == parent["source_reference"]
     assert resume["request"]["resume_lineage"]["next_subcommand"] == "doctor"
     assert resume["resume_lineage"] == resume["request"]["resume_lineage"]
+    assert resume["job_lineage"]["parent_job_id"] == parent["job_id"]
+    assert resume["job_lineage"]["root_job_id"] == parent["job_id"]
+    assert resume["job_lineage"]["depth"] == 1
+    assert [item["job_id"] for item in resume["job_lineage"]["chain"]] == [parent["job_id"], resume["job_id"]]
     assert resume["source_reference"] == parent["source_reference"]
     assert resume["workflow_context"]["resume_lineage"] == resume["resume_lineage"]
     assert resume["resume_context"] == resume["request"]["resume_context"]
@@ -13090,6 +13094,20 @@ def test_job_store_resume_runs_allowlisted_command(monkeypatch, tmp_path) -> Non
     assert parent["resume_plan"]["recommended"] is True
     assert parent["resume_plan"]["subcommand"] == "doctor"
     assert parent["resume_plan"]["endpoint"] == f"/v1/jobs/{parent['job_id']}/resume"
+
+    parent_after_resume = store.get(parent["job_id"])
+    parent_summary = store.summary(parent["job_id"])
+    child_summary = store.summary(resume["job_id"])
+    listed = store.list({"kind": "ptcli.resume"})
+
+    assert parent_after_resume["job_lineage"]["child_count"] == 1
+    assert parent_after_resume["job_lineage"]["latest_child"]["job_id"] == resume["job_id"]
+    assert parent_after_resume["job_lineage"]["children"][0]["status"] == "complete"
+    assert parent_summary["job_lineage"] == parent_after_resume["job_lineage"]
+    assert child_summary["job_lineage"]["parent_job_id"] == parent["job_id"]
+    assert child_summary["job_lineage"]["root_job_id"] == parent["job_id"]
+    assert listed["jobs"][0]["job_lineage"]["parent_job_id"] == parent["job_id"]
+    assert listed["jobs"][0]["job_lineage"]["chain"][0]["job_id"] == parent["job_id"]
 
 
 def test_job_store_resume_applies_allowlisted_overrides(monkeypatch, tmp_path) -> None:
@@ -15580,6 +15598,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_lineage" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_lineage" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "job_lineage" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
+    assert "job_lineage" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "job_lineage" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "job_lineage" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "resume_context" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_context" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -15587,6 +15609,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_audit" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_audit" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "resume_audit_fields" in tool_by_name["resume_job"]["response_contract"]
+    assert "children" in tool_by_name["resume_job"]["response_contract"]["job_lineage_fields"]
     assert "resume_summary" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "resume_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -15877,6 +15900,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_plan" in summary_schema["properties"]
     assert "resume_requirements" in summary_schema["properties"]
     assert "resume_lineage" in summary_schema["properties"]
+    assert "job_lineage" in summary_schema["properties"]
     assert "resume_context" in summary_schema["properties"]
     assert "resume_summary" in summary_schema["properties"]
     assert "material_resolution" in summary_schema["properties"]
@@ -15889,6 +15913,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     job_schema = openapi["paths"]["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "interruption" in job_schema["properties"]
     assert "runtime" in job_schema["properties"]
+    assert "job_lineage" in job_schema["properties"]
     assert "policy_handoff" in job_schema["properties"]
     assert "submit_if_clear_handoff" in job_schema["properties"]
     assert "check_submission" in job_schema["properties"]
@@ -16304,6 +16329,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_lineage" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_lineage" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "job_lineage" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
+        assert "job_lineage" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "job_lineage" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "job_lineage" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_context" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_context" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -16311,6 +16340,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_audit" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_audit" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_audit_fields" in tools_by_name["resume_job"]["response_contract"]
+        assert "latest_child" in tools_by_name["resume_job"]["response_contract"]["job_lineage_fields"]
         assert "resume_summary" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_summary" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_summary" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]

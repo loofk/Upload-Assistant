@@ -1565,6 +1565,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -1700,6 +1701,20 @@
           "dry_run_request",
           "execute_request",
           "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
           "next_actions"
         ],
         "resume_summary_fields": [
@@ -2266,6 +2281,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -2401,6 +2417,20 @@
           "dry_run_request",
           "execute_request",
           "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
           "next_actions"
         ],
         "resume_summary_fields": [
@@ -2834,6 +2864,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -2969,6 +3000,20 @@
           "dry_run_request",
           "execute_request",
           "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
           "next_actions"
         ],
         "resume_summary_fields": [
@@ -3402,6 +3447,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -3537,6 +3583,20 @@
           "dry_run_request",
           "execute_request",
           "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
           "next_actions"
         ],
         "resume_summary_fields": [
@@ -3974,6 +4034,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -4109,6 +4170,20 @@
           "dry_run_request",
           "execute_request",
           "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
           "next_actions"
         ],
         "resume_summary_fields": [
@@ -4854,6 +4929,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -4989,6 +5065,20 @@
           "dry_run_request",
           "execute_request",
           "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
           "next_actions"
         ],
         "resume_summary_fields": [
@@ -5685,6 +5775,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -5820,6 +5911,20 @@
           "dry_run_request",
           "execute_request",
           "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
           "next_actions"
         ],
         "resume_summary_fields": [
@@ -7009,6 +7114,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_summary",
           "material_resolution",
           "job_handoff",
@@ -7087,6 +7193,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -7222,6 +7329,20 @@
           "dry_run_request",
           "execute_request",
           "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
           "next_actions"
         ],
         "resume_summary_fields": [
@@ -7474,6 +7595,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -7741,6 +7863,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -7876,6 +7999,20 @@
           "dry_run_request",
           "execute_request",
           "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
           "next_actions"
         ],
         "resume_summary_fields": [
@@ -8146,6 +8283,7 @@
           "resume_plan",
           "resume_requirements",
           "resume_lineage",
+          "job_lineage",
           "resume_context",
           "resume_audit",
           "resume_summary",
@@ -8281,6 +8419,20 @@
           "dry_run_request",
           "execute_request",
           "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
           "next_actions"
         ],
         "resume_summary_fields": [

@@ -154,7 +154,8 @@ class JobStore:
         return self.get(job_id)
 
     def get(self, job_id: str) -> dict[str, Any]:
-        return _job_public_payload(self._read(job_id))
+        job = self._read(job_id)
+        return _job_public_payload(job, self._job_lineage(job))
 
     def recover_interrupted_jobs(self) -> dict[str, Any]:
         recovered: list[dict[str, Any]] = []
@@ -191,7 +192,7 @@ class JobStore:
             )
             job["agent_decision"] = _agent_decision(job)
             self._write(job)
-            recovered.append(_job_list_item(job))
+            recovered.append(_job_list_item(job, self._job_lineage(job)))
         return {
             "status": "ok",
             "ok": True,
@@ -222,7 +223,7 @@ class JobStore:
                 continue
             total += 1
             if len(jobs) < limit:
-                jobs.append(_job_list_item(job))
+                jobs.append(_job_list_item(job, self._job_lineage(job)))
         return {
             "status": "ok",
             "ok": True,
@@ -273,6 +274,7 @@ class JobStore:
             "resume_plan": _job_resume_plan(job),
             "resume_requirements": _job_resume_requirements(job, summary_payload),
             "resume_lineage": _job_resume_lineage(job),
+            "job_lineage": self._job_lineage(job),
             "resume_context": _job_resume_context(job),
             "resume_audit": _job_resume_audit(job),
             "resume_summary": _job_resume_summary(job),
@@ -433,6 +435,20 @@ class JobStore:
         if not path.is_file():
             raise ServiceError(f"Job not found: {job_id}", status=HTTPStatus.NOT_FOUND)
         return json.loads(path.read_text(encoding="utf-8"))
+
+    def _read_all_jobs(self) -> list[dict[str, Any]]:
+        jobs: list[dict[str, Any]] = []
+        for path in sorted(self.root.glob("*.json"), key=lambda item: item.stat().st_mtime):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict):
+                jobs.append(payload)
+        return jobs
+
+    def _job_lineage(self, job: dict[str, Any]) -> dict[str, Any]:
+        return _job_lineage_summary(job, self._read_all_jobs())
 
     def _write(self, job: dict[str, Any]) -> None:
         job_id = str(job["job_id"])
@@ -4656,7 +4672,85 @@ def _job_handoff_next_actions(status: str, runtime: dict[str, Any], resume_plan:
     return list(dict.fromkeys(action for action in actions if action))
 
 
-def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
+def _job_lineage_summary(job: dict[str, Any], all_jobs: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    all_jobs = all_jobs or [job]
+    job_id = str(job.get("job_id") or "")
+    by_id = {str(item.get("job_id")): item for item in all_jobs if isinstance(item, dict) and item.get("job_id")}
+    parent_job_id = _job_parent_job_id(job)
+    children = [item for item in all_jobs if _job_parent_job_id(item) == job_id]
+    children.sort(key=lambda item: _timestamp(item.get("created_at")) or 0)
+    chain = _job_lineage_chain(job, by_id)
+    root_job_id = chain[0].get("job_id") if chain else job_id or None
+    latest_child = _job_lineage_item(children[-1]) if children else None
+    return {
+        "kind": "ptcli.job_lineage",
+        "job_id": job_id or None,
+        "parent_job_id": parent_job_id,
+        "root_job_id": root_job_id,
+        "depth": max(0, len(chain) - 1),
+        "is_resume_job": bool(parent_job_id or str(job.get("kind") or "") == "ptcli.resume"),
+        "chain": chain,
+        "child_count": len(children),
+        "children": [_job_lineage_item(child) for child in children],
+        "latest_child": latest_child,
+        "has_active_child": any(child.get("status") in {"queued", "running"} for child in children),
+        "terminal_child_count": sum(1 for child in children if child.get("status") not in {"queued", "running"}),
+        "next_actions": _job_lineage_next_actions(job_id, children, latest_child),
+    }
+
+
+def _job_parent_job_id(job: dict[str, Any]) -> str | None:
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    lineage = request.get("resume_lineage") if isinstance(request.get("resume_lineage"), dict) else {}
+    context = request.get("resume_context") if isinstance(request.get("resume_context"), dict) else {}
+    parent = request.get("parent_job_id") or lineage.get("parent_job_id") or context.get("parent_job_id")
+    return str(parent) if parent else None
+
+
+def _job_lineage_chain(job: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    chain = [_job_lineage_item(job)]
+    seen = {str(job.get("job_id") or "")}
+    current = job
+    while True:
+        parent_id = _job_parent_job_id(current)
+        if not parent_id or parent_id in seen:
+            break
+        parent = by_id.get(parent_id)
+        if not parent:
+            chain.insert(0, {"job_id": parent_id, "missing": True})
+            break
+        chain.insert(0, _job_lineage_item(parent))
+        seen.add(parent_id)
+        current = parent
+    return chain
+
+
+def _job_lineage_item(job: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(job.get("job_id") or "")
+    return {
+        "job_id": job_id or None,
+        "kind": job.get("kind"),
+        "status": job.get("status"),
+        "parent_job_id": _job_parent_job_id(job),
+        "created_at": job.get("created_at"),
+        "completed_at": job.get("completed_at"),
+        "status_endpoint": f"/v1/jobs/{job_id}" if job_id else None,
+        "summary_endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
+        "resume_endpoint": f"/v1/jobs/{job_id}/resume" if job_id else None,
+    }
+
+
+def _job_lineage_next_actions(job_id: str, children: list[dict[str, Any]], latest_child: dict[str, Any] | None) -> list[str]:
+    if not children:
+        return []
+    if any(child.get("status") in {"queued", "running"} for child in children):
+        return [f"Poll active child jobs before resuming parent job {job_id} again."]
+    if latest_child:
+        return [f"Inspect latest_child.summary_endpoint before deciding whether parent job {job_id} still needs another resume."]
+    return []
+
+
+def _job_list_item(job: dict[str, Any], job_lineage: dict[str, Any] | None = None) -> dict[str, Any]:
     job_id = job.get("job_id")
     return {
         "job_id": job_id,
@@ -4689,6 +4783,7 @@ def _job_list_item(job: dict[str, Any]) -> dict[str, Any]:
         "resume_plan": _job_resume_plan(job),
         "resume_requirements": _job_resume_requirements(job),
         "resume_lineage": _job_resume_lineage(job),
+        "job_lineage": job_lineage or _job_lineage_summary(job),
         "resume_audit": _job_resume_audit(job),
         "resume_summary": _job_resume_summary(job),
         "material_resolution": _job_material_resolution(job),
@@ -4714,7 +4809,7 @@ def _job_list_next_actions(jobs: list[dict[str, Any]], total: int, limit: int) -
     return actions
 
 
-def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
+def _job_public_payload(job: dict[str, Any], job_lineage: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "status": job.get("status"),
         "ok": job.get("status") == "complete",
@@ -4752,6 +4847,7 @@ def _job_public_payload(job: dict[str, Any]) -> dict[str, Any]:
         "resume_plan": _job_resume_plan(job),
         "resume_requirements": _job_resume_requirements(job),
         "resume_lineage": _job_resume_lineage(job),
+        "job_lineage": job_lineage or _job_lineage_summary(job),
         "resume_context": _job_resume_context(job),
         "resume_audit": _job_resume_audit(job),
         "resume_summary": _job_resume_summary(job),
@@ -8494,7 +8590,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -9055,7 +9151,7 @@ def _qbit_wait_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -9066,6 +9162,7 @@ def _job_response_contract() -> dict[str, Any]:
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "request_template", "dry_run_request", "execute_request", "recommended_inputs", "allowed_overrides", "current_flags"],
         "resume_preview_fields": ["dry_run", "mutates_state", "live_upload", "command_argv", "original_next_command_argv", "applied_overrides", "ignored_overrides", "material_resolution", "resume_context", "resume_lineage", "resume_plan", "resume_requirements", "agent_decision"],
         "resume_audit_fields": ["is_resume_job", "parent_job_id", "parent_status", "parent_kind", "child_status", "resume_available", "resume_allowed", "resume_recommended", "next_subcommand", "next_command_argv", "applied_override_keys", "ignored_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "next_actions"],
+        "job_lineage_fields": ["job_id", "parent_job_id", "root_job_id", "depth", "is_resume_job", "chain", "child_count", "children", "latest_child", "has_active_child", "terminal_child_count", "next_actions"],
         "resume_summary_fields": ["available", "allowed", "recommended", "status", "subcommand", "missing_confirmations", "recommended_input_keys", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "recommended_tool", "blockers", "next_actions"],
         "recommended_input_fields": ["key", "accepted_keys", "required", "reason", "stage", "resume_tool", "resume_endpoint_hint", "blocking_keys", "examples"],
         "materials_handoff_fields": ["ready", "can_prepare_upload_payload", "metadata", "materials", "target_preflight", "material_plan", "resume_request_template", "recommended_inputs", "blockers", "next_actions"],
@@ -9105,7 +9202,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -9530,6 +9627,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_plan": {"type": "object"},
             "resume_requirements": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
+            "job_lineage": {"type": "object"},
             "resume_context": {"type": ["object", "null"]},
             "resume_audit": {"type": "object"},
             "resume_summary": {"type": "object"},
@@ -9590,6 +9688,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_plan": {"type": "object"},
             "resume_requirements": {"type": "object"},
             "resume_lineage": {"type": ["object", "null"]},
+            "job_lineage": {"type": "object"},
             "resume_context": {"type": ["object", "null"]},
             "resume_audit": {"type": "object"},
             "resume_summary": {"type": "object"},
