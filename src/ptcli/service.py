@@ -3717,11 +3717,11 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
         ],
         "missing_confirmations": _string_list(digest_item.get("missing_confirmations")),
         "after_submit": {
-            "read_fields": ["candidate_submission_summary", "candidate_submission_handoff", "manual_retorrent_handoff", "materials_handoff", "agent_decision", "status_endpoint", "summary_endpoint"],
+            "read_fields": ["candidate_submission_summary", "candidate_submission_summary.execution_state", "candidate_submission_summary.execution_handoff", "candidate_submission_handoff", "manual_retorrent_handoff", "materials_handoff", "agent_decision", "status_endpoint", "summary_endpoint"],
             "poll_with": "get_job_status",
             "summary_with": "get_job_summary",
-            "stop_when": ["candidate_submission_summary.closure_action=stop_duplicate", "candidate_submission_summary.manual_action=collect_confirmations", "candidate_submission_summary.manual_action=configure_policy"],
-            "resume_when": "candidate_submission_summary.recommended_tool=resume_job and resume_plan.allowed=true",
+            "stop_when": ["candidate_submission_summary.execution_state=stop_duplicate", "candidate_submission_summary.execution_state=collect_confirmations", "candidate_submission_summary.execution_state=configure_policy"],
+            "resume_when": "candidate_submission_summary.execution_handoff.recommended_tool=resume_job and resume_plan.allowed=true",
         },
         "status_endpoint": job.get("status_endpoint"),
         "summary_endpoint": job.get("summary_endpoint"),
@@ -7049,6 +7049,8 @@ def _job_candidate_submission_handoff(job: dict[str, Any], summary_payload: dict
     request = job.get("request") if isinstance(job.get("request"), dict) else {}
     manual_handoff = _job_manual_retorrent_handoff(job, summary_payload)
     policy_execution_handoff = submission.get("policy_execution_handoff") if isinstance(submission.get("policy_execution_handoff"), dict) else {}
+    closure_summary = _job_closure_summary(job, summary_payload)
+    execution_handoff = _candidate_submission_execution_handoff(job, manual_handoff if isinstance(manual_handoff, dict) else {}, closure_summary, policy_execution_handoff)
     return {
         "kind": "ptcli.candidate_submission_handoff",
         "candidate_job_id": submission.get("candidate_job_id"),
@@ -7068,6 +7070,8 @@ def _job_candidate_submission_handoff(job: dict[str, Any], summary_payload: dict
         "target_trackers": request.get("target_trackers"),
         "manual_retorrent_handoff": manual_handoff,
         "action": manual_handoff.get("action") if isinstance(manual_handoff, dict) else None,
+        "execution_state": execution_handoff.get("state"),
+        "execution_handoff": execution_handoff,
         "status_endpoint": f"/v1/jobs/{job_id}" if job_id else None,
         "summary_endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
         "parent_status_endpoint": f"/v1/jobs/{submission.get('candidate_job_id')}" if submission.get("candidate_job_id") else None,
@@ -7089,6 +7093,7 @@ def _job_candidate_submission_summary(job: dict[str, Any], summary_payload: dict
     qbit_overrides = submission.get("qbit_overrides") if isinstance(submission.get("qbit_overrides"), dict) else {}
     policy_execution_handoff = submission.get("policy_execution_handoff") if isinstance(submission.get("policy_execution_handoff"), dict) else {}
     next_step = closure_summary.get("next_step") if isinstance(closure_summary.get("next_step"), dict) else {}
+    execution_handoff = handoff.get("execution_handoff") if isinstance(handoff, dict) and isinstance(handoff.get("execution_handoff"), dict) else {}
     blockers = list(
         dict.fromkeys(
             _string_list(closure_summary.get("blockers"))
@@ -7115,6 +7120,8 @@ def _job_candidate_submission_summary(job: dict[str, Any], summary_payload: dict
         "manual_action": manual_handoff.get("action"),
         "closure_action": closure_summary.get("action"),
         "closure_complete": closure_summary.get("complete") is True,
+        "execution_state": execution_handoff.get("state"),
+        "execution_handoff": execution_handoff,
         "can_attempt_live": manual_handoff.get("can_attempt_live"),
         "next_step": next_step,
         "recommended_tool": next_step.get("tool"),
@@ -7126,6 +7133,110 @@ def _job_candidate_submission_summary(job: dict[str, Any], summary_payload: dict
         "blockers": blockers,
         "next_actions": _candidate_submission_summary_next_actions(closure_summary, manual_handoff, next_step, blockers),
     }
+
+
+def _candidate_submission_execution_handoff(job: dict[str, Any], manual_handoff: dict[str, Any], closure_summary: dict[str, Any], policy_execution_handoff: dict[str, Any]) -> dict[str, Any]:
+    status = str(job.get("status") or "unknown")
+    blockers = list(dict.fromkeys(_string_list(closure_summary.get("blockers")) + _string_list(manual_handoff.get("blockers")) + _string_list(job.get("blockers"))))
+    closure_action = str(closure_summary.get("action") or "")
+    manual_action = str(manual_handoff.get("action") or "")
+    next_step = closure_summary.get("next_step") if isinstance(closure_summary.get("next_step"), dict) else {}
+    policy_ready = policy_execution_handoff.get("ready") if isinstance(policy_execution_handoff.get("ready"), bool) else None
+    state, reason = _candidate_submission_execution_state(status, closure_summary, manual_handoff, policy_ready, blockers)
+    recommended_tool = next_step.get("tool")
+    recommended_endpoint = next_step.get("endpoint")
+    recommended_request = next_step.get("request")
+    return {
+        "kind": "ptcli.candidate_submission_execution_handoff",
+        "state": state,
+        "reason": reason,
+        "status": status,
+        "ready_for_live": state in {"ready_for_live_upload", "resume"} and not blockers,
+        "should_poll": state == "wait",
+        "should_resume": state in {"resume", "prepare_materials", "repair_target_payload", "repair_qbit"} and recommended_tool == "resume_job",
+        "should_stop": state in {"stop_duplicate", "collect_confirmations", "configure_policy", "cancelled"},
+        "manual_action": manual_action or None,
+        "closure_action": closure_action or None,
+        "policy_execution_ready": policy_ready,
+        "recommended_tool": recommended_tool,
+        "recommended_endpoint": recommended_endpoint,
+        "recommended_method": next_step.get("method"),
+        "recommended_request": recommended_request,
+        "continue_when": _candidate_submission_execution_continue_when(state),
+        "stop_when": _candidate_submission_execution_stop_when(state),
+        "blockers": blockers,
+        "next_actions": _candidate_submission_execution_next_actions(state, next_step, blockers),
+    }
+
+
+def _candidate_submission_execution_state(status: str, closure_summary: dict[str, Any], manual_handoff: dict[str, Any], policy_ready: bool | None, blockers: list[str]) -> tuple[str, str]:
+    closure_action = str(closure_summary.get("action") or "")
+    manual_action = str(manual_handoff.get("action") or "")
+    if status in {"queued", "running"} or closure_action == "wait" or manual_action == "poll":
+        return "wait", "submitted_retorrent_job_still_running"
+    if closure_summary.get("complete") is True and not blockers:
+        return "complete", "retorrent_closure_complete"
+    if closure_action == "stop_duplicate" or manual_action == "stop_duplicate":
+        return "stop_duplicate", "target_duplicate_exists"
+    if manual_action == "collect_confirmations" or closure_action == "collect_confirmations":
+        return "collect_confirmations", "missing_required_confirmation"
+    if policy_ready is False or manual_action == "configure_policy" or closure_action == "configure_policy":
+        return "configure_policy", "policy_coverage_or_execution_incomplete"
+    if closure_action in {"prepare_materials", "repair_target_payload", "repair_qbit", "ready_for_upload"}:
+        return "ready_for_live_upload" if closure_action == "ready_for_upload" else closure_action, closure_action
+    if manual_action == "resume" or closure_summary.get("recommended_tool") == "resume_job":
+        return "resume", "resume_submitted_retorrent_job"
+    if status == "cancelled":
+        return "cancelled", "job_cancelled"
+    if blockers:
+        return "blocked", "blocked_by_runtime_or_gate"
+    if status == "complete":
+        return "complete", "retorrent_job_complete"
+    return "inspect", "unknown_candidate_submission_state"
+
+
+def _candidate_submission_execution_continue_when(state: str) -> str | None:
+    if state == "wait":
+        return "job status is no longer queued/running"
+    if state in {"resume", "prepare_materials", "repair_target_payload", "repair_qbit"}:
+        return "recommended_request reviewed, site rules accepted, and resume dry-run is acceptable"
+    if state == "ready_for_live_upload":
+        return "accept_rules=true, confirm_upload=true, duplicate_check clear, policy_execution_ready=true, and target payload ready"
+    if state == "complete":
+        return "closure_summary.complete=true and blockers=[]"
+    return None
+
+
+def _candidate_submission_execution_stop_when(state: str) -> list[str]:
+    if state == "stop_duplicate":
+        return ["duplicate_check.exists=true"]
+    if state == "collect_confirmations":
+        return ["accept_rules or confirm_upload is missing"]
+    if state == "configure_policy":
+        return ["policy_execution_handoff.ready=false", "rule obligations or site policy coverage incomplete"]
+    if state == "cancelled":
+        return ["job.status=cancelled"]
+    if state == "blocked":
+        return ["candidate_submission_summary.blockers is not empty and recommended_tool is null"]
+    return []
+
+
+def _candidate_submission_execution_next_actions(state: str, next_step: dict[str, Any], blockers: list[str]) -> list[str]:
+    if state == "complete":
+        return []
+    if state == "wait":
+        return ["Poll candidate_submission_handoff.status_endpoint until the submitted retorrent job is terminal."]
+    if state == "stop_duplicate":
+        return ["Stop. Do not upload; report duplicate_check.dupes or choose another target."]
+    if state == "collect_confirmations":
+        return ["Ask the user for explicit accept_rules/confirm_upload confirmation before resuming."]
+    if state == "configure_policy":
+        return ["Call site_policies or update PTCLI.SITE_POLICIES before attempting live work."]
+    if next_step.get("tool"):
+        return [f"Use candidate_submission_summary.execution_handoff.recommended_request with {next_step['tool']} after reviewing blockers and site rules."]
+    if blockers:
+        return ["Resolve candidate_submission_summary.execution_handoff.blockers before resuming the submitted retorrent job."]
+    return ["Inspect candidate_submission_summary.execution_handoff and closure_summary before taking live action."]
 
 
 def _candidate_submission_summary_next_actions(closure_summary: dict[str, Any], manual_handoff: dict[str, Any], next_step: dict[str, Any], blockers: list[str]) -> list[str]:
@@ -9947,8 +10058,9 @@ def _job_response_contract() -> dict[str, Any]:
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
         "candidate_batch_handoff_fields": ["ready", "candidate_job_id", "status", "submit_count", "submit_tool", "submit_endpoint", "submit_endpoint_template", "required_overrides", "allowed_selector_fields", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items", "blockers", "next_actions"],
         "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
-        "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
-        "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "policy_execution_ready", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
+        "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "execution_state", "execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
+        "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "policy_execution_ready", "execution_state", "execution_handoff", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
+        "candidate_submission_execution_handoff_fields": ["state", "reason", "status", "ready_for_live", "should_poll", "should_resume", "should_stop", "manual_action", "closure_action", "policy_execution_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "continue_when", "stop_when", "blockers", "next_actions"],
         "check_submission_fields": ["check_job_id", "check_status", "check_kind", "check_summary_file", "duplicate_check", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides"],
         "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "tool", "endpoint", "method", "request", "requires_before_call", "next_step", "blockers", "next_actions"],
         "closure_handoff_fields": ["action", "complete", "closure_checklist", "source", "target", "evidence", "duplicate_check", "target_upload_handoff", "qbit_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],

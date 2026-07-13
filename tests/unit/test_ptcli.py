@@ -14341,6 +14341,11 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["candidate_submission_handoff"]["material_options"] == retorrent_job["candidate_submission"]["material_options"]
     assert retorrent_job["candidate_submission_handoff"]["qbit_overrides"] == retorrent_job["candidate_submission"]["qbit_overrides"]
     assert retorrent_job["candidate_submission_handoff"]["policy_execution_handoff"] == policy_execution_handoff
+    assert retorrent_job["candidate_submission_handoff"]["execution_state"] == "configure_policy"
+    assert retorrent_job["candidate_submission_handoff"]["execution_handoff"]["state"] == "configure_policy"
+    assert retorrent_job["candidate_submission_handoff"]["execution_handoff"]["should_stop"] is True
+    assert retorrent_job["candidate_submission_handoff"]["execution_handoff"]["policy_execution_ready"] is True
+    assert "policy_execution_handoff.ready=false" in retorrent_job["candidate_submission_handoff"]["execution_handoff"]["stop_when"]
     assert retorrent_job["candidate_submission_handoff"]["manual_retorrent_handoff"]["action"] == "configure_policy"
     assert retorrent_job["candidate_submission_summary"]["candidate_job_id"] == candidate_job["job_id"]
     assert retorrent_job["candidate_submission_summary"]["candidate_rank"] == 1
@@ -14361,6 +14366,9 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["candidate_submission_summary"]["qbit_override_keys"] == ["uploaded_qbit_tags", "uploaded_qbit_upload_limit"]
     assert retorrent_job["candidate_submission_summary"]["policy_execution_handoff"] == policy_execution_handoff
     assert retorrent_job["candidate_submission_summary"]["policy_execution_ready"] is True
+    assert retorrent_job["candidate_submission_summary"]["execution_state"] == "configure_policy"
+    assert retorrent_job["candidate_submission_summary"]["execution_handoff"] == retorrent_job["candidate_submission_handoff"]["execution_handoff"]
+    assert retorrent_job["candidate_submission_summary"]["execution_handoff"]["recommended_tool"] == retorrent_job["closure_summary"]["recommended_tool"]
     assert retorrent_job["candidate_submission_summary"]["manual_action"] == "configure_policy"
     assert retorrent_job["candidate_submission_summary"]["closure_complete"] is False
     assert retorrent_job["candidate_submission_summary"]["recommended_tool"] == retorrent_job["closure_summary"]["recommended_tool"]
@@ -14648,6 +14656,8 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     }
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["after_submit"]["read_fields"] == [
         "candidate_submission_summary",
+        "candidate_submission_summary.execution_state",
+        "candidate_submission_summary.execution_handoff",
         "candidate_submission_handoff",
         "manual_retorrent_handoff",
         "materials_handoff",
@@ -14656,6 +14666,12 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
         "summary_endpoint",
     ]
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["after_submit"]["poll_with"] == "get_job_status"
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["after_submit"]["stop_when"] == [
+        "candidate_submission_summary.execution_state=stop_duplicate",
+        "candidate_submission_summary.execution_state=collect_confirmations",
+        "candidate_submission_summary.execution_state=configure_policy",
+    ]
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["after_submit"]["resume_when"] == "candidate_submission_summary.execution_handoff.recommended_tool=resume_job and resume_plan.allowed=true"
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["identity_inherited_from_candidate"]["source_tracker"] == "U2"
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["identity_inherited_from_candidate"]["target_trackers"] == "MTEAM"
     assert payload["notification_payload"]["kind"] == "ptcli.daily_candidate_notification_payload"
@@ -15815,8 +15831,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "submitted_overrides" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "material_options" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "policy_execution_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
+    assert "execution_state" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
+    assert "execution_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "policy_execution_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
     assert "policy_execution_ready" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+    assert "execution_state" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+    assert "execution_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+    assert "candidate_submission_execution_handoff_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
+    assert "state" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
+    assert "should_resume" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
     assert "recommended_tool" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_requirements" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
@@ -16623,8 +16646,15 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "submitted_overrides" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "material_options" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "policy_execution_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
+        assert "execution_state" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
+        assert "execution_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "policy_execution_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "policy_execution_ready" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+        assert "execution_state" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+        assert "execution_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+        assert "candidate_submission_execution_handoff_fields" in tools_by_name["submit_daily_candidate_job"]["response_contract"]
+        assert "state" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
+        assert "should_resume" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
         assert "recommended_tool" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "resume_plan" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
         assert "resume_requirements" in tools_by_name["resume_job"]["response_contract"]["required_fields"]
