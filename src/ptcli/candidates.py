@@ -892,6 +892,7 @@ def _candidate_digest_policy_summary(policy_summary: dict[str, Any]) -> dict[str
         "policy_coverage": policy_summary.get("policy_coverage"),
         "qbit_limits": qbit_limits,
         "seeding_requirements": seeding,
+        "transfer_rules": policy_summary.get("transfer_rules"),
         "rules": policy_summary.get("rules"),
     }
 

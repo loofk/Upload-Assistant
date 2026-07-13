@@ -3288,6 +3288,7 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
             "source_id": top_candidate.get("source_id"),
             "title": top_candidate.get("title"),
         },
+        "policy_execution": _daily_candidate_submission_policy_execution({**digest_item, **top_candidate}),
         "required_overrides": ["confirm_upload=true", "save_path or path"],
         "allowed_overrides": [
             "confirm_upload",
@@ -3316,6 +3317,25 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
         },
         "status_endpoint": job.get("status_endpoint"),
         "summary_endpoint": job.get("summary_endpoint"),
+    }
+
+
+def _daily_candidate_submission_policy_execution(digest_item: dict[str, Any]) -> dict[str, Any]:
+    policy_summary = digest_item.get("policy_summary") if isinstance(digest_item.get("policy_summary"), dict) else {}
+    policy_coverage = policy_summary.get("policy_coverage") if isinstance(policy_summary.get("policy_coverage"), dict) else {}
+    submit_request = digest_item.get("submit_request") if isinstance(digest_item.get("submit_request"), dict) else {}
+    qbit_keys = ("qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags")
+    return {
+        "ready": policy_coverage.get("ready") is True,
+        "policy_coverage_ready": policy_coverage.get("ready"),
+        "rule_obligations_ready": policy_coverage.get("rule_obligations_ready"),
+        "manual_review_ready": policy_summary.get("manual_review_ready"),
+        "qbit_limits": policy_summary.get("qbit_limits") if isinstance(policy_summary.get("qbit_limits"), dict) else {},
+        "seeding_requirements": policy_summary.get("seeding_requirements") if isinstance(policy_summary.get("seeding_requirements"), dict) else {},
+        "transfer_rules": policy_summary.get("transfer_rules") if isinstance(policy_summary.get("transfer_rules"), dict) else {},
+        "rules": policy_summary.get("rules") if isinstance(policy_summary.get("rules"), dict) else {},
+        "inherited_qbit_request": {key: submit_request.get(key) for key in qbit_keys if submit_request.get(key) is not None},
+        "blockers": _string_list(digest_item.get("blockers")),
     }
 
 
@@ -8576,6 +8596,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "push_payload_fields": ["title", "summary", "message", "format", "target_count", "selected_count", "shortfall_count", "target_met", "items", "top_item", "decision_summary", "submission_ready", "recommended_action"],
                 "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "submit_items", "submission_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
                 "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items"],
+                "submission_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
             },
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
@@ -9241,6 +9262,7 @@ def _job_response_contract() -> dict[str, Any]:
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
         "candidate_batch_handoff_fields": ["ready", "candidate_job_id", "status", "submit_count", "submit_tool", "submit_endpoint", "submit_endpoint_template", "required_overrides", "allowed_selector_fields", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items", "blockers", "next_actions"],
+        "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
         "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
         "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
         "check_submission_fields": ["check_job_id", "check_status", "check_kind", "check_summary_file", "duplicate_check", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides"],

@@ -14053,6 +14053,25 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
                     "execute_if_no_duplicate": True,
                     "accept_rules": True,
                     "confirm_upload": False,
+                    "qbit_download_limit": 20 * 1024 * 1024,
+                    "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+                },
+                "policy_summary": {
+                    "manual_review_ready": True,
+                    "policy_coverage": {"ready": True, "rule_obligations_ready": True, "recommendations": []},
+                    "qbit_limits": {
+                        "source": {"download_limit": 20 * 1024 * 1024},
+                        "target": {"upload_limit": 2 * 1024 * 1024},
+                    },
+                    "seeding_requirements": {
+                        "source": {"tracker": "U2", "min_seed_time_hours": 72},
+                        "targets": [{"tracker": "MTEAM", "min_ratio": 1.0}],
+                    },
+                    "transfer_rules": {
+                        "source": {"tracker": "U2", "required_promotions": ["free"]},
+                        "targets": [{"tracker": "MTEAM", "freeleech_required": False}],
+                    },
+                    "rules": {"source_fingerprint": "u2-review", "target_fingerprints": ["mteam-review"]},
                 },
             }
         ],
@@ -14106,6 +14125,16 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert job["candidate_batch_handoff"]["recommended_request"]["save_path"] == "/downloads"
     assert job["candidate_batch_handoff"]["items"][0]["identity_inherited_from_candidate"]["source_tracker"] == "U2"
     assert job["candidate_batch_handoff"]["items"][0]["identity_inherited_from_candidate"]["target_trackers"] == "MTEAM"
+    policy_execution = job["candidate_batch_handoff"]["items"][0]["policy_execution"]
+    assert policy_execution["ready"] is True
+    assert policy_execution["rule_obligations_ready"] is True
+    assert policy_execution["qbit_limits"]["source"]["download_limit"] == 20 * 1024 * 1024
+    assert policy_execution["seeding_requirements"]["source"]["min_seed_time_hours"] == 72
+    assert policy_execution["transfer_rules"]["source"]["required_promotions"] == ["free"]
+    assert policy_execution["inherited_qbit_request"] == {
+        "qbit_download_limit": 20 * 1024 * 1024,
+        "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+    }
     assert summary["candidate_digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
     assert summary["candidate_digest"]["top_submit_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert summary["agent_decision"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/from-url"
@@ -14427,10 +14456,35 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
         "recommendation": "submit_top_candidate_when_confirmed",
         "ready_count": 1,
         "top_candidate": {"source_tracker": "U2", "source_id": "60635"},
-        "top_submit_request": {"source": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"},
+        "top_submit_request": {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "qbit_download_limit": 20 * 1024 * 1024,
+            "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+        },
         "top_submit_job_endpoint": "/v1/jobs/retorrent/from-url",
         "top_submit_tool": "source_url_retorrent_job",
-        "push_items": [{"rank": 1, "source_id": "60635"}],
+        "push_items": [
+            {
+                "rank": 1,
+                "source_id": "60635",
+                "can_submit": True,
+                "submit_request": {
+                    "source": "https://u2.dmhy.org/details.php?id=60635",
+                    "target": "MTEAM",
+                    "qbit_download_limit": 20 * 1024 * 1024,
+                    "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+                },
+                "policy_summary": {
+                    "manual_review_ready": True,
+                    "policy_coverage": {"ready": True, "rule_obligations_ready": True},
+                    "qbit_limits": {"source": {"download_limit": 20 * 1024 * 1024}, "target": {"upload_limit": 2 * 1024 * 1024}},
+                    "seeding_requirements": {"source": {"tracker": "U2", "min_seed_time_hours": 72}, "targets": [{"tracker": "MTEAM", "min_ratio": 1.0}]},
+                    "transfer_rules": {"source": {"tracker": "U2", "required_promotions": ["free"]}, "targets": [{"tracker": "MTEAM", "freeleech_required": False}]},
+                    "rules": {"source_fingerprint": "u2-review", "target_fingerprints": ["mteam-review"]},
+                },
+            }
+        ],
     }
 
     async def fake_daily_candidates(_request):
@@ -14495,6 +14549,15 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["selector"] == {"rank": 1, "source_id": "60635"}
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["confirm_upload"] is True
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["save_path"] == "/downloads"
+    schedule_policy_execution = payload["schedule_digest"]["submission_handoff"]["items"][0]["policy_execution"]
+    assert schedule_policy_execution["ready"] is True
+    assert schedule_policy_execution["rule_obligations_ready"] is True
+    assert schedule_policy_execution["qbit_limits"]["target"]["upload_limit"] == 2 * 1024 * 1024
+    assert schedule_policy_execution["seeding_requirements"]["targets"][0]["min_ratio"] == 1.0
+    assert schedule_policy_execution["inherited_qbit_request"] == {
+        "qbit_download_limit": 20 * 1024 * 1024,
+        "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+    }
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["after_submit"]["read_fields"] == [
         "candidate_submission_summary",
         "candidate_submission_handoff",
@@ -16268,6 +16331,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "submit_endpoint_template" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
         assert "next_step" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
         assert "recommended_tool" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_handoff_fields"]
+        assert "policy_execution" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["submission_item_fields"]
         assert "agent_decision" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "digest" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
         assert "candidate_digest" in tools_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
@@ -16387,6 +16451,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_batch_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "candidate_batch_handoff_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "recommended_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_batch_handoff_fields"]
+        assert "policy_execution" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_batch_item_fields"]
         assert "interruption" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "runtime" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "runtime" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
