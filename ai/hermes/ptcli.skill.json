@@ -39,14 +39,18 @@
   },
   "closure_contract": {
     "primary_field": "closure_handoff",
+    "control_field": "job_handoff",
     "complete_when": "closure_handoff.complete=true",
     "never_treat_complete_when": [
       "closure_handoff.action!=done",
       "closure_handoff.target.uploaded_seeding_ready=false",
       "closure_handoff.blockers is not empty"
     ],
-    "next_step_source": "closure_handoff.next_step",
+    "next_step_source": "job_handoff when present, otherwise closure_handoff.next_step",
     "recommended_call_fields": [
+      "job_handoff.recommended_tool",
+      "job_handoff.recommended_endpoint",
+      "job_handoff.recommended_request",
       "recommended_tool",
       "recommended_endpoint",
       "recommended_request"
@@ -179,6 +183,7 @@
           "read": [
             "job_id",
             "status",
+            "job_handoff",
             "runtime.status_endpoint",
             "agent_decision",
             "closure_summary",
@@ -189,6 +194,7 @@
           ],
           "continue_when": "job_id is present",
           "stop_when": [
+            "job_handoff.action=stop",
             "closure_handoff.action=stop_duplicate",
             "closure_handoff.action=configure_policy",
             "closure_handoff.action=collect_confirmations"
@@ -199,17 +205,23 @@
           "tool": "get_job_status",
           "read": [
             "status",
+            "job_handoff.action",
+            "job_handoff.should_poll",
+            "job_handoff.poll_after_seconds",
+            "job_handoff.recommended_tool",
+            "job_handoff.recommended_endpoint",
+            "job_handoff.recommended_request",
             "runtime.should_poll",
-            "runtime.poll_after_seconds",
             "agent_decision",
             "closure_summary",
             "closure_handoff",
             "blockers",
             "next_actions"
           ],
-          "continue_when": "status not in queued,running",
-          "repeat_when": "status in queued,running and runtime.should_poll=true",
+          "continue_when": "job_handoff.action!=wait and status not in queued,running",
+          "repeat_when": "job_handoff.action=wait and job_handoff.should_poll=true",
           "stop_when": [
+            "job_handoff.action=stop",
             "status=blocked",
             "status=failed",
             "status=cancelled"
@@ -219,6 +231,11 @@
           "step": "closure_decision",
           "tool": "get_job_summary",
           "read": [
+            "job_handoff.action",
+            "job_handoff.recommended_tool",
+            "job_handoff.recommended_endpoint",
+            "job_handoff.recommended_request",
+            "job_handoff.blockers",
             "closure_summary.complete",
             "closure_summary.action",
             "closure_summary.next_step",
@@ -234,9 +251,10 @@
             "resume_requirements",
             "candidate_submission"
           ],
-          "complete_when": "closure_summary.complete=true and closure_summary.blockers=[]",
-          "resume_with": "closure_summary.recommended_tool when closure_summary.next_step.method is not null; pass only closure_summary.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
+          "complete_when": "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]",
+          "resume_with": "job_handoff when job_handoff.action=resume; pass only job_handoff.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
           "stop_when": [
+            "job_handoff.action=stop",
             "closure_summary.action=stop_duplicate",
             "closure_summary.action=collect_confirmations without explicit user confirmation",
             "closure_summary.action=configure_policy",
@@ -310,6 +328,7 @@
           "request_from": "schedule_digest.submission_handoff.items[].request_template after human rule review",
           "read": [
             "job_id",
+            "job_handoff",
             "candidate_submission",
             "agent_decision",
             "closure_handoff",
@@ -320,7 +339,7 @@
             "confirm_upload missing",
             "save_path/path missing"
           ],
-          "then_follow": "source_url_retorrent.poll"
+          "then_follow": "source_url_retorrent.poll via job_handoff"
         }
       ]
     },
@@ -336,6 +355,7 @@
           "step": "inspect",
           "tool": "get_job_status",
           "read": [
+            "job_handoff",
             "closure_handoff",
             "resume_plan",
             "resume_requirements",
@@ -344,9 +364,10 @@
             "blockers",
             "next_actions"
           ],
-          "continue_when": "closure_handoff.next_step.tool=resume_job and resume_plan.allowed=true",
+          "continue_when": "job_handoff.action=resume and resume_plan.allowed=true",
           "stop_when": [
-            "closure_handoff.complete=true",
+            "job_handoff.action=done",
+            "job_handoff.action=stop",
             "resume_plan.allowed=false",
             "next_command_argv not allowlisted"
           ]
