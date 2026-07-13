@@ -14980,6 +14980,17 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert payload["policy_setup_summary"]["missing_fingerprints"] == []
     assert payload["policy_setup_summary"]["placeholder_fingerprints"] == []
     assert payload["policy_setup_summary"]["recommended_tool"] == "readiness_bundle"
+    assert payload["policy_execution_handoff"]["kind"] == "ptcli.policy_execution_handoff"
+    assert payload["policy_execution_handoff"]["ready"] is True
+    assert payload["policy_execution_handoff"]["phase"] == "ready_for_live_preflight"
+    assert payload["policy_execution_handoff"]["recommended_tool"] == "readiness_bundle"
+    assert payload["policy_execution_handoff"]["recommended_endpoint"] == "/v1/readiness/bundle"
+    assert payload["policy_execution_handoff"]["qbit"]["source"]["U2"]["download_limit"] == 20 * 1024 * 1024
+    assert payload["policy_execution_handoff"]["qbit"]["target"]["MTEAM"]["upload_limit"] == 2 * 1024 * 1024
+    assert payload["policy_execution_handoff"]["seeding"]["by_tracker"]["MTEAM"]["min_ratio"] == 1.0
+    assert payload["policy_execution_handoff"]["transfer_rules"]["by_tracker"]["MTEAM"]["freeleech_required"] is True
+    assert payload["policy_execution_handoff"]["rule_obligations"]["MTEAM"]["scopes"][0]["scope"] == "upload_and_seed"
+    assert payload["policy_execution_handoff"]["continue_when"] == "policy_execution_handoff.ready=true; then run readiness_bundle or source_url_retorrent_preflight before live upload"
     assert payload["config_templates"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]'
     assert payload["config_templates"]["trackers"]["MTEAM"]["min_ratio"] == 1.0
     assert payload["agent_summary"]["qbit_limits_present"] == ["U2", "MTEAM"]
@@ -15551,6 +15562,15 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert payload["policy_setup_summary"]["placeholder_fingerprint_count"] == 0
     assert payload["policy_setup_summary"]["recommended_tool"] == "edit_config"
     assert payload["policy_setup_summary"]["copyable_templates"]["U2"]["rule_review_fingerprint"] == "manual-review-YYYY-MM-DD"
+    assert payload["policy_execution_handoff"]["ready"] is False
+    assert payload["policy_execution_handoff"]["phase"] == "configure_site_policy"
+    assert payload["policy_execution_handoff"]["recommended_tool"] == "edit_config"
+    assert {"tracker": "U2", "field": "download_rate_limit"} in payload["policy_execution_handoff"]["qbit"]["missing"]
+    assert {"tracker": "MTEAM", "field": "min_ratio"} in payload["policy_execution_handoff"]["seeding"]["missing"]
+    assert payload["policy_execution_handoff"]["config"]["templates"]["U2"]["download_rate_limit"] == "20MiB/s"
+    assert payload["policy_execution_handoff"]["next_actions"] == [
+        "Apply policy_execution_handoff.config.templates to PTCLI.SITE_POLICIES, replace rule_review_fingerprint placeholders after manual rule review, then rerun site_policies."
+    ]
     assert payload["agent_summary"]["policy_coverage_ready"] is False
     assert payload["agent_summary"]["execution_ready"] is False
     assert payload["agent_summary"]["policy_execution_summary"] == payload["policy_execution_summary"]
@@ -15843,6 +15863,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_setup_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "policy_execution_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -15853,6 +15874,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_setup_summary_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "missing_fingerprints" in tool_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
     assert "placeholder_fingerprints" in tool_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
+    assert "policy_execution_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "qbit" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
+    assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
     assert "policy_gap_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "missing_by_category" in tool_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
@@ -16053,6 +16077,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_gap_summary" in site_policy_schema["properties"]
     assert "policy_execution_summary" in site_policy_schema["properties"]
     assert "policy_setup_summary" in site_policy_schema["properties"]
+    assert "policy_execution_handoff" in site_policy_schema["properties"]
     assert "config_templates" in site_policy_schema["properties"]
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "capability_matrix" in site_profiles_schema["properties"]
@@ -16384,6 +16409,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_setup_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "policy_execution_handoff" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_handoff" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -16394,6 +16420,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_setup_summary_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "missing_fingerprints" in tools_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
         assert "placeholder_fingerprints" in tools_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
+        assert "policy_execution_handoff_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "qbit" in tools_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
+        assert "rule_obligations" in tools_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
         assert "policy_gap_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "missing_by_category" in tools_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
         assert "next_step" in tools_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
