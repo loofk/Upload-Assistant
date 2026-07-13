@@ -7107,6 +7107,7 @@
           "skipped",
           "schedule_digest",
           "notification_payload",
+          "delivery_handoff",
           "agent_decision",
           "blockers",
           "next_actions"
@@ -7167,6 +7168,25 @@
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
+          "next_actions"
+        ],
+        "delivery_handoff_fields": [
+          "ready",
+          "publish_ready",
+          "submission_ready",
+          "target_met",
+          "status",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "counts",
+          "notification_payload",
+          "submission_handoff",
+          "top_submit_requests",
+          "publish_contract",
+          "continue_when",
+          "stop_when",
+          "blockers",
           "next_actions"
         ],
         "submission_handoff_fields": [
