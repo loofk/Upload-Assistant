@@ -14453,6 +14453,84 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert listed["candidate_submission_handoff"]["policy_execution_handoff"] == policy_execution_handoff
 
 
+def test_candidate_retorrent_handoff_prefers_material_resume_request(tmp_path) -> None:
+    result = {
+        "kind": "ptcli.service.retorrent",
+        "status": "blocked",
+        "ok": False,
+        "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+        "material_diagnostics": {
+            "present": True,
+            "ready_for_mteam_upload": False,
+            "critical_ready": False,
+            "critical_missing": ["metadata.tmdb", "description.content"],
+            "critical_path": {"ready": False, "next_step": "metadata", "missing": ["metadata.tmdb", "description.content"]},
+            "metadata_fields": {
+                "imdb_id": {"ready": True},
+                "tmdb_id": {"ready": False},
+                "douban_id": {"ready": False},
+                "ptgen_description": {"ready": False},
+            },
+            "description": {
+                "ready": False,
+                "has_mediainfo_or_bdinfo": True,
+                "has_screenshot_bbcode": False,
+                "bbcode_image_count": 0,
+                "external_id_missing": ["tmdb", "douban"],
+                "external_id_readiness": {"imdb": True, "tmdb": False, "douban": False},
+                "has_ptgen_description": False,
+            },
+            "upload_material_blockers": ["assets.screenshots", "assets.image_host_uploads"],
+        },
+        "target_preflight_diagnostics": {
+            "ready": False,
+            "payload_ready": False,
+            "materials_ready": False,
+            "metadata_ready": False,
+            "assets_ready": False,
+            "description_ready": False,
+            "missing": ["materials.metadata.tmdb", "assets.screenshots"],
+            "description_missing": ["materials.description.external_ids.tmdb"],
+            "blockers": ["description.screenshot_coverage"],
+        },
+    }
+    request = {
+        "mode": "candidate_retorrent",
+        "manual_retorrent": True,
+        "execute": True,
+        "execute_if_no_duplicate": True,
+        "accept_rules": True,
+        "confirm_upload": True,
+        "source": "https://u2.dmhy.org/details.php?id=60635",
+        "source_reference": {"tracker": "U2", "source_id": "60635"},
+        "target": "MTEAM",
+        "target_trackers": "MTEAM",
+        "policy_coverage": {"ready": True, "recommendations": [], "missing_policy_fields": {}, "disabled_automation": {}},
+        "candidate_submission": {
+            "candidate_job_id": "candidate-job",
+            "candidate_rank": 1,
+            "candidate_source_id": "60635",
+            "policy_execution_handoff": {"ready": True},
+            "inherited_request": {"source": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"},
+            "submitted_overrides": {"confirm_upload": True, "save_path": "/downloads"},
+        },
+    }
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    job = store.create("ptcli.candidate_retorrent", request, ["ptcli", "retorrent", "--json"], lambda: result)
+
+    assert job["candidate_submission_summary"]["execution_state"] == "prepare_materials"
+    material_template = job["candidate_submission_summary"]["execution_handoff"]["material_input_template"]
+    assert material_template["dry_run_request"]["dry_run"] is True
+    assert material_template["dry_run_request"]["metadata_file"] == "/tmp/materials/metadata.json"
+    assert "dry_run" not in material_template["execute_request"]
+    assert job["job_handoff"]["action"] == "prepare_materials"
+    assert job["job_handoff"]["recommended_tool"] == "resume_job"
+    assert job["job_handoff"]["recommended_request"] == material_template["dry_run_request"]
+    assert job["job_handoff"]["dry_run_request"] == material_template["dry_run_request"]
+    assert job["job_handoff"]["execute_request"] == material_template["execute_request"]
+    assert job["job_handoff"]["material_input_template"] == material_template
+
+
 def test_submit_daily_candidate_job_rejects_blocked_candidate(monkeypatch, tmp_path) -> None:
     digest = {
         "kind": "ptcli.daily_candidates_digest",

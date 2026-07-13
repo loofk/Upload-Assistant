@@ -5155,10 +5155,16 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
         stop_when = ["status in blocked,failed,cancelled"]
     elif isinstance(candidate_execution, dict):
         action = str(candidate_execution.get("state") or action)
+        candidate_material_template = candidate_execution.get("material_input_template") if isinstance(candidate_execution.get("material_input_template"), dict) else {}
+        candidate_material_dry_run_request = candidate_material_template.get("dry_run_request") if action == "prepare_materials" and isinstance(candidate_material_template.get("dry_run_request"), dict) else None
         recommended_tool = candidate_execution.get("recommended_tool")
         recommended_endpoint = candidate_execution.get("recommended_endpoint")
         recommended_method = candidate_execution.get("recommended_method")
-        recommended_request = candidate_execution.get("recommended_request")
+        recommended_request = candidate_material_dry_run_request or candidate_execution.get("recommended_request")
+        if candidate_material_dry_run_request:
+            recommended_tool = "resume_job"
+            recommended_endpoint = candidate_execution.get("recommended_endpoint") or runtime.get("resume_endpoint")
+            recommended_method = "POST"
         continue_when = candidate_execution.get("continue_when")
         stop_when = _string_list(candidate_execution.get("stop_when"))
     elif action == "submit_if_clear" and isinstance(submit_if_clear, dict):
@@ -5195,6 +5201,11 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
     else:
         recommended_tool = recommended_tool or agent_decision.get("recommended_tool")
 
+    candidate_material_dry_run_request = _job_handoff_candidate_material_request(candidate_execution, "dry_run_request")
+    candidate_material_execute_request = _job_handoff_candidate_material_request(candidate_execution, "execute_request")
+    dry_run_request = candidate_material_dry_run_request or (resume_requirements.get("dry_run_request") if isinstance(resume_requirements.get("dry_run_request"), dict) else None)
+    execute_request = candidate_material_execute_request or (resume_requirements.get("execute_request") if isinstance(resume_requirements.get("execute_request"), dict) else None)
+
     return {
         "kind": "ptcli.job_handoff",
         "job_id": job_id or None,
@@ -5222,12 +5233,20 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
         "resume_execution_handoff": _job_resume_execution_handoff(job, payload if isinstance(payload, dict) else None),
         "candidate_submission_execution": candidate_execution,
         "material_input_template": candidate_execution.get("material_input_template") if isinstance(candidate_execution, dict) else None,
-        "dry_run_request": resume_requirements.get("dry_run_request") if isinstance(resume_requirements.get("dry_run_request"), dict) else None,
-        "execute_request": resume_requirements.get("execute_request") if isinstance(resume_requirements.get("execute_request"), dict) else None,
+        "dry_run_request": dry_run_request,
+        "execute_request": execute_request,
         "agent_decision": agent_decision,
         "blockers": _string_list(job.get("blockers")),
         "next_actions": _job_handoff_next_actions(status, runtime, resume_plan, recommended_tool, job_id, _string_list(job.get("next_actions"))),
     }
+
+
+def _job_handoff_candidate_material_request(candidate_execution: dict[str, Any] | None, key: str) -> dict[str, Any] | None:
+    if not isinstance(candidate_execution, dict) or candidate_execution.get("state") != "prepare_materials":
+        return None
+    material_template = candidate_execution.get("material_input_template") if isinstance(candidate_execution.get("material_input_template"), dict) else {}
+    request = material_template.get(key)
+    return request if isinstance(request, dict) else None
 
 
 def _job_handoff_next_actions(status: str, runtime: dict[str, Any], resume_plan: dict[str, Any], recommended_tool: Any, job_id: str, job_actions: list[str]) -> list[str]:
