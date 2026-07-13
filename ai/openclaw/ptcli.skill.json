@@ -6693,6 +6693,7 @@
           "adapter_profiles",
           "policy_matrix",
           "policy_execution_summary",
+          "extension_plan",
           "flow_matrix",
           "agent_summary",
           "blockers",
@@ -6720,7 +6721,8 @@
           "mteam_source_flow",
           "full_live_closure_to_mteam",
           "implemented_roles",
-          "extension_notes"
+          "extension_notes",
+          "extension_checklist"
         ],
         "policy_profile_fields": [
           "config_path",
@@ -6731,6 +6733,29 @@
           "current_values",
           "next_actions"
         ],
+        "extension_plan_fields": [
+          "ready",
+          "trackers",
+          "ready_sources",
+          "ready_targets",
+          "reference_sources_to_mteam",
+          "items",
+          "next_item",
+          "blockers",
+          "next_actions"
+        ],
+        "extension_item_fields": [
+          "tracker",
+          "source_ready",
+          "target_ready",
+          "full_live_closure_to_mteam",
+          "has_reference_flow",
+          "implemented_roles",
+          "missing_components",
+          "checklist",
+          "blockers",
+          "next_action"
+        ],
         "agent_summary_fields": [
           "ready",
           "site_count",
@@ -6740,6 +6765,8 @@
           "full_live_closure_to_mteam_count",
           "policy_profile_count",
           "reference_flow_count",
+          "extension_ready",
+          "extension_blocker_count",
           "recommended_next_tool",
           "blocker_count"
         ],

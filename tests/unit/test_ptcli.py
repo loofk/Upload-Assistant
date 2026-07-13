@@ -14989,6 +14989,8 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert u2_profile["source_download_adapter"] == "nexusphp_passkey"
     assert u2_profile["full_live_closure_to_mteam"] is True
     assert "TRACKERS.U2.passkey" in u2_profile["credential_requirements"]
+    assert "extension_checklist" in u2_profile
+    assert next(item for item in u2_profile["extension_checklist"] if item["key"] == "source_info_adapter")["ready"] is True
     mteam_profile = payload["adapter_profiles"]["MTEAM"]
     assert mteam_profile["target_upload"] is True
     assert mteam_profile["target_upload_adapter"] == "mteam_api"
@@ -15001,6 +15003,18 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert payload["agent_summary"]["source_download_count"] == 2
     assert payload["agent_summary"]["target_upload_count"] == 1
     assert payload["agent_summary"]["full_live_closure_to_mteam_count"] == 1
+    assert payload["extension_plan"]["reference_sources_to_mteam"] == ["U2"]
+    assert payload["extension_plan"]["items"][0]["tracker"] == "U2"
+    assert payload["extension_plan"]["items"][0]["roles"] == ["source"]
+    assert payload["extension_plan"]["items"][0]["source_ready"] is True
+    assert payload["extension_plan"]["items"][0]["missing_components"] == []
+    assert payload["extension_plan"]["items"][1]["tracker"] == "MTEAM"
+    assert payload["extension_plan"]["items"][1]["roles"] == ["target"]
+    assert payload["extension_plan"]["items"][1]["target_ready"] is True
+    assert payload["extension_plan"]["items"][1]["missing_components"] == []
+    assert payload["extension_plan"]["ready"] is True
+    assert payload["agent_summary"]["extension_ready"] is True
+    assert payload["agent_summary"]["extension_blocker_count"] == 0
     assert payload["agent_summary"]["recommended_next_tool"] == "readiness_bundle"
 
 
@@ -15822,6 +15836,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
     assert tool_by_name["site_profiles"]["path"] == "/v1/sites"
     assert "adapter_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "extension_plan" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
+    assert "extension_checklist" in tool_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
+    assert "extension_plan_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "missing_components" in tool_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
     assert "policy_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "full_live_closure_to_mteam_count" in tool_by_name["site_profiles"]["response_contract"]["agent_summary_fields"]
     assert tool_by_name["qbit_inspect"]["path"] == "/v1/qbit/inspect"
@@ -16258,6 +16276,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert source_url_workflow["runbook"][6]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
         assert source_url_workflow["runbook"][6]["resume_with"].startswith("job_handoff")
         assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][6]["stop_when"]
+        assert tools_by_name["site_profiles"]["path"] == "/v1/sites"
+        assert "extension_plan" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
+        assert "extension_checklist" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
+        assert "extension_plan_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "missing_components" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "config_templates" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
