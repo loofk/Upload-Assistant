@@ -14113,6 +14113,24 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
                         "targets": [{"tracker": "MTEAM", "freeleech_required": False}],
                     },
                     "rules": {"source_fingerprint": "u2-review", "target_fingerprints": ["mteam-review"]},
+                    "policy_execution_handoff": {
+                        "kind": "ptcli.daily_candidate_policy_execution_handoff",
+                        "ready": True,
+                        "qbit": {
+                            "ready": True,
+                            "source": {"download_limit": 20 * 1024 * 1024},
+                            "target": {"upload_limit": 2 * 1024 * 1024},
+                            "missing": [],
+                        },
+                        "seeding": {
+                            "ready": True,
+                            "source": {"tracker": "U2", "min_seed_time_hours": 72},
+                            "targets": [{"tracker": "MTEAM", "min_ratio": 1.0}],
+                            "missing": [],
+                        },
+                        "rule_obligations": {"ready": True},
+                        "blockers": [],
+                    },
                 },
             }
         ],
@@ -14170,6 +14188,8 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert policy_execution["ready"] is True
     assert policy_execution["rule_obligations_ready"] is True
     assert policy_execution["qbit_limits"]["source"]["download_limit"] == 20 * 1024 * 1024
+    assert policy_execution["policy_execution_handoff"]["ready"] is True
+    assert policy_execution["policy_execution_handoff"]["qbit"]["target"]["upload_limit"] == 2 * 1024 * 1024
     assert policy_execution["seeding_requirements"]["source"]["min_seed_time_hours"] == 72
     assert policy_execution["transfer_rules"]["source"]["required_promotions"] == ["free"]
     assert policy_execution["inherited_qbit_request"] == {
@@ -14523,6 +14543,14 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
                     "seeding_requirements": {"source": {"tracker": "U2", "min_seed_time_hours": 72}, "targets": [{"tracker": "MTEAM", "min_ratio": 1.0}]},
                     "transfer_rules": {"source": {"tracker": "U2", "required_promotions": ["free"]}, "targets": [{"tracker": "MTEAM", "freeleech_required": False}]},
                     "rules": {"source_fingerprint": "u2-review", "target_fingerprints": ["mteam-review"]},
+                    "policy_execution_handoff": {
+                        "kind": "ptcli.daily_candidate_policy_execution_handoff",
+                        "ready": True,
+                        "qbit": {"ready": True, "source": {"download_limit": 20 * 1024 * 1024}, "target": {"upload_limit": 2 * 1024 * 1024}, "missing": []},
+                        "seeding": {"ready": True, "source": {"tracker": "U2", "min_seed_time_hours": 72}, "targets": [{"tracker": "MTEAM", "min_ratio": 1.0}], "missing": []},
+                        "rule_obligations": {"ready": True},
+                        "blockers": [],
+                    },
                 },
             }
         ],
@@ -14594,6 +14622,8 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert schedule_policy_execution["ready"] is True
     assert schedule_policy_execution["rule_obligations_ready"] is True
     assert schedule_policy_execution["qbit_limits"]["target"]["upload_limit"] == 2 * 1024 * 1024
+    assert schedule_policy_execution["policy_execution_handoff"]["ready"] is True
+    assert schedule_policy_execution["policy_execution_handoff"]["seeding"]["targets"][0]["min_ratio"] == 1.0
     assert schedule_policy_execution["seeding_requirements"]["targets"][0]["min_ratio"] == 1.0
     assert schedule_policy_execution["inherited_qbit_request"] == {
         "qbit_download_limit": 20 * 1024 * 1024,
@@ -16013,10 +16043,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "recommended_action" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "policy_coverage" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "policy_execution_handoff" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "audit_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "rules" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
+    assert "policy_execution_handoff" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
+    assert "policy_execution_handoff_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "qbit" in tool_by_name["daily_candidates"]["response_contract"]["policy_execution_handoff_fields"]
     assert "rule_obligations_ready" in tool_by_name["daily_candidates"]["response_contract"]["policy_coverage_fields"]
     assert "fingerprint_status" in tool_by_name["daily_candidates"]["response_contract"]["rule_fields"]
     assert "placeholder" in tool_by_name["daily_candidates"]["response_contract"]["rule_fingerprint_status_fields"]
@@ -16024,6 +16058,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "summary_text" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "audit_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
+    assert "policy_execution_handoff" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "can_submit" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "response_contract" in tool_by_name["get_job_status"]
     assert tool_by_name["list_jobs"]["method"] == "GET"
@@ -16669,16 +16704,21 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "recommended_action" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "audit_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "rules" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
+        assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
+        assert "policy_execution_handoff_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "qbit" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_execution_handoff_fields"]
         assert "rule_obligations_ready" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_coverage_fields"]
         assert "fingerprint_status" in tools_by_name["daily_candidates_job"]["response_contract"]["rule_fields"]
         assert "placeholder" in tools_by_name["daily_candidates_job"]["response_contract"]["rule_fingerprint_status_fields"]
         assert "summary_text" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "audit_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
+        assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "can_submit" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "candidate_digest" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert tools_by_name["retorrent_job"]["input_schema"]["required"] == ["source", "target"]
@@ -17466,6 +17506,13 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["policy_summary"]["policy_coverage"]["source"]["rule_obligations"]["missing_confirmations"] == []
     assert result["digest"]["push_items"][0]["policy_summary"]["qbit_limits"]["source"]["download_limit"] == 20 * 1024 * 1024
     assert result["digest"]["push_items"][0]["policy_summary"]["qbit_limits"]["target"]["upload_limit"] == 2 * 1024 * 1024
+    assert result["digest"]["push_items"][0]["policy_execution_handoff"]["kind"] == "ptcli.daily_candidate_policy_execution_handoff"
+    assert result["digest"]["push_items"][0]["policy_execution_handoff"]["ready"] is True
+    assert result["digest"]["push_items"][0]["policy_execution_handoff"]["qbit"]["source"]["download_limit"] == 20 * 1024 * 1024
+    assert result["digest"]["push_items"][0]["policy_execution_handoff"]["qbit"]["target"]["upload_limit"] == 2 * 1024 * 1024
+    assert result["digest"]["push_items"][0]["policy_execution_handoff"]["seeding"]["source"]["min_seed_time_hours"] == 72
+    assert result["digest"]["push_items"][0]["policy_execution_handoff"]["rule_obligations"]["ready"] is True
+    assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["policy_execution_handoff"]["ready"] is True
     assert result["digest"]["push_items"][0]["policy_summary"]["rules"]["fingerprint_status"]["source"]["ready"] is True
     assert result["digest"]["push_items"][0]["policy_summary"]["rules"]["fingerprint_status"]["targets"][0]["ready"] is True
     candidate = result["candidates"][0]
@@ -17497,6 +17544,8 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["policy_summary"]["policy_coverage"]["source"]["complete"] is True
     assert candidate["policy_summary"]["policy_coverage"]["targets"][0]["complete"] is True
     assert candidate["policy_coverage"]["ready"] is True
+    assert candidate["policy_execution_handoff"]["ready"] is True
+    assert candidate["policy_summary"]["policy_execution_handoff"] == candidate["policy_execution_handoff"]
     assert candidate["agent_workflow"]["tool"] == "source_url_retorrent_job"
     assert candidate["agent_workflow"]["decision"] == "submit_when_confirmed"
     assert candidate["submit_tool"] == "source_url_retorrent_job"

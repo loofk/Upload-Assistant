@@ -3717,6 +3717,7 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
 def _daily_candidate_submission_policy_execution(digest_item: dict[str, Any]) -> dict[str, Any]:
     policy_summary = digest_item.get("policy_summary") if isinstance(digest_item.get("policy_summary"), dict) else {}
     policy_coverage = policy_summary.get("policy_coverage") if isinstance(policy_summary.get("policy_coverage"), dict) else {}
+    policy_execution_handoff = digest_item.get("policy_execution_handoff") if isinstance(digest_item.get("policy_execution_handoff"), dict) else policy_summary.get("policy_execution_handoff") if isinstance(policy_summary.get("policy_execution_handoff"), dict) else {}
     submit_request = digest_item.get("submit_request") if isinstance(digest_item.get("submit_request"), dict) else {}
     qbit_keys = ("qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags")
     return {
@@ -3728,6 +3729,7 @@ def _daily_candidate_submission_policy_execution(digest_item: dict[str, Any]) ->
         "seeding_requirements": policy_summary.get("seeding_requirements") if isinstance(policy_summary.get("seeding_requirements"), dict) else {},
         "transfer_rules": policy_summary.get("transfer_rules") if isinstance(policy_summary.get("transfer_rules"), dict) else {},
         "rules": policy_summary.get("rules") if isinstance(policy_summary.get("rules"), dict) else {},
+        "policy_execution_handoff": policy_execution_handoff,
         "inherited_qbit_request": {key: submit_request.get(key) for key in qbit_keys if submit_request.get(key) is not None},
         "blockers": _string_list(digest_item.get("blockers")),
     }
@@ -9946,6 +9948,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
             "push_item_fields": candidate_contract["push_item_fields"],
             "push_payload_fields": candidate_contract["push_payload_fields"],
             "policy_summary_fields": candidate_contract["policy_summary_fields"],
+            "policy_execution_handoff_fields": candidate_contract["policy_execution_handoff_fields"],
             "policy_coverage_fields": candidate_contract["policy_coverage_fields"],
             "rule_fields": candidate_contract["rule_fields"],
             "rule_fingerprint_status_fields": candidate_contract["rule_fingerprint_status_fields"],
@@ -10020,6 +10023,7 @@ def _candidate_response_contract() -> dict[str, Any]:
             "target_policies",
             "policy_summary",
             "policy_coverage",
+            "policy_execution_handoff",
             "ranking",
             "decision_summary",
             "audit_summary",
@@ -10050,6 +10054,7 @@ def _candidate_response_contract() -> dict[str, Any]:
             "decision_summary",
             "audit_summary",
             "policy_summary",
+            "policy_execution_handoff",
             "blockers",
             "next_actions",
             "can_submit",
@@ -10059,7 +10064,8 @@ def _candidate_response_contract() -> dict[str, Any]:
             "submit_job_endpoint",
             "submit_tool",
         ],
-        "policy_summary_fields": ["manual_review_ready", "automation", "policy_coverage", "qbit_limits", "seeding_requirements", "rules"],
+        "policy_summary_fields": ["manual_review_ready", "automation", "policy_coverage", "policy_execution_handoff", "qbit_limits", "seeding_requirements", "transfer_rules", "rules"],
+        "policy_execution_handoff_fields": ["ready", "accepted_rules", "phase", "qbit", "seeding", "transfer_rules", "rule_obligations", "missing_by_category", "continue_when", "stop_when", "blockers", "next_actions"],
         "policy_coverage_fields": ["ready", "rule_obligations_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "recommendations"],
         "rule_fields": ["source_rules_url", "target_rules_urls", "source_fingerprint", "target_fingerprints", "fingerprint_status"],
         "rule_fingerprint_status_fields": ["tracker", "manual_review_required", "ready", "missing", "placeholder", "fingerprint"],
