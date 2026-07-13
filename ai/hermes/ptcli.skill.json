@@ -7630,6 +7630,14 @@
           "required_overrides",
           "allowed_overrides",
           "after_submit"
+        ],
+        "after_submit_fields": [
+          "read_fields",
+          "poll_with",
+          "summary_with",
+          "stop_when",
+          "resume_when",
+          "material_resume_request"
         ]
       },
       "workflow_hints": {
