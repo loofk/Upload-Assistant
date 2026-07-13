@@ -289,6 +289,7 @@ class JobStore:
             "source_reference": _job_source_reference(job),
             "workflow_context": _job_workflow_context(job, summary_payload),
             "job_handoff": _job_handoff(job, summary_payload),
+            "recovery_handoff": _job_recovery_handoff(job, summary_payload),
             "result": job.get("result"),
             "blockers": _string_list(job.get("blockers")),
             "next_actions": _string_list(job.get("next_actions")),
@@ -5496,6 +5497,249 @@ def _job_handoff_next_actions(status: str, runtime: dict[str, Any], resume_plan:
     return list(dict.fromkeys(action for action in actions if action))
 
 
+def _job_recovery_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    job_id = str(job.get("job_id") or "")
+    status = str(job.get("status") or "unknown")
+    runtime = _job_runtime(job)
+    job_handoff = job.get("job_handoff") if isinstance(job.get("job_handoff"), dict) else {}
+    resume_plan = _job_resume_plan(job)
+    resume_requirements = _job_resume_requirements(job, payload if isinstance(payload, dict) else None)
+    resume_execution = _job_resume_execution_handoff(job, payload if isinstance(payload, dict) else None)
+    materials_handoff = _job_materials_handoff(job, payload if isinstance(payload, dict) else None)
+    target_upload_handoff = _job_target_upload_handoff(job, payload if isinstance(payload, dict) else None)
+    closure_handoff = _job_closure_handoff(job, payload if isinstance(payload, dict) else None)
+    qbit_handoff = _job_qbit_handoff(job, payload if isinstance(payload, dict) else None)
+    candidate_submission_summary = _job_candidate_submission_summary(job, payload if isinstance(payload, dict) else None)
+
+    action, phase, reason = _job_recovery_decision(status, runtime, job_handoff, materials_handoff, target_upload_handoff, closure_handoff, resume_plan, candidate_submission_summary)
+    next_step = _job_recovery_next_step(action, job_handoff, materials_handoff, target_upload_handoff, closure_handoff, resume_execution, runtime)
+    recommended_request = next_step.get("request") if isinstance(next_step, dict) else None
+    dry_run_request = _job_recovery_dry_run_request(action, materials_handoff, resume_execution, resume_requirements, recommended_request)
+    execute_request = _job_recovery_execute_request(action, materials_handoff, resume_execution, resume_requirements)
+    blockers = _job_recovery_blockers(job, materials_handoff, target_upload_handoff, closure_handoff, resume_execution, qbit_handoff)
+    return {
+        "kind": "ptcli.job_recovery_handoff",
+        "job_id": job_id or None,
+        "job_kind": job.get("kind"),
+        "status": status,
+        "terminal": bool(runtime.get("terminal")),
+        "phase": phase,
+        "action": action,
+        "reason": reason,
+        "ready": action in {"poll", "preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit", "read_summary"},
+        "should_poll": bool(runtime.get("should_poll")),
+        "should_resume": action in {"preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit"},
+        "resume_preview_required": action in {"preview_resume", "prepare_materials", "repair_target_payload", "repair_qbit"},
+        "recommended_tool": next_step.get("tool") if isinstance(next_step, dict) else None,
+        "recommended_endpoint": next_step.get("endpoint") if isinstance(next_step, dict) else None,
+        "recommended_method": next_step.get("method") if isinstance(next_step, dict) else None,
+        "recommended_request": recommended_request,
+        "dry_run_request": dry_run_request,
+        "execute_request": execute_request,
+        "status_endpoint": runtime.get("status_endpoint"),
+        "summary_endpoint": runtime.get("summary_endpoint"),
+        "resume_endpoint": runtime.get("resume_endpoint"),
+        "poll_after_seconds": runtime.get("poll_after_seconds"),
+        "gates": _job_recovery_gates(runtime, resume_plan, materials_handoff, target_upload_handoff, closure_handoff, qbit_handoff),
+        "handoff_sources": {
+            "job_handoff_action": job_handoff.get("action"),
+            "resume_recommended": bool(resume_plan.get("recommended")),
+            "materials_ready": materials_handoff.get("ready") if isinstance(materials_handoff, dict) else None,
+            "target_upload_action": target_upload_handoff.get("action") if isinstance(target_upload_handoff, dict) else None,
+            "closure_action": closure_handoff.get("action") if isinstance(closure_handoff, dict) else None,
+            "candidate_submission_action": candidate_submission_summary.get("execution_state") if isinstance(candidate_submission_summary, dict) else None,
+        },
+        "read_fields": [
+            "recovery_handoff",
+            "job_handoff",
+            "resume_execution_handoff",
+            "resume_requirements",
+            "materials_handoff",
+            "target_upload_handoff",
+            "closure_handoff",
+            "qbit_handoff",
+            "closure_summary",
+        ],
+        "continue_when": _job_recovery_continue_when(action),
+        "stop_when": _job_recovery_stop_when(action),
+        "blockers": blockers,
+        "next_actions": _job_recovery_next_actions(action, next_step, blockers, runtime),
+    }
+
+
+def _job_recovery_decision(
+    status: str,
+    runtime: dict[str, Any],
+    job_handoff: dict[str, Any],
+    materials_handoff: dict[str, Any] | None,
+    target_upload_handoff: dict[str, Any] | None,
+    closure_handoff: dict[str, Any] | None,
+    resume_plan: dict[str, Any],
+    candidate_submission_summary: dict[str, Any] | None,
+) -> tuple[str, str, str]:
+    if runtime.get("should_poll"):
+        return "poll", "runtime", "job_not_terminal"
+    if status == "complete":
+        return "read_summary", "complete", "job_complete"
+    if status == "cancelled":
+        return "stop", "cancelled", "job_cancelled"
+    candidate_execution = candidate_submission_summary.get("execution_handoff") if isinstance(candidate_submission_summary, dict) and isinstance(candidate_submission_summary.get("execution_handoff"), dict) else None
+    candidate_state = str(candidate_execution.get("state") or "") if isinstance(candidate_execution, dict) else ""
+    if candidate_state in {"prepare_materials", "repair_target_payload", "repair_qbit", "resume"}:
+        return candidate_state if candidate_state != "resume" else "preview_resume", "candidate_submission", f"candidate_submission.{candidate_state}"
+    closure_action = str(closure_handoff.get("action") or "") if isinstance(closure_handoff, dict) else ""
+    if closure_action in {"prepare_materials", "repair_target_payload", "repair_qbit"}:
+        return closure_action, "closure", f"closure.{closure_action}"
+    target_action = str(target_upload_handoff.get("action") or "") if isinstance(target_upload_handoff, dict) else ""
+    if target_action in {"prepare_materials", "repair_target_payload", "collect_confirmations"}:
+        return ("stop" if target_action == "collect_confirmations" else target_action), "target_upload", f"target_upload.{target_action}"
+    if isinstance(materials_handoff, dict) and materials_handoff.get("ready") is False and isinstance(materials_handoff.get("resume_handoff"), dict) and materials_handoff["resume_handoff"].get("resume_recommended"):
+        return "prepare_materials", "materials", "materials_resume_recommended"
+    if resume_plan.get("recommended"):
+        return "preview_resume", "resume", "resume_plan_recommended"
+    if job_handoff.get("action") == "done":
+        return "read_summary", "complete", "job_handoff_done"
+    if job_handoff.get("action") in {"stop", "stop_duplicate", "collect_confirmations", "configure_policy"}:
+        return "stop", "blocked", str(job_handoff.get("action"))
+    return "inspect", "unknown", "no_recovery_action_selected"
+
+
+def _job_recovery_next_step(
+    action: str,
+    job_handoff: dict[str, Any],
+    materials_handoff: dict[str, Any] | None,
+    target_upload_handoff: dict[str, Any] | None,
+    closure_handoff: dict[str, Any] | None,
+    resume_execution: dict[str, Any],
+    runtime: dict[str, Any],
+) -> dict[str, Any]:
+    if action == "poll":
+        return {"tool": "get_job_status", "endpoint": runtime.get("status_endpoint"), "method": "GET", "request": None, "reason": "poll_running_job"}
+    if action == "read_summary":
+        return {"tool": "get_job_summary", "endpoint": runtime.get("summary_endpoint"), "method": "GET", "request": None, "reason": "read_terminal_summary"}
+    if action == "prepare_materials" and isinstance(materials_handoff, dict):
+        resume_handoff = materials_handoff.get("resume_handoff") if isinstance(materials_handoff.get("resume_handoff"), dict) else {}
+        if resume_handoff.get("recommended_tool"):
+            return {
+                "tool": resume_handoff.get("recommended_tool"),
+                "endpoint": resume_handoff.get("recommended_endpoint"),
+                "method": resume_handoff.get("method"),
+                "request": resume_handoff.get("recommended_request"),
+                "reason": "materials_missing",
+            }
+    for handoff in (target_upload_handoff, closure_handoff):
+        next_step = handoff.get("next_step") if isinstance(handoff, dict) and isinstance(handoff.get("next_step"), dict) else None
+        if next_step and next_step.get("tool"):
+            return next_step
+    if action in {"preview_resume", "execute_resume", "repair_target_payload", "repair_qbit", "prepare_materials"}:
+        request = resume_execution.get("dry_run_request") or resume_execution.get("recommended_request") or job_handoff.get("recommended_request")
+        return {"tool": "resume_job", "endpoint": resume_execution.get("endpoint") or job_handoff.get("resume_endpoint"), "method": "POST", "request": request, "reason": action}
+    return {
+        "tool": job_handoff.get("recommended_tool"),
+        "endpoint": job_handoff.get("recommended_endpoint"),
+        "method": job_handoff.get("recommended_method"),
+        "request": job_handoff.get("recommended_request"),
+        "reason": action,
+    }
+
+
+def _job_recovery_dry_run_request(action: str, materials_handoff: dict[str, Any] | None, resume_execution: dict[str, Any], resume_requirements: dict[str, Any], recommended_request: Any) -> dict[str, Any] | None:
+    if action == "prepare_materials" and isinstance(materials_handoff, dict):
+        resume_handoff = materials_handoff.get("resume_handoff") if isinstance(materials_handoff.get("resume_handoff"), dict) else {}
+        request = resume_handoff.get("dry_run_request")
+        if isinstance(request, dict):
+            return request
+    for request in (resume_execution.get("dry_run_request"), resume_requirements.get("dry_run_request"), recommended_request):
+        if isinstance(request, dict) and request.get("dry_run") is True:
+            return request
+    return None
+
+
+def _job_recovery_execute_request(action: str, materials_handoff: dict[str, Any] | None, resume_execution: dict[str, Any], resume_requirements: dict[str, Any]) -> dict[str, Any] | None:
+    if action == "prepare_materials" and isinstance(materials_handoff, dict):
+        resume_handoff = materials_handoff.get("resume_handoff") if isinstance(materials_handoff.get("resume_handoff"), dict) else {}
+        request = resume_handoff.get("execute_request")
+        if isinstance(request, dict):
+            return request
+    for request in (resume_execution.get("execute_request"), resume_requirements.get("execute_request")):
+        if isinstance(request, dict):
+            return request
+    return None
+
+
+def _job_recovery_gates(
+    runtime: dict[str, Any],
+    resume_plan: dict[str, Any],
+    materials_handoff: dict[str, Any] | None,
+    target_upload_handoff: dict[str, Any] | None,
+    closure_handoff: dict[str, Any] | None,
+    qbit_handoff: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "terminal": bool(runtime.get("terminal")),
+        "resume_available": bool(resume_plan.get("available")),
+        "resume_allowed": bool(resume_plan.get("allowed")),
+        "resume_recommended": bool(resume_plan.get("recommended")),
+        "materials_ready": materials_handoff.get("ready") if isinstance(materials_handoff, dict) else None,
+        "target_upload_ready": target_upload_handoff.get("ready_for_live_upload") if isinstance(target_upload_handoff, dict) else None,
+        "uploaded_seeding_ready": target_upload_handoff.get("uploaded_seeding_ready") if isinstance(target_upload_handoff, dict) else None,
+        "closure_complete": closure_handoff.get("complete") if isinstance(closure_handoff, dict) else None,
+        "qbit_ready": qbit_handoff.get("ready") if isinstance(qbit_handoff, dict) else None,
+    }
+
+
+def _job_recovery_blockers(
+    job: dict[str, Any],
+    materials_handoff: dict[str, Any] | None,
+    target_upload_handoff: dict[str, Any] | None,
+    closure_handoff: dict[str, Any] | None,
+    resume_execution: dict[str, Any],
+    qbit_handoff: dict[str, Any] | None,
+) -> list[str]:
+    blockers = _string_list(job.get("blockers"))
+    for handoff in (materials_handoff, target_upload_handoff, closure_handoff, resume_execution, qbit_handoff):
+        if isinstance(handoff, dict):
+            blockers.extend(_string_list(handoff.get("blockers")))
+    return list(dict.fromkeys(str(item) for item in blockers if item))
+
+
+def _job_recovery_continue_when(action: str) -> str | None:
+    return {
+        "poll": "job status leaves queued/running",
+        "preview_resume": "resume dry_run returns ok=true and command_argv has been reviewed",
+        "execute_resume": "resume execute_request creates a child job or completes the requested step",
+        "prepare_materials": "materials_handoff.ready=true and target_upload_handoff.preflight.payload_ready=true",
+        "repair_target_payload": "target_upload_handoff.ready_for_live_upload=true",
+        "repair_qbit": "qbit_handoff.ready=true and closure_handoff.complete=true",
+        "read_summary": "closure_summary.complete=true or blockers are reported to the user",
+    }.get(action)
+
+
+def _job_recovery_stop_when(action: str) -> list[str]:
+    common = ["duplicate_check.exists=true", "site rule obligations are not ready", "resume preview contains unexpected ignored_overrides"]
+    if action == "poll":
+        return ["job status becomes blocked, failed, or cancelled"]
+    if action == "read_summary":
+        return ["closure_summary.blockers is non-empty"]
+    if action == "stop":
+        return ["current blockers require user action before automation continues"]
+    return common
+
+
+def _job_recovery_next_actions(action: str, next_step: dict[str, Any], blockers: list[str], runtime: dict[str, Any]) -> list[str]:
+    if action == "poll":
+        return [f"Poll recovery_handoff.status_endpoint after {runtime.get('poll_after_seconds')} seconds."]
+    if action in {"preview_resume", "prepare_materials", "repair_target_payload", "repair_qbit"}:
+        return ["Call recovery_handoff.dry_run_request first, review command_argv and site-rule gates, then use execute_request only after approval."]
+    if action == "read_summary":
+        return ["Read recovery_handoff.summary_endpoint and report closure_summary/evidence."]
+    if blockers:
+        return ["Resolve recovery_handoff.blockers before continuing automation."]
+    if next_step.get("tool"):
+        return [f"Call recovery_handoff.recommended_tool={next_step.get('tool')} after reviewing blockers."]
+    return ["Inspect recovery_handoff.read_fields before taking the next automation step."]
+
+
 def _job_lineage_summary(job: dict[str, Any], all_jobs: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     all_jobs = all_jobs or [job]
     job_id = str(job.get("job_id") or "")
@@ -5619,6 +5863,7 @@ def _job_list_item(job: dict[str, Any], job_lineage: dict[str, Any] | None = Non
         "candidate_submission_handoff": _job_candidate_submission_handoff(job),
         "candidate_submission_summary": _job_candidate_submission_summary(job),
         "job_handoff": _job_handoff(job),
+        "recovery_handoff": _job_recovery_handoff(job),
         "status_endpoint": f"/v1/jobs/{job_id}" if job_id else None,
         "summary_endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
         "resume_endpoint": f"/v1/jobs/{job_id}/resume" if job_id else None,
@@ -5689,6 +5934,7 @@ def _job_public_payload(job: dict[str, Any], job_lineage: dict[str, Any] | None 
         "source_reference": _job_source_reference(job),
         "workflow_context": _job_workflow_context(job),
         "job_handoff": _job_handoff(job),
+        "recovery_handoff": _job_recovery_handoff(job),
         "result_status": _nested_value(job.get("result"), "status"),
         "next_stage": _nested_value(job.get("result"), "next_stage"),
         "next_command": _nested_value(job.get("result"), "next_command"),
@@ -7911,6 +8157,7 @@ def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = 
         "resume_plan": resume_plan,
         "resume_requirements": _job_resume_requirements(job, payload if isinstance(payload, dict) else None),
         "resume_execution_handoff": _job_resume_execution_handoff(job, payload if isinstance(payload, dict) else None),
+        "recovery_handoff": _job_recovery_handoff(job, payload if isinstance(payload, dict) else None),
         "resume_state": resume_state,
         "resume_context": _job_resume_context(job),
         "resume_summary": _job_resume_summary(job),
@@ -9839,7 +10086,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_execution_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -10407,12 +10654,13 @@ def _qbit_wait_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_execution_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
         "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
+        "recovery_handoff_fields": ["phase", "action", "reason", "ready", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "gates", "handoff_sources", "read_fields", "continue_when", "stop_when", "blockers", "next_actions"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "request_template", "dry_run_request", "execute_request", "recommended_inputs", "allowed_overrides", "current_flags"],
@@ -10474,7 +10722,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }

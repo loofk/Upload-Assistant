@@ -12715,11 +12715,19 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert job["job_handoff"]["recommended_tool"] == "get_job_status"
     assert job["job_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
     assert job["job_handoff"]["poll_after_seconds"] == 5
+    assert job["recovery_handoff"]["kind"] == "ptcli.job_recovery_handoff"
+    assert job["recovery_handoff"]["phase"] == "runtime"
+    assert job["recovery_handoff"]["action"] == "poll"
+    assert job["recovery_handoff"]["recommended_tool"] == "get_job_status"
+    assert job["recovery_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
+    assert job["recovery_handoff"]["should_poll"] is True
+    assert job["recovery_handoff"]["poll_after_seconds"] == 5
 
     payload = store.list({"status": "queued"})
     assert payload["jobs"][0]["runtime"]["should_poll"] is True
     assert payload["jobs"][0]["runtime"]["poll_after_seconds"] == 5
     assert payload["jobs"][0]["job_handoff"]["action"] == "wait"
+    assert payload["jobs"][0]["recovery_handoff"]["action"] == "poll"
     assert any("Poll running jobs" in action for action in payload["next_actions"])
 
 
@@ -13064,6 +13072,19 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["job_handoff"]["execute_request"] == job["resume_requirements"]["execute_request"]
     assert job["job_handoff"]["resume_execution_handoff"] == job["resume_execution_handoff"]
     assert job["job_handoff"]["resume_recommended"] is True
+    assert job["recovery_handoff"]["kind"] == "ptcli.job_recovery_handoff"
+    assert job["recovery_handoff"]["phase"] == "closure"
+    assert job["recovery_handoff"]["action"] == "prepare_materials"
+    assert job["recovery_handoff"]["should_resume"] is True
+    assert job["recovery_handoff"]["resume_preview_required"] is True
+    assert job["recovery_handoff"]["recommended_tool"] == "resume_job"
+    assert job["recovery_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
+    assert job["recovery_handoff"]["dry_run_request"] == job["materials_handoff"]["resume_handoff"]["dry_run_request"]
+    assert job["recovery_handoff"]["execute_request"] == job["materials_handoff"]["resume_handoff"]["execute_request"]
+    assert job["recovery_handoff"]["gates"]["materials_ready"] is False
+    assert job["recovery_handoff"]["gates"]["closure_complete"] is False
+    assert "materials_handoff.not_ready" in job["recovery_handoff"]["blockers"]
+    assert "Call recovery_handoff.dry_run_request" in job["recovery_handoff"]["next_actions"][0]
     assert summary["agent_summary"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["agent_summary"]["resume"]["materials_missing"] == ["metadata.tmdb"]
     assert summary["materials_handoff"] == job["materials_handoff"]
@@ -13076,6 +13097,8 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["resume_execution_handoff"] == job["resume_execution_handoff"]
     assert summary["resume_summary"] == job["resume_summary"]
     assert summary["job_handoff"] == job["job_handoff"]
+    assert summary["recovery_handoff"] == job["recovery_handoff"]
+    assert summary["workflow_context"]["recovery_handoff"] == job["recovery_handoff"]
     assert summary["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["workflow_context"]["resume_execution_handoff"] == job["resume_execution_handoff"]
     assert summary["workflow_context"]["target_preflight"]["missing"] == ["materials.metadata.tmdb"]
@@ -16371,6 +16394,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "job_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "recovery_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "recovery_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "recovery_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "recovery_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "recovery_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "recovery_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
+    assert "execute_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
+    assert "handoff_sources" in tool_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
     assert "recommended_tool" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "resume_recommended" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "candidate_submission_execution" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
@@ -17229,6 +17261,15 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_execution_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "resume_execution_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "resume_execution_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "recovery_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "recovery_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+        assert "recovery_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "recovery_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "recovery_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "recovery_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "dry_run_request" in tools_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
+        assert "execute_request" in tools_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
+        assert "handoff_sources" in tools_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
         assert "resume_requirements" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_summary" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_requirement_fields" in tools_by_name["resume_job"]["response_contract"]
