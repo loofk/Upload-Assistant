@@ -13505,6 +13505,14 @@ def test_manual_retorrent_job_audits_qbit_limit_application(monkeypatch, tmp_pat
     assert job["qbit_handoff"]["ready"] is True
     assert job["qbit_handoff"]["source"]["audit_status"] == "applied"
     assert job["qbit_handoff"]["uploaded"]["audit_status"] == "applied"
+    assert job["qbit_handoff"]["enforcement_handoff"]["kind"] == "ptcli.qbit_enforcement_handoff"
+    assert job["qbit_handoff"]["enforcement_handoff"]["ready"] is True
+    assert job["qbit_handoff"]["enforcement_handoff"]["status"] == "ready"
+    assert job["qbit_handoff"]["enforcement_handoff"]["pending_roles"] == []
+    assert job["qbit_handoff"]["enforcement_handoff"]["mismatch_roles"] == []
+    assert job["qbit_handoff"]["enforcement_handoff"]["roles"][0]["expected_limits"] == {"download_limit": 20 * 1024 * 1024}
+    assert job["qbit_handoff"]["enforcement_handoff"]["roles"][1]["expected_limits"] == {"upload_limit": 2 * 1024 * 1024}
+    assert job["qbit_handoff"]["enforcement_handoff"]["next_step"]["reason"] == "qbit_limits_enforced"
     assert job["agent_decision"]["qbit_limit_audit"] == job["qbit_limit_audit"]
     assert job["agent_decision"]["qbit_handoff"] == job["qbit_handoff"]
     assert job["workflow_context"]["qbit_limit_audit"] == job["qbit_limit_audit"]
@@ -13557,6 +13565,13 @@ def test_manual_retorrent_job_marks_qbit_limit_audit_pending_without_injection_e
     assert job["qbit_handoff"]["source"]["audit_status"] == "pending"
     assert job["qbit_handoff"]["uploaded"]["audit_status"] == "pending"
     assert job["qbit_handoff"]["blockers"] == job["qbit_limit_audit"]["blockers"]
+    assert job["qbit_handoff"]["enforcement_handoff"]["ready"] is False
+    assert job["qbit_handoff"]["enforcement_handoff"]["status"] == "pending"
+    assert job["qbit_handoff"]["enforcement_handoff"]["pending_roles"] == ["source", "uploaded"]
+    assert job["qbit_handoff"]["enforcement_handoff"]["roles"][0]["requires_injection_evidence"] is True
+    assert job["qbit_handoff"]["enforcement_handoff"]["roles"][1]["requires_injection_evidence"] is True
+    assert job["qbit_handoff"]["enforcement_handoff"]["next_step"]["tool"] == "resume_job"
+    assert job["qbit_handoff"]["enforcement_handoff"]["next_step"]["request"] == {"dry_run": True}
 
 
 def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path) -> None:
@@ -15650,6 +15665,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "qbit_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "qbit_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "qbit_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "enforcement_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_handoff_fields"]
+    assert "qbit_enforcement_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "qbit_enforcement_role_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "requires_injection_evidence" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_enforcement_role_fields"]
     assert "materials_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -16405,6 +16425,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "qbit_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "qbit_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "qbit_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "qbit_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "enforcement_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["qbit_handoff_fields"]
+        assert "qbit_enforcement_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "qbit_enforcement_role_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "requires_injection_evidence" in tools_by_name["manual_retorrent_job"]["response_contract"]["qbit_enforcement_role_fields"]
         assert "materials_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "materials_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "materials_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]

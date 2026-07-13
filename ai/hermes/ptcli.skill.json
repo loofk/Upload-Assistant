@@ -1799,6 +1799,42 @@
           "unresolved_recommended_inputs",
           "blockers_before_resume"
         ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
+        ],
         "target_upload_handoff_fields": [
           "action",
           "ready_for_live_upload",
@@ -2563,6 +2599,42 @@
           "unresolved_recommended_inputs",
           "blockers_before_resume"
         ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
+        ],
         "target_upload_handoff_fields": [
           "action",
           "ready_for_live_upload",
@@ -3194,6 +3266,42 @@
           "unresolved_recommended_inputs",
           "blockers_before_resume"
         ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
+        ],
         "target_upload_handoff_fields": [
           "action",
           "ready_for_live_upload",
@@ -3824,6 +3932,42 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -4459,6 +4603,42 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -5412,6 +5592,42 @@
           "unresolved_recommended_inputs",
           "blockers_before_resume"
         ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
+        ],
         "target_upload_handoff_fields": [
           "action",
           "ready_for_live_upload",
@@ -6314,6 +6530,42 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
         ],
         "target_upload_handoff_fields": [
           "action",
@@ -7821,6 +8073,42 @@
           "unresolved_recommended_inputs",
           "blockers_before_resume"
         ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
+        ],
         "target_upload_handoff_fields": [
           "action",
           "ready_for_live_upload",
@@ -8540,6 +8828,42 @@
           "unresolved_recommended_inputs",
           "blockers_before_resume"
         ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
+        ],
         "target_upload_handoff_fields": [
           "action",
           "ready_for_live_upload",
@@ -9007,6 +9331,42 @@
           "covered_recommended_inputs",
           "unresolved_recommended_inputs",
           "blockers_before_resume"
+        ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
         ],
         "target_upload_handoff_fields": [
           "action",

@@ -5437,12 +5437,14 @@ def _job_qbit_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | Non
     source_audit = audit.get("source") if isinstance(audit, dict) and isinstance(audit.get("source"), dict) else {}
     uploaded_audit = audit.get("uploaded") if isinstance(audit, dict) and isinstance(audit.get("uploaded"), dict) else {}
     blockers = _string_list(audit.get("blockers")) if isinstance(audit, dict) else []
+    enforcement_handoff = _qbit_enforcement_handoff(plan, audit, blockers)
     return {
         "kind": "ptcli.qbit_handoff",
         "client": plan.get("client"),
         "ready": bool(audit.get("ready")) if isinstance(audit, dict) else False,
         "source": _qbit_handoff_role("source", source_plan, source_audit),
         "uploaded": _qbit_handoff_role("uploaded", uploaded_plan, uploaded_audit),
+        "enforcement_handoff": enforcement_handoff,
         "policy_defaults": plan.get("policy_defaults"),
         "blockers": blockers,
         "next_actions": _qbit_handoff_next_actions(blockers),
@@ -5473,6 +5475,66 @@ def _qbit_handoff_next_actions(blockers: list[str]) -> list[str]:
     if not blockers:
         return []
     return ["Review qbit_handoff.source/uploaded blockers, then resume or rerun the affected qBittorrent injection step with the listed category, tags, and rate limits."]
+
+
+def _qbit_enforcement_handoff(plan: dict[str, Any], audit: dict[str, Any] | None, blockers: list[str]) -> dict[str, Any]:
+    roles = []
+    for role in ("source", "uploaded"):
+        role_plan = plan.get(role) if isinstance(plan.get(role), dict) else {}
+        role_audit = audit.get(role) if isinstance(audit, dict) and isinstance(audit.get(role), dict) else {}
+        roles.append(_qbit_enforcement_role(role, role_plan, role_audit))
+    pending_roles = [role["role"] for role in roles if role.get("status") == "pending"]
+    mismatch_roles = [role["role"] for role in roles if role.get("status") == "mismatch"]
+    return {
+        "kind": "ptcli.qbit_enforcement_handoff",
+        "ready": not blockers,
+        "status": "ready" if not blockers else "mismatch" if mismatch_roles else "pending" if pending_roles else "blocked",
+        "roles": roles,
+        "pending_roles": pending_roles,
+        "mismatch_roles": mismatch_roles,
+        "blockers": blockers,
+        "next_step": _qbit_enforcement_next_step(blockers, pending_roles, mismatch_roles),
+        "continue_when": "qbit_limit_audit.ready=true and source/uploaded role blockers are empty",
+        "stop_when": "any qbit_handoff.enforcement_handoff.roles[].blockers remain after the injection or resume step",
+    }
+
+
+def _qbit_enforcement_role(role: str, plan: dict[str, Any], audit: dict[str, Any]) -> dict[str, Any]:
+    expected_limits = audit.get("expected") if isinstance(audit.get("expected"), dict) else {}
+    observed_limits = audit.get("observed") if isinstance(audit.get("observed"), dict) else None
+    status = audit.get("status") or "none"
+    blockers = _string_list(audit.get("blockers"))
+    return {
+        "role": role,
+        "ready": bool(audit.get("ready")),
+        "status": status,
+        "category": plan.get("category"),
+        "tags": plan.get("tags"),
+        "expected_limits": expected_limits,
+        "observed_limits": observed_limits,
+        "upload_limit_source": plan.get("upload_limit_source"),
+        "download_limit_source": plan.get("download_limit_source"),
+        "evidence_present": bool(audit.get("evidence_present")),
+        "requires_injection_evidence": bool(expected_limits) and not bool(audit.get("evidence_present")),
+        "requires_rate_limit_repair": status == "mismatch",
+        "blockers": blockers,
+        "requested_options": {
+            "category": plan.get("category"),
+            "tags": plan.get("tags"),
+            "upload_limit": plan.get("upload_limit"),
+            "download_limit": plan.get("download_limit"),
+        },
+    }
+
+
+def _qbit_enforcement_next_step(blockers: list[str], pending_roles: list[str], mismatch_roles: list[str]) -> dict[str, Any]:
+    if not blockers:
+        return {"tool": "get_job_summary", "endpoint": None, "method": "GET", "request": None, "reason": "qbit_limits_enforced"}
+    if pending_roles:
+        return {"tool": "resume_job", "endpoint": "/v1/jobs/{job_id}/resume", "method": "POST", "request": {"dry_run": True}, "reason": "qbit_injection_evidence_missing", "roles": pending_roles}
+    if mismatch_roles:
+        return {"tool": "resume_job", "endpoint": "/v1/jobs/{job_id}/resume", "method": "POST", "request": {"dry_run": True}, "reason": "qbit_rate_limit_mismatch", "roles": mismatch_roles}
+    return {"tool": "get_job_summary", "endpoint": None, "method": "GET", "request": None, "reason": "inspect_qbit_handoff", "blockers": blockers}
 
 
 def _job_materials_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -9539,6 +9601,9 @@ def _job_response_contract() -> dict[str, Any]:
         "material_plan_item_fields": ["key", "label", "ready", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "next_step", "resume_overrides"],
         "materials_resume_handoff_fields": ["ready", "resume_recommended", "recommended_tool", "recommended_endpoint", "method", "next_item", "missing", "accepted_override_keys", "dry_run_request", "execute_request", "recommended_request", "staged_requests", "continue_when", "stop_when"],
         "material_resolution_fields": ["ready_before_resume", "recommended_inputs", "applied_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "blockers_before_resume"],
+        "qbit_handoff_fields": ["ready", "source", "uploaded", "enforcement_handoff", "policy_defaults", "blockers", "next_actions"],
+        "qbit_enforcement_handoff_fields": ["ready", "status", "roles", "pending_roles", "mismatch_roles", "blockers", "next_step", "continue_when", "stop_when"],
+        "qbit_enforcement_role_fields": ["role", "ready", "status", "category", "tags", "expected_limits", "observed_limits", "upload_limit_source", "download_limit_source", "evidence_present", "requires_injection_evidence", "requires_rate_limit_repair", "blockers", "requested_options"],
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
