@@ -16357,6 +16357,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "digest" in tool_by_name["daily_candidates"]["response_contract"]["required_fields"]
     assert "top_submit_request" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "push_payload" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
+    assert "approval_queue" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
+    assert "top_safe_candidates" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "target_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "shortfall_count" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "message" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
@@ -16364,6 +16366,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "shortfall_count" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
+    assert "approval_queue" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
+    assert "top_safe_candidates" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "push_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "recommended_action" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
@@ -16377,6 +16381,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_risk_summary" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
     assert "policy_risk_summary_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "execution_priority" in tool_by_name["daily_candidates"]["response_contract"]["policy_risk_summary_fields"]
+    assert "approval_queue_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "safe_count" in tool_by_name["daily_candidates"]["response_contract"]["approval_queue_fields"]
+    assert "approval_queue_item_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "policy_risk_level" in tool_by_name["daily_candidates"]["response_contract"]["approval_queue_item_fields"]
     assert "policy_execution_handoff" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
     assert "policy_execution_handoff_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "qbit" in tool_by_name["daily_candidates"]["response_contract"]["policy_execution_handoff_fields"]
@@ -17064,6 +17072,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "workflow_context" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "top_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "push_payload" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "approval_queue" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "top_safe_candidates" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "target_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "shortfall_count" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "message" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
@@ -17071,6 +17081,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "shortfall_count" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
+        assert "approval_queue" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
+        assert "top_safe_candidates" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
         assert "push_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "recommended_action" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
@@ -17084,6 +17096,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_risk_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
         assert "policy_risk_summary_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "execution_priority" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_risk_summary_fields"]
+        assert "approval_queue_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "safe_count" in tools_by_name["daily_candidates_job"]["response_contract"]["approval_queue_fields"]
+        assert "approval_queue_item_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "policy_risk_level" in tools_by_name["daily_candidates_job"]["response_contract"]["approval_queue_item_fields"]
         assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
         assert "policy_execution_handoff_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "qbit" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_execution_handoff_fields"]
@@ -17837,6 +17853,25 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_payload"]["decision_summary"]["top_action"] == "submit_when_confirmed"
     assert result["digest"]["push_payload"]["decision_summary"]["risk_counts"] == {"low": 1, "medium": 0, "high": 0}
     assert result["digest"]["push_payload"]["decision_summary"]["policy_risk_counts"] == {"low": 1, "medium": 0, "high": 0}
+    assert result["digest"]["push_payload"]["decision_summary"]["safe_to_submit_count"] == 1
+    approval_queue = result["digest"]["approval_queue"]
+    assert approval_queue["kind"] == "ptcli.daily_candidate_approval_queue"
+    assert approval_queue["ready"] is True
+    assert approval_queue["safe_count"] == 1
+    assert approval_queue["guarded_count"] == 0
+    assert approval_queue["blocked_count"] == 0
+    assert approval_queue["recommended_count"] == 1
+    assert approval_queue["submit_tool"] == "source_url_retorrent_job"
+    assert approval_queue["submit_endpoint"] == "/v1/jobs/retorrent/from-url"
+    assert approval_queue["top_safe_candidates"][0]["source_id"] == "60635"
+    assert approval_queue["top_safe_candidates"][0]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert approval_queue["top_safe_candidates"][0]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert approval_queue["top_safe_candidates"][0]["policy_risk_level"] == "low"
+    assert approval_queue["top_safe_candidates"][0]["execution_priority"] == "preferred"
+    assert approval_queue["top_safe_candidates"][0]["duplicate_clear"] is True
+    assert result["digest"]["top_safe_candidates"] == approval_queue["top_safe_candidates"]
+    assert result["digest"]["push_payload"]["approval_queue"] == approval_queue
+    assert result["digest"]["push_payload"]["top_safe_candidates"] == approval_queue["top_safe_candidates"]
     assert "#1 [ready] U2-60635" in result["digest"]["push_payload"]["message"]
     assert result["digest"]["recommended_action"].startswith("Review digest.top_candidate")
     assert result["digest"]["push_count"] == 1
@@ -17988,6 +18023,10 @@ async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers
     assert result["digest"]["push_payload"]["decision_summary"]["blocked_source_ids"] == ["60635"]
     assert result["digest"]["push_payload"]["decision_summary"]["risk_counts"]["high"] == 1
     assert result["digest"]["push_payload"]["decision_summary"]["policy_risk_counts"]["low"] == 1
+    assert result["digest"]["push_payload"]["decision_summary"]["safe_to_submit_count"] == 1
+    assert [item["source_id"] for item in result["digest"]["approval_queue"]["top_safe_candidates"]] == ["60636"]
+    assert result["digest"]["approval_queue"]["safe_count"] == 1
+    assert result["digest"]["approval_queue"]["blocked_source_ids"] == ["60635"]
     assert any("target-duplicate" in blocker for blocker in result["digest"]["push_items"][1]["blockers"])
 
 
@@ -18100,6 +18139,10 @@ async def test_daily_candidates_blocks_for_transfer_policy_rules(monkeypatch) ->
     assert result["candidates"][0]["policy_risk_summary"]["strict_transfer_rule_count"] == 4
     assert result["digest"]["push_items"][0]["policy_risk_summary"]["strict_transfer_rule_count"] == 4
     assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["policy_risk_summary"]["risk_level"] == "high"
+    assert result["digest"]["approval_queue"]["ready"] is False
+    assert result["digest"]["approval_queue"]["safe_count"] == 0
+    assert result["digest"]["approval_queue"]["blocked_source_ids"] == ["60635"]
+    assert result["digest"]["top_safe_candidates"] == []
 
 
 def test_source_info_from_tuple_includes_meta_side_effects() -> None:

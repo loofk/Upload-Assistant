@@ -781,9 +781,10 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
     else:
         recommendation = "no_candidates"
     push_items = [_candidate_digest_item(candidate, rank=index + 1) for index, candidate in enumerate(candidates)]
+    approval_queue = _candidate_approval_queue(push_items)
     target_summary = _candidate_target_summary(limit, scan_count=scan_count, selected_count=len(candidates), ready_count=len(ready_candidates))
     push_summary = _candidate_push_summary(target_summary, review_count, blocked_count, recommendation)
-    push_payload = _candidate_push_payload(push_summary, push_items, recommendation, blockers, next_actions, target_summary=target_summary)
+    push_payload = _candidate_push_payload(push_summary, push_items, recommendation, blockers, next_actions, target_summary=target_summary, approval_queue=approval_queue)
     return {
         "kind": "ptcli.daily_candidates_digest",
         "limit": limit,
@@ -799,6 +800,8 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
         "push_title": "Daily PT retorrent candidates",
         "push_summary": push_summary,
         "push_payload": push_payload,
+        "approval_queue": approval_queue,
+        "top_safe_candidates": approval_queue["top_safe_candidates"],
         "push_count": len(push_items),
         "recommended_action": _candidate_digest_recommended_action(recommendation),
         "top_candidate": _candidate_digest_item(top_candidate, rank=1) if top_candidate else None,
@@ -820,6 +823,7 @@ def _candidate_push_payload(
     next_actions: list[str],
     *,
     target_summary: dict[str, Any],
+    approval_queue: dict[str, Any],
 ) -> dict[str, Any]:
     items = [item for item in push_items if isinstance(item, dict)]
     ready_items = [item for item in items if item.get("can_submit") is True]
@@ -843,10 +847,77 @@ def _candidate_push_payload(
         "recommendation": recommendation,
         "recommended_action": _candidate_digest_recommended_action(recommendation),
         "decision_summary": decision_summary,
+        "approval_queue": approval_queue,
+        "top_safe_candidates": approval_queue["top_safe_candidates"],
         "top_item": ready_items[0] if ready_items else items[0] if items else None,
         "items": items,
         "blockers": blockers,
         "next_actions": next_actions,
+    }
+
+
+def _candidate_approval_queue(push_items: list[dict[str, Any] | None], *, limit: int = 3) -> dict[str, Any]:
+    items = [item for item in push_items if isinstance(item, dict)]
+    safe_items = [item for item in items if _candidate_item_safe_to_submit(item)]
+    guarded_items = [item for item in items if item.get("can_submit") is True and not _candidate_item_safe_to_submit(item)]
+    blocked_items = [item for item in items if item.get("can_submit") is not True]
+    queue_items = [_candidate_approval_queue_item(item) for item in safe_items[:limit]]
+    next_actions = ["Ask the user to approve one approval_queue.items[] entry, then submit its request to source_url_retorrent_job."]
+    if not queue_items and items:
+        next_actions = ["Resolve guarded or blocked candidate reasons before submitting any daily candidate."]
+    if not items:
+        next_actions = ["Run the daily candidate scan again after source cookies and site policies are configured."]
+    return {
+        "kind": "ptcli.daily_candidate_approval_queue",
+        "ready": bool(queue_items),
+        "safe_count": len(safe_items),
+        "guarded_count": len(guarded_items),
+        "blocked_count": len(blocked_items),
+        "recommended_count": len(queue_items),
+        "items": queue_items,
+        "top_safe_candidates": queue_items,
+        "guarded_source_ids": [item.get("source_id") for item in guarded_items if item.get("source_id")],
+        "blocked_source_ids": [item.get("source_id") for item in blocked_items if item.get("source_id")],
+        "submit_tool": SOURCE_URL_RETORRENT_JOB_TOOL,
+        "submit_endpoint": SOURCE_URL_RETORRENT_JOB_ENDPOINT,
+        "requires_confirmation": ["accept_rules=true", "confirm_upload=true", "save_path or path"],
+        "continue_when": "approval_queue.ready=true and the user approves one approval_queue.items[] entry",
+        "stop_when": ["duplicate_clear=false", "policy_risk_level=high", "can_submit=false"],
+        "next_actions": next_actions,
+    }
+
+
+def _candidate_item_safe_to_submit(item: dict[str, Any]) -> bool:
+    decision_summary = item.get("decision_summary") if isinstance(item.get("decision_summary"), dict) else {}
+    policy_risk_summary = item.get("policy_risk_summary") if isinstance(item.get("policy_risk_summary"), dict) else {}
+    return bool(
+        item.get("can_submit") is True
+        and decision_summary.get("duplicate_clear") is True
+        and policy_risk_summary.get("risk_level") == "low"
+        and decision_summary.get("risk_level") == "low"
+    )
+
+
+def _candidate_approval_queue_item(item: dict[str, Any]) -> dict[str, Any]:
+    decision_summary = item.get("decision_summary") if isinstance(item.get("decision_summary"), dict) else {}
+    policy_risk_summary = item.get("policy_risk_summary") if isinstance(item.get("policy_risk_summary"), dict) else {}
+    return {
+        "rank": item.get("rank"),
+        "source_tracker": item.get("source_tracker"),
+        "source_id": item.get("source_id"),
+        "source_url": item.get("source_url"),
+        "title": item.get("title"),
+        "score": item.get("score"),
+        "risk_level": decision_summary.get("risk_level"),
+        "policy_risk_level": policy_risk_summary.get("risk_level"),
+        "execution_priority": policy_risk_summary.get("execution_priority"),
+        "duplicate_clear": decision_summary.get("duplicate_clear"),
+        "metadata": item.get("metadata"),
+        "policy_risk_summary": policy_risk_summary,
+        "submit_tool": item.get("submit_tool") or SOURCE_URL_RETORRENT_JOB_TOOL,
+        "submit_endpoint": item.get("submit_job_endpoint") or item.get("action_endpoint") or SOURCE_URL_RETORRENT_JOB_ENDPOINT,
+        "request": item.get("submit_request"),
+        "requires_confirmation": ["accept_rules=true", "confirm_upload=true", "save_path or path"],
     }
 
 
@@ -1083,6 +1154,7 @@ def _push_decision_summary(items: list[dict[str, Any]], ready_items: list[dict[s
         "blocked_count": len(blocked_items),
         "risk_counts": risk_counts,
         "policy_risk_counts": policy_risk_counts,
+        "safe_to_submit_count": sum(1 for item in items if _candidate_item_safe_to_submit(item)),
         "ready_source_ids": [item.get("source_id") for item in ready_items if item.get("source_id")],
         "blocked_source_ids": [item.get("source_id") for item in blocked_items if item.get("source_id")],
         "submit_ready": bool(ready_items),
