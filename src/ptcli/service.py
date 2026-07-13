@@ -3981,9 +3981,12 @@ def _site_policy_profile(item: dict[str, Any]) -> dict[str, Any]:
         "config_path": f'config["PTCLI"]["SITE_POLICIES"]["{tracker}"]',
         "required_fields": _site_policy_required_fields_for_roles(roles),
         "optional_fields": ["freeleech_required", "required_promotions", "forbidden_title_patterns", "forbidden_release_groups", "notes"],
+        "accepted_config_shapes": ["flat", "structured"],
         "missing_fields": _string_list(coverage.get("missing_fields")),
         "disabled_automation": _string_list(coverage.get("disabled_automation")),
         "template": _site_policy_config_template(item),
+        "flat_template": _site_policy_config_template(item),
+        "structured_template": _site_policy_structured_config_template(item),
         "current_values": {
             "rules_url": item.get("rules_url"),
             "automation": item.get("automation"),
@@ -4049,11 +4052,45 @@ def _site_policy_config_template(item: dict[str, Any]) -> dict[str, Any]:
     return template
 
 
+def _site_policy_structured_config_template(item: dict[str, Any]) -> dict[str, Any]:
+    flat = _site_policy_config_template(item)
+    roles = _string_list(item.get("roles")) or ["unknown"]
+    template: dict[str, Any] = {
+        "rules_url": flat.get("rules_url") or "",
+        "manual_review_required": flat.get("manual_review_required", True),
+        "rule_review_fingerprint": flat.get("rule_review_fingerprint") or "manual-review-YYYY-MM-DD",
+        "automation": {
+            "retorrent": flat.get("allow_retorrent") is True,
+            "download": flat.get("allow_auto_download") is True if "source" in roles else False,
+            "upload": flat.get("allow_auto_upload") is True if "target" in roles else False,
+        },
+        "qbit_limits": {},
+        "seeding_requirements": {},
+        "transfer_rules": {},
+        "notes": flat.get("notes") or [],
+    }
+    if "source" in roles:
+        template["qbit_limits"]["download_limit"] = flat.get("download_rate_limit") or "20MiB/s"
+        if flat.get("upload_rate_limit"):
+            template["qbit_limits"]["upload_limit"] = flat.get("upload_rate_limit")
+        template["seeding_requirements"]["min_seed_time_hours"] = flat.get("min_seed_time_hours") or 72
+    if "target" in roles:
+        template["qbit_limits"]["upload_limit"] = flat.get("upload_rate_limit") or "2MiB/s"
+        if flat.get("download_rate_limit"):
+            template["qbit_limits"]["download_limit"] = flat.get("download_rate_limit")
+        template["seeding_requirements"]["min_ratio"] = flat.get("min_ratio") or 1.0
+    for key in ("freeleech_required", "required_promotions", "forbidden_title_patterns", "forbidden_release_groups"):
+        if key in flat:
+            template["transfer_rules"][key] = flat[key]
+    return template
+
+
 def _site_policy_config_templates(matrix: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "kind": "ptcli.site_policy_config_templates",
         "config_path": 'config["PTCLI"]["SITE_POLICIES"]',
         "trackers": {str(item.get("tracker")): (item.get("policy_profile") or {}).get("template") for item in matrix if item.get("tracker")},
+        "structured_trackers": {str(item.get("tracker")): (item.get("policy_profile") or {}).get("structured_template") for item in matrix if item.get("tracker")},
     }
 
 
@@ -4131,6 +4168,7 @@ def _site_policy_next_step(
         "request": {
             "config_path": templates.get("config_path"),
             "site_policy_templates": templates.get("trackers"),
+            "structured_site_policy_templates": templates.get("structured_trackers"),
             "blocked_trackers": _string_list(execution_readiness.get("blocked_trackers")),
             "missing_by_category": missing_by_category,
         },
@@ -4323,6 +4361,7 @@ def _site_policy_execution_handoff(policy_execution_summary: dict[str, Any], pol
         "config": {
             "path": policy_handoff.get("config_path"),
             "templates": (policy_handoff.get("config_templates") or {}).get("trackers") if isinstance(policy_handoff.get("config_templates"), dict) else {},
+            "structured_templates": (policy_handoff.get("config_templates") or {}).get("structured_trackers") if isinstance(policy_handoff.get("config_templates"), dict) else {},
             "missing_by_category": policy_handoff.get("missing_by_category") if isinstance(policy_handoff.get("missing_by_category"), dict) else {},
         },
         "request": _site_policy_rerun_request(request_context, {"accept_rules": bool(policy_execution_summary.get("accepted_rules"))}),
@@ -9708,7 +9747,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                     "policy_coverage",
                     "execution_readiness",
                 ],
-                "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "missing_fields", "disabled_automation", "template", "current_values", "next_actions"],
+                "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "accepted_config_shapes", "missing_fields", "disabled_automation", "template", "flat_template", "structured_template", "current_values", "next_actions"],
+                "config_template_fields": ["config_path", "trackers", "structured_trackers"],
                 "gap_summary_fields": ["ready", "missing_total", "disabled_total", "by_role", "missing_by_category", "recommendations"],
                 "rule_obligation_fields": ["ready", "accepted_rules", "rules_url", "manual_review_required", "rule_review_fingerprint", "missing_fields", "missing_confirmations", "scopes", "required_confirmations", "blockers"],
                 "rule_obligation_scope_fields": ["role", "scope", "action", "ready", "rules_url", "review_fingerprint", "required_confirmations", "missing_fields", "missing_confirmations", "blockers"],
@@ -10123,7 +10163,7 @@ def _sites_response_contract() -> dict[str, Any]:
         "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "policy_matrix", "policy_execution_summary", "extension_plan", "extension_handoff", "flow_matrix", "agent_summary", "blockers", "next_actions"],
         "capability_fields": ["tracker", "capabilities", "adapter_profile", "policy_profile", "execution_readiness", "ready_for_source", "ready_for_mteam_target_flow", "ready_as_target"],
         "adapter_profile_fields": ["tracker", "source_info", "source_info_adapter", "source_download", "source_download_adapter", "target_upload", "target_upload_adapter", "credential_requirements", "mteam_source_flow", "full_live_closure_to_mteam", "implemented_roles", "extension_notes", "extension_checklist"],
-        "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "missing_fields", "template", "current_values", "next_actions"],
+        "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "accepted_config_shapes", "missing_fields", "template", "flat_template", "structured_template", "current_values", "next_actions"],
         "extension_plan_fields": ["ready", "trackers", "ready_sources", "ready_targets", "reference_sources_to_mteam", "items", "next_item", "blockers", "next_actions"],
         "extension_item_fields": ["tracker", "source_ready", "target_ready", "full_live_closure_to_mteam", "has_reference_flow", "implemented_roles", "missing_components", "checklist", "blockers", "next_action"],
         "extension_handoff_fields": ["ready", "phase", "recommended_next_tracker", "reference_flow", "implementation_order", "tracker_steps", "endpoint_sequence", "validation_sequence", "continue_when", "stop_when", "blockers", "next_actions"],

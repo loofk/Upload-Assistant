@@ -451,6 +451,49 @@ def test_site_policy_overrides_parse_rate_limits() -> None:
     assert report["qbit_limits"]["MTEAM"]["upload_limit"] == 2 * 1024 * 1024
 
 
+def test_site_policy_accepts_structured_config_shape() -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "automation": {"download": True, "retorrent": True},
+                    "qbit_limits": {"download_limit": "20MiB/s", "upload_limit": "500KiB/s"},
+                    "seeding_requirements": {"min_seed_time_hours": 72},
+                    "transfer_rules": {"required_promotions": ["free"], "forbidden_release_groups": ["BADGRP"]},
+                    "rule_review_fingerprint": "u2-review",
+                },
+                "MTEAM": {
+                    "automation": {"upload": True, "retorrent": True},
+                    "qbit_limits": {"upload_limit": "2MiB/s"},
+                    "seeding_requirements": {"min_ratio": 1.0},
+                    "transfer_rules": {"freeleech_required": True, "forbidden_title_patterns": ["Forbidden"]},
+                    "rule_review_fingerprint": "mteam-review",
+                },
+            }
+        }
+    }
+
+    u2 = build_site_policy(config, "U2")
+    mteam = build_site_policy(config, "MTEAM")
+    report = build_site_policy_report(config, ["U2", "MTEAM"], accept_rules=True)
+
+    assert u2.allow_auto_download is True
+    assert u2.allow_retorrent is True
+    assert u2.download_rate_limit == 20 * 1024 * 1024
+    assert u2.upload_rate_limit == 500 * 1024
+    assert u2.min_seed_time_hours == 72
+    assert u2.required_promotions == ("free",)
+    assert u2.forbidden_release_groups == ("BADGRP",)
+    assert mteam.allow_auto_upload is True
+    assert mteam.upload_rate_limit == 2 * 1024 * 1024
+    assert mteam.min_ratio == 1.0
+    assert mteam.freeleech_required is True
+    assert mteam.forbidden_title_patterns == ("Forbidden",)
+    assert report["ready"] is True
+    assert report["qbit_limits"]["U2"]["download_limit"] == 20 * 1024 * 1024
+    assert report["qbit_limits"]["MTEAM"]["upload_limit"] == 2 * 1024 * 1024
+
+
 def test_example_config_includes_safe_ptcli_site_policy_templates() -> None:
     namespace = runpy.run_path(str(Path(__file__).resolve().parents[2] / "data" / "example-config.py"))
     config = namespace["config"]
@@ -15173,8 +15216,14 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["U2"]["policy_coverage"]["rule_obligations"]["ready"] is True
     assert matrix_by_tracker["U2"]["policy_coverage"]["complete"] is True
     assert matrix_by_tracker["U2"]["policy_profile"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]["U2"]'
+    assert matrix_by_tracker["U2"]["policy_profile"]["accepted_config_shapes"] == ["flat", "structured"]
     assert "download_rate_limit" in matrix_by_tracker["U2"]["policy_profile"]["required_fields"]
     assert matrix_by_tracker["U2"]["policy_profile"]["template"]["download_rate_limit"] == "20 MiB/s"
+    assert matrix_by_tracker["U2"]["policy_profile"]["flat_template"]["download_rate_limit"] == "20 MiB/s"
+    assert matrix_by_tracker["U2"]["policy_profile"]["structured_template"]["automation"]["download"] is True
+    assert matrix_by_tracker["U2"]["policy_profile"]["structured_template"]["qbit_limits"]["download_limit"] == "20 MiB/s"
+    assert matrix_by_tracker["U2"]["policy_profile"]["structured_template"]["seeding_requirements"]["min_seed_time_hours"] == 72
+    assert matrix_by_tracker["U2"]["policy_profile"]["structured_template"]["transfer_rules"]["required_promotions"] == ["free"]
     assert matrix_by_tracker["U2"]["policy_profile"]["template"]["required_promotions"] == ["free"]
     assert matrix_by_tracker["U2"]["execution_readiness"]["ready"] is True
     assert matrix_by_tracker["U2"]["execution_readiness"]["role_status"]["source"]["can_download"] is True
@@ -15191,6 +15240,10 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["MTEAM"]["policy_coverage"]["complete"] is True
     assert "upload_rate_limit" in matrix_by_tracker["MTEAM"]["policy_profile"]["required_fields"]
     assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["upload_rate_limit"] == "2 MiB/s"
+    assert matrix_by_tracker["MTEAM"]["policy_profile"]["structured_template"]["automation"]["upload"] is True
+    assert matrix_by_tracker["MTEAM"]["policy_profile"]["structured_template"]["qbit_limits"]["upload_limit"] == "2 MiB/s"
+    assert matrix_by_tracker["MTEAM"]["policy_profile"]["structured_template"]["seeding_requirements"]["min_ratio"] == 1.0
+    assert matrix_by_tracker["MTEAM"]["policy_profile"]["structured_template"]["transfer_rules"]["freeleech_required"] is True
     assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["freeleech_required"] is True
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["ready"] is True
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["role_status"]["target"]["can_upload"] is True
@@ -15228,6 +15281,8 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert payload["policy_execution_handoff"]["continue_when"] == "policy_execution_handoff.ready=true; then run readiness_bundle or source_url_retorrent_preflight before live upload"
     assert payload["config_templates"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]'
     assert payload["config_templates"]["trackers"]["MTEAM"]["min_ratio"] == 1.0
+    assert payload["config_templates"]["structured_trackers"]["U2"]["qbit_limits"]["download_limit"] == "20 MiB/s"
+    assert payload["config_templates"]["structured_trackers"]["MTEAM"]["qbit_limits"]["upload_limit"] == "2 MiB/s"
     assert payload["agent_summary"]["qbit_limits_present"] == ["U2", "MTEAM"]
     assert payload["agent_summary"]["seeding_requirements_present"] == ["U2", "MTEAM"]
     assert payload["agent_summary"]["policy_coverage_ready"] is True
@@ -15803,6 +15858,8 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert {"tracker": "U2", "field": "download_rate_limit"} in payload["policy_execution_handoff"]["qbit"]["missing"]
     assert {"tracker": "MTEAM", "field": "min_ratio"} in payload["policy_execution_handoff"]["seeding"]["missing"]
     assert payload["policy_execution_handoff"]["config"]["templates"]["U2"]["download_rate_limit"] == "20MiB/s"
+    assert payload["policy_execution_handoff"]["config"]["structured_templates"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
+    assert payload["policy_execution_handoff"]["config"]["structured_templates"]["MTEAM"]["qbit_limits"]["upload_limit"] == "2MiB/s"
     assert payload["policy_execution_handoff"]["next_actions"] == [
         "Apply policy_execution_handoff.config.templates to PTCLI.SITE_POLICIES, replace rule_review_fingerprint placeholders after manual rule review, then rerun site_policies."
     ]
@@ -15831,6 +15888,8 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert payload["policy_handoff"]["next_step"]["request"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]'
     assert payload["policy_handoff"]["next_step"]["request"]["site_policy_templates"]["U2"]["download_rate_limit"] == "20MiB/s"
     assert payload["policy_handoff"]["next_step"]["request"]["site_policy_templates"]["MTEAM"]["upload_rate_limit"] == "2MiB/s"
+    assert payload["policy_handoff"]["next_step"]["request"]["structured_site_policy_templates"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
+    assert payload["policy_handoff"]["next_step"]["request"]["structured_site_policy_templates"]["MTEAM"]["qbit_limits"]["upload_limit"] == "2MiB/s"
     assert payload["policy_handoff"]["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert payload["recommended_tool"] == "edit_config"
     assert payload["recommended_request"] == payload["policy_handoff"]["next_step"]["request"]
@@ -16114,6 +16173,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "transfer_rules" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "policy_profile" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "template" in tool_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
+    assert "flat_template" in tool_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
+    assert "structured_template" in tool_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
+    assert "accepted_config_shapes" in tool_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
+    assert "config_template_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "structured_trackers" in tool_by_name["site_policies"]["response_contract"]["config_template_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_setup_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
@@ -16689,6 +16753,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "transfer_rules" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert "policy_profile" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
         assert "template" in tools_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
+        assert "flat_template" in tools_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
+        assert "structured_template" in tools_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
+        assert "accepted_config_shapes" in tools_by_name["site_policies"]["response_contract"]["policy_profile_fields"]
+        assert "config_template_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "structured_trackers" in tools_by_name["site_policies"]["response_contract"]["config_template_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_setup_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]

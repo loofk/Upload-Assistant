@@ -7750,8 +7750,11 @@
           "config_path",
           "required_fields",
           "optional_fields",
+          "accepted_config_shapes",
           "missing_fields",
           "template",
+          "flat_template",
+          "structured_template",
           "current_values",
           "next_actions"
         ],
@@ -11042,11 +11045,19 @@
           "config_path",
           "required_fields",
           "optional_fields",
+          "accepted_config_shapes",
           "missing_fields",
           "disabled_automation",
           "template",
+          "flat_template",
+          "structured_template",
           "current_values",
           "next_actions"
+        ],
+        "config_template_fields": [
+          "config_path",
+          "trackers",
+          "structured_trackers"
         ],
         "gap_summary_fields": [
           "ready",

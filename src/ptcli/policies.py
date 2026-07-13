@@ -309,6 +309,34 @@ def _site_policy_overrides(config: dict[str, Any]) -> dict[str, Any]:
 
 def _apply_policy_override(policy: SitePolicy, override: dict[str, Any]) -> SitePolicy:
     fields: dict[str, Any] = {}
+    automation = override.get("automation") if isinstance(override.get("automation"), dict) else {}
+    qbit_limits = override.get("qbit_limits") if isinstance(override.get("qbit_limits"), dict) else {}
+    seeding = override.get("seeding_requirements") if isinstance(override.get("seeding_requirements"), dict) else {}
+    transfer_rules = override.get("transfer_rules") if isinstance(override.get("transfer_rules"), dict) else {}
+    nested_bool_fields = {
+        "manual_review_required": automation.get("manual_review_required"),
+        "allow_auto_download": automation.get("download"),
+        "allow_auto_upload": automation.get("upload"),
+        "allow_retorrent": automation.get("retorrent"),
+        "freeleech_required": transfer_rules.get("freeleech_required"),
+    }
+    fields.update({key: value for key, value in nested_bool_fields.items() if value is not None})
+    nested_value_fields = {
+        "min_seed_time_hours": seeding.get("min_seed_time_hours"),
+        "min_ratio": seeding.get("min_ratio"),
+    }
+    fields.update({key: value for key, value in nested_value_fields.items() if value is not None})
+    if "download_limit" in qbit_limits:
+        fields["download_rate_limit"] = parse_rate_limit(qbit_limits["download_limit"])
+    elif "download_rate_limit" in qbit_limits:
+        fields["download_rate_limit"] = parse_rate_limit(qbit_limits["download_rate_limit"])
+    if "upload_limit" in qbit_limits:
+        fields["upload_rate_limit"] = parse_rate_limit(qbit_limits["upload_limit"])
+    elif "upload_rate_limit" in qbit_limits:
+        fields["upload_rate_limit"] = parse_rate_limit(qbit_limits["upload_rate_limit"])
+    for key in ("required_promotions", "forbidden_title_patterns", "forbidden_release_groups"):
+        if key in transfer_rules:
+            fields[key] = tuple(str(item) for item in _as_list(transfer_rules[key]) if str(item).strip())
     for key in (
         "rules_url",
         "manual_review_required",
