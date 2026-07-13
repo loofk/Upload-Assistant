@@ -106,6 +106,7 @@
             "source_reference",
             "target_trackers",
             "policy_execution_summary",
+            "policy_execution_handoff",
             "duplicate_check",
             "duplicate_check_handoff",
             "job_creation_handoff.request",
@@ -115,6 +116,7 @@
           "continue_when": "ready_to_create_job=true",
           "stop_when": [
             "source_reference.error is present",
+            "policy_execution_handoff.ready=false",
             "policy_execution_summary.ready=false",
             "accept_rules or confirm_upload missing",
             "deployment.ready=false"
@@ -126,12 +128,14 @@
           "read": [
             "live_readiness.ready_for_manual_retorrent",
             "live_readiness.policy_execution_summary",
+            "live_readiness.policy_execution_handoff",
             "live_readiness.blockers",
             "live_readiness.manual_job_template.request"
           ],
           "continue_when": "live_readiness.ready_for_manual_retorrent=true",
           "stop_when": [
             "deployment.ready=false",
+            "live_readiness.policy_execution_handoff.ready=false",
             "policy_execution_summary.ready=false",
             "accept_rules or confirm_upload missing"
           ]
@@ -142,14 +146,16 @@
           "read": [
             "ready",
             "policy_execution_summary.ready",
-            "policy_execution_summary.next_step",
-            "policy_execution_summary.qbit_limit_plan",
-            "policy_execution_summary.seeding_plan",
+            "policy_execution_handoff.ready",
+            "policy_execution_handoff.qbit",
+            "policy_execution_handoff.seeding",
+            "policy_execution_handoff.transfer_rules",
+            "policy_execution_handoff.rule_obligations",
             "policy_gap_summary",
             "execution_readiness",
             "agent_summary.policy_recommendations"
           ],
-          "continue_when": "ready=true and policy_execution_summary.ready=true",
+          "continue_when": "ready=true and policy_execution_handoff.ready=true",
           "stop_when": [
             "missing rule_review_fingerprint",
             "missing qBittorrent rate limits",
@@ -849,6 +855,7 @@
           "duplicate_check_handoff",
           "readiness_bundle",
           "policy_execution_summary",
+          "policy_execution_handoff",
           "job_template",
           "job_creation_handoff",
           "next_step",
@@ -868,6 +875,18 @@
           "request",
           "reason",
           "blockers"
+        ],
+        "policy_execution_handoff_fields": [
+          "ready",
+          "phase",
+          "qbit",
+          "seeding",
+          "transfer_rules",
+          "rule_obligations",
+          "config",
+          "next_step",
+          "blockers",
+          "next_actions"
         ],
         "duplicate_check_fields": [
           "searched",
@@ -10285,6 +10304,7 @@
           "site_policy_ready",
           "policy_execution_summary",
           "policy_setup_summary",
+          "policy_execution_handoff",
           "live_verification_ready",
           "credential_requirements",
           "doctor_template",
@@ -10302,6 +10322,7 @@
           "doctor_template",
           "manual_job_template",
           "policy_execution_summary",
+          "policy_execution_handoff",
           "next_step",
           "recommended_tool",
           "recommended_endpoint",

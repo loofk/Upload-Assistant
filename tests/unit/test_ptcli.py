@@ -15968,9 +15968,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "policy_setup_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
+    assert "policy_execution_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "credential_requirements" in tool_by_name["readiness_bundle"]["response_contract"]["live_verification_fields"]
     assert "after_doctor" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+    assert "policy_execution_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "recommended_tool" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "preflight_checklist" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "execution_plan" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
@@ -15980,6 +15982,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "runbook_ref" in tool_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
     assert tool_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
     assert "ready_to_create_job" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+    assert "policy_execution_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+    assert "policy_execution_handoff_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
     assert "duplicate_check_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
     assert "submit_if_clear_handoff" in tool_by_name["retorrent_check"]["response_contract"]["required_fields"]
     assert "submit_if_clear_handoff_fields" in tool_by_name["retorrent_check"]["response_contract"]
@@ -16178,8 +16182,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "docker_compose" in deployment_schema["properties"]
     assert "agent_summary" in deployment_schema["properties"]
     assert "agent_handoff" in deployment_schema["properties"]
+    source_url_preflight_schema = openapi["paths"]["/v1/retorrent/source-url/preflight"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "policy_execution_handoff" in source_url_preflight_schema["properties"]
     readiness_schema = openapi["paths"]["/v1/readiness/bundle"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "live_readiness" in readiness_schema["properties"]
+    assert "seedbox_live_validation_handoff" in readiness_schema["properties"]
     assert "agent_decision" in readiness_schema["properties"]
 
 
@@ -16215,9 +16222,11 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["recommended_tool"] == "source_url_check_and_submit"
     assert [step["tool"] for step in ready["steps"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
     assert "policy_execution_summary" in ready["steps"][0]["read"]
+    assert "policy_execution_handoff" in ready["steps"][0]["read"]
     assert "live_readiness.policy_execution_summary" in ready["steps"][1]["read"]
-    assert "policy_execution_summary.ready" in ready["steps"][2]["read"]
-    assert ready["steps"][2]["continue_when"] == "ready=true and policy_execution_summary.ready=true"
+    assert "live_readiness.policy_execution_handoff" in ready["steps"][1]["read"]
+    assert "policy_execution_handoff.ready" in ready["steps"][2]["read"]
+    assert ready["steps"][2]["continue_when"] == "ready=true and policy_execution_handoff.ready=true"
     assert ready["steps"][3]["tool"] == "retorrent_check"
     assert ready["steps"][3]["request"]["source"] == ready["request_template"]["source_url"]
     assert ready["steps"][4]["request"] == ready["request_template"]
@@ -16279,10 +16288,12 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
     assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
     assert "policy_execution_summary" in source_url_workflow["runbook"][0]["read"]
+    assert "policy_execution_handoff" in source_url_workflow["runbook"][0]["read"]
     assert source_url_workflow["runbook"][1]["continue_when"] == "live_readiness.ready_for_manual_retorrent=true"
     assert "live_readiness.policy_execution_summary" in source_url_workflow["runbook"][1]["read"]
-    assert "policy_execution_summary.ready=false" in source_url_workflow["runbook"][0]["stop_when"]
-    assert source_url_workflow["runbook"][2]["continue_when"] == "ready=true and policy_execution_summary.ready=true"
+    assert "live_readiness.policy_execution_handoff" in source_url_workflow["runbook"][1]["read"]
+    assert "policy_execution_handoff.ready=false" in source_url_workflow["runbook"][0]["stop_when"]
+    assert source_url_workflow["runbook"][2]["continue_when"] == "ready=true and policy_execution_handoff.ready=true"
     assert source_url_workflow["runbook"][3]["tool"] == "retorrent_check"
     assert source_url_workflow["runbook"][3]["continue_when"] == "duplicate_check.searched=true and duplicate_check.exists=false"
     assert "job_handoff" in source_url_workflow["runbook"][4]["read"]
@@ -16330,6 +16341,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]
         assert tools_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
         assert "ready_to_create_job" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+        assert "policy_execution_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+        assert "policy_execution_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "duplicate_check_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "duplicate_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "job_creation_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
@@ -16361,9 +16374,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "next_step" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
         assert "policy_setup_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
+        assert "policy_execution_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
         assert "credential_requirements" in tools_by_name["readiness_bundle"]["response_contract"]["live_verification_fields"]
         assert "after_doctor" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+        assert "policy_execution_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "recommended_tool" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "preflight_checklist" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "execution_plan" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
@@ -16934,6 +16949,8 @@ services:
     assert payload["live_readiness"]["ready_for_daily_candidates"] is True
     assert payload["live_readiness"]["policy_execution_summary"] == payload["site_policies"]["policy_execution_summary"]
     assert payload["live_readiness"]["policy_setup_summary"] == payload["site_policies"]["policy_setup_summary"]
+    assert payload["live_readiness"]["policy_execution_handoff"] == payload["site_policies"]["policy_execution_handoff"]
+    assert payload["live_readiness"]["policy_execution_handoff"]["ready"] is True
     assert payload["live_readiness"]["policy_execution_summary"]["recommended_tool"] == "readiness_bundle"
     assert payload["live_readiness"]["source"]["tracker"] == "U2"
     assert payload["live_readiness"]["manual_job_template"]["endpoint"] == "/v1/jobs/retorrent/from-url"
@@ -16950,6 +16967,8 @@ services:
     assert payload["live_test_handoff"]["execution_plan"]["steps"][1]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
     assert payload["live_test_handoff"]["execution_plan"]["steps"][2]["tool"] == "source_url_check_and_submit"
     assert payload["live_test_handoff"]["policy_execution_summary"] == payload["site_policies"]["policy_execution_summary"]
+    assert payload["live_test_handoff"]["policy_execution_handoff"] == payload["site_policies"]["policy_execution_handoff"]
+    assert payload["live_test_handoff"]["preflight_checklist"]["items"][1]["evidence"]["policy_execution_handoff"] == payload["site_policies"]["policy_execution_handoff"]
     assert payload["live_test_handoff"]["next_step"]["tool"] == "ptcli_doctor"
     assert payload["live_test_handoff"]["next_step"]["method"] == "CLI"
     assert payload["live_test_handoff"]["next_step"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
@@ -16965,6 +16984,7 @@ services:
     assert payload["seedbox_live_validation_handoff"]["docker_compose"]["api_ready"] is True
     assert payload["seedbox_live_validation_handoff"]["qbit"]["configured"] is True
     assert payload["seedbox_live_validation_handoff"]["site_policy"]["ready"] is True
+    assert payload["seedbox_live_validation_handoff"]["site_policy"]["policy_execution_handoff"]["ready"] is True
     assert payload["seedbox_live_validation_handoff"]["credentials"]["ready"] is True
     assert payload["seedbox_live_validation_handoff"]["doctor"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
     assert payload["seedbox_live_validation_handoff"]["doctor"]["continue_when"] == "doctor_result_handoff.live_safe_to_attempt=true"
@@ -17046,6 +17066,8 @@ def test_source_url_preflight_ready_points_to_source_url_job(tmp_path, monkeypat
     assert payload["duplicate_check_handoff"]["continue_when"] == "duplicate_check.searched=true and duplicate_check.exists=false"
     assert payload["duplicate_check_handoff"]["then_tool"] == "source_url_retorrent_job"
     assert payload["policy_execution_summary"]["ready"] is True
+    assert payload["policy_execution_handoff"]["ready"] is True
+    assert payload["policy_execution_handoff"]["recommended_tool"] == "readiness_bundle"
     assert payload["job_template"]["endpoint"] == "/v1/jobs/retorrent/from-url"
     assert payload["job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["job_template"]["request"]["target"] == "MTEAM"
@@ -17087,9 +17109,12 @@ def test_source_url_preflight_blocks_on_policy_config(tmp_path, monkeypatch) -> 
     assert payload["ready_to_create_job"] is False
     assert payload["source_reference"]["tracker"] == "U2"
     assert payload["policy_execution_summary"]["ready"] is False
+    assert payload["policy_execution_handoff"]["ready"] is False
+    assert payload["policy_execution_handoff"]["recommended_tool"] == "edit_config"
     assert payload["recommended_tool"] == "edit_config"
     assert payload["next_step"]["reason"] == "site_policy_not_ready"
     assert payload["next_step"]["policy_execution_summary"]["recommended_tool"] == "edit_config"
+    assert payload["next_step"]["policy_execution_handoff"]["recommended_tool"] == "edit_config"
     assert payload["job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert any("policy" in blocker.lower() or "rule" in blocker.lower() for blocker in payload["blockers"])
 
@@ -17191,7 +17216,9 @@ def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path
     assert payload["live_readiness"]["accept_rules"] is False
     assert payload["live_readiness"]["confirm_upload"] is False
     assert payload["live_readiness"]["policy_execution_summary"]["ready"] is False
+    assert payload["live_readiness"]["policy_execution_handoff"]["ready"] is False
     assert payload["live_test_handoff"]["policy_execution_summary"] == payload["live_readiness"]["policy_execution_summary"]
+    assert payload["live_test_handoff"]["policy_execution_handoff"] == payload["live_readiness"]["policy_execution_handoff"]
     assert "accept_rules=true is required before live execution." in payload["blockers"]
     assert "confirm_upload=true is required before live upload." in payload["blockers"]
     assert "--accept-rules" not in payload["live_readiness"]["doctor_template"]["argv"]
@@ -17283,7 +17310,9 @@ def test_readiness_bundle_blocks_live_when_credentials_and_image_host_are_missin
     assert payload["live_verification"]["ready"] is False
     assert payload["live_readiness"]["ready_for_manual_retorrent"] is False
     assert payload["live_readiness"]["policy_execution_summary"]["ready"] is False
+    assert payload["live_readiness"]["policy_execution_handoff"]["ready"] is False
     assert {"tracker": "U2", "field": "download_rate_limit"} in payload["live_readiness"]["policy_execution_summary"]["qbit_limit_plan"]["missing"]
+    assert {"tracker": "U2", "field": "download_rate_limit"} in payload["live_readiness"]["policy_execution_handoff"]["qbit"]["missing"]
     assert {"tracker": "MTEAM", "field": "upload_rate_limit"} in payload["live_readiness"]["policy_execution_summary"]["qbit_limit_plan"]["missing"]
     check_names = {check["name"] for check in payload["live_verification"]["checks"] if check["ok"] is False}
     assert {"U2.passkey", "U2.cookie", "MTEAM.api_key", "materials.image_host"} <= check_names

@@ -830,6 +830,9 @@ def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None
     policy_execution_summary = live_readiness.get("policy_execution_summary") if isinstance(live_readiness.get("policy_execution_summary"), dict) else None
     if policy_execution_summary is None and isinstance(site_policies, dict) and isinstance(site_policies.get("policy_execution_summary"), dict):
         policy_execution_summary = site_policies["policy_execution_summary"]
+    policy_execution_handoff = live_readiness.get("policy_execution_handoff") if isinstance(live_readiness.get("policy_execution_handoff"), dict) else None
+    if policy_execution_handoff is None and isinstance(site_policies, dict) and isinstance(site_policies.get("policy_execution_handoff"), dict):
+        policy_execution_handoff = site_policies["policy_execution_handoff"]
     source_reference = live_readiness.get("source") if isinstance(live_readiness.get("source"), dict) else None
     target_trackers = live_readiness.get("target_trackers")
     manual_job_template = live_readiness.get("manual_job_template") if isinstance(live_readiness.get("manual_job_template"), dict) else None
@@ -864,6 +867,7 @@ def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None
         "duplicate_check_handoff": duplicate_check_handoff,
         "readiness_bundle": readiness,
         "policy_execution_summary": policy_execution_summary,
+        "policy_execution_handoff": policy_execution_handoff,
         "job_template": manual_job_template,
         "job_creation_handoff": _source_url_preflight_job_creation_handoff(manual_job_template, ready_to_create_job),
         "next_step": next_step,
@@ -1886,6 +1890,7 @@ def _readiness_bundle_live_readiness(
     warnings = _string_list(deployment.get("warnings"))
     policy_execution_summary = site_policies.get("policy_execution_summary") if isinstance(site_policies, dict) and isinstance(site_policies.get("policy_execution_summary"), dict) else None
     policy_setup_summary = site_policies.get("policy_setup_summary") if isinstance(site_policies, dict) and isinstance(site_policies.get("policy_setup_summary"), dict) else None
+    policy_execution_handoff = site_policies.get("policy_execution_handoff") if isinstance(site_policies, dict) and isinstance(site_policies.get("policy_execution_handoff"), dict) else None
     if source is None:
         blockers.append("source_url or source/source_id with source_tracker is required for manual live readiness.")
     elif source.get("error"):
@@ -1917,6 +1922,7 @@ def _readiness_bundle_live_readiness(
         "site_policy_ready": bool(site_policies.get("ready")) and bool((site_policies.get("execution_readiness") or {}).get("ready")) if isinstance(site_policies, dict) else False,
         "policy_execution_summary": policy_execution_summary,
         "policy_setup_summary": policy_setup_summary,
+        "policy_execution_handoff": policy_execution_handoff,
         "live_verification_ready": bool(live_verification.get("ready")),
         "credential_requirements": _string_list(live_verification.get("credential_requirements")),
         "accept_rules": accept_rules,
@@ -2029,6 +2035,7 @@ def _readiness_bundle_live_test_handoff(
     doctor_template = live_readiness.get("doctor_template") if isinstance(live_readiness.get("doctor_template"), dict) else None
     manual_job_template = live_readiness.get("manual_job_template") if isinstance(live_readiness.get("manual_job_template"), dict) else None
     policy_execution_summary = live_readiness.get("policy_execution_summary") if isinstance(live_readiness.get("policy_execution_summary"), dict) else None
+    policy_execution_handoff = live_readiness.get("policy_execution_handoff") if isinstance(live_readiness.get("policy_execution_handoff"), dict) else None
     preflight_checklist = _readiness_bundle_live_test_checklist(live_readiness, deployment, site_policies, live_verification, doctor_template, manual_job_template)
     execution_plan = _readiness_bundle_live_test_execution_plan(next_step, doctor_template, manual_job_template, preflight_checklist)
     return {
@@ -2042,6 +2049,7 @@ def _readiness_bundle_live_test_handoff(
         "doctor_template": doctor_template,
         "manual_job_template": manual_job_template,
         "policy_execution_summary": policy_execution_summary,
+        "policy_execution_handoff": policy_execution_handoff,
         "next_step": next_step,
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
@@ -2078,6 +2086,7 @@ def _readiness_bundle_seedbox_live_validation_handoff(
     qbit = deployment.get("qbit") if isinstance(deployment.get("qbit"), dict) else {}
     policy_execution_summary = live_readiness.get("policy_execution_summary") if isinstance(live_readiness.get("policy_execution_summary"), dict) else {}
     policy_setup_summary = live_readiness.get("policy_setup_summary") if isinstance(live_readiness.get("policy_setup_summary"), dict) else {}
+    policy_execution_handoff = live_readiness.get("policy_execution_handoff") if isinstance(live_readiness.get("policy_execution_handoff"), dict) else {}
     ready = bool(live_readiness.get("ready_for_manual_retorrent") and preflight_checklist.get("ready") and doctor_template and manual_job_template)
     phase = "run_doctor" if ready else str(next_step.get("reason") or "fix_preflight")
     doctor_request = {"argv": doctor_template.get("argv")} if isinstance(doctor_template, dict) and doctor_template.get("argv") else None
@@ -2113,6 +2122,7 @@ def _readiness_bundle_seedbox_live_validation_handoff(
             "ready": bool(live_readiness.get("site_policy_ready")),
             "policy_execution_summary": policy_execution_summary,
             "policy_setup_summary": policy_setup_summary,
+            "policy_execution_handoff": policy_execution_handoff,
             "rule_obligations": (site_policies or {}).get("rule_obligations") if isinstance(site_policies, dict) else None,
         },
         "credentials": {
@@ -2177,9 +2187,9 @@ def _readiness_bundle_live_test_checklist(
             "site_policy",
             "Source/target site policy gate is ready",
             bool(site_policies and site_policies.get("ready") is True and (site_policies.get("execution_readiness") or {}).get("ready") is True),
-            blockers=_string_list((site_policies or {}).get("blockers")) + _string_list(((site_policies or {}).get("policy_execution_summary") or {}).get("blockers")),
-            next_actions=_string_list((site_policies or {}).get("next_actions")) or _string_list(((site_policies or {}).get("policy_handoff") or {}).get("next_actions")),
-            evidence={"policy_execution_summary": (site_policies or {}).get("policy_execution_summary"), "policy_setup_summary": (site_policies or {}).get("policy_setup_summary")},
+            blockers=_string_list(((site_policies or {}).get("policy_execution_handoff") or {}).get("blockers")) or _string_list((site_policies or {}).get("blockers")) + _string_list(((site_policies or {}).get("policy_execution_summary") or {}).get("blockers")),
+            next_actions=_string_list(((site_policies or {}).get("policy_execution_handoff") or {}).get("next_actions")) or _string_list((site_policies or {}).get("next_actions")) or _string_list(((site_policies or {}).get("policy_handoff") or {}).get("next_actions")),
+            evidence={"policy_execution_summary": (site_policies or {}).get("policy_execution_summary"), "policy_setup_summary": (site_policies or {}).get("policy_setup_summary"), "policy_execution_handoff": (site_policies or {}).get("policy_execution_handoff")},
         ),
         _readiness_checklist_item(
             "credentials",
@@ -2314,16 +2324,18 @@ def _readiness_bundle_live_test_next_step(
         }
     if isinstance(site_policies, dict) and (site_policies.get("ready") is not True or (site_policies.get("execution_readiness") or {}).get("ready") is not True):
         policy_execution_summary = site_policies.get("policy_execution_summary") if isinstance(site_policies.get("policy_execution_summary"), dict) else {}
+        policy_execution_handoff = site_policies.get("policy_execution_handoff") if isinstance(site_policies.get("policy_execution_handoff"), dict) else {}
         policy_handoff = site_policies.get("policy_handoff") if isinstance(site_policies.get("policy_handoff"), dict) else {}
-        policy_step = policy_execution_summary.get("next_step") if isinstance(policy_execution_summary.get("next_step"), dict) else policy_handoff.get("next_step") if isinstance(policy_handoff.get("next_step"), dict) else {}
+        policy_step = policy_execution_handoff.get("next_step") if isinstance(policy_execution_handoff.get("next_step"), dict) else policy_execution_summary.get("next_step") if isinstance(policy_execution_summary.get("next_step"), dict) else policy_handoff.get("next_step") if isinstance(policy_handoff.get("next_step"), dict) else {}
         return {
             "tool": policy_step.get("tool") or "site_policies",
             "endpoint": policy_step.get("endpoint") or "/v1/site-policies",
             "method": policy_step.get("method") or "POST",
             "request": policy_step.get("request") or site_policies.get("request"),
             "reason": "site_policy_not_ready",
-            "blockers": _string_list(policy_execution_summary.get("blockers")) or _string_list(site_policies.get("blockers")) or _string_list((site_policies.get("agent_summary") or {}).get("policy_recommendations")),
+            "blockers": _string_list(policy_execution_handoff.get("blockers")) or _string_list(policy_execution_summary.get("blockers")) or _string_list(site_policies.get("blockers")) or _string_list((site_policies.get("agent_summary") or {}).get("policy_recommendations")),
             "policy_execution_summary": policy_execution_summary,
+            "policy_execution_handoff": policy_execution_handoff,
         }
     if live_verification.get("ready") is not True:
         return {
@@ -9788,8 +9800,9 @@ def _agent_run_preview_response_contract() -> dict[str, Any]:
 
 def _source_url_preflight_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "request", "source_reference", "target_trackers", "ready_to_create_job", "ready_for_live_upload", "duplicate_check", "duplicate_check_handoff", "readiness_bundle", "policy_execution_summary", "job_template", "job_creation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions", "safety"],
+        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "request", "source_reference", "target_trackers", "ready_to_create_job", "ready_for_live_upload", "duplicate_check", "duplicate_check_handoff", "readiness_bundle", "policy_execution_summary", "policy_execution_handoff", "job_template", "job_creation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions", "safety"],
         "next_step_fields": ["tool", "endpoint", "method", "request", "reason", "blockers"],
+        "policy_execution_handoff_fields": ["ready", "phase", "qbit", "seeding", "transfer_rules", "rule_obligations", "config", "next_step", "blockers", "next_actions"],
         "duplicate_check_fields": ["searched", "status", "exists", "count", "dupes", "reason", "ready_to_check", "next_tool", "next_endpoint", "next_request", "continue_when", "stop_when"],
         "duplicate_handoff_fields": ["ready", "tool", "endpoint", "method", "request", "read", "continue_when", "stop_when", "then_tool", "then_endpoint", "then_request"],
         "job_template_fields": ["tool", "endpoint", "request"],
@@ -9813,8 +9826,8 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
-        "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
-        "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
+        "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "policy_execution_handoff", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
+        "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "policy_execution_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
         "seedbox_live_validation_handoff_fields": ["ready", "phase", "connectivity_checked", "preflight_ready", "preflight_checklist", "execution_plan", "docker_compose", "qbit", "site_policy", "credentials", "doctor", "manual_job", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
         "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
@@ -10132,22 +10145,22 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "preflight",
                     "tool": "source_url_retorrent_preflight",
-                    "read": ["ready_to_create_job", "source_reference", "target_trackers", "policy_execution_summary", "duplicate_check", "duplicate_check_handoff", "job_creation_handoff.request", "next_step", "blockers"],
+                    "read": ["ready_to_create_job", "source_reference", "target_trackers", "policy_execution_summary", "policy_execution_handoff", "duplicate_check", "duplicate_check_handoff", "job_creation_handoff.request", "next_step", "blockers"],
                     "continue_when": "ready_to_create_job=true",
-                    "stop_when": ["source_reference.error is present", "policy_execution_summary.ready=false", "accept_rules or confirm_upload missing", "deployment.ready=false"],
+                    "stop_when": ["source_reference.error is present", "policy_execution_handoff.ready=false", "policy_execution_summary.ready=false", "accept_rules or confirm_upload missing", "deployment.ready=false"],
                 },
                 {
                     "step": "readiness_bundle",
                     "tool": "readiness_bundle",
-                    "read": ["live_readiness.ready_for_manual_retorrent", "live_readiness.policy_execution_summary", "live_readiness.blockers", "live_readiness.manual_job_template.request"],
+                    "read": ["live_readiness.ready_for_manual_retorrent", "live_readiness.policy_execution_summary", "live_readiness.policy_execution_handoff", "live_readiness.blockers", "live_readiness.manual_job_template.request"],
                     "continue_when": "live_readiness.ready_for_manual_retorrent=true",
-                    "stop_when": ["deployment.ready=false", "policy_execution_summary.ready=false", "accept_rules or confirm_upload missing"],
+                    "stop_when": ["deployment.ready=false", "live_readiness.policy_execution_handoff.ready=false", "policy_execution_summary.ready=false", "accept_rules or confirm_upload missing"],
                 },
                 {
                     "step": "policy_audit",
                     "tool": "site_policies",
-                    "read": ["ready", "policy_execution_summary.ready", "policy_execution_summary.next_step", "policy_execution_summary.qbit_limit_plan", "policy_execution_summary.seeding_plan", "policy_gap_summary", "execution_readiness", "agent_summary.policy_recommendations"],
-                    "continue_when": "ready=true and policy_execution_summary.ready=true",
+                    "read": ["ready", "policy_execution_summary.ready", "policy_execution_handoff.ready", "policy_execution_handoff.qbit", "policy_execution_handoff.seeding", "policy_execution_handoff.transfer_rules", "policy_execution_handoff.rule_obligations", "policy_gap_summary", "execution_readiness", "agent_summary.policy_recommendations"],
+                    "continue_when": "ready=true and policy_execution_handoff.ready=true",
                     "stop_when": ["missing rule_review_fingerprint", "missing qBittorrent rate limits", "missing seeding requirements", "automation disabled"],
                 },
                 {
@@ -10737,6 +10750,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "duplicate_check_handoff": {"type": "object"},
             "readiness_bundle": {"type": "object"},
             "policy_execution_summary": {"type": ["object", "null"]},
+            "policy_execution_handoff": {"type": ["object", "null"]},
             "job_template": {"type": ["object", "null"]},
             "job_creation_handoff": {"type": "object"},
             "next_step": {"type": "object"},
@@ -10784,6 +10798,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "live_verification": {"type": "object"},
             "live_readiness": {"type": "object"},
             "live_test_handoff": {"type": "object"},
+            "seedbox_live_validation_handoff": {"type": "object"},
             "next_step": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},
