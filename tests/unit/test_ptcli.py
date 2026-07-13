@@ -15088,6 +15088,53 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
         "top_submit_request": {"source": "https://chdbits.co/details.php?id=12345", "target": "MTEAM"},
         "top_submit_job_endpoint": "/v1/jobs/retorrent/from-url",
         "top_submit_tool": "source_url_retorrent_job",
+        "approval_queue": {
+            "kind": "ptcli.daily_candidate_approval_queue",
+            "ready": True,
+            "safe_count": 1,
+            "items": [
+                {
+                    "rank": 1,
+                    "source_tracker": "CHD",
+                    "source_id": "12345",
+                    "source_url": "https://chdbits.co/details.php?id=12345",
+                    "title": "Example",
+                    "risk_level": "low",
+                    "policy_risk_level": "low",
+                    "duplicate_clear": True,
+                    "request": {"source": "https://chdbits.co/details.php?id=12345", "target": "MTEAM"},
+                    "policy_risk_summary": {"risk_level": "low"},
+                }
+            ],
+            "top_safe_candidates": [
+                {
+                    "rank": 1,
+                    "source_tracker": "CHD",
+                    "source_id": "12345",
+                    "source_url": "https://chdbits.co/details.php?id=12345",
+                    "title": "Example",
+                    "risk_level": "low",
+                    "policy_risk_level": "low",
+                    "duplicate_clear": True,
+                    "request": {"source": "https://chdbits.co/details.php?id=12345", "target": "MTEAM"},
+                    "policy_risk_summary": {"risk_level": "low"},
+                }
+            ],
+        },
+        "top_safe_candidates": [
+            {
+                "rank": 1,
+                "source_tracker": "CHD",
+                "source_id": "12345",
+                "source_url": "https://chdbits.co/details.php?id=12345",
+                "title": "Example",
+                "risk_level": "low",
+                "policy_risk_level": "low",
+                "duplicate_clear": True,
+                "request": {"source": "https://chdbits.co/details.php?id=12345", "target": "MTEAM"},
+                "policy_risk_summary": {"risk_level": "low"},
+            }
+        ],
         "push_items": [{"rank": 1, "source_id": "12345", "title": "Example"}],
     }
 
@@ -15188,13 +15235,20 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert check_payload["daily_candidate_targets"]["target_count"] == 10
     assert check_payload["daily_candidate_targets"]["selected_count"] == 1
     assert check_payload["daily_candidate_targets"]["ready_count"] == 1
+    assert check_payload["daily_candidate_targets"]["safe_count"] == 1
     assert check_payload["daily_candidate_targets"]["shortfall_count"] == 9
     assert check_payload["daily_candidate_targets"]["target_met"] is False
     assert check_payload["target_count"] == 10
     assert check_payload["shortfall_count"] == 9
     assert check_payload["readiness_summary"]["daily_candidate_targets"] == check_payload["daily_candidate_targets"]
+    assert check_payload["readiness_summary"]["daily_candidate_safe_count"] == 1
+    assert check_payload["readiness_summary"]["daily_candidate_approval_ready"] is True
+    assert check_payload["readiness_summary"]["daily_candidate_approval_safe_count"] == 1
     assert check_payload["readiness_summary"]["daily_candidate_shortfall_count"] == 9
     assert check_payload["notification_payload"]["top_item"]["source_id"] == "12345"
+    assert check_payload["approval_queue"]["safe_count"] == 1
+    assert check_payload["top_safe_candidates"][0]["source_id"] == "12345"
+    assert check_payload["recommended_approval_request"]["confirm_upload"] is True
     assert check_payload["notification_payload"]["submission_ready"] is True
     assert check_payload["delivery_handoff"] == payload["delivery_handoff"]
     assert check_payload["delivery_result"] == payload["delivery_result"]
@@ -15206,8 +15260,12 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     shell_output = capsys.readouterr().out
     assert shell_code == 0
     assert "export PTCLI_DAILY_CANDIDATE_TARGET=10" in shell_output
+    assert "export PTCLI_DAILY_CANDIDATE_SAFE=1" in shell_output
     assert "export PTCLI_DAILY_CANDIDATE_SHORTFALL=9" in shell_output
     assert "export PTCLI_DAILY_CANDIDATE_TARGET_MET=0" in shell_output
+    assert "export PTCLI_READINESS_DAILY_CANDIDATE_SAFE=1" in shell_output
+    assert "export PTCLI_READINESS_DAILY_CANDIDATE_APPROVAL_READY=1" in shell_output
+    assert "export PTCLI_READINESS_DAILY_CANDIDATE_APPROVAL_SAFE=1" in shell_output
     assert "export PTCLI_READINESS_DAILY_CANDIDATE_SHORTFALL=9" in shell_output
 
 
