@@ -15721,6 +15721,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "after_doctor" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "recommended_tool" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+    assert "preflight_checklist" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+    assert "execution_plan" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "runbook_ref" in tool_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
     assert tool_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
     assert "ready_to_create_job" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
@@ -16089,6 +16091,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "after_doctor" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "recommended_tool" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+        assert "preflight_checklist" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
+        assert "execution_plan" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "runbook_ref" in tools_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
         assert "submit_if_clear_handoff" in tools_by_name["retorrent_check"]["response_contract"]["required_fields"]
         assert "submit_if_clear_handoff_fields" in tools_by_name["retorrent_check"]["response_contract"]
@@ -16580,6 +16584,13 @@ def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch
     assert "--accept-rules" in payload["live_readiness"]["doctor_template"]["argv"]
     assert "--confirm-upload" in payload["live_readiness"]["doctor_template"]["argv"]
     assert payload["live_test_handoff"]["ready"] is True
+    assert payload["live_test_handoff"]["preflight_checklist"]["ready"] is True
+    assert payload["live_test_handoff"]["preflight_checklist"]["ready_count"] == payload["live_test_handoff"]["preflight_checklist"]["total_count"]
+    assert [item["name"] for item in payload["live_test_handoff"]["preflight_checklist"]["items"]] == ["deployment", "site_policy", "credentials", "materials", "confirmations", "doctor", "manual_job"]
+    assert payload["live_test_handoff"]["execution_plan"]["ready"] is True
+    assert [step["name"] for step in payload["live_test_handoff"]["execution_plan"]["steps"]] == ["fix_preflight", "run_doctor", "submit_checked_manual_job"]
+    assert payload["live_test_handoff"]["execution_plan"]["steps"][1]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
+    assert payload["live_test_handoff"]["execution_plan"]["steps"][2]["tool"] == "source_url_check_and_submit"
     assert payload["live_test_handoff"]["policy_execution_summary"] == payload["site_policies"]["policy_execution_summary"]
     assert payload["live_test_handoff"]["next_step"]["tool"] == "ptcli_doctor"
     assert payload["live_test_handoff"]["next_step"]["method"] == "CLI"
@@ -16818,6 +16829,49 @@ def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path
     assert payload["live_test_handoff"]["next_step"]["reason"] == "site_policy_not_ready"
     assert payload["live_test_handoff"]["next_step"]["tool"] == "edit_config"
     assert payload["live_test_handoff"]["next_step"]["policy_execution_summary"]["recommended_tool"] == "edit_config"
+
+
+def test_readiness_bundle_live_test_checklist_reports_blockers(tmp_path, monkeypatch) -> None:
+    (tmp_path / "data" / "cookies").mkdir(parents=True)
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "jobs").mkdir()
+    (tmp_path / "downloads").mkdir()
+    (tmp_path / "data" / "config.py").write_text("config = {}", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent"},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit", "qbit_url": "http://host.docker.internal", "qbit_port": "8080"}},
+        "TRACKERS": {"U2": {}, "MTEAM": {}},
+        "PTCLI": {"SITE_POLICIES": {}},
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp"))
+
+    payload = ptcli_service.readiness_bundle_payload(
+        {
+            "base_dir": str(tmp_path),
+            "job_dir": str(tmp_path / "jobs"),
+            "downloads_path": str(tmp_path / "downloads"),
+            "source_tracker": "U2",
+            "source_id": "60635",
+            "target": "MTEAM",
+        }
+    )
+
+    checklist = payload["live_test_handoff"]["preflight_checklist"]
+    by_name = {item["name"]: item for item in checklist["items"]}
+
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["live_readiness"]["ready_for_manual_retorrent"] is False
+    assert checklist["ready"] is False
+    assert by_name["site_policy"]["ready"] is False
+    assert by_name["credentials"]["ready"] is False
+    assert by_name["materials"]["ready"] is False
+    assert by_name["confirmations"]["ready"] is False
+    assert payload["live_test_handoff"]["execution_plan"]["ready"] is False
+    assert payload["live_test_handoff"]["execution_plan"]["steps"][0]["blockers"] == checklist["blockers"]
+    assert any("accept_rules=true" in blocker for blocker in checklist["blockers"])
+    assert any("Configure DEFAULT.img_host" in action for action in checklist["next_actions"])
 
 
 def test_readiness_bundle_blocks_live_when_credentials_and_image_host_are_missing(tmp_path, monkeypatch) -> None:

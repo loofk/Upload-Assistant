@@ -2000,12 +2000,16 @@ def _readiness_bundle_live_test_handoff(
     doctor_template = live_readiness.get("doctor_template") if isinstance(live_readiness.get("doctor_template"), dict) else None
     manual_job_template = live_readiness.get("manual_job_template") if isinstance(live_readiness.get("manual_job_template"), dict) else None
     policy_execution_summary = live_readiness.get("policy_execution_summary") if isinstance(live_readiness.get("policy_execution_summary"), dict) else None
+    preflight_checklist = _readiness_bundle_live_test_checklist(live_readiness, deployment, site_policies, live_verification, doctor_template, manual_job_template)
+    execution_plan = _readiness_bundle_live_test_execution_plan(next_step, doctor_template, manual_job_template, preflight_checklist)
     return {
         "kind": "ptcli.live_test_handoff",
         "ready": bool(live_readiness.get("ready_for_manual_retorrent")),
         "doctor_ready": bool(doctor_template),
         "manual_job_ready": bool(manual_job_template) and bool(live_readiness.get("ready_for_manual_retorrent")),
         "connectivity_checked": bool(live_verification.get("connectivity_checked")),
+        "preflight_checklist": preflight_checklist,
+        "execution_plan": execution_plan,
         "doctor_template": doctor_template,
         "manual_job_template": manual_job_template,
         "policy_execution_summary": policy_execution_summary,
@@ -2023,6 +2027,146 @@ def _readiness_bundle_live_test_handoff(
             "then_tool": "source_url_retorrent_job",
             "then_request": manual_job_template.get("request") if isinstance(manual_job_template, dict) else None,
         },
+    }
+
+
+def _readiness_bundle_live_test_checklist(
+    live_readiness: dict[str, Any],
+    deployment: dict[str, Any],
+    site_policies: dict[str, Any] | None,
+    live_verification: dict[str, Any],
+    doctor_template: dict[str, Any] | None,
+    manual_job_template: dict[str, Any] | None,
+) -> dict[str, Any]:
+    items = [
+        _readiness_checklist_item(
+            "deployment",
+            "Docker/API deployment is ready",
+            deployment.get("ready") is True,
+            blockers=_string_list(deployment.get("blockers")),
+            next_actions=_string_list(deployment.get("next_actions")),
+            evidence={"status": deployment.get("status"), "deployment_handoff": deployment.get("deployment_handoff")},
+        ),
+        _readiness_checklist_item(
+            "site_policy",
+            "Source/target site policy gate is ready",
+            bool(site_policies and site_policies.get("ready") is True and (site_policies.get("execution_readiness") or {}).get("ready") is True),
+            blockers=_string_list((site_policies or {}).get("blockers")) + _string_list(((site_policies or {}).get("policy_execution_summary") or {}).get("blockers")),
+            next_actions=_string_list((site_policies or {}).get("next_actions")) or _string_list(((site_policies or {}).get("policy_handoff") or {}).get("next_actions")),
+            evidence={"policy_execution_summary": (site_policies or {}).get("policy_execution_summary"), "policy_setup_summary": (site_policies or {}).get("policy_setup_summary")},
+        ),
+        _readiness_checklist_item(
+            "credentials",
+            "Tracker and qBittorrent credentials are present",
+            live_verification.get("ready") is True and not any(check.get("category") == "credentials" and check.get("ok") is False for check in live_verification.get("checks", []) if isinstance(check, dict)),
+            blockers=[str(check.get("message")) for check in live_verification.get("checks", []) if isinstance(check, dict) and check.get("category") == "credentials" and check.get("ok") is False],
+            next_actions=_string_list(live_verification.get("next_actions")),
+            evidence={"credential_requirements": live_verification.get("credential_requirements"), "connectivity_checked": live_verification.get("connectivity_checked")},
+        ),
+        _readiness_checklist_item(
+            "materials",
+            "Material prerequisites are ready or recoverable",
+            (live_verification.get("materials") or {}).get("ready") is True,
+            blockers=[str(check.get("message")) for check in ((live_verification.get("materials") or {}).get("checks") or []) if isinstance(check, dict) and check.get("ok") is False and check.get("blocking", True) is not False],
+            next_actions=_string_list(live_verification.get("next_actions")),
+            evidence=live_verification.get("materials") if isinstance(live_verification.get("materials"), dict) else {},
+        ),
+        _readiness_checklist_item(
+            "confirmations",
+            "Live confirmations are explicit",
+            live_readiness.get("accept_rules") is True and live_readiness.get("confirm_upload") is True,
+            blockers=[blocker for blocker in _string_list(live_readiness.get("blockers")) if "accept_rules" in blocker or "confirm_upload" in blocker],
+            next_actions=["Rerun readiness_bundle with accept_rules=true and confirm_upload=true after manual rule review."],
+            evidence={"accept_rules": live_readiness.get("accept_rules"), "confirm_upload": live_readiness.get("confirm_upload")},
+        ),
+        _readiness_checklist_item(
+            "doctor",
+            "Live doctor command is available",
+            bool(doctor_template and doctor_template.get("argv")),
+            blockers=[] if doctor_template and doctor_template.get("argv") else ["doctor_template.argv is missing."],
+            next_actions=["Provide source_url/source_id, target, and seedbox paths so readiness_bundle can build a doctor command."],
+            evidence=doctor_template or {},
+        ),
+        _readiness_checklist_item(
+            "manual_job",
+            "Manual job request is available after doctor passes",
+            bool(manual_job_template and manual_job_template.get("request")),
+            blockers=[] if manual_job_template and manual_job_template.get("request") else ["manual_job_template.request is missing."],
+            next_actions=["Resolve readiness blockers before creating a live retorrent job."],
+            evidence=manual_job_template or {},
+        ),
+    ]
+    blockers = [blocker for item in items for blocker in _string_list(item.get("blockers"))]
+    ready_count = sum(1 for item in items if item.get("ready") is True)
+    return {
+        "kind": "ptcli.live_test_preflight_checklist",
+        "ready": not blockers and all(item.get("ready") is True for item in items),
+        "ready_count": ready_count,
+        "total_count": len(items),
+        "blocked_count": len(items) - ready_count,
+        "items": items,
+        "blockers": list(dict.fromkeys(blockers)),
+        "next_actions": list(dict.fromkeys(action for item in items for action in _string_list(item.get("next_actions")) if item.get("ready") is not True)),
+    }
+
+
+def _readiness_checklist_item(name: str, label: str, ready: bool, *, blockers: list[str], next_actions: list[str], evidence: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "label": label,
+        "ready": bool(ready),
+        "blockers": list(dict.fromkeys(blockers)),
+        "next_actions": list(dict.fromkeys(next_actions)) if not ready else [],
+        "evidence": evidence,
+    }
+
+
+def _readiness_bundle_live_test_execution_plan(
+    next_step: dict[str, Any],
+    doctor_template: dict[str, Any] | None,
+    manual_job_template: dict[str, Any] | None,
+    preflight_checklist: dict[str, Any],
+) -> dict[str, Any]:
+    doctor_argv = doctor_template.get("argv") if isinstance(doctor_template, dict) else None
+    manual_request = manual_job_template.get("request") if isinstance(manual_job_template, dict) else None
+    steps = [
+        {
+            "index": 1,
+            "name": "fix_preflight",
+            "ready": bool(preflight_checklist.get("ready")),
+            "tool": next_step.get("tool"),
+            "endpoint": next_step.get("endpoint"),
+            "method": next_step.get("method"),
+            "request": next_step.get("request"),
+            "continue_when": "preflight_checklist.ready=true",
+            "blockers": _string_list(preflight_checklist.get("blockers")),
+        },
+        {
+            "index": 2,
+            "name": "run_doctor",
+            "ready": bool(doctor_argv),
+            "tool": "ptcli_doctor",
+            "method": "CLI",
+            "request": {"argv": doctor_argv} if doctor_argv else None,
+            "continue_when": "doctor_result_handoff.live_safe_to_attempt=true",
+        },
+        {
+            "index": 3,
+            "name": "submit_checked_manual_job",
+            "ready": bool(manual_request),
+            "tool": "source_url_check_and_submit",
+            "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": "POST",
+            "request": manual_request,
+            "continue_when": "job_id is returned; then poll get_job_status and read get_job_summary",
+        },
+    ]
+    return {
+        "kind": "ptcli.live_test_execution_plan",
+        "ready": bool(preflight_checklist.get("ready") and doctor_argv and manual_request),
+        "recommended_first_step": next_step,
+        "steps": steps,
+        "blockers": _string_list(preflight_checklist.get("blockers")),
     }
 
 
@@ -8735,7 +8879,7 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
-        "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "doctor_template", "manual_job_template", "policy_execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
+        "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
         "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
     }
