@@ -242,6 +242,7 @@ class JobStore:
         daily_batch_summary = _daily_candidate_jobs_batch_summary(all_jobs, filters={"status": status_filter or None, "kind": kind_filter or None}, limit=limit, visible_count=len(jobs), total=total)
         daily_batch_gate = _daily_candidate_batch_gate(daily_batch_summary)
         daily_submission_plan = _daily_candidate_batch_submission_plan(daily_batch_summary, daily_batch_gate)
+        daily_execution_summary = _daily_candidate_batch_execution_summary(daily_batch_summary, daily_batch_gate, daily_submission_plan)
         return {
             "status": "ok",
             "ok": True,
@@ -254,6 +255,7 @@ class JobStore:
             "daily_candidate_batch_summary": daily_batch_summary,
             "daily_candidate_batch_gate": daily_batch_gate,
             "daily_candidate_submission_plan": daily_submission_plan,
+            "daily_candidate_execution_summary": daily_execution_summary,
             "jobs": jobs,
             "next_actions": _job_list_next_actions(jobs, total, limit),
         }
@@ -280,6 +282,7 @@ class JobStore:
         )
         gate = _daily_candidate_batch_gate(summary)
         submission_plan = _daily_candidate_batch_submission_plan(summary, gate)
+        execution_summary = _daily_candidate_batch_execution_summary(summary, gate, submission_plan)
         return {
             "status": "ok" if summary.get("candidate_job_count") else "empty",
             "ok": True,
@@ -288,9 +291,11 @@ class JobStore:
             "daily_candidate_batch_summary": summary,
             "daily_candidate_batch_gate": gate,
             "daily_candidate_submission_plan": submission_plan,
+            "daily_candidate_execution_summary": execution_summary,
             "batch_summary": summary,
             "batch_gate": gate,
             "submission_plan": submission_plan,
+            "execution_summary": execution_summary,
             "blockers": summary.get("blockers") or [],
             "next_actions": summary.get("next_actions") or [],
         }
@@ -9792,6 +9797,24 @@ def _daily_candidate_batch_submit_requests(items: list[dict[str, Any]]) -> list[
 
 
 def _daily_candidate_batch_shortfall_recovery(items: list[dict[str, Any]], *, target_count: int, selected_count: int, ready_count: int, shortfall_count: int) -> dict[str, Any]:
+    if not items:
+        return {
+            "kind": "ptcli.daily_candidate_batch_shortfall_recovery",
+            "action": "none",
+            "reason": None,
+            "target_count": 0,
+            "selected_count": 0,
+            "ready_count": 0,
+            "selected_shortfall_count": 0,
+            "ready_shortfall_count": 0,
+            "shortfall_count": 0,
+            "recommended_tool": None,
+            "recommended_endpoint": None,
+            "recommended_method": None,
+            "recommended_request": None,
+            "continue_when": None,
+            "stop_when": None,
+        }
     first_request = next((item.get("candidate_request") for item in items if isinstance(item.get("candidate_request"), dict)), {})
     source_tracker = str(first_request.get("source_tracker") or "")
     target = first_request.get("target") or first_request.get("target_trackers")
@@ -9842,6 +9865,127 @@ def _daily_candidate_batch_submission_plan_next_actions(action: str, submit_coun
     if action == "complete":
         return ["Read submitted job summaries and report completed daily candidate retorrent outcomes."]
     return ["Create or rerun daily candidate jobs before expecting a submission plan."]
+
+
+def _daily_candidate_batch_execution_summary(summary: dict[str, Any], gate: dict[str, Any], submission_plan: dict[str, Any]) -> dict[str, Any]:
+    submitted_jobs = _daily_candidate_batch_submitted_jobs(summary)
+    complete_jobs = [job for job in submitted_jobs if job.get("status") == "complete" or job.get("action") in {"complete", "read_summary"}]
+    running_jobs = [job for job in submitted_jobs if job.get("status") in {"queued", "running"} or job.get("action") == "wait"]
+    blocked_jobs = [
+        job
+        for job in submitted_jobs
+        if job.get("status") in {"blocked", "failed", "cancelled"} or job.get("action") in {"stop_duplicate", "collect_confirmations", "configure_policy", "blocked", "failed", "cancelled"}
+    ]
+    terminal_jobs = [job for job in submitted_jobs if job.get("status") not in {"queued", "running"}]
+    remaining_submit_count = int(submission_plan.get("safe_to_submit_count") or 0)
+    shortfall_recovery = submission_plan.get("shortfall_recovery") if isinstance(submission_plan.get("shortfall_recovery"), dict) else {}
+    blockers = list(dict.fromkeys(_string_list(summary.get("blockers")) + _string_list(submission_plan.get("hard_blockers"))))
+    if remaining_submit_count:
+        action = "submit_remaining"
+        next_step = {
+            "tool": "submit_daily_candidate_job",
+            "endpoint": submission_plan.get("recommended_endpoint"),
+            "method": "POST",
+            "request": submission_plan.get("recommended_request"),
+            "reason": "unsubmitted_safe_candidates",
+        }
+    elif running_jobs:
+        first_running = running_jobs[0]
+        action = "poll_submitted_jobs"
+        next_step = {"tool": "get_job_status", "endpoint": first_running.get("status_endpoint"), "method": "GET", "request": None, "reason": "submitted_candidate_jobs_running"}
+    elif blocked_jobs:
+        first_blocked = blocked_jobs[0]
+        action = "resolve_submitted_blockers"
+        next_step = {
+            "tool": first_blocked.get("recommended_tool") or gate.get("recommended_tool") or "get_job_summary",
+            "endpoint": first_blocked.get("recommended_endpoint") or first_blocked.get("summary_endpoint") or first_blocked.get("status_endpoint"),
+            "method": first_blocked.get("recommended_method") or ("POST" if first_blocked.get("recommended_tool") in {"resume_job", "site_policies"} else "GET"),
+            "request": first_blocked.get("recommended_request"),
+            "reason": "submitted_candidate_job_blocked",
+        }
+    elif shortfall_recovery.get("recommended_request") and int(shortfall_recovery.get("ready_shortfall_count") or 0):
+        action = "rerun_for_shortfall"
+        next_step = {
+            "tool": shortfall_recovery.get("recommended_tool"),
+            "endpoint": shortfall_recovery.get("recommended_endpoint"),
+            "method": shortfall_recovery.get("recommended_method"),
+            "request": shortfall_recovery.get("recommended_request"),
+            "reason": "daily_ready_target_shortfall",
+        }
+    elif submitted_jobs and len(complete_jobs) >= len(submitted_jobs):
+        first_complete = complete_jobs[0]
+        action = "complete"
+        next_step = {"tool": "get_job_summary", "endpoint": first_complete.get("summary_endpoint"), "method": "GET", "request": None, "reason": "all_submitted_candidates_complete"}
+    else:
+        action = str(gate.get("action") or "inspect_batch")
+        next_step = gate.get("next_step") if isinstance(gate.get("next_step"), dict) else {"tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": None, "reason": "inspect_batch"}
+    completed_source_ids = [str(job.get("candidate_source_id")) for job in complete_jobs if job.get("candidate_source_id")]
+    blocked_source_ids = [str(job.get("candidate_source_id")) for job in blocked_jobs if job.get("candidate_source_id")]
+    running_source_ids = [str(job.get("candidate_source_id")) for job in running_jobs if job.get("candidate_source_id")]
+    ready = action == "complete" and not blockers
+    return {
+        "kind": "ptcli.daily_candidate_execution_summary",
+        "ready": ready,
+        "action": action,
+        "target_count": int(submission_plan.get("target_count") or 0),
+        "ready_count": int(submission_plan.get("ready_count") or 0),
+        "safe_to_submit_count": int(submission_plan.get("safe_to_submit_count") or 0),
+        "submitted_retorrent_job_count": len(submitted_jobs),
+        "complete_count": len(complete_jobs),
+        "running_count": len(running_jobs),
+        "blocked_count": len(blocked_jobs),
+        "terminal_count": len(terminal_jobs),
+        "remaining_submit_count": remaining_submit_count,
+        "ready_shortfall_count": int(shortfall_recovery.get("ready_shortfall_count") or 0),
+        "target_met": bool(submission_plan.get("target_met")),
+        "ready_target_met": bool(submission_plan.get("ready_target_met")),
+        "completion_ratio": f"{len(complete_jobs)}/{len(submitted_jobs)}" if submitted_jobs else "0/0",
+        "completed_source_ids": completed_source_ids,
+        "running_source_ids": running_source_ids,
+        "blocked_source_ids": blocked_source_ids,
+        "submitted_jobs": submitted_jobs,
+        "running_jobs": running_jobs,
+        "blocked_jobs": blocked_jobs,
+        "complete_jobs": complete_jobs,
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_method": next_step.get("method"),
+        "recommended_request": next_step.get("request"),
+        "read_order": ["daily_candidate_execution_summary", "daily_candidate_submission_plan", "daily_candidate_batch_gate", "daily_candidate_batch_summary.items[].submitted_jobs", "jobs[].candidate_submit_followup"],
+        "continue_when": "daily_candidate_execution_summary.action=complete or every safe candidate has a terminal submitted job and shortfall_recovery is exhausted",
+        "stop_when": [
+            "daily_candidate_execution_summary.blocked_count>0",
+            "daily_candidate_execution_summary.action='resolve_submitted_blockers'",
+            "retorrent_action_counts.stop_duplicate>0",
+            "site policy or material blockers remain unresolved",
+        ],
+        "blockers": blockers,
+        "next_actions": _daily_candidate_batch_execution_next_actions(action, remaining_submit_count, len(running_jobs), len(blocked_jobs), int(shortfall_recovery.get("ready_shortfall_count") or 0)),
+    }
+
+
+def _daily_candidate_batch_submitted_jobs(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    submitted: list[dict[str, Any]] = []
+    for item in summary.get("items", []):
+        if not isinstance(item, dict) or not isinstance(item.get("submitted_jobs"), list):
+            continue
+        submitted.extend(job for job in item["submitted_jobs"] if isinstance(job, dict))
+    return submitted
+
+
+def _daily_candidate_batch_execution_next_actions(action: str, remaining_submit_count: int, running_count: int, blocked_count: int, ready_shortfall_count: int) -> list[str]:
+    if action == "submit_remaining":
+        return [f"Submit {remaining_submit_count} remaining approved candidate(s) via daily_candidate_execution_summary.next_step after explicit user approval."]
+    if action == "poll_submitted_jobs":
+        return [f"Poll {running_count} submitted candidate retorrent job(s), then refresh daily_candidate_execution_summary."]
+    if action == "resolve_submitted_blockers":
+        return [f"Resolve {blocked_count} submitted candidate job blocker(s) before marking the daily batch complete."]
+    if action == "rerun_for_shortfall":
+        return [f"Rerun daily candidate discovery to fill {ready_shortfall_count} ready candidate shortfall(s)."]
+    if action == "complete":
+        return ["Read complete_jobs[].summary_endpoint and report completed daily candidate retorrent evidence."]
+    return ["Inspect daily_candidate_execution_summary.submitted_jobs and daily_candidate_submission_plan before continuing."]
 
 
 def _daily_candidate_jobs_batch_item(candidate_job: dict[str, Any], submitted_jobs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -9923,17 +10067,27 @@ def _daily_candidate_job_matches_batch_filter(job: dict[str, Any], *, source_tra
 def _daily_candidate_submitted_item(job: dict[str, Any]) -> dict[str, Any]:
     followup = _job_candidate_submit_followup(job) or {}
     submission = _job_candidate_submission(job) or {}
+    summary = followup.get("candidate_submission_summary") if isinstance(followup.get("candidate_submission_summary"), dict) else {}
+    execution = summary.get("execution_handoff") if isinstance(summary.get("execution_handoff"), dict) else {}
     return {
         "retorrent_job_id": job.get("job_id"),
         "status": job.get("status"),
         "candidate_rank": submission.get("candidate_rank"),
         "candidate_source_id": submission.get("candidate_source_id"),
+        "candidate_title": submission.get("candidate_title"),
         "action": followup.get("action"),
         "status_endpoint": followup.get("status_endpoint"),
         "summary_endpoint": followup.get("summary_endpoint"),
+        "resume_endpoint": followup.get("resume_endpoint"),
         "recommended_tool": followup.get("recommended_tool"),
         "recommended_endpoint": followup.get("recommended_endpoint"),
+        "recommended_method": followup.get("recommended_method"),
+        "recommended_request": followup.get("recommended_request"),
+        "closure_complete": summary.get("closure_complete") is True,
+        "policy_execution_ready": summary.get("policy_execution_ready"),
+        "execution_state": execution.get("state") or summary.get("execution_state"),
         "blockers": _string_list(followup.get("blockers")),
+        "next_actions": _string_list(followup.get("next_actions")),
     }
 
 
@@ -16944,14 +17098,15 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 
 def _job_list_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "jobs", "next_actions"],
+        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "jobs", "next_actions"],
         "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_control_summary", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "daily_candidate_batch_summary_fields": ["ready", "filters", "list_window", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "retorrent_status_counts", "retorrent_action_counts", "complete_count", "running_count", "blocked_count", "items", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_gate_fields": ["ready", "action", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "complete_count", "running_count", "blocked_count", "retorrent_status_counts", "retorrent_action_counts", "first_submit_request", "first_submit_endpoint", "first_submitted_job", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
         "daily_candidate_submission_plan_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "running_count", "shortfall_count", "target_met", "ready_target_met", "first_submit_request", "submit_requests", "shortfall_recovery", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "read_order", "continue_when", "stop_when", "shortfall_blockers", "hard_blockers", "blockers", "next_actions"],
+        "daily_candidate_execution_summary_fields": ["ready", "action", "target_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "terminal_count", "remaining_submit_count", "ready_shortfall_count", "target_met", "ready_target_met", "completion_ratio", "completed_source_ids", "running_source_ids", "blocked_source_ids", "submitted_jobs", "running_jobs", "blocked_jobs", "complete_jobs", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_item_fields": ["candidate_job_id", "status", "status_endpoint", "summary_endpoint", "source_tracker", "target_trackers", "candidate_request", "candidate_counts", "candidate_control_summary", "candidate_batch_handoff_ready", "submit_endpoint", "recommended_request", "safe_source_ids", "submit_requests", "submitted_jobs", "blockers"],
         "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "source_url_retorrent_request", "required_overrides", "after_submit"],
-        "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "action", "status_endpoint", "summary_endpoint", "recommended_tool", "recommended_endpoint", "blockers"],
+        "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "candidate_title", "action", "status_endpoint", "summary_endpoint", "resume_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "closure_complete", "policy_execution_ready", "execution_state", "blockers", "next_actions"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -16960,10 +17115,11 @@ def _job_list_response_contract() -> dict[str, Any]:
 def _daily_candidate_batch_status_response_contract() -> dict[str, Any]:
     list_contract = _job_list_response_contract()
     return {
-        "required_fields": ["status", "ok", "kind", "filters", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "batch_summary", "batch_gate", "submission_plan", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "kind", "filters", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "batch_summary", "batch_gate", "submission_plan", "execution_summary", "blockers", "next_actions"],
         "daily_candidate_batch_summary_fields": list_contract["daily_candidate_batch_summary_fields"],
         "daily_candidate_batch_gate_fields": list_contract["daily_candidate_batch_gate_fields"],
         "daily_candidate_submission_plan_fields": list_contract["daily_candidate_submission_plan_fields"],
+        "daily_candidate_execution_summary_fields": list_contract["daily_candidate_execution_summary_fields"],
         "daily_candidate_batch_item_fields": list_contract["daily_candidate_batch_item_fields"],
         "daily_candidate_batch_submit_request_fields": list_contract["daily_candidate_batch_submit_request_fields"],
         "daily_candidate_submitted_item_fields": list_contract["daily_candidate_submitted_item_fields"],
@@ -17687,6 +17843,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_batch_summary": {"type": "object"},
             "daily_candidate_batch_gate": {"type": "object"},
             "daily_candidate_submission_plan": {"type": "object"},
+            "daily_candidate_execution_summary": {"type": "object"},
             "jobs": {
                 "type": "array",
                 "items": {
@@ -17722,9 +17879,11 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_batch_summary": {"type": "object"},
             "daily_candidate_batch_gate": {"type": "object"},
             "daily_candidate_submission_plan": {"type": "object"},
+            "daily_candidate_execution_summary": {"type": "object"},
             "batch_summary": {"type": "object"},
             "batch_gate": {"type": "object"},
             "submission_plan": {"type": "object"},
+            "execution_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
