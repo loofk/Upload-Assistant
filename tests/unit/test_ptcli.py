@@ -15382,10 +15382,28 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["candidate_submission_summary"]["closure_complete"] is False
     assert retorrent_job["candidate_submission_summary"]["recommended_tool"] == retorrent_job["closure_summary"]["recommended_tool"]
     assert retorrent_job["candidate_submission_summary"]["blockers"]
+    followup = retorrent_job["candidate_submit_followup"]
+    assert followup["kind"] == "ptcli.candidate_submit_followup"
+    assert followup["candidate_job_id"] == candidate_job["job_id"]
+    assert followup["candidate_rank"] == 1
+    assert followup["candidate_source_id"] == "60635"
+    assert followup["retorrent_job_id"] == retorrent_job["job_id"]
+    assert followup["retorrent_status"] == "blocked"
+    assert followup["action"] == "configure_policy"
+    assert followup["status_endpoint"] == f"/v1/jobs/{retorrent_job['job_id']}"
+    assert followup["summary_endpoint"] == f"/v1/jobs/{retorrent_job['job_id']}/summary"
+    assert followup["parent_status_endpoint"] == f"/v1/jobs/{candidate_job['job_id']}"
+    assert followup["parent_summary_endpoint"] == f"/v1/jobs/{candidate_job['job_id']}/summary"
+    assert followup["job_control_summary_ref"] == "job_control_summary"
+    assert followup["job_handoff_ref"] == "job_handoff"
+    assert followup["read_order"][0] == "candidate_submit_followup"
+    assert followup["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
     assert retorrent_job["workflow_context"]["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
     assert retorrent_job["workflow_context"]["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
+    assert retorrent_job["workflow_context"]["candidate_submit_followup"] == followup
     assert retorrent_job["agent_decision"]["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
     assert retorrent_job["agent_decision"]["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
+    assert retorrent_job["agent_decision"]["candidate_submit_followup"] == followup
     assert retorrent_job["agent_decision"]["candidate_submission_execution"] == retorrent_job["candidate_submission_summary"]["execution_handoff"]
     assert retorrent_job["agent_decision"]["material_input_template"] == material_template
     assert retorrent_job["job_handoff"]["candidate_submission_execution"] == retorrent_job["candidate_submission_summary"]["execution_handoff"]
@@ -15412,11 +15430,13 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert summary["candidate_submission"] == retorrent_job["candidate_submission"]
     assert summary["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
     assert summary["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
+    assert summary["candidate_submit_followup"] == followup
     assert summary["candidate_submission_summary"]["policy_execution_handoff"] == policy_execution_handoff
     assert summary["workflow_context"]["candidate_submission"] == retorrent_job["candidate_submission"]
     assert listed["candidate_submission"] == retorrent_job["candidate_submission"]
     assert listed["candidate_submission_handoff"]["retorrent_job_id"] == retorrent_job["job_id"]
     assert listed["candidate_submission_summary"]["retorrent_job_id"] == retorrent_job["job_id"]
+    assert listed["candidate_submit_followup"]["retorrent_job_id"] == retorrent_job["job_id"]
     assert listed["candidate_submission_handoff"]["policy_execution_handoff"] == policy_execution_handoff
 
 
@@ -17430,8 +17450,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_submission_summary" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["required_fields"]
     assert "candidate_submission_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "candidate_submission_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "candidate_submit_followup" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["required_fields"]
+    assert "candidate_submit_followup" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "candidate_submit_followup" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "candidate_submission_handoff_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
     assert "candidate_submission_summary_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
+    assert "candidate_submit_followup_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
     assert "submitted_overrides" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "material_options" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "policy_execution_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
@@ -17449,6 +17473,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "dry_run_request" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_material_input_template_fields"]
     assert "examples_by_key" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_material_input_template_fields"]
     assert "recommended_tool" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+    assert "read_order" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submit_followup_fields"]
     assert "resume_plan" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "resume_requirements" in tool_by_name["resume_job"]["response_contract"]["required_fields"]
     assert "dry_run" in tool_by_name["resume_job"]["input_schema"]["properties"]
@@ -17526,6 +17551,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_submission" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "candidate_submission_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "candidate_submission_summary" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "candidate_submit_followup" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "source_reference" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "workflow_context" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -18004,6 +18030,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "check_submission" in summary_schema["properties"]
     assert "candidate_submission_handoff" in summary_schema["properties"]
     assert "candidate_submission_summary" in summary_schema["properties"]
+    assert "candidate_submit_followup" in summary_schema["properties"]
     assert "source_reference" in summary_schema["properties"]
     assert "workflow_context" in summary_schema["properties"]
     assert "job_control_summary" in summary_schema["properties"]
@@ -18029,6 +18056,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_handoff" in job_schema["properties"]
     assert "candidate_submission_handoff" in job_schema["properties"]
     assert "candidate_submission_summary" in job_schema["properties"]
+    assert "candidate_submit_followup" in job_schema["properties"]
     assert "resume_requirements" in job_schema["properties"]
     assert "resume_summary" in job_schema["properties"]
     assert "material_resolution" in job_schema["properties"]
