@@ -14279,7 +14279,13 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_enforcement_bundle"]["qbit_enforcement"]["request_fields"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert job["policy_enforcement_bundle"]["seeding_enforcement"]["ready"] is True
     assert job["policy_enforcement_bundle"]["rule_gate"]["ready"] is True
+    assert job["policy_enforcement_bundle"]["runtime_contract"] == job["policy_runtime_contract"]
+    assert job["policy_runtime_contract"]["kind"] == "ptcli.policy_runtime_contract"
+    assert job["policy_runtime_contract"]["ready"] is True
+    assert job["policy_runtime_contract"]["required_request_fields"] == ["source_url", "target", "accept_rules", "confirm_upload", "qbit_download_limit", "uploaded_qbit_upload_limit"]
+    assert job["policy_runtime_contract"]["protected_fields"][0]["field"] == "qbit_download_limit"
     assert job["request"]["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
+    assert job["request"]["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert job["agent_decision"]["decision"] == "blocked"
     assert job["agent_decision"]["duplicate_check"]["status"] == "not_found"
     assert job["agent_decision"]["missing_confirmations"] == []
@@ -14288,6 +14294,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["agent_decision"]["policy_qbit_defaults"]["applied"] == job["policy_qbit_defaults"]["applied"]
     assert job["agent_decision"]["policy_execution_plan"] == job["policy_execution_plan"]
     assert job["agent_decision"]["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
+    assert job["agent_decision"]["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert job["agent_decision"]["qbit_plan"] == job["qbit_plan"]
     assert job["agent_decision"]["qbit_handoff"] == job["qbit_handoff"]
     assert job["qbit_handoff"]["source"]["download_limit"] == 20 * 1024 * 1024
@@ -14304,6 +14311,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_execution_report"]["policy_qbit_defaults"] == job["policy_qbit_defaults"]
     assert job["policy_execution_report"]["policy_execution_plan"] == job["policy_execution_plan"]
     assert job["policy_execution_report"]["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
+    assert job["policy_execution_report"]["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert job["policy_execution_report"]["qbit_plan"] == job["qbit_plan"]
     assert job["policy_execution_report"]["qbit_enforcement_summary"] == job["qbit_enforcement_summary"]
     assert job["policy_execution_report"]["pending_qbit_roles"] == ["source", "uploaded"]
@@ -14317,6 +14325,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["workflow_context"]["policy_handoff"] == job["policy_handoff"]
     assert job["workflow_context"]["policy_execution_plan"] == job["policy_execution_plan"]
     assert job["workflow_context"]["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
+    assert job["workflow_context"]["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert job["workflow_context"]["qbit_handoff"] == job["qbit_handoff"]
     assert job["workflow_context"]["policy_execution_report"] == job["policy_execution_report"]
     assert job["workflow_context"]["qbit_execution_gate"] == job["qbit_execution_gate"]
@@ -14325,6 +14334,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert summary["policy_qbit_defaults"]["applied"] == job["policy_qbit_defaults"]["applied"]
     assert summary["policy_execution_plan"] == job["policy_execution_plan"]
     assert summary["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
+    assert summary["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert summary["qbit_plan"] == job["qbit_plan"]
     assert summary["qbit_handoff"] == job["qbit_handoff"]
     assert summary["policy_execution_report"] == job["policy_execution_report"]
@@ -14335,6 +14345,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert captured_request["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert captured_request["policy_execution_plan"] == job["policy_execution_plan"]
     assert captured_request["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
+    assert captured_request["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert job["command_argv"][:2] == ["ptcli", "retorrent"]
     assert "--execute" in job["command_argv"]
     assert "--accept-rules" in job["command_argv"]
@@ -15693,6 +15704,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["candidate_submission_handoff"]["candidate_execution_context"] == submission_context
     assert retorrent_job["candidate_submission_handoff"]["policy_execution_plan"] == retorrent_job["policy_execution_plan"]
     assert retorrent_job["candidate_submission_handoff"]["policy_enforcement_bundle"] == retorrent_job["policy_enforcement_bundle"]
+    assert retorrent_job["candidate_submission_handoff"]["policy_runtime_contract"] == retorrent_job["policy_runtime_contract"]
     assert retorrent_job["candidate_submission_handoff"]["execution_state"] == "configure_policy"
     assert retorrent_job["candidate_submission_handoff"]["execution_handoff"]["state"] == "configure_policy"
     assert retorrent_job["candidate_submission_handoff"]["execution_handoff"]["should_stop"] is True
@@ -15727,7 +15739,9 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["candidate_submission_summary"]["candidate_execution_context"] == submission_context
     assert retorrent_job["candidate_submission_summary"]["policy_execution_plan"] == retorrent_job["policy_execution_plan"]
     assert retorrent_job["candidate_submission_summary"]["policy_enforcement_bundle"] == retorrent_job["policy_enforcement_bundle"]
+    assert retorrent_job["candidate_submission_summary"]["policy_runtime_contract"] == retorrent_job["policy_runtime_contract"]
     assert retorrent_job["candidate_submission_summary"]["policy_enforcement_ready"] == retorrent_job["policy_enforcement_bundle"]["ready"]
+    assert retorrent_job["candidate_submission_summary"]["policy_runtime_ready"] == retorrent_job["policy_runtime_contract"]["ready"]
     assert retorrent_job["candidate_submission_summary"]["policy_execution_ready"] is True
     assert retorrent_job["candidate_submission_summary"]["execution_state"] == "configure_policy"
     assert retorrent_job["candidate_submission_summary"]["execution_handoff"] == retorrent_job["candidate_submission_handoff"]["execution_handoff"]
@@ -15758,6 +15772,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert followup["retorrent_status"] == "blocked"
     assert followup["action"] == "configure_policy"
     assert followup["candidate_submission_summary"]["policy_execution_plan"] == retorrent_job["policy_execution_plan"]
+    assert followup["candidate_submission_summary"]["policy_runtime_contract"] == retorrent_job["policy_runtime_contract"]
     assert followup["status_endpoint"] == f"/v1/jobs/{retorrent_job['job_id']}"
     assert followup["summary_endpoint"] == f"/v1/jobs/{retorrent_job['job_id']}/summary"
     assert followup["parent_status_endpoint"] == f"/v1/jobs/{candidate_job['job_id']}"
@@ -18368,6 +18383,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_enforcement_bundle" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_enforcement_bundle" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_enforcement_bundle" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "policy_runtime_contract" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "policy_runtime_contract" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "policy_runtime_contract" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "policy_enforcement_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_enforcement_gate" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_enforcement_gate" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -18388,7 +18406,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_execution_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "policy_execution_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_enforcement_bundle" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
+    assert "policy_runtime_contract" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_enforcement_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
+    assert "policy_runtime_contract" in tool_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
+    assert "policy_runtime_contract" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
+    assert "policy_runtime_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
+    assert "policy_runtime_contract" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
+    assert "policy_runtime_contract" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+    assert "policy_runtime_ready" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
     assert "qbit_execution_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "qbit_execution_gate" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "qbit_execution_gate" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -19328,6 +19353,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_resolution" in summary_schema["properties"]
     assert "policy_execution_plan" in summary_schema["properties"]
     assert "policy_enforcement_bundle" in summary_schema["properties"]
+    assert "policy_runtime_contract" in summary_schema["properties"]
     assert "policy_enforcement_gate" in summary_schema["properties"]
     assert "candidate_submission" in summary_schema["properties"]
     assert "check_submission" in summary_schema["properties"]
@@ -19347,6 +19373,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_handoff" in job_schema["properties"]
     assert "policy_execution_plan" in job_schema["properties"]
     assert "policy_enforcement_bundle" in job_schema["properties"]
+    assert "policy_runtime_contract" in job_schema["properties"]
     assert "policy_enforcement_gate" in job_schema["properties"]
     assert "submit_if_clear_handoff" in job_schema["properties"]
     assert "check_submission" in job_schema["properties"]
@@ -19420,6 +19447,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "jobs" in job_list_schema["properties"]
     assert "job_control_summary" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_enforcement_bundle" in job_list_schema["properties"]["jobs"]["items"]["properties"]
+    assert "policy_runtime_contract" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_enforcement_gate" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "target_upload_service_gate" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "daily_candidate_batch_summary" in job_list_schema["properties"]
@@ -20030,6 +20058,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_enforcement_bundle" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "policy_runtime_contract" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "policy_runtime_contract" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "policy_runtime_contract" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "policy_enforcement_gate" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "policy_enforcement_gate" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "policy_enforcement_gate" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
@@ -20037,6 +20068,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_enforcement_gate" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "material_options" in tools_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
+        assert "policy_runtime_contract" in tools_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
         assert "material_option_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "generate_screenshots" in tools_by_name["manual_retorrent_job"]["response_contract"]["material_option_fields"]
         assert "policy_qbit_defaults" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -20055,6 +20087,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_execution_report_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "policy_execution_plan" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
+        assert "policy_runtime_contract" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
         assert "policy_enforcement_gate" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
         assert "qbit_execution_gate" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "qbit_execution_gate" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -20136,6 +20169,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "manual_retorrent_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "live_checklist" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
         assert "live_ready" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
+        assert "policy_runtime_contract" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
+        assert "policy_runtime_ready" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
         assert "closure_checklist" in tools_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
         assert "next_step" in tools_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
         assert "recommended_tool" in tools_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
@@ -20163,12 +20198,15 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_execution_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "policy_execution_plan" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
+        assert "policy_runtime_contract" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "execution_state" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "execution_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "policy_execution_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "policy_execution_plan" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+        assert "policy_runtime_contract" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "policy_enforcement_ready" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+        assert "policy_runtime_ready" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "policy_execution_ready" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "execution_state" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "execution_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
@@ -20300,6 +20338,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_submission_summary" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "policy_execution_plan" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "policy_runtime_contract" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "policy_enforcement_gate" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_plan" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_limit_audit" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
