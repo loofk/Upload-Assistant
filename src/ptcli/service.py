@@ -6776,7 +6776,7 @@ def _site_policy_repair_gate(
         next_step = {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "request": _site_policy_rerun_request(request_context, {"accept_rules": readiness.get("accepted_rules")}), "reason": "policy_repair_complete"}
     elif missing_rule_reviews or placeholder_rule_reviews:
         action = "review_rules"
-        next_step = _site_policy_repair_edit_step(config_update_plan, request_context, reason="manual_rule_review_required")
+        next_step = _site_policy_repair_rule_review_step(missing_rule_reviews, placeholder_rule_reviews, config_update_plan, request_context)
     elif int(missing_counts.get("rate_limits") or 0) or int(missing_counts.get("seeding_requirements") or 0) or int(missing_counts.get("automation") or 0):
         action = "edit_config"
         next_step = _site_policy_repair_edit_step(config_update_plan, request_context, reason="policy_config_missing")
@@ -6808,6 +6808,7 @@ def _site_policy_repair_gate(
             "mutates_state": config_update_plan.get("mutates_state") is True,
             "apply_order": config_update_plan.get("apply_order") if isinstance(config_update_plan.get("apply_order"), list) else [],
         },
+        "rule_review_request": _site_policy_repair_rule_review_request(missing_rule_reviews, placeholder_rule_reviews, request_context),
         "manual_steps": _site_policy_repair_manual_steps(setup_summary, config_update_plan, action),
         "next_step": next_step,
         "recommended_tool": next_step.get("tool"),
@@ -6820,6 +6821,62 @@ def _site_policy_repair_gate(
         "blockers": blockers,
         "next_actions": _site_policy_repair_gate_next_actions(action, blockers),
     }
+
+
+def _site_policy_repair_rule_review_step(
+    missing_rule_reviews: list[dict[str, Any]],
+    placeholder_rule_reviews: list[dict[str, Any]],
+    config_update_plan: dict[str, Any],
+    request_context: dict[str, Any],
+) -> dict[str, Any]:
+    request = _site_policy_repair_rule_review_request(missing_rule_reviews, placeholder_rule_reviews, request_context)
+    return {
+        "tool": "site_policy_rule_review",
+        "endpoint": "/v1/site-policies/rule-review",
+        "method": "POST",
+        "request": request,
+        "reason": "manual_rule_review_required",
+        "after_rule_review": {
+            "tool": "edit_config",
+            "endpoint": None,
+            "method": None,
+            "request_from": "site_policy_rule_review.config_patch.structured_patch plus existing policy_repair_gate.config.preferred_patch for rate limits and seeding requirements",
+            "base_request": {
+                "config_path": config_update_plan.get("config_path"),
+                "preferred_shape": config_update_plan.get("preferred_shape"),
+                "preferred_patch": config_update_plan.get("structured_patch") if config_update_plan.get("preferred_shape") == "structured" else config_update_plan.get("flat_patch"),
+                "structured_patch": config_update_plan.get("structured_patch"),
+                "flat_patch": config_update_plan.get("flat_patch"),
+                "apply_order": config_update_plan.get("apply_order"),
+            },
+        },
+        "after_edit": {
+            "tool": "site_policies",
+            "endpoint": "/v1/site-policies",
+            "method": "POST",
+            "request": _site_policy_rerun_request(request_context, {"accept_rules": True}),
+        },
+    }
+
+
+def _site_policy_repair_rule_review_request(
+    missing_rule_reviews: list[dict[str, Any]],
+    placeholder_rule_reviews: list[dict[str, Any]],
+    request_context: dict[str, Any],
+) -> dict[str, Any]:
+    request = _site_policy_rerun_request(request_context, {"accept_rules": True})
+    request["rules_reviewed"] = False
+    request["reviewer"] = "<reviewer>"
+    request["reviewed_at"] = "<YYYY-MM-DD>"
+    request["notes"] = ["Review each listed tracker rule page before setting rules_reviewed=true."]
+    rules_urls = {
+        str(item.get("tracker")): item.get("rules_url")
+        for item in [*missing_rule_reviews, *placeholder_rule_reviews]
+        if isinstance(item, dict) and item.get("tracker") and item.get("rules_url")
+    }
+    if rules_urls:
+        request["rules_urls"] = rules_urls
+    return request
 
 
 def _site_policy_repair_edit_step(config_update_plan: dict[str, Any], request_context: dict[str, Any], *, reason: str) -> dict[str, Any]:
@@ -6859,7 +6916,7 @@ def _site_policy_repair_gate_next_actions(action: str, blockers: list[str]) -> l
     if action == "ready_for_live_preflight":
         return ["Policy repair gate is ready; continue with readiness_bundle before live automation."]
     if action == "review_rules":
-        return ["Review each tracker rule page, replace rule_review_fingerprint placeholders, then rerun site_policies with accept_rules=true."]
+        return ["Review each tracker rule page, call site_policy_rule_review with rules_reviewed=true/reviewer/reviewed_at, copy its config_patch plus required rate-limit/seeding fields, then rerun site_policies with accept_rules=true."]
     if action == "edit_config":
         return ["Apply policy_repair_gate.config.preferred_patch to PTCLI.SITE_POLICIES, then rerun site_policies with accept_rules=true."]
     if blockers:
@@ -15816,7 +15873,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "policy_execution_summary_fields": ["ready", "accepted_rules", "ready_trackers", "blocked_trackers", "by_role", "items", "qbit_limit_plan", "seeding_plan", "transfer_rule_plan", "missing_by_category", "next_step", "recommended_tool", "blockers", "next_actions"],
                 "policy_setup_summary_fields": ["ready", "accepted_rules", "config_path", "ready_trackers", "blocked_trackers", "missing_fingerprints", "placeholder_fingerprints", "copyable_templates", "config_update_plan", "next_step", "recommended_tool", "blockers", "next_actions"],
                 "policy_readiness_summary_fields": ["ready", "phase", "accepted_rules", "tracker_count", "ready_trackers", "blocked_trackers", "missing_counts", "missing_rate_limits", "missing_seeding_requirements", "missing_rule_reviews", "placeholder_rule_reviews", "config", "first_blocker", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
-                "policy_repair_gate_fields": ["ready", "action", "accepted_rules", "tracker_count", "ready_trackers", "blocked_trackers", "missing_counts", "missing_rate_limits", "missing_seeding_requirements", "missing_rule_reviews", "placeholder_rule_reviews", "manual_review_required", "config", "manual_steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
+                "policy_repair_gate_fields": ["ready", "action", "accepted_rules", "tracker_count", "ready_trackers", "blocked_trackers", "missing_counts", "missing_rate_limits", "missing_seeding_requirements", "missing_rule_reviews", "placeholder_rule_reviews", "manual_review_required", "config", "rule_review_request", "manual_steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
                 "policy_execution_handoff_fields": ["ready", "accepted_rules", "phase", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "qbit", "seeding", "transfer_rules", "rule_obligations", "config", "request", "continue_when", "stop_when", "blockers", "next_actions"],
                 "policy_handoff_fields": ["ready", "config_path", "blocked_trackers", "items", "config_templates", "config_update_plan", "missing_by_category", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "rule_obligations"],
             },

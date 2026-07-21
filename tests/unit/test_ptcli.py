@@ -17227,7 +17227,12 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert payload["policy_repair_gate"]["ready"] is False
     assert payload["policy_repair_gate"]["action"] == "review_rules"
     assert payload["policy_repair_gate"]["manual_review_required"] is True
-    assert payload["policy_repair_gate"]["recommended_tool"] == "edit_config"
+    assert payload["policy_repair_gate"]["recommended_tool"] == "site_policy_rule_review"
+    assert payload["policy_repair_gate"]["recommended_endpoint"] == "/v1/site-policies/rule-review"
+    assert payload["policy_repair_gate"]["rule_review_request"]["rules_reviewed"] is False
+    assert payload["policy_repair_gate"]["rule_review_request"]["reviewer"] == "<reviewer>"
+    assert payload["policy_repair_gate"]["rule_review_request"]["rules_urls"] == {"U2": "https://u2.dmhy.org/rules.php", "MTEAM": "https://kp.m-team.cc/rules"}
+    assert payload["policy_repair_gate"]["next_step"]["after_rule_review"]["tool"] == "edit_config"
     assert payload["policy_repair_gate"]["next_step"]["after_edit"]["tool"] == "site_policies"
     assert payload["policy_repair_gate"]["config"]["preferred_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
     assert payload["policy_repair_gate"]["first_blocker"] == payload["policy_repair_gate"]["blockers"][0]
@@ -17831,6 +17836,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "missing_rate_limits" in tool_by_name["site_policies"]["response_contract"]["policy_readiness_summary_fields"]
     assert "policy_repair_gate_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "manual_review_required" in tool_by_name["site_policies"]["response_contract"]["policy_repair_gate_fields"]
+    assert "rule_review_request" in tool_by_name["site_policies"]["response_contract"]["policy_repair_gate_fields"]
     assert tool_by_name["site_policy_rule_review"]["path"] == "/v1/site-policies/rule-review"
     assert tool_by_name["site_policy_rule_review"]["input_schema"]["required"] == ["rules_reviewed", "reviewer", "reviewed_at"]
     assert "config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
@@ -18736,6 +18742,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "missing_rate_limits" in tools_by_name["site_policies"]["response_contract"]["policy_readiness_summary_fields"]
         assert "policy_repair_gate_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "manual_review_required" in tools_by_name["site_policies"]["response_contract"]["policy_repair_gate_fields"]
+        assert "rule_review_request" in tools_by_name["site_policies"]["response_contract"]["policy_repair_gate_fields"]
         assert "policy_execution_handoff_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "qbit" in tools_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
         assert "rule_obligations" in tools_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]

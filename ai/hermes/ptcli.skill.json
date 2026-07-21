@@ -22263,6 +22263,7 @@
           "placeholder_rule_reviews",
           "manual_review_required",
           "config",
+          "rule_review_request",
           "manual_steps",
           "next_step",
           "recommended_tool",
