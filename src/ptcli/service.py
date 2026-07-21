@@ -251,6 +251,37 @@ class JobStore:
             "next_actions": _job_list_next_actions(jobs, total, limit),
         }
 
+    def daily_candidate_batch(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        request = request or {}
+        source_tracker = str(request.get("source_tracker") or request.get("source") or "").strip().upper()
+        target_trackers = _daily_candidate_batch_targets(request.get("target") or request.get("target_tracker") or request.get("target_trackers"))
+        limit = _bounded_int(request.get("limit"), default=20, minimum=1, maximum=100)
+        filters = {
+            "source_tracker": source_tracker or None,
+            "target_trackers": target_trackers or None,
+            "kind": "ptcli.daily_candidates",
+            "status": None,
+        }
+        summary = _daily_candidate_jobs_batch_summary(
+            list(reversed(self._read_all_jobs())),
+            filters=filters,
+            limit=limit,
+            visible_count=0,
+            total=0,
+            source_tracker=source_tracker,
+            target_trackers=target_trackers,
+        )
+        return {
+            "status": "ok" if summary.get("candidate_job_count") else "empty",
+            "ok": True,
+            "kind": "ptcli.daily_candidate_batch_status",
+            "filters": filters,
+            "daily_candidate_batch_summary": summary,
+            "batch_summary": summary,
+            "blockers": summary.get("blockers") or [],
+            "next_actions": summary.get("next_actions") or [],
+        }
+
     def summary(self, job_id: str) -> dict[str, Any]:
         job = self._read(job_id)
         summary_file = _job_summary_file(job)
@@ -601,6 +632,13 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                     return
                 query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
                 self._send_json(HTTPStatus.OK, job_store.list(query))
+                return
+            if path == "/v1/jobs/candidates/daily/batch":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                self._send_json(HTTPStatus.OK, job_store.daily_candidate_batch(query))
                 return
             if path.startswith("/v1/jobs/"):
                 if not self._authorized():
@@ -8913,9 +8951,29 @@ def _job_list_next_actions(jobs: list[dict[str, Any]], total: int, limit: int) -
     return actions
 
 
-def _daily_candidate_jobs_batch_summary(all_jobs: list[dict[str, Any]], *, filters: dict[str, Any], limit: int, visible_count: int, total: int) -> dict[str, Any]:
-    candidate_jobs = [job for job in all_jobs if str(job.get("kind") or "") == "ptcli.daily_candidates"]
-    submitted_jobs = [job for job in all_jobs if _job_candidate_submission(job)]
+def _daily_candidate_jobs_batch_summary(
+    all_jobs: list[dict[str, Any]],
+    *,
+    filters: dict[str, Any],
+    limit: int,
+    visible_count: int,
+    total: int,
+    source_tracker: str = "",
+    target_trackers: list[str] | None = None,
+) -> dict[str, Any]:
+    target_trackers = target_trackers or []
+    candidate_jobs = [
+        job
+        for job in all_jobs
+        if str(job.get("kind") or "") == "ptcli.daily_candidates" and _daily_candidate_job_matches_batch_filter(job, source_tracker=source_tracker, target_trackers=target_trackers)
+    ]
+    candidate_job_ids = {str(job.get("job_id") or "") for job in candidate_jobs}
+    if candidate_job_ids:
+        submitted_jobs = [job for job in all_jobs if _job_candidate_submission(job) and str((_job_candidate_submission(job) or {}).get("candidate_job_id") or "") in candidate_job_ids]
+    elif source_tracker or target_trackers:
+        submitted_jobs = []
+    else:
+        submitted_jobs = [job for job in all_jobs if _job_candidate_submission(job)]
     submitted_by_parent: dict[str, list[dict[str, Any]]] = {}
     for job in submitted_jobs:
         submission = _job_candidate_submission(job) or {}
@@ -8991,6 +9049,25 @@ def _daily_candidate_jobs_batch_item(candidate_job: dict[str, Any], submitted_jo
         "submitted_jobs": submitted_items,
         "blockers": list(dict.fromkeys(_string_list(candidate_job.get("blockers")) + _string_list(batch_handoff.get("blockers")) + _string_list(control.get("blockers")))),
     }
+
+
+def _daily_candidate_batch_targets(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip().upper() for item in value if str(item).strip()]
+    return [item.strip().upper() for item in str(value).split(",") if item.strip()]
+
+
+def _daily_candidate_job_matches_batch_filter(job: dict[str, Any], *, source_tracker: str, target_trackers: list[str]) -> bool:
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    if source_tracker and str(request.get("source_tracker") or "").strip().upper() != source_tracker:
+        return False
+    if target_trackers:
+        job_targets = _daily_candidate_batch_targets(request.get("target_trackers") or request.get("target"))
+        if not set(target_trackers).intersection(job_targets):
+            return False
+    return True
 
 
 def _daily_candidate_submitted_item(job: dict[str, Any]) -> dict[str, Any]:
@@ -14201,6 +14278,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     job_resume_schema = _job_resume_tool_request_schema()
     job_cancel_schema = _job_cancel_tool_request_schema()
     job_list_schema = _job_list_tool_request_schema()
+    daily_candidate_batch_schema = _daily_candidate_batch_status_tool_request_schema()
     return [
         {
             "name": "agent_run_preview",
@@ -14367,6 +14445,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             },
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary"},
             "safety": {"mutates_state": True, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "daily_candidate_batch_status",
+            "method": "GET",
+            "path": "/v1/jobs/candidates/daily/batch",
+            "description": "Read-only aggregate status for daily candidate jobs and submitted retorrent jobs, optionally filtered by source_tracker and target. This is the shortest AI path for deciding whether today's candidate batch still needs submissions, polling, or blocker resolution.",
+            "input_schema": daily_candidate_batch_schema,
+            "response_contract": _daily_candidate_batch_status_response_contract(),
+            "workflow_hints": {"after": "daily_candidates_schedule_job", "submit_with": "submit_daily_candidate_job", "poll_with": "get_job_status", "summary_with": "get_job_summary"},
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
             "name": "site_profiles",
@@ -15212,6 +15300,19 @@ def _job_list_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _daily_candidate_batch_status_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": [],
+        "properties": {
+            "source_tracker": {"type": "string", "description": "Optional source tracker filter, e.g. U2 or CHD."},
+            "target": {"type": "string", "description": "Optional target tracker filter, e.g. MTEAM."},
+            "target_trackers": {"type": "array", "items": {"type": "string"}, "description": "Optional target tracker filter list."},
+            "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
+        },
+    }
+
+
 def _without_execute_fields(schema: dict[str, Any]) -> dict[str, Any]:
     copy = json.loads(json.dumps(schema))
     properties = copy.get("properties")
@@ -15513,6 +15614,17 @@ def _job_list_response_contract() -> dict[str, Any]:
         "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "action", "status_endpoint", "summary_endpoint", "recommended_tool", "recommended_endpoint", "blockers"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
+    }
+
+
+def _daily_candidate_batch_status_response_contract() -> dict[str, Any]:
+    list_contract = _job_list_response_contract()
+    return {
+        "required_fields": ["status", "ok", "kind", "filters", "daily_candidate_batch_summary", "batch_summary", "blockers", "next_actions"],
+        "daily_candidate_batch_summary_fields": list_contract["daily_candidate_batch_summary_fields"],
+        "daily_candidate_batch_item_fields": list_contract["daily_candidate_batch_item_fields"],
+        "daily_candidate_submitted_item_fields": list_contract["daily_candidate_submitted_item_fields"],
+        "filters": ["source_tracker", "target_trackers", "kind", "status"],
     }
 
 
@@ -16246,6 +16358,19 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     },
                 },
             },
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    daily_candidate_batch_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "kind": {"type": "string"},
+            "filters": {"type": "object"},
+            "daily_candidate_batch_summary": {"type": "object"},
+            "batch_summary": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }
@@ -17131,6 +17256,18 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": False, "content": {"application/json": {"schema": candidate_schedule_request_schema}}},
                     "responses": {"200": {"description": "Queued daily-candidate jobs for each enabled schedule.", "content": {"application/json": {"schema": candidate_schedule_jobs_response_schema}}}},
+                }
+            },
+            "/v1/jobs/candidates/daily/batch": {
+                "get": {
+                    "operationId": "getDailyRetorrentCandidateBatchStatus",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "source_tracker", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "target", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "limit", "in": "query", "required": False, "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}},
+                    ],
+                    "responses": {"200": {"description": "Read-only daily candidate batch and submitted retorrent status.", "content": {"application/json": {"schema": daily_candidate_batch_response_schema}}}},
                 }
             },
             "/v1/jobs": {
