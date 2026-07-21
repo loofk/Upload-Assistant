@@ -13758,6 +13758,13 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert "target.uploaded_torrent_hash" in job["live_user_report"]["evidence"]["required_fields"]
     assert job["live_user_report"]["recommended_tool"] == "resume_job"
     assert job["live_user_report"]["read_order"][0] == "live_user_report"
+    assert job["live_validation_final_report"]["kind"] == "ptcli.live_validation_final_report"
+    assert job["live_validation_final_report"]["report_allowed"] is False
+    assert job["live_validation_final_report"]["verdict"] == job["live_user_report"]["verdict"]
+    assert job["live_validation_final_report"]["recommended_tool"] == "resume_job"
+    assert "uploaded_seeding_ready" in job["live_validation_final_report"]["evidence"]["missing_evidence"]
+    assert job["live_validation_final_report"]["audit"]["source_report_field"] == "live_user_report"
+    assert job["live_validation_final_report"]["audit"]["live_user_report_allowed"] is False
     assert job["live_action_sequence"]["kind"] == "ptcli.job_live_action_sequence"
     assert job["live_action_sequence"]["action"] == "resume_job"
     assert job["live_action_sequence"]["final_report_field"] == "live_completion_gate"
@@ -13892,6 +13899,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["seedbox_live_validation_completion_report"] == job["seedbox_live_validation_completion_report"]
     assert summary["live_completion_gate"] == job["live_completion_gate"]
     assert summary["live_user_report"] == job["live_user_report"]
+    assert summary["live_validation_final_report"] == job["live_validation_final_report"]
     assert summary["live_action_sequence"] == job["live_action_sequence"]
     assert summary["closure_handoff"]["next_step"] == job["target_upload_handoff"]["next_step"]
     assert summary["resume_plan"] == job["resume_plan"]
@@ -18554,6 +18562,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_user_report" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_user_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "live_user_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "live_validation_final_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "live_validation_final_report" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "live_validation_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "live_validation_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "live_action_sequence" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_action_sequence" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_action_sequence" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -18582,6 +18594,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_user_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "report_allowed" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_user_report_fields"]
     assert "report_outline" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_user_report_fields"]
+    assert "live_validation_final_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "audit" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_validation_final_report_fields"]
     assert "live_action_sequence_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "final_report_field" in tool_by_name["manual_retorrent_job"]["response_contract"]["live_action_sequence_fields"]
     assert "live_action_sequence_step_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
@@ -18753,6 +18767,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_submit_sequence" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "live_validation_submission" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "live_validation_followup" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "live_validation_final_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "daily_candidate_batch_summary" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_batch_gate" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_submission_plan" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
@@ -19413,6 +19428,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_validation_completion_report" in summary_schema["properties"]
     assert "live_completion_gate" in summary_schema["properties"]
     assert "live_user_report" in summary_schema["properties"]
+    assert "live_validation_final_report" in summary_schema["properties"]
     assert "live_action_sequence" in summary_schema["properties"]
     assert "live_validation_submission" in summary_schema["properties"]
     assert "live_validation_followup" in summary_schema["properties"]
@@ -19468,6 +19484,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_validation_completion_report" in job_schema["properties"]
     assert "live_completion_gate" in job_schema["properties"]
     assert "live_user_report" in job_schema["properties"]
+    assert "live_validation_final_report" in job_schema["properties"]
     assert "live_action_sequence" in job_schema["properties"]
     assert "live_validation_submission" in job_schema["properties"]
     assert "live_validation_followup" in job_schema["properties"]
@@ -19526,6 +19543,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_control_summary" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "live_validation_submission" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "live_validation_followup" in job_list_schema["properties"]["jobs"]["items"]["properties"]
+    assert "live_validation_final_report" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_enforcement_bundle" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_runtime_contract" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_enforcement_gate" in job_list_schema["properties"]["jobs"]["items"]["properties"]
@@ -19762,6 +19780,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["skill_contract"]["primary_entrypoints"]["manual_source_url_retorrent"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
         assert "target duplicate check" in payload["skill_contract"]["mandatory_preflight"]
         assert "target_upload_handoff.uploaded_seeding_ready=true" in payload["skill_contract"]["completion_evidence"]
+        assert "live_validation_final_report.report_allowed=true" in payload["skill_contract"]["completion_evidence"]
         assert "live_user_report.report_allowed=true" in payload["skill_contract"]["completion_evidence"]
         assert "seedbox_live_validation_completion_report.ready_for_user_report=true" in payload["skill_contract"]["completion_evidence"]
         assert "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes." in payload["agent_instructions"]["must"]
@@ -20248,6 +20267,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_completion_gate" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "live_completion_gate" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "live_completion_gate" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "live_validation_final_report" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+        assert "live_validation_final_report" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "live_validation_final_report" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "live_action_sequence" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "live_action_sequence" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "live_action_sequence" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -20268,6 +20290,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "recommended_call" in tools_by_name["manual_retorrent_job"]["response_contract"]["seedbox_live_validation_completion_report_fields"]
         assert "live_completion_gate_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "evidence_status" in tools_by_name["manual_retorrent_job"]["response_contract"]["live_completion_gate_fields"]
+        assert "live_validation_final_report_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "audit" in tools_by_name["manual_retorrent_job"]["response_contract"]["live_validation_final_report_fields"]
         assert "live_action_sequence_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "final_report_field" in tools_by_name["manual_retorrent_job"]["response_contract"]["live_action_sequence_fields"]
         assert "live_validation_submission_fields" in tools_by_name["source_url_retorrent_job"]["response_contract"]
@@ -20364,6 +20388,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_submit_sequence" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "live_validation_submission" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "live_validation_followup" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "live_validation_final_report" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_requirement_fields" in tools_by_name["resume_job"]["response_contract"]
         assert "resume_execution_handoff_fields" in tools_by_name["resume_job"]["response_contract"]
         assert "execute_request" in tools_by_name["resume_job"]["response_contract"]["resume_execution_handoff_fields"]
@@ -20966,6 +20991,10 @@ services:
     assert payload["evidence"]["live_validation"]["status"] == "complete"
     assert payload["evidence"]["live_validation"]["completion_evidence"]["job_id"] == job["job_id"]
     assert payload["evidence"]["live_validation"]["completion_evidence"]["live_user_report"]["report_allowed"] is True
+    assert job["live_validation_final_report"]["report_allowed"] is True
+    assert job["live_validation_final_report"]["verdict"] == "complete"
+    assert job["live_validation_final_report"]["audit"]["source_report_field"] == "live_user_report"
+    assert job["live_validation_final_report"]["audit"]["missing_evidence"] == []
     assert capabilities["manual_source_url_retorrent"]["status"] == "complete"
     assert capabilities["metadata_and_materials"]["status"] == "complete"
     assert capabilities["qbittorrent_execution"]["status"] == "complete"
