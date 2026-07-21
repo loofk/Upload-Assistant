@@ -281,6 +281,12 @@ docker compose --profile cli run --rm ptcli retorrent --from U2 --source-id 6063
 docker compose --profile legacy-webui up legacy-webui
 ```
 
+## 每日候选可下载性证据
+
+每日候选的每个 candidate、`digest.push_items[]`、`publish_card.downloadability` 和 `audit_summary.downloadability` 都会暴露同一份 `downloadability_summary`。AI 判断“可转种候选”时应同时检查 `downloadability_summary.ready=true`、`downloadability_summary.downloadable=true`、`downloadability_summary.source_pull.request`、目标站 `duplicate_check.exists=false`、策略 gate ready，以及用户确认状态。
+
+`downloadability_summary` 会记录源站详情 URL、源站拉种 adapter、候选发现 adapter、cookie 路径/状态、站点策略是否允许自动下载/转种、可调用的 `source_url_retorrent_job` 请求和等价的 `source-download` CLI 参数。若 `downloadability_summary.blockers` 非空，或真实盒子环境里 `cookie.status=missing`，应先修复源站登录、cookie 挂载或站点策略，不应把该候选提交为 live 转种任务。
+
 ## 开发命令
 
 ```bash

@@ -213,17 +213,19 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
     target_policies = [build_site_policy(config, target).to_dict() for target in targets]
     blockers = _candidate_blockers(seed, source_info_payload, source_info_error, duplicate_check, source_policy, target_policies, accept_rules=accept_rules)
     execute_request = _candidate_execute_request(config, seed, targets, accept_rules=accept_rules)
+    downloadability_summary = await _candidate_downloadability_summary(seed, source_policy, execute_request, accept_rules=accept_rules, base_dir=base_dir)
     policy_summary = _candidate_policy_summary(source_policy, target_policies, execute_request, accept_rules=accept_rules)
     policy_risk_summary = _candidate_policy_risk_summary(policy_summary, blockers=blockers)
     policy_summary["policy_risk_summary"] = policy_risk_summary
     status = "ready" if not blockers else "blocked"
-    ranking = _candidate_ranking(seed, source_info_payload, duplicate_check, blockers)
+    ranking = _candidate_ranking(seed, source_info_payload, duplicate_check, blockers, downloadability_summary)
     return {
         "status": status,
         "source": seed.to_dict(),
         "source_info": source_info_payload,
         "source_info_error": source_info_error,
         "duplicate_check": duplicate_check,
+        "downloadability_summary": downloadability_summary,
         "source_policy": source_policy,
         "target_policies": target_policies,
         "policy_summary": policy_summary,
@@ -232,7 +234,7 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "policy_execution_handoff": policy_summary.get("policy_execution_handoff"),
         "ranking": ranking,
         "recommendation": _candidate_recommendation(seed, source_info_payload, duplicate_check, blockers, ranking),
-        "decision_summary": _candidate_decision_summary(seed, source_info_payload, duplicate_check, blockers, ranking, policy_summary, status),
+        "decision_summary": _candidate_decision_summary(seed, source_info_payload, duplicate_check, blockers, ranking, policy_summary, status, downloadability_summary),
         "blockers": blockers,
         "risk_flags": blockers,
         "agent_workflow": _candidate_agent_workflow(status, blockers),
@@ -242,6 +244,67 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "execute_request": execute_request,
         "execute_job_endpoint": SOURCE_URL_RETORRENT_JOB_ENDPOINT,
     }
+
+
+async def _candidate_downloadability_summary(seed: CandidateSeed, source_policy: dict[str, Any], execute_request: dict[str, Any], *, accept_rules: bool, base_dir: str | None) -> dict[str, Any]:
+    cookie_path = _cookie_path(seed.tracker, base_dir)
+    cookie_exists = await asyncio.to_thread(os.path.exists, cookie_path)
+    adapter = source_download_adapter(seed.tracker)
+    source_url = execute_request.get("source_url") or execute_request.get("source") or seed.details_url
+    policy_allows_download = source_policy.get("allow_auto_download") is True
+    policy_allows_retorrent = source_policy.get("allow_retorrent") is True
+    blockers: list[str] = []
+    if not adapter:
+        blockers.append(f"{seed.tracker} source download adapter is not enabled.")
+    if not policy_allows_download:
+        blockers.append(f"{seed.tracker} policy: automatic source download is not enabled.")
+    if not policy_allows_retorrent:
+        blockers.append(f"{seed.tracker} policy: retorrent automation is not enabled.")
+    if not source_url:
+        blockers.append("source-url: details URL is missing.")
+    if source_policy.get("manual_review_required") is True and not accept_rules:
+        blockers.append("site-policy: source rules must be acknowledged before downloading.")
+    return {
+        "kind": "ptcli.daily_candidate_downloadability_summary",
+        "ready": not blockers,
+        "downloadable": bool(adapter and policy_allows_download and policy_allows_retorrent and source_url),
+        "source_tracker": seed.tracker,
+        "source_id": seed.torrent_id,
+        "source_url": source_url,
+        "source_download_adapter": adapter,
+        "source_info_adapter": source_info_adapter(seed.tracker),
+        "candidate_discovery_adapter": "generic_recent_cookie" if seed.tracker in GENERIC_DETAILS_BASE_URLS and seed.tracker not in MTEAM_API_TRACKERS else None,
+        "policy_allows_download": policy_allows_download,
+        "policy_allows_retorrent": policy_allows_retorrent,
+        "rules_accepted": bool(accept_rules),
+        "manual_review_required": source_policy.get("manual_review_required") is True,
+        "cookie": {
+            "required": True,
+            "path": cookie_path,
+            "exists": cookie_exists,
+            "status": "verified" if cookie_exists else "missing",
+            "note": "Candidate discovery already requires a valid cookie; source torrent download should reuse the same tracker session.",
+        },
+        "source_pull": {
+            "tool": SOURCE_URL_RETORRENT_JOB_TOOL,
+            "endpoint": SOURCE_URL_RETORRENT_JOB_ENDPOINT,
+            "request": execute_request,
+            "direct_cli_tool": "source-download",
+            "direct_cli_args": ["source-download", "--tracker", seed.tracker, "--source-id", seed.torrent_id, "--to", str(execute_request.get("target") or ""), "--accept-rules", "--json"],
+        },
+        "continue_when": "downloadability_summary.ready=true, user confirms site rules, and source_pull is only executed through approved ptcli tools",
+        "stop_when": ["downloadability_summary.blockers is non-empty", "cookie.status='missing' in live environment", "source_download_adapter missing"],
+        "blockers": blockers,
+        "next_actions": _candidate_downloadability_next_actions(blockers, cookie_exists),
+    }
+
+
+def _candidate_downloadability_next_actions(blockers: list[str], cookie_exists: bool) -> list[str]:
+    if blockers:
+        return ["Resolve downloadability_summary.blockers before treating this candidate as executable."]
+    if not cookie_exists:
+        return ["Refresh the source tracker cookie before live source torrent download; candidate discovery may have been mocked or run from another base_dir."]
+    return ["Source pull prerequisites are visible; submit only after duplicate, policy, confirmation, and material gates remain clear."]
 
 
 async def _candidate_duplicate_check(config: dict[str, Any], source_info: dict[str, Any] | None, targets: list[str], *, check_dupes: bool) -> dict[str, Any]:
@@ -668,7 +731,7 @@ def _candidate_agent_workflow(status: str, blockers: list[str]) -> dict[str, Any
     }
 
 
-def _candidate_ranking(seed: CandidateSeed, source_info: dict[str, Any] | None, duplicate_check: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+def _candidate_ranking(seed: CandidateSeed, source_info: dict[str, Any] | None, duplicate_check: dict[str, Any], blockers: list[str], downloadability_summary: dict[str, Any]) -> dict[str, Any]:
     score = 50
     reasons: list[str] = []
     penalties: list[str] = []
@@ -701,6 +764,13 @@ def _candidate_ranking(seed: CandidateSeed, source_info: dict[str, Any] | None, 
     else:
         score -= 20
         penalties.append("Source metadata is missing IMDb/TMDb/Douban/name signals.")
+
+    if downloadability_summary.get("ready") is True:
+        score += 5
+        reasons.append("Source downloadability preflight is ready.")
+    else:
+        score -= 10
+        penalties.append("Source downloadability preflight has blockers or missing evidence.")
 
     if freeleech_like:
         score += 5
@@ -738,6 +808,10 @@ def _candidate_ranking(seed: CandidateSeed, source_info: dict[str, Any] | None, 
             "duplicate_status": duplicate_status,
             "metadata_ready": metadata_ready,
             "metadata_keys": metadata_keys,
+            "downloadable": downloadability_summary.get("downloadable"),
+            "downloadability_ready": downloadability_summary.get("ready"),
+            "download_adapter": downloadability_summary.get("source_download_adapter"),
+            "download_cookie_status": (downloadability_summary.get("cookie") or {}).get("status") if isinstance(downloadability_summary.get("cookie"), dict) else None,
             "promotion": seed.promotion,
             "freeleech_like": freeleech_like,
             "seeders": seed.seeders,
@@ -1470,6 +1544,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
     policy_summary = candidate.get("policy_summary") if isinstance(candidate.get("policy_summary"), dict) else {}
     policy_risk_summary = candidate.get("policy_risk_summary") if isinstance(candidate.get("policy_risk_summary"), dict) else {}
     decision_summary = candidate.get("decision_summary") if isinstance(candidate.get("decision_summary"), dict) else {}
+    downloadability_summary = candidate.get("downloadability_summary") if isinstance(candidate.get("downloadability_summary"), dict) else {}
     blockers = _string_list(candidate.get("blockers"))
     status = str(candidate.get("status") or "")
     title = source.get("title") or source_info.get("name")
@@ -1518,6 +1593,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         submit_endpoint=candidate.get("submit_job_endpoint"),
         submit_tool=candidate.get("submit_tool"),
         approval_prompt=approval_prompt,
+        downloadability_summary=downloadability_summary,
     )
     return {
         "rank": rank,
@@ -1534,6 +1610,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "metadata": metadata,
         "duplicate_status": duplicate_check.get("status"),
         "duplicate_count": duplicate_check.get("count"),
+        "downloadability_summary": downloadability_summary,
         "publish_card": publish_card,
         "decision_summary": decision_summary,
         "audit_summary": _candidate_audit_summary(
@@ -1551,6 +1628,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
             submit_request=submit_request,
             submit_endpoint=candidate.get("submit_job_endpoint"),
             submit_tool=candidate.get("submit_tool"),
+            downloadability_summary=downloadability_summary,
         ),
         "blocker_count": len(blockers),
         "blockers": blockers,
@@ -1590,6 +1668,7 @@ def _candidate_publish_card(
     submit_endpoint: Any,
     submit_tool: Any,
     approval_prompt: dict[str, Any],
+    downloadability_summary: dict[str, Any],
 ) -> dict[str, Any]:
     metadata_ready = bool([value for value in metadata.values() if value])
     duplicate_clear = duplicate_check.get("searched") is True and duplicate_check.get("exists") is False
@@ -1623,6 +1702,7 @@ def _candidate_publish_card(
             "clear": duplicate_clear,
             "dupes": duplicate_check.get("dupes") if isinstance(duplicate_check.get("dupes"), list) else [],
         },
+        "downloadability": downloadability_summary,
         "recommendation": {
             "recommended": recommendation.get("recommended"),
             "score": ranking.get("score"),
@@ -1668,6 +1748,7 @@ def _candidate_audit_summary(
     submit_request: dict[str, Any] | None,
     submit_endpoint: Any,
     submit_tool: Any,
+    downloadability_summary: dict[str, Any],
 ) -> dict[str, Any]:
     duplicate_clear = duplicate_check.get("searched") is True and duplicate_check.get("exists") is False
     qbit_limits = policy_summary.get("qbit_limits") if isinstance(policy_summary.get("qbit_limits"), dict) else {}
@@ -1702,6 +1783,7 @@ def _candidate_audit_summary(
             "count": duplicate_check.get("count"),
             "clear": duplicate_clear,
         },
+        "downloadability": downloadability_summary,
         "policy": {
             "ready": (policy_summary.get("policy_coverage") or {}).get("ready") if isinstance(policy_summary.get("policy_coverage"), dict) else None,
             "manual_review_ready": policy_summary.get("manual_review_ready"),
@@ -1732,6 +1814,7 @@ def _candidate_decision_summary(
     ranking: dict[str, Any],
     policy_summary: dict[str, Any],
     status: str,
+    downloadability_summary: dict[str, Any],
 ) -> dict[str, Any]:
     metadata = {
         "imdb_id": source_info.get("imdb_id") if source_info else None,
@@ -1762,6 +1845,10 @@ def _candidate_decision_summary(
         "metadata_ready": bool(metadata_keys),
         "metadata_keys": metadata_keys,
         "metadata": metadata,
+        "downloadability_ready": downloadability_summary.get("ready"),
+        "downloadable": downloadability_summary.get("downloadable"),
+        "download_cookie_status": (downloadability_summary.get("cookie") or {}).get("status") if isinstance(downloadability_summary.get("cookie"), dict) else None,
+        "source_download_adapter": downloadability_summary.get("source_download_adapter"),
         "promotion": seed.promotion,
         "freeleech_like": _promotion_is_free(seed.promotion),
         "duplicate_status": duplicate_status,

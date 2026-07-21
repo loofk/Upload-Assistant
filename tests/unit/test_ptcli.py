@@ -19048,6 +19048,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "audit_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "submit_request" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "downloadability_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
+    assert "downloadability_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
+    assert "downloadability" in tool_by_name["daily_candidates"]["response_contract"]["publish_card_fields"]
+    assert "downloadability_summary_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "source_pull" in tool_by_name["daily_candidates"]["response_contract"]["downloadability_summary_fields"]
+    assert "downloadability_cookie_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "status" in tool_by_name["daily_candidates"]["response_contract"]["downloadability_cookie_fields"]
+    assert "downloadability_source_pull_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "direct_cli_tool" in tool_by_name["daily_candidates"]["response_contract"]["downloadability_source_pull_fields"]
     assert "rules" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
     assert "policy_risk_summary" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
     assert "policy_risk_summary_fields" in tool_by_name["daily_candidates"]["response_contract"]
@@ -20317,6 +20326,15 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "audit_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "downloadability_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "downloadability_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
+        assert "downloadability" in tools_by_name["daily_candidates_job"]["response_contract"]["publish_card_fields"]
+        assert "downloadability_summary_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "source_pull" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_summary_fields"]
+        assert "downloadability_cookie_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "status" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_cookie_fields"]
+        assert "downloadability_source_pull_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "direct_cli_tool" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_source_pull_fields"]
         assert "rules" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
         assert "policy_risk_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
         assert "policy_risk_summary_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
@@ -21559,6 +21577,11 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert publish_card["metadata"]["douban_id"] is None
     assert publish_card["duplicate_check"]["clear"] is True
     assert publish_card["duplicate_check"]["status"] == "not_found"
+    assert publish_card["downloadability"]["kind"] == "ptcli.daily_candidate_downloadability_summary"
+    assert publish_card["downloadability"]["ready"] is True
+    assert publish_card["downloadability"]["downloadable"] is True
+    assert publish_card["downloadability"]["source_download_adapter"]
+    assert publish_card["downloadability"]["cookie"]["status"] in {"missing", "verified"}
     assert publish_card["recommendation"]["score"] == result["digest"]["push_items"][0]["score"]
     assert publish_card["recommendation"]["reason"]
     assert publish_card["risk"]["level"] == "low"
@@ -21626,6 +21649,9 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["summary_text"].startswith("#1 [ready] U2-60635")
     assert result["digest"]["push_items"][0]["metadata"]["imdb_id"] == 1234567
     assert result["digest"]["push_items"][0]["metadata"]["tmdb_id"] == 999
+    assert result["digest"]["push_items"][0]["downloadability_summary"]["ready"] is True
+    assert result["digest"]["push_items"][0]["downloadability_summary"]["source_pull"]["tool"] == "source_url_retorrent_job"
+    assert result["digest"]["push_items"][0]["downloadability_summary"]["source_pull"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["push_items"][0]["audit_summary"]["rank"] == 1
     assert result["digest"]["push_items"][0]["audit_summary"]["can_submit"] is True
     assert result["digest"]["push_items"][0]["audit_summary"]["action"] == "submit_when_confirmed"
@@ -21636,6 +21662,7 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["audit_summary"]["metadata"]["tmdb_id"] == 999
     assert result["digest"]["push_items"][0]["audit_summary"]["duplicate_check"]["clear"] is True
     assert result["digest"]["push_items"][0]["audit_summary"]["duplicate_check"]["status"] == "not_found"
+    assert result["digest"]["push_items"][0]["audit_summary"]["downloadability"]["ready"] is True
     assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["ready"] is True
     assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["rule_obligations_ready"] is True
     assert result["digest"]["push_items"][0]["audit_summary"]["policy"]["qbit_limits"]["target"]["upload_limit"] == 2 * 1024 * 1024
@@ -21645,6 +21672,8 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_items"][0]["decision_summary"]["action"] == "submit_when_confirmed"
     assert result["digest"]["push_items"][0]["decision_summary"]["risk_level"] == "low"
     assert result["digest"]["push_items"][0]["decision_summary"]["metadata_ready"] is True
+    assert result["digest"]["push_items"][0]["decision_summary"]["downloadability_ready"] is True
+    assert result["digest"]["push_items"][0]["decision_summary"]["downloadable"] is True
     assert result["digest"]["push_items"][0]["decision_summary"]["duplicate_clear"] is True
     assert result["digest"]["push_items"][0]["decision_summary"]["freeleech_like"] is True
     assert result["digest"]["push_items"][0]["decision_summary"]["policy_risk_level"] == "low"
@@ -21683,6 +21712,8 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["ranking"]["score"] >= 90
     assert candidate["ranking"]["signals"]["duplicate_status"] == "not_found"
     assert candidate["ranking"]["signals"]["metadata_ready"] is True
+    assert candidate["ranking"]["signals"]["downloadability_ready"] is True
+    assert candidate["ranking"]["signals"]["downloadable"] is True
     assert candidate["decision_summary"]["action"] == "submit_when_confirmed"
     assert candidate["decision_summary"]["risk_level"] == "low"
     assert candidate["decision_summary"]["policy_coverage_ready"] is True
@@ -21690,6 +21721,9 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["policy_risk_summary"]["execution_priority"] == "preferred"
     assert candidate["recommendation"]["score"] == candidate["ranking"]["score"]
     assert candidate["duplicate_check"]["status"] == "not_found"
+    assert candidate["downloadability_summary"]["ready"] is True
+    assert candidate["downloadability_summary"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert candidate["downloadability_summary"]["source_pull"]["direct_cli_tool"] == "source-download"
     assert candidate["source_policy"]["tracker"] == "U2"
     assert candidate["target_policies"][0]["tracker"] == "MTEAM"
     assert candidate["policy_summary"]["manual_review_ready"] is True
