@@ -14251,6 +14251,87 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert "--uploaded-qbit-upload-limit" in job["command_argv"]
 
 
+def test_retorrent_execute_blocks_before_live_payload_when_policy_enforcement_not_ready(monkeypatch) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True},
+            }
+        }
+    }
+    called = False
+
+    async def fail_retorrent_payload(_args):
+        nonlocal called
+        called = True
+        raise AssertionError("retorrent_payload must not run when policy enforcement is blocked")
+
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    monkeypatch.setattr(ptcli_service, "retorrent_payload", fail_retorrent_payload)
+
+    payload = asyncio.run(
+        ptcli_service.retorrent(
+            {
+                "source": "https://u2.dmhy.org/details.php?id=60635",
+                "target": "MTEAM",
+                "execute": True,
+                "accept_rules": True,
+                "confirm_upload": True,
+                "save_path": "/downloads",
+            }
+        )
+    )
+
+    assert called is False
+    assert payload["status"] == "blocked"
+    assert payload["ok"] is False
+    assert payload["policy_enforcement_gate"]["ready"] is False
+    assert payload["policy_enforcement_gate"]["policy_enforcement_bundle_ready"] is False
+    assert "policy_enforcement_bundle.ready=true is required before live retorrent execution." in payload["blockers"]
+    assert payload["duplicate_check"]["status"] == "not_run"
+    assert payload["result"]["mutates_state"] is False
+    assert payload["result"]["mutates_network"] is False
+
+
+def test_retorrent_execute_runs_live_payload_when_policy_enforcement_ready(monkeypatch) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True, "download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True, "upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+            }
+        }
+    }
+    calls = []
+
+    async def fake_retorrent_payload(args):
+        calls.append(args)
+        return {"status": "complete", "ok": True, "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []}}
+
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    monkeypatch.setattr(ptcli_service, "retorrent_payload", fake_retorrent_payload)
+
+    payload = asyncio.run(
+        ptcli_service.retorrent(
+            {
+                "source": "https://u2.dmhy.org/details.php?id=60635",
+                "target": "MTEAM",
+                "execute": True,
+                "accept_rules": True,
+                "confirm_upload": True,
+                "save_path": "/downloads",
+            }
+        )
+    )
+
+    assert len(calls) == 1
+    assert payload["status"] == "complete"
+    assert payload["policy_enforcement_gate"] is None
+    assert payload["request"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert payload["request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+
+
 def test_manual_retorrent_job_audits_qbit_limit_application(monkeypatch, tmp_path) -> None:
     config = {
         "PTCLI": {
@@ -17974,6 +18055,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_enforcement_bundle" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_enforcement_bundle" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_enforcement_bundle" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "policy_enforcement_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "policy_enforcement_gate" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "policy_enforcement_gate" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "qbit_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "qbit_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "qbit_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -17991,6 +18075,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_execution_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "policy_execution_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "policy_enforcement_bundle" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
+    assert "policy_enforcement_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
     assert "qbit_execution_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "qbit_execution_gate" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "qbit_execution_gate" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -18828,6 +18913,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_resolution" in summary_schema["properties"]
     assert "policy_execution_plan" in summary_schema["properties"]
     assert "policy_enforcement_bundle" in summary_schema["properties"]
+    assert "policy_enforcement_gate" in summary_schema["properties"]
     assert "candidate_submission" in summary_schema["properties"]
     assert "check_submission" in summary_schema["properties"]
     assert "candidate_submission_handoff" in summary_schema["properties"]
@@ -18846,6 +18932,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_handoff" in job_schema["properties"]
     assert "policy_execution_plan" in job_schema["properties"]
     assert "policy_enforcement_bundle" in job_schema["properties"]
+    assert "policy_enforcement_gate" in job_schema["properties"]
     assert "submit_if_clear_handoff" in job_schema["properties"]
     assert "check_submission" in job_schema["properties"]
     assert "qbit_limit_audit" in job_schema["properties"]
@@ -18912,6 +18999,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "jobs" in job_list_schema["properties"]
     assert "job_control_summary" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_enforcement_bundle" in job_list_schema["properties"]["jobs"]["items"]["properties"]
+    assert "policy_enforcement_gate" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "daily_candidate_batch_summary" in job_list_schema["properties"]
     assert "daily_candidate_batch_gate" in job_list_schema["properties"]
     assert "daily_candidate_submission_plan" in job_list_schema["properties"]
@@ -19463,6 +19551,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_enforcement_bundle" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "policy_enforcement_gate" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "policy_enforcement_gate" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "policy_enforcement_gate" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "policy_enforcement_gate" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "policy_enforcement_gate" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "material_options" in tools_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["manual_retorrent_job"]["response_contract"]["request_fields"]
         assert "material_option_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
@@ -19483,6 +19576,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_execution_report_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "policy_execution_plan" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
+        assert "policy_enforcement_gate" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_execution_report_fields"]
         assert "qbit_execution_gate" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "qbit_execution_gate" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "qbit_execution_gate" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -19724,6 +19818,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_submission_summary" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "policy_execution_plan" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "policy_enforcement_gate" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_plan" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_limit_audit" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "qbit_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
