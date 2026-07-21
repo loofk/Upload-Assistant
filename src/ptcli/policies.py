@@ -101,6 +101,64 @@ def build_site_policy_report(config: dict[str, Any] | None, trackers: list[str],
     }
 
 
+def build_site_policy_config_audit(
+    config: dict[str, Any] | None,
+    policy: SitePolicy | dict[str, Any],
+    *,
+    roles: list[str] | tuple[str, ...] | None = None,
+    accept_rules: bool = False,
+) -> dict[str, Any]:
+    """Return a stable audit of the local config shape behind an effective policy."""
+    tracker = str(_policy_value(policy, "tracker") or "UNKNOWN")
+    normalized_roles = _string_list(roles) or ["unknown"]
+    override = _site_policy_overrides(config or {}).get(normalize_tracker(tracker))
+    override = override if isinstance(override, dict) else {}
+    field_sources = _site_policy_field_sources(override)
+    configured_fields = sorted(field_sources)
+    coverage = build_site_policy_coverage(_policy_dict(policy), roles=normalized_roles, accept_rules=accept_rules)
+    required_fields = _policy_required_fields_for_roles(normalized_roles)
+    missing_fields = _string_list(coverage.get("missing_fields"))
+    disabled_automation = _string_list(coverage.get("disabled_automation"))
+    defaulted_fields = [field for field in required_fields if field not in field_sources and field not in missing_fields]
+    placeholder_fields = _site_policy_placeholder_fields(policy)
+    blockers = list(dict.fromkeys([*missing_fields, *disabled_automation, *placeholder_fields]))
+    shape = _site_policy_override_shape(override)
+    ready = bool(coverage.get("complete")) and not placeholder_fields
+    return {
+        "kind": "ptcli.site_policy_config_audit",
+        "tracker": tracker,
+        "roles": normalized_roles,
+        "ready": ready,
+        "shape": shape,
+        "accepted_config_shapes": ["flat", "structured"],
+        "config_path": f'config["PTCLI"]["SITE_POLICIES"]["{tracker}"]',
+        "configured": bool(override),
+        "configured_fields": configured_fields,
+        "defaulted_fields": defaulted_fields,
+        "missing_fields": missing_fields,
+        "disabled_automation": disabled_automation,
+        "placeholder_fields": placeholder_fields,
+        "field_sources": field_sources,
+        "automation_fields": _site_policy_group_sources(field_sources, ("manual_review_required", "allow_auto_download", "allow_auto_upload", "allow_retorrent")),
+        "qbit_limit_fields": _site_policy_group_sources(field_sources, ("download_rate_limit", "upload_rate_limit")),
+        "seeding_fields": _site_policy_group_sources(field_sources, ("min_seed_time_hours", "min_ratio")),
+        "transfer_rule_fields": _site_policy_group_sources(
+            field_sources,
+            ("freeleech_required", "required_promotions", "forbidden_title_patterns", "forbidden_release_groups"),
+        ),
+        "rule_review": {
+            "rules_url": _policy_value(policy, "rules_url"),
+            "manual_review_required": _policy_value(policy, "manual_review_required") is True,
+            "fingerprint": _policy_value(policy, "rule_review_fingerprint"),
+            "missing": "rule_review_fingerprint" in missing_fields,
+            "placeholder": "rule_review_fingerprint" in placeholder_fields,
+            "accepted_rules": bool(accept_rules),
+        },
+        "blockers": blockers,
+        "next_actions": _site_policy_config_audit_next_actions(tracker, shape, blockers, placeholder_fields),
+    }
+
+
 def qbit_limits_for_tracker(config: dict[str, Any] | None, tracker: str, *, role: str) -> dict[str, Any]:
     policy = build_site_policy(config, tracker)
     limits = qbit_limits_for_policy(policy)
@@ -400,6 +458,131 @@ def _policy_automation(policy: SitePolicy | dict[str, Any]) -> dict[str, Any]:
         "retorrent": policy.get("allow_retorrent"),
         "manual_review_required": policy.get("manual_review_required"),
     }
+
+
+def _policy_dict(policy: SitePolicy | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(policy, SitePolicy):
+        return policy.to_dict()
+    return dict(policy)
+
+
+def _policy_required_fields_for_roles(roles: list[str]) -> list[str]:
+    fields = ["rules_url", "rule_review_fingerprint", "allow_retorrent"]
+    if "source" in roles:
+        fields.extend(["allow_auto_download", "download_rate_limit", "min_seed_time_hours"])
+    if "target" in roles:
+        fields.extend(["allow_auto_upload", "upload_rate_limit", "min_ratio"])
+    if "unknown" in roles:
+        fields.append("source_or_target_role")
+    return list(dict.fromkeys(fields))
+
+
+def _site_policy_override_shape(override: dict[str, Any]) -> str:
+    if not override:
+        return "default"
+    has_structured = any(isinstance(override.get(section), dict) for section in ("automation", "qbit_limits", "seeding_requirements", "transfer_rules"))
+    has_flat = any(key in override for key in _SITE_POLICY_FLAT_SHAPE_FIELDS)
+    if has_structured and has_flat:
+        return "mixed"
+    if has_structured:
+        return "structured"
+    if has_flat:
+        return "flat"
+    return "custom"
+
+
+_SITE_POLICY_FLAT_SOURCE_FIELDS: Final[dict[str, str]] = {
+    "rules_url": "rules_url",
+    "manual_review_required": "manual_review_required",
+    "allow_auto_download": "allow_auto_download",
+    "allow_auto_upload": "allow_auto_upload",
+    "allow_retorrent": "allow_retorrent",
+    "download_rate_limit": "download_rate_limit",
+    "download_limit": "download_rate_limit",
+    "upload_rate_limit": "upload_rate_limit",
+    "upload_limit": "upload_rate_limit",
+    "min_seed_time_hours": "min_seed_time_hours",
+    "min_ratio": "min_ratio",
+    "freeleech_required": "freeleech_required",
+    "required_promotions": "required_promotions",
+    "forbidden_title_patterns": "forbidden_title_patterns",
+    "forbidden_release_groups": "forbidden_release_groups",
+    "rule_review_fingerprint": "rule_review_fingerprint",
+    "notes": "notes",
+}
+
+
+_SITE_POLICY_FLAT_SHAPE_FIELDS: Final[set[str]] = {
+    "manual_review_required",
+    "allow_auto_download",
+    "allow_auto_upload",
+    "allow_retorrent",
+    "download_rate_limit",
+    "download_limit",
+    "upload_rate_limit",
+    "upload_limit",
+    "min_seed_time_hours",
+    "min_ratio",
+    "freeleech_required",
+    "required_promotions",
+    "forbidden_title_patterns",
+    "forbidden_release_groups",
+}
+
+
+_SITE_POLICY_STRUCTURED_SOURCE_FIELDS: Final[dict[tuple[str, str], str]] = {
+    ("automation", "manual_review_required"): "manual_review_required",
+    ("automation", "download"): "allow_auto_download",
+    ("automation", "upload"): "allow_auto_upload",
+    ("automation", "retorrent"): "allow_retorrent",
+    ("qbit_limits", "download_limit"): "download_rate_limit",
+    ("qbit_limits", "download_rate_limit"): "download_rate_limit",
+    ("qbit_limits", "upload_limit"): "upload_rate_limit",
+    ("qbit_limits", "upload_rate_limit"): "upload_rate_limit",
+    ("seeding_requirements", "min_seed_time_hours"): "min_seed_time_hours",
+    ("seeding_requirements", "min_ratio"): "min_ratio",
+    ("transfer_rules", "freeleech_required"): "freeleech_required",
+    ("transfer_rules", "required_promotions"): "required_promotions",
+    ("transfer_rules", "forbidden_title_patterns"): "forbidden_title_patterns",
+    ("transfer_rules", "forbidden_release_groups"): "forbidden_release_groups",
+}
+
+
+def _site_policy_field_sources(override: dict[str, Any]) -> dict[str, str]:
+    sources: dict[str, str] = {}
+    for config_key, policy_field in _SITE_POLICY_FLAT_SOURCE_FIELDS.items():
+        if config_key in override:
+            sources[policy_field] = f"flat.{config_key}"
+    for (section_name, config_key), policy_field in _SITE_POLICY_STRUCTURED_SOURCE_FIELDS.items():
+        section = override.get(section_name)
+        if isinstance(section, dict) and config_key in section:
+            sources[policy_field] = f"structured.{section_name}.{config_key}"
+    return sources
+
+
+def _site_policy_group_sources(field_sources: dict[str, str], fields: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+    return {field: {"configured": field in field_sources, "source": field_sources.get(field)} for field in fields}
+
+
+def _site_policy_placeholder_fields(policy: SitePolicy | dict[str, Any]) -> list[str]:
+    value = str(_policy_value(policy, "rule_review_fingerprint") or "").strip()
+    if not value:
+        return []
+    normalized = value.lower()
+    if "yyyy" in normalized or normalized in {"manual-review", "manual-review-yyyy-mm-dd", "reviewed-yyyy-mm-dd"}:
+        return ["rule_review_fingerprint"]
+    return []
+
+
+def _site_policy_config_audit_next_actions(tracker: str, shape: str, blockers: list[str], placeholder_fields: list[str]) -> list[str]:
+    if not blockers:
+        return [f"{tracker}: site policy config audit is ready for AI-gated automation."]
+    actions = [f"{tracker}: update PTCLI.SITE_POLICIES using flat_template or structured_template, then rerun site_policies."]
+    if placeholder_fields:
+        actions.append(f"{tracker}: replace rule_review_fingerprint placeholder with a real manual rule review marker.")
+    if shape == "default":
+        actions.append(f"{tracker}: add an explicit local site policy instead of relying on default reference automation values.")
+    return actions
 
 
 def _rule_obligation_scope(

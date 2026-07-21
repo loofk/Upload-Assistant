@@ -29,7 +29,14 @@ from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, parse_tracker_list
 from src.ptcli.materials import generate_bdinfo_material, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
 from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, load_ptgen_description_override, normalize_metadata_overrides
-from src.ptcli.policies import build_rule_obligations, build_site_policy_coverage, build_site_policy_report, parse_rate_limit, qbit_limits_for_tracker
+from src.ptcli.policies import (
+    build_rule_obligations,
+    build_site_policy_config_audit,
+    build_site_policy_coverage,
+    build_site_policy_report,
+    parse_rate_limit,
+    qbit_limits_for_tracker,
+)
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.source import fetch_source_info, resolve_source_reference
 from src.ptcli.target import build_mteam_upload_preflight, create_mteam_upload_torrent_candidate, write_mteam_prepare_package
@@ -1743,7 +1750,7 @@ def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
     report = build_site_policy_report(config, context["trackers"], accept_rules=bool(context.get("accept_rules")))
     roles = context.get("roles") if isinstance(context.get("roles"), dict) else {}
     policy_matrix = [
-        _site_policy_matrix_item(policy, roles=_string_list(roles.get(str(policy.get("tracker")))), accept_rules=bool(report.get("accept_rules")))
+        _site_policy_matrix_item(policy, roles=_string_list(roles.get(str(policy.get("tracker")))), accept_rules=bool(report.get("accept_rules")), config=config)
         for policy in report.get("site_policies", [])
         if isinstance(policy, dict)
     ]
@@ -1947,7 +1954,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     report = build_site_policy_report(config, context["trackers"], accept_rules=bool(context.get("accept_rules")))
     roles = context.get("roles") if isinstance(context.get("roles"), dict) else {}
     matrix = [
-        _site_policy_matrix_item(policy, roles=_string_list(roles.get(str(policy.get("tracker")))), accept_rules=bool(report.get("accept_rules")))
+        _site_policy_matrix_item(policy, roles=_string_list(roles.get(str(policy.get("tracker")))), accept_rules=bool(report.get("accept_rules")), config=config)
         for policy in report.get("site_policies", [])
         if isinstance(policy, dict)
     ]
@@ -4572,7 +4579,7 @@ def _daily_candidate_schedule_run_next_actions(jobs: list[dict[str, Any]], skipp
     return actions
 
 
-def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None = None, accept_rules: bool = False) -> dict[str, Any]:
+def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None = None, accept_rules: bool = False, config: dict[str, Any] | None = None) -> dict[str, Any]:
     policy_roles = roles or ["unknown"]
     rule_obligations = build_rule_obligations(policy, roles=policy_roles, accept_rules=accept_rules)
     item = {
@@ -4609,6 +4616,7 @@ def _site_policy_matrix_item(policy: dict[str, Any], *, roles: list[str] | None 
     }
     item["policy_coverage"] = build_site_policy_coverage(policy, roles=policy_roles, accept_rules=accept_rules)
     item["execution_readiness"] = _site_policy_item_execution_readiness(item)
+    item["config_audit"] = build_site_policy_config_audit(config, policy, roles=policy_roles, accept_rules=accept_rules)
     item["policy_profile"] = _site_policy_profile(item)
     return item
 
@@ -4628,6 +4636,7 @@ def _site_policy_profile(item: dict[str, Any]) -> dict[str, Any]:
         "accepted_config_shapes": ["flat", "structured"],
         "missing_fields": _string_list(coverage.get("missing_fields")),
         "disabled_automation": _string_list(coverage.get("disabled_automation")),
+        "config_audit": item.get("config_audit"),
         "template": _site_policy_config_template(item),
         "flat_template": _site_policy_config_template(item),
         "structured_template": _site_policy_structured_config_template(item),
@@ -4735,6 +4744,7 @@ def _site_policy_config_templates(matrix: list[dict[str, Any]]) -> dict[str, Any
         "config_path": 'config["PTCLI"]["SITE_POLICIES"]',
         "trackers": {str(item.get("tracker")): (item.get("policy_profile") or {}).get("template") for item in matrix if item.get("tracker")},
         "structured_trackers": {str(item.get("tracker")): (item.get("policy_profile") or {}).get("structured_template") for item in matrix if item.get("tracker")},
+        "config_audits": {str(item.get("tracker")): (item.get("policy_profile") or {}).get("config_audit") for item in matrix if item.get("tracker")},
     }
 
 
@@ -12114,8 +12124,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                     "policy_coverage",
                     "execution_readiness",
                 ],
-                "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "accepted_config_shapes", "missing_fields", "disabled_automation", "template", "flat_template", "structured_template", "current_values", "next_actions"],
-                "config_template_fields": ["config_path", "trackers", "structured_trackers"],
+                "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "accepted_config_shapes", "missing_fields", "disabled_automation", "config_audit", "template", "flat_template", "structured_template", "current_values", "next_actions"],
+                "config_audit_fields": ["ready", "shape", "configured", "configured_fields", "defaulted_fields", "missing_fields", "disabled_automation", "placeholder_fields", "field_sources", "automation_fields", "qbit_limit_fields", "seeding_fields", "transfer_rule_fields", "rule_review", "blockers", "next_actions"],
+                "config_template_fields": ["config_path", "trackers", "structured_trackers", "config_audits"],
                 "gap_summary_fields": ["ready", "missing_total", "disabled_total", "by_role", "missing_by_category", "recommendations"],
                 "rule_obligation_fields": ["ready", "accepted_rules", "rules_url", "manual_review_required", "rule_review_fingerprint", "missing_fields", "missing_confirmations", "scopes", "required_confirmations", "blockers"],
                 "rule_obligation_scope_fields": ["role", "scope", "action", "ready", "rules_url", "review_fingerprint", "required_confirmations", "missing_fields", "missing_confirmations", "blockers"],
@@ -12763,7 +12774,7 @@ def _sites_response_contract() -> dict[str, Any]:
         "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "policy_matrix", "policy_execution_summary", "extension_plan", "extension_handoff", "flow_matrix", "agent_summary", "blockers", "next_actions"],
         "capability_fields": ["tracker", "capabilities", "adapter_profile", "policy_profile", "execution_readiness", "ready_for_source", "ready_for_mteam_target_flow", "ready_as_target"],
         "adapter_profile_fields": ["tracker", "source_info", "source_info_adapter", "source_download", "source_download_adapter", "target_upload", "target_upload_adapter", "credential_requirements", "mteam_source_flow", "full_live_closure_to_mteam", "implemented_roles", "extension_notes", "extension_checklist"],
-        "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "accepted_config_shapes", "missing_fields", "template", "flat_template", "structured_template", "current_values", "next_actions"],
+        "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "accepted_config_shapes", "missing_fields", "config_audit", "template", "flat_template", "structured_template", "current_values", "next_actions"],
         "extension_plan_fields": ["ready", "trackers", "ready_sources", "ready_targets", "reference_sources_to_mteam", "items", "next_item", "blockers", "next_actions"],
         "extension_item_fields": ["tracker", "source_ready", "target_ready", "full_live_closure_to_mteam", "has_reference_flow", "implemented_roles", "missing_components", "checklist", "blockers", "next_action"],
         "extension_handoff_fields": ["ready", "phase", "recommended_next_tracker", "reference_flow", "implementation_order", "tracker_steps", "endpoint_sequence", "validation_sequence", "continue_when", "stop_when", "blockers", "next_actions"],

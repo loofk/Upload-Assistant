@@ -9031,6 +9031,7 @@
           "optional_fields",
           "accepted_config_shapes",
           "missing_fields",
+          "config_audit",
           "template",
           "flat_template",
           "structured_template",
@@ -17328,16 +17329,36 @@
           "accepted_config_shapes",
           "missing_fields",
           "disabled_automation",
+          "config_audit",
           "template",
           "flat_template",
           "structured_template",
           "current_values",
           "next_actions"
         ],
+        "config_audit_fields": [
+          "ready",
+          "shape",
+          "configured",
+          "configured_fields",
+          "defaulted_fields",
+          "missing_fields",
+          "disabled_automation",
+          "placeholder_fields",
+          "field_sources",
+          "automation_fields",
+          "qbit_limit_fields",
+          "seeding_fields",
+          "transfer_rule_fields",
+          "rule_review",
+          "blockers",
+          "next_actions"
+        ],
         "config_template_fields": [
           "config_path",
           "trackers",
-          "structured_trackers"
+          "structured_trackers",
+          "config_audits"
         ],
         "gap_summary_fields": [
           "ready",
