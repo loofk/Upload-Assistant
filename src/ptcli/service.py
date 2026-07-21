@@ -6164,6 +6164,8 @@ def _daily_candidate_schedule_job_digest(jobs: list[dict[str, Any]], skipped: li
         "push_count": len(push_items),
         "push_payload": push_payload,
         "approval_queue": approval_queue,
+        "approval_prompts": approval_queue["approval_prompts"],
+        "first_approval_prompt": approval_queue["first_approval_prompt"],
         "top_safe_candidates": approval_queue["top_safe_candidates"],
         "submit_request_count": len(top_submit_requests),
         "items": items,
@@ -6467,6 +6469,7 @@ def _daily_candidate_schedule_approval_queue(approval_items: list[dict[str, Any]
         for item in schedule_items
         if item.get("source_id") and (item.get("blockers") or item.get("can_submit_job") is not True)
     ]
+    approval_prompts = [item["approval_prompt"] for item in approval_items if isinstance(item.get("approval_prompt"), dict)]
     next_actions = ["Ask the user to approve one approval_queue.items[] entry, then POST its request_template to submit_daily_candidate_job."]
     if not approval_items and pending_count:
         next_actions = ["Poll pending schedule jobs, then refresh schedule_digest.approval_queue."]
@@ -6481,6 +6484,8 @@ def _daily_candidate_schedule_approval_queue(approval_items: list[dict[str, Any]
         "pending_job_count": pending_count,
         "recommended_count": len(approval_items),
         "items": approval_items,
+        "approval_prompts": approval_prompts,
+        "first_approval_prompt": approval_prompts[0] if approval_prompts else None,
         "top_safe_candidates": approval_items,
         "blocked_source_ids": blocked_source_ids,
         "submit_tool": "submit_daily_candidate_job",
@@ -6496,6 +6501,18 @@ def _daily_candidate_schedule_approval_queue(approval_items: list[dict[str, Any]
 def _daily_candidate_schedule_approval_item(submission_item: dict[str, Any], source_item: dict[str, Any], schedule_item: dict[str, Any]) -> dict[str, Any]:
     policy_risk_summary = source_item.get("policy_risk_summary") if isinstance(source_item.get("policy_risk_summary"), dict) else {}
     decision_summary = source_item.get("decision_summary") if isinstance(source_item.get("decision_summary"), dict) else {}
+    approval_prompt = source_item.get("approval_prompt") if isinstance(source_item.get("approval_prompt"), dict) else {}
+    if approval_prompt:
+        approval_prompt = {
+            **approval_prompt,
+            "submit_tool": submission_item.get("submit_tool"),
+            "submit_endpoint": submission_item.get("submit_endpoint"),
+            "submit_request": submission_item.get("request_template") if approval_prompt.get("ready") is not False else None,
+            "candidate_job_id": submission_item.get("candidate_job_id"),
+            "source_url_retorrent_request": source_item.get("request") if isinstance(source_item.get("request"), dict) else source_item.get("submit_request") if isinstance(source_item.get("submit_request"), dict) else None,
+        }
+    else:
+        approval_prompt = _daily_candidate_schedule_approval_prompt(submission_item, source_item, schedule_item, policy_risk_summary, decision_summary)
     return {
         "schedule_name": schedule_item.get("schedule_name") or submission_item.get("schedule_name"),
         "candidate_job_id": submission_item.get("candidate_job_id"),
@@ -6517,8 +6534,67 @@ def _daily_candidate_schedule_approval_item(submission_item: dict[str, Any], sou
         "request_template": submission_item.get("request_template"),
         "source_url_retorrent_request": source_item.get("request") if isinstance(source_item.get("request"), dict) else source_item.get("submit_request") if isinstance(source_item.get("submit_request"), dict) else None,
         "candidate_execution_context": submission_item.get("candidate_execution_context") if isinstance(submission_item.get("candidate_execution_context"), dict) else None,
+        "approval_prompt": approval_prompt or None,
         "requires_confirmation": submission_item.get("required_overrides") if isinstance(submission_item.get("required_overrides"), list) else ["confirm_upload=true", "save_path or path"],
         "after_submit": submission_item.get("after_submit") if isinstance(submission_item.get("after_submit"), dict) else {},
+    }
+
+
+def _daily_candidate_schedule_approval_prompt(
+    submission_item: dict[str, Any],
+    source_item: dict[str, Any],
+    schedule_item: dict[str, Any],
+    policy_risk_summary: dict[str, Any],
+    decision_summary: dict[str, Any],
+) -> dict[str, Any]:
+    request_template = submission_item.get("request_template") if isinstance(submission_item.get("request_template"), dict) else None
+    source_url_request = source_item.get("request") if isinstance(source_item.get("request"), dict) else source_item.get("submit_request") if isinstance(source_item.get("submit_request"), dict) else None
+    if isinstance(source_url_request, dict) and source_url_request.get("source_url") is None and source_url_request.get("source") is not None:
+        source_url_request = {**source_url_request, "source_url": source_url_request.get("source")}
+    duplicate_clear = source_item.get("duplicate_clear") if "duplicate_clear" in source_item else decision_summary.get("duplicate_clear")
+    risk_level = source_item.get("risk_level") or decision_summary.get("risk_level")
+    policy_risk_level = source_item.get("policy_risk_level") or policy_risk_summary.get("risk_level")
+    blockers = _string_list(source_item.get("blockers")) + _string_list(submission_item.get("blockers"))
+    ready = bool(request_template and duplicate_clear is not False and policy_risk_level != "high" and not blockers)
+    source_tracker = source_item.get("source_tracker") or schedule_item.get("source_tracker")
+    source_id = source_item.get("source_id")
+    rank = (submission_item.get("selector") or {}).get("rank") if isinstance(submission_item.get("selector"), dict) else source_item.get("rank")
+    label = f"#{rank} {source_tracker}-{source_id}"
+    return {
+        "kind": "ptcli.daily_candidate_approval_prompt",
+        "ready": ready,
+        "candidate_job_id": submission_item.get("candidate_job_id"),
+        "schedule_name": schedule_item.get("schedule_name") or submission_item.get("schedule_name"),
+        "rank": rank,
+        "source_tracker": source_tracker,
+        "source_id": source_id,
+        "source_url": source_item.get("source_url"),
+        "target_trackers": schedule_item.get("target_trackers"),
+        "title": source_item.get("title"),
+        "score": source_item.get("score"),
+        "metadata": source_item.get("metadata") if isinstance(source_item.get("metadata"), dict) else {},
+        "duplicate_clear": duplicate_clear,
+        "risk_level": risk_level,
+        "policy_risk_level": policy_risk_level,
+        "approval_text": f"Approve daily PT retorrent candidate {label}: {source_item.get('title') or ''}".strip(),
+        "confirm_phrase": f"Approve {source_tracker}-{source_id} to retorrent after rule review",
+        "submit_tool": submission_item.get("submit_tool"),
+        "submit_endpoint": submission_item.get("submit_endpoint"),
+        "submit_request": request_template if ready else None,
+        "source_url_retorrent_request": source_url_request,
+        "required_confirmations": ["explicit user approval", "accept_rules=true", "confirm_upload=true", "save_path or path"],
+        "safety": {
+            "mutates_state_after_submit": True,
+            "live_upload_after_submit": True,
+            "does_not_submit_from_prompt": True,
+            "requires_human_approval": True,
+            "stop_on_duplicate": True,
+            "respect_site_rules": True,
+        },
+        "continue_when": "user explicitly approves approval_prompt.confirm_phrase and required_confirmations are satisfied",
+        "stop_when": ["approval_prompt.ready=false", "duplicate_clear=false", "policy_risk_level='high'", "blockers is non-empty"],
+        "blockers": blockers,
+        "next_actions": ["Show approval_prompt.approval_text to the user; after approval, POST approval_prompt.submit_request to approval_prompt.submit_endpoint."] if ready else ["Resolve approval_prompt.blockers before asking the user to approve this candidate."],
     }
 
 
@@ -6555,6 +6631,8 @@ def _daily_candidate_schedule_push_payload(push_items: list[dict[str, Any]], ite
         "pending_job_count": pending_count,
         "submission_ready": bool(submission_handoff.get("ready")),
         "approval_queue": approval_queue,
+        "approval_prompts": approval_queue.get("approval_prompts", []),
+        "first_approval_prompt": approval_queue.get("first_approval_prompt"),
         "top_safe_candidates": approval_queue["top_safe_candidates"],
         "recommended_action": recommended_action,
         "top_item": ready_items[0] if ready_items else push_items[0] if push_items else None,
@@ -6612,6 +6690,8 @@ def _daily_candidate_schedule_notification_payload(schedule_digest: dict[str, An
         "top_item": top_item,
         "items": items,
         "approval_queue": approval_queue,
+        "approval_prompts": approval_queue.get("approval_prompts", []),
+        "first_approval_prompt": approval_queue.get("first_approval_prompt"),
         "top_safe_candidates": approval_queue.get("top_safe_candidates", []),
         "daily_candidate_report": daily_candidate_report,
         "daily_candidate_batch_report": daily_candidate_batch_report,
@@ -6665,6 +6745,8 @@ def _daily_candidate_schedule_delivery_handoff(schedule_digest: dict[str, Any], 
         },
         "notification_payload": notification_payload,
         "approval_queue": approval_queue,
+        "approval_prompts": approval_queue.get("approval_prompts", []),
+        "first_approval_prompt": approval_queue.get("first_approval_prompt"),
         "top_safe_candidates": approval_queue.get("top_safe_candidates", []),
         "daily_candidate_report": daily_candidate_report,
         "daily_candidate_batch_report": daily_candidate_batch_report,
@@ -19766,20 +19848,21 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "job_count", "jobs", "skipped", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "agent_decision", "blockers", "next_actions"],
                 "job_fields": ["schedule_name", "job_id", "status_endpoint", "summary_endpoint", "job_request", "candidate_digest", "agent_decision"],
-                "digest_fields": ["items", "push_items", "push_payload", "approval_queue", "top_safe_candidates", "execution_plan", "daily_candidate_report", "daily_candidate_batch_report", "candidate_control_summary", "daily_candidate_schedule_execution_context", "top_submit_requests", "submission_handoff", "target_count", "selected_count", "ready_count", "shortfall_count", "target_met", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
-                "push_payload_fields": ["title", "summary", "message", "format", "target_count", "selected_count", "shortfall_count", "target_met", "items", "top_item", "publish_cards", "approval_queue", "top_safe_candidates", "execution_plan", "daily_candidate_report", "daily_candidate_batch_report", "candidate_control_summary", "decision_summary", "submission_ready", "recommended_action"],
+                "digest_fields": ["items", "push_items", "push_payload", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "execution_plan", "daily_candidate_report", "daily_candidate_batch_report", "candidate_control_summary", "daily_candidate_schedule_execution_context", "top_submit_requests", "submission_handoff", "target_count", "selected_count", "ready_count", "shortfall_count", "target_met", "ready_job_count", "submit_request_count", "pending_job_count", "blocked_job_count"],
+                "push_payload_fields": ["title", "summary", "message", "format", "target_count", "selected_count", "shortfall_count", "target_met", "items", "top_item", "publish_cards", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "execution_plan", "daily_candidate_report", "daily_candidate_batch_report", "candidate_control_summary", "decision_summary", "submission_ready", "recommended_action"],
                 "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "pending_job_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_batch_report_fields": ["ready", "decision", "target_count", "scan_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "submission_ready", "push_ready", "approval_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "safe_to_submit_ids", "blocked_source_ids", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],
                 "candidate_control_summary_fields": _candidate_response_contract()["candidate_control_summary_fields"],
                 "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "shortfall_items", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
-                "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "approval_queue", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_schedule_execution_context", "submit_items", "submission_handoff", "execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
-                "delivery_handoff_fields": ["ready", "publish_ready", "submission_ready", "target_met", "status", "recommended_tool", "recommended_endpoint", "recommended_request", "counts", "notification_payload", "approval_queue", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_schedule_execution_context", "submission_handoff", "execution_summary", "top_submit_requests", "publish_contract", "continue_when", "stop_when", "blockers", "next_actions"],
+                "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_schedule_execution_context", "submit_items", "submission_handoff", "execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
+                "delivery_handoff_fields": ["ready", "publish_ready", "submission_ready", "target_met", "status", "recommended_tool", "recommended_endpoint", "recommended_request", "counts", "notification_payload", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_schedule_execution_context", "submission_handoff", "execution_summary", "top_submit_requests", "publish_contract", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_schedule_gate_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "target_met", "pending_job_count", "publish_ready", "submission_ready", "notification_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
                 "daily_candidate_delivery_plan_fields": ["ready", "action", "status", "publish_ready", "submission_ready", "notification_ready", "target_met", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "recommended_tool", "recommended_endpoint", "recommended_request", "publish_request", "first_submit_request", "safe_to_publish", "recommended_action_safety", "daily_candidate_schedule_execution_context", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_schedule_execution_context_fields": ["ready", "action", "schedule_job_count", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "target_met", "approval_queue_ready", "publish_ready", "submission_ready", "notification_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "first_submit_request", "first_candidate_execution_context", "approval_queue", "submission_handoff_ref", "notification_payload_ref", "publish_request", "shortfall_recovery", "required_user_inputs", "missing_user_inputs", "read_before_action", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
-                "approval_queue_fields": ["ready", "safe_count", "guarded_count", "blocked_count", "pending_job_count", "recommended_count", "items", "top_safe_candidates", "submit_tool", "submit_endpoint_template", "requires_confirmation", "continue_when", "stop_when", "blockers", "next_actions"],
+                "approval_queue_fields": ["ready", "safe_count", "guarded_count", "blocked_count", "pending_job_count", "recommended_count", "items", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "submit_tool", "submit_endpoint_template", "requires_confirmation", "continue_when", "stop_when", "blockers", "next_actions"],
                 "execution_plan_fields": ["ready", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "selected_shortfall_count", "ready_shortfall_count", "recommended_submit_requests", "shortfall_recovery", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
-                "approval_queue_item_fields": ["schedule_name", "candidate_job_id", "rank", "source_tracker", "target_trackers", "source_id", "source_url", "title", "score", "risk_level", "policy_risk_level", "execution_priority", "duplicate_clear", "metadata", "publish_card", "policy_risk_summary", "submit_tool", "submit_endpoint", "request_template", "source_url_retorrent_request", "candidate_execution_context", "requires_confirmation", "after_submit"],
+                "approval_queue_item_fields": ["schedule_name", "candidate_job_id", "rank", "source_tracker", "target_trackers", "source_id", "source_url", "title", "score", "risk_level", "policy_risk_level", "execution_priority", "duplicate_clear", "metadata", "publish_card", "policy_risk_summary", "submit_tool", "submit_endpoint", "request_template", "source_url_retorrent_request", "candidate_execution_context", "approval_prompt", "requires_confirmation", "after_submit"],
+                "approval_prompt_fields": ["ready", "rank", "source_tracker", "source_id", "source_url", "title", "score", "metadata", "duplicate_clear", "risk_level", "policy_risk_level", "approval_text", "confirm_phrase", "submit_tool", "submit_endpoint", "submit_request", "required_confirmations", "safety", "continue_when", "stop_when", "blockers", "next_actions"],
                 "submission_handoff_fields": ["ready", "submit_tool", "submit_endpoint_template", "required_overrides", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "approval_queue", "top_safe_candidates", "execution_summary", "items"],
                 "execution_summary_fields": ["ready", "submit_count", "blocked_count", "counts", "recommended_tool", "recommended_endpoint", "recommended_request", "post_submit_flow", "actions", "items", "blockers", "next_actions"],
                 "submission_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
@@ -21033,7 +21116,9 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
             "push_payload_fields": candidate_contract["push_payload_fields"],
             "approval_queue_fields": candidate_contract["approval_queue_fields"],
             "approval_queue_item_fields": candidate_contract["approval_queue_item_fields"],
+            "approval_prompt_fields": candidate_contract["approval_prompt_fields"],
             "publish_card_fields": candidate_contract["publish_card_fields"],
+            "publish_card_action_fields": candidate_contract["publish_card_action_fields"],
             "execution_plan_fields": candidate_contract["execution_plan_fields"],
             "candidate_control_summary_fields": candidate_contract["candidate_control_summary_fields"],
             "daily_candidate_report_fields": candidate_contract["daily_candidate_report_fields"],
@@ -21109,6 +21194,8 @@ def _candidate_response_contract() -> dict[str, Any]:
             "push_summary",
             "push_payload",
             "approval_queue",
+            "approval_prompts",
+            "first_approval_prompt",
             "top_safe_candidates",
             "execution_plan",
             "daily_candidate_report",
@@ -21145,6 +21232,8 @@ def _candidate_response_contract() -> dict[str, Any]:
             "publish_cards",
             "policy_risk_summary",
             "approval_queue",
+            "approval_prompts",
+            "first_approval_prompt",
             "top_safe_candidates",
             "execution_plan",
             "daily_candidate_report",
@@ -21199,6 +21288,7 @@ def _candidate_response_contract() -> dict[str, Any]:
             "policy_summary",
             "policy_risk_summary",
             "policy_execution_handoff",
+            "approval_prompt",
             "blockers",
             "next_actions",
             "can_submit",
@@ -21209,10 +21299,12 @@ def _candidate_response_contract() -> dict[str, Any]:
             "submit_tool",
         ],
         "publish_card_fields": ["rank", "status", "source_tracker", "source_id", "source_url", "title", "size", "published_at", "promotion", "freeleech_like", "metadata", "duplicate_check", "recommendation", "risk", "action"],
+        "publish_card_action_fields": ["decision", "can_submit", "tool", "endpoint", "request", "approval_prompt", "required_user_inputs", "next_actions"],
         "policy_summary_fields": ["manual_review_ready", "automation", "policy_coverage", "policy_execution_handoff", "policy_risk_summary", "qbit_limits", "seeding_requirements", "transfer_rules", "rules"],
         "policy_risk_summary_fields": ["ready", "risk_level", "execution_priority", "qbit_limit_ready", "seeding_ready", "rule_obligations_ready", "manual_review_ready", "strict_transfer_rule_count", "strict_transfer_rules", "qbit_missing", "seeding_missing", "blockers", "next_actions"],
-        "approval_queue_fields": ["ready", "safe_count", "guarded_count", "blocked_count", "recommended_count", "items", "top_safe_candidates", "guarded_source_ids", "blocked_source_ids", "submit_tool", "submit_endpoint", "requires_confirmation", "continue_when", "stop_when", "next_actions"],
-        "approval_queue_item_fields": ["rank", "source_tracker", "source_id", "source_url", "title", "score", "risk_level", "policy_risk_level", "execution_priority", "duplicate_clear", "metadata", "publish_card", "policy_risk_summary", "submit_tool", "submit_endpoint", "request", "requires_confirmation"],
+        "approval_queue_fields": ["ready", "safe_count", "guarded_count", "blocked_count", "recommended_count", "items", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "guarded_source_ids", "blocked_source_ids", "submit_tool", "submit_endpoint", "requires_confirmation", "continue_when", "stop_when", "next_actions"],
+        "approval_queue_item_fields": ["rank", "source_tracker", "source_id", "source_url", "title", "score", "risk_level", "policy_risk_level", "execution_priority", "duplicate_clear", "metadata", "publish_card", "policy_risk_summary", "submit_tool", "submit_endpoint", "request", "approval_prompt", "requires_confirmation"],
+        "approval_prompt_fields": ["ready", "rank", "source_tracker", "source_id", "source_url", "title", "score", "metadata", "duplicate_clear", "risk_level", "policy_risk_level", "approval_text", "confirm_phrase", "submit_tool", "submit_endpoint", "submit_request", "required_confirmations", "safety", "continue_when", "stop_when", "blockers", "next_actions"],
         "execution_plan_fields": ["ready", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "request_context", "recommended_submit_requests", "shortfall_recovery", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_control_summary_fields": ["ready", "action", "decision", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "pending_job_count", "ready_shortfall_count", "target_met", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "shortfall_recovery", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_report_fields": ["scope", "decision", "action", "target_count", "scan_count", "selected_count", "ready_count", "safe_to_submit_count", "guarded_count", "blocked_count", "selected_shortfall_count", "ready_shortfall_count", "target_met", "ready_target_met", "approval_ready", "submission_ready", "push_ready", "recommended_tool", "recommended_endpoint", "recommended_request", "first_submit_request", "shortfall_recovery", "continue_when", "stop_when", "blockers", "next_actions"],

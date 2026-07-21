@@ -842,6 +842,8 @@ def _candidate_digest(
         "push_summary": push_summary,
         "push_payload": push_payload,
         "approval_queue": approval_queue,
+        "approval_prompts": approval_queue["approval_prompts"],
+        "first_approval_prompt": approval_queue["first_approval_prompt"],
         "top_safe_candidates": approval_queue["top_safe_candidates"],
         "execution_plan": execution_plan,
         "daily_candidate_report": daily_candidate_report,
@@ -899,6 +901,8 @@ def _candidate_push_payload(
         "decision_summary": decision_summary,
         "publish_cards": publish_cards,
         "approval_queue": approval_queue,
+        "approval_prompts": approval_queue["approval_prompts"],
+        "first_approval_prompt": approval_queue["first_approval_prompt"],
         "top_safe_candidates": approval_queue["top_safe_candidates"],
         "execution_plan": execution_plan,
         "daily_candidate_report": daily_candidate_report,
@@ -1314,6 +1318,7 @@ def _candidate_approval_queue(push_items: list[dict[str, Any] | None], *, limit:
     guarded_items = [item for item in items if item.get("can_submit") is True and not _candidate_item_safe_to_submit(item)]
     blocked_items = [item for item in items if item.get("can_submit") is not True]
     queue_items = [_candidate_approval_queue_item(item) for item in safe_items[:limit]]
+    approval_prompts = [item["approval_prompt"] for item in queue_items if isinstance(item.get("approval_prompt"), dict)]
     next_actions = ["Ask the user to approve one approval_queue.items[] entry, then submit its request to source_url_retorrent_job."]
     if not queue_items and items:
         next_actions = ["Resolve guarded or blocked candidate reasons before submitting any daily candidate."]
@@ -1327,6 +1332,8 @@ def _candidate_approval_queue(push_items: list[dict[str, Any] | None], *, limit:
         "blocked_count": len(blocked_items),
         "recommended_count": len(queue_items),
         "items": queue_items,
+        "approval_prompts": approval_prompts,
+        "first_approval_prompt": approval_prompts[0] if approval_prompts else None,
         "top_safe_candidates": queue_items,
         "guarded_source_ids": [item.get("source_id") for item in guarded_items if item.get("source_id")],
         "blocked_source_ids": [item.get("source_id") for item in blocked_items if item.get("source_id")],
@@ -1353,6 +1360,22 @@ def _candidate_item_safe_to_submit(item: dict[str, Any]) -> bool:
 def _candidate_approval_queue_item(item: dict[str, Any]) -> dict[str, Any]:
     decision_summary = item.get("decision_summary") if isinstance(item.get("decision_summary"), dict) else {}
     policy_risk_summary = item.get("policy_risk_summary") if isinstance(item.get("policy_risk_summary"), dict) else {}
+    approval_prompt = _candidate_approval_prompt(
+        rank=item.get("rank"),
+        source_tracker=item.get("source_tracker"),
+        source_id=item.get("source_id"),
+        source_url=item.get("source_url"),
+        title=item.get("title"),
+        score=item.get("score"),
+        metadata=item.get("metadata") if isinstance(item.get("metadata"), dict) else {},
+        duplicate_clear=decision_summary.get("duplicate_clear"),
+        risk_level=decision_summary.get("risk_level"),
+        policy_risk_level=policy_risk_summary.get("risk_level"),
+        submit_tool=item.get("submit_tool") or SOURCE_URL_RETORRENT_JOB_TOOL,
+        submit_endpoint=item.get("submit_job_endpoint") or item.get("action_endpoint") or SOURCE_URL_RETORRENT_JOB_ENDPOINT,
+        submit_request=item.get("submit_request") if isinstance(item.get("submit_request"), dict) else None,
+        blockers=_string_list(item.get("blockers")),
+    )
     return {
         "rank": item.get("rank"),
         "source_tracker": item.get("source_tracker"),
@@ -1370,7 +1393,69 @@ def _candidate_approval_queue_item(item: dict[str, Any]) -> dict[str, Any]:
         "submit_tool": item.get("submit_tool") or SOURCE_URL_RETORRENT_JOB_TOOL,
         "submit_endpoint": item.get("submit_job_endpoint") or item.get("action_endpoint") or SOURCE_URL_RETORRENT_JOB_ENDPOINT,
         "request": item.get("submit_request"),
+        "approval_prompt": approval_prompt,
         "requires_confirmation": ["accept_rules=true", "confirm_upload=true", "save_path or path"],
+    }
+
+
+def _candidate_approval_prompt(
+    *,
+    rank: Any,
+    source_tracker: Any,
+    source_id: Any,
+    source_url: Any,
+    title: Any,
+    score: Any,
+    metadata: dict[str, Any],
+    duplicate_clear: Any,
+    risk_level: Any,
+    policy_risk_level: Any,
+    submit_tool: Any,
+    submit_endpoint: Any,
+    submit_request: dict[str, Any] | None,
+    blockers: list[str],
+) -> dict[str, Any]:
+    ready = bool(submit_request and duplicate_clear is True and risk_level == "low" and policy_risk_level == "low" and not blockers)
+    label = f"#{rank} {source_tracker}-{source_id}"
+    title_text = str(title or "").strip()
+    score_text = f", score {score}" if score is not None else ""
+    approval_text = f"Approve daily PT retorrent candidate {label}{score_text}: {title_text}".strip()
+    return {
+        "kind": "ptcli.daily_candidate_approval_prompt",
+        "ready": ready,
+        "rank": rank,
+        "source_tracker": source_tracker,
+        "source_id": source_id,
+        "source_url": source_url,
+        "title": title,
+        "score": score,
+        "metadata": {
+            "imdb_id": metadata.get("imdb_id"),
+            "tmdb_id": metadata.get("tmdb_id"),
+            "douban_id": metadata.get("douban_id"),
+            "douban_url": metadata.get("douban_url"),
+        },
+        "duplicate_clear": duplicate_clear,
+        "risk_level": risk_level,
+        "policy_risk_level": policy_risk_level,
+        "approval_text": approval_text,
+        "confirm_phrase": f"Approve {source_tracker}-{source_id} to retorrent after rule review",
+        "submit_tool": submit_tool,
+        "submit_endpoint": submit_endpoint,
+        "submit_request": submit_request if ready else None,
+        "required_confirmations": ["explicit user approval", "accept_rules=true", "confirm_upload=true", "save_path or path"],
+        "safety": {
+            "mutates_state_after_submit": True,
+            "live_upload_after_submit": True,
+            "does_not_submit_from_prompt": True,
+            "requires_human_approval": True,
+            "stop_on_duplicate": True,
+            "respect_site_rules": True,
+        },
+        "continue_when": "user explicitly approves approval_prompt.confirm_phrase and required_confirmations are satisfied",
+        "stop_when": ["approval_prompt.ready=false", "duplicate_clear=false", "risk_level!='low'", "policy_risk_level!='low'", "blockers is non-empty"],
+        "blockers": blockers,
+        "next_actions": ["Show approval_prompt.approval_text to the user; after approval, call approval_prompt.submit_tool with approval_prompt.submit_request."] if ready else ["Resolve approval_prompt.blockers before asking the user to approve this candidate."],
     }
 
 
@@ -1400,6 +1485,22 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
     }
     policy_digest = _candidate_digest_policy_summary(policy_summary)
     policy_execution_handoff = policy_digest.get("policy_execution_handoff") if isinstance(policy_digest.get("policy_execution_handoff"), dict) else {}
+    approval_prompt = _candidate_approval_prompt(
+        rank=rank,
+        source_tracker=source.get("tracker"),
+        source_id=source.get("torrent_id"),
+        source_url=source.get("details_url"),
+        title=title,
+        score=ranking.get("score"),
+        metadata=metadata,
+        duplicate_clear=decision_summary.get("duplicate_clear"),
+        risk_level=decision_summary.get("risk_level"),
+        policy_risk_level=policy_risk_summary.get("risk_level"),
+        submit_tool=candidate.get("submit_tool"),
+        submit_endpoint=candidate.get("submit_job_endpoint"),
+        submit_request=submit_request if can_submit else None,
+        blockers=blockers,
+    )
     publish_card = _candidate_publish_card(
         rank=rank,
         status=status,
@@ -1416,6 +1517,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         submit_request=submit_request,
         submit_endpoint=candidate.get("submit_job_endpoint"),
         submit_tool=candidate.get("submit_tool"),
+        approval_prompt=approval_prompt,
     )
     return {
         "rank": rank,
@@ -1463,6 +1565,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "policy_summary": policy_digest,
         "policy_risk_summary": policy_risk_summary,
         "policy_execution_handoff": policy_execution_handoff,
+        "approval_prompt": approval_prompt,
         "submit_request": submit_request if can_submit else None,
         "submit_job_endpoint": candidate.get("submit_job_endpoint"),
         "submit_tool": candidate.get("submit_tool"),
@@ -1486,6 +1589,7 @@ def _candidate_publish_card(
     submit_request: dict[str, Any] | None,
     submit_endpoint: Any,
     submit_tool: Any,
+    approval_prompt: dict[str, Any],
 ) -> dict[str, Any]:
     metadata_ready = bool([value for value in metadata.values() if value])
     duplicate_clear = duplicate_check.get("searched") is True and duplicate_check.get("exists") is False
@@ -1541,6 +1645,7 @@ def _candidate_publish_card(
             "tool": submit_tool,
             "endpoint": submit_endpoint,
             "request": submit_request if can_submit else None,
+            "approval_prompt": approval_prompt,
             "required_user_inputs": ["accept_rules=true", "confirm_upload=true", "save_path or path"],
             "next_actions": workflow.get("recommended_action"),
         },
