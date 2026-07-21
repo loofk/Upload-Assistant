@@ -1901,6 +1901,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -1910,8 +1911,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -2929,6 +2942,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -2938,8 +2952,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -3824,6 +3850,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -3833,8 +3860,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -4719,6 +4758,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -4728,8 +4768,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -5618,6 +5670,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -5627,8 +5680,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -6963,6 +7028,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -6972,8 +7038,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -8259,6 +8337,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -8268,8 +8347,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -11364,6 +11455,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -11373,8 +11465,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -12221,6 +12325,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -12230,8 +12335,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -13087,6 +13204,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -13096,8 +13214,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -13922,6 +14052,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -13931,8 +14062,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -14880,6 +15023,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -14889,8 +15033,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -15870,6 +16026,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -15879,8 +16036,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -16602,6 +16771,7 @@
         ],
         "recommended_call_fields": [
           "ready",
+          "safe_to_call_now",
           "tool",
           "endpoint",
           "method",
@@ -16611,8 +16781,20 @@
           "dry_run_request",
           "execute_request",
           "requires_user_review",
+          "gates",
           "safety",
           "stop_when"
+        ],
+        "recommended_call_gate_fields": [
+          "dry_run_preview",
+          "execute_available",
+          "requires_rules",
+          "requires_upload_confirmation",
+          "accept_rules_present",
+          "confirm_upload_present",
+          "live_execute_requested",
+          "safe_to_call_now",
+          "missing"
         ],
         "recovery_handoff_fields": [
           "phase",

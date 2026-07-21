@@ -7442,9 +7442,13 @@ def _job_handoff_recommended_call(
     stop_when: list[str],
 ) -> dict[str, Any]:
     requires_user_review = action not in {"wait", "done", "stop"} and bool(dry_run_request or execute_request or action in {"resume", "prepare_materials", "target_upload_closure"})
+    request_value = request if isinstance(request, dict) else None
+    gates = _job_handoff_recommended_call_gates(action, request_value, dry_run_request, execute_request)
+    safety = _job_handoff_recommended_call_safety(gates, stop_when)
     if not tool or not endpoint:
         return {
             "ready": False,
+            "safe_to_call_now": False,
             "tool": None,
             "endpoint": None,
             "method": None,
@@ -7454,12 +7458,14 @@ def _job_handoff_recommended_call(
             "dry_run_request": dry_run_request,
             "execute_request": execute_request,
             "requires_user_review": requires_user_review,
+            "gates": gates,
+            "safety": safety,
             "stop_when": stop_when,
         }
     method_value = str(method or ("GET" if str(endpoint).endswith("/summary") or action == "wait" else "POST"))
-    request_value = request if isinstance(request, dict) else None
     return {
         "ready": True,
+        "safe_to_call_now": bool(gates.get("safe_to_call_now")),
         "tool": tool,
         "endpoint": endpoint,
         "method": method_value,
@@ -7469,13 +7475,60 @@ def _job_handoff_recommended_call(
         "dry_run_request": dry_run_request,
         "execute_request": execute_request,
         "requires_user_review": requires_user_review,
-        "safety": {
-            "live_upload_requires_confirm_upload": True,
-            "rules_must_be_accepted": True,
-            "use_dry_run_first": bool(dry_run_request),
-            "do_not_call_when": stop_when,
-        },
+        "gates": gates,
+        "safety": safety,
         "stop_when": stop_when,
+    }
+
+
+def _job_handoff_recommended_call_gates(action: str, request: dict[str, Any] | None, dry_run_request: dict[str, Any] | None, execute_request: dict[str, Any] | None) -> dict[str, Any]:
+    call_request = request if isinstance(request, dict) else {}
+    dry_run_preview = action not in {"wait", "done", "stop"} and bool(call_request.get("dry_run") is True or (isinstance(dry_run_request, dict) and dry_run_request.get("dry_run") is True))
+    execute_available = isinstance(execute_request, dict) and bool(execute_request)
+    accept_rules_present = _job_handoff_call_flag_present("accept_rules", call_request, execute_request)
+    confirm_upload_present = _job_handoff_call_flag_present("confirm_upload", call_request, execute_request)
+    requires_rules = action in {"resume", "prepare_materials", "prepare_target_package", "target_upload_closure", "submit_if_clear"}
+    requires_upload_confirmation = action in {"resume", "target_upload_closure", "submit_if_clear"}
+    live_execute_requested = execute_available and not dry_run_preview
+    missing: list[str] = []
+    if requires_rules and not accept_rules_present and live_execute_requested:
+        missing.append("accept_rules")
+    if requires_upload_confirmation and not confirm_upload_present and live_execute_requested:
+        missing.append("confirm_upload")
+    return {
+        "dry_run_preview": dry_run_preview,
+        "execute_available": execute_available,
+        "requires_rules": requires_rules,
+        "requires_upload_confirmation": requires_upload_confirmation,
+        "accept_rules_present": accept_rules_present,
+        "confirm_upload_present": confirm_upload_present,
+        "live_execute_requested": live_execute_requested,
+        "safe_to_call_now": action in {"wait", "done"} or dry_run_preview or not missing,
+        "missing": missing,
+    }
+
+
+def _job_handoff_call_flag_present(key: str, request: dict[str, Any], execute_request: dict[str, Any] | None) -> bool:
+    if request.get(key) is True:
+        return True
+    if isinstance(request.get("overrides"), dict) and request["overrides"].get(key) is True:
+        return True
+    if isinstance(execute_request, dict):
+        if execute_request.get(key) is True:
+            return True
+        if isinstance(execute_request.get("overrides"), dict) and execute_request["overrides"].get(key) is True:
+            return True
+    return False
+
+
+def _job_handoff_recommended_call_safety(gates: dict[str, Any], stop_when: list[str]) -> dict[str, Any]:
+    return {
+        "live_upload_requires_confirm_upload": True,
+        "rules_must_be_accepted": True,
+        "use_dry_run_first": bool(gates.get("dry_run_preview")),
+        "safe_to_call_now": bool(gates.get("safe_to_call_now")),
+        "missing_required_flags": _string_list(gates.get("missing")),
+        "do_not_call_when": stop_when,
     }
 
 
@@ -13658,7 +13711,8 @@ def _job_response_contract() -> dict[str, Any]:
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
         "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
-        "recommended_call_fields": ["ready", "tool", "endpoint", "method", "request", "action", "status", "dry_run_request", "execute_request", "requires_user_review", "safety", "stop_when"],
+        "recommended_call_fields": ["ready", "safe_to_call_now", "tool", "endpoint", "method", "request", "action", "status", "dry_run_request", "execute_request", "requires_user_review", "gates", "safety", "stop_when"],
+        "recommended_call_gate_fields": ["dry_run_preview", "execute_available", "requires_rules", "requires_upload_confirmation", "accept_rules_present", "confirm_upload_present", "live_execute_requested", "safe_to_call_now", "missing"],
         "recovery_handoff_fields": ["phase", "action", "reason", "ready", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "gates", "handoff_sources", "read_fields", "continue_when", "stop_when", "blockers", "next_actions"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],

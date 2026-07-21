@@ -13263,12 +13263,17 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert job["job_handoff"]["recommended_tool"] == "get_job_status"
     assert job["job_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
     assert job["job_handoff"]["recommended_call"]["ready"] is True
+    assert job["job_handoff"]["recommended_call"]["safe_to_call_now"] is True
     assert job["job_handoff"]["recommended_call"]["tool"] == "get_job_status"
     assert job["job_handoff"]["recommended_call"]["endpoint"] == f"/v1/jobs/{job_id}"
     assert job["job_handoff"]["recommended_call"]["method"] == "GET"
     assert job["job_handoff"]["recommended_call"]["request"] is None
     assert job["job_handoff"]["recommended_call"]["action"] == "wait"
     assert job["job_handoff"]["recommended_call"]["requires_user_review"] is False
+    assert job["job_handoff"]["recommended_call"]["gates"]["dry_run_preview"] is False
+    assert job["job_handoff"]["recommended_call"]["gates"]["requires_rules"] is False
+    assert job["job_handoff"]["recommended_call"]["gates"]["safe_to_call_now"] is True
+    assert job["job_handoff"]["recommended_call"]["safety"]["safe_to_call_now"] is True
     assert job["job_handoff"]["poll_after_seconds"] == 5
     assert job["recovery_handoff"]["kind"] == "ptcli.job_recovery_handoff"
     assert job["recovery_handoff"]["phase"] == "runtime"
@@ -13625,6 +13630,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["job_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
     assert job["job_handoff"]["recommended_request"] == {"job_id": job["job_id"], "dry_run": True}
     assert job["job_handoff"]["recommended_call"]["ready"] is True
+    assert job["job_handoff"]["recommended_call"]["safe_to_call_now"] is True
     assert job["job_handoff"]["recommended_call"]["tool"] == "resume_job"
     assert job["job_handoff"]["recommended_call"]["endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
     assert job["job_handoff"]["recommended_call"]["method"] == "POST"
@@ -13632,6 +13638,12 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["job_handoff"]["recommended_call"]["dry_run_request"] == job["resume_requirements"]["dry_run_request"]
     assert job["job_handoff"]["recommended_call"]["execute_request"] == job["resume_requirements"]["execute_request"]
     assert job["job_handoff"]["recommended_call"]["requires_user_review"] is True
+    assert job["job_handoff"]["recommended_call"]["gates"]["dry_run_preview"] is True
+    assert job["job_handoff"]["recommended_call"]["gates"]["execute_available"] is True
+    assert job["job_handoff"]["recommended_call"]["gates"]["requires_rules"] is True
+    assert job["job_handoff"]["recommended_call"]["gates"]["requires_upload_confirmation"] is True
+    assert job["job_handoff"]["recommended_call"]["gates"]["safe_to_call_now"] is True
+    assert job["job_handoff"]["recommended_call"]["gates"]["missing"] == []
     assert job["job_handoff"]["recommended_call"]["safety"]["use_dry_run_first"] is True
     assert "next_command_argv not allowlisted" in job["job_handoff"]["recommended_call"]["stop_when"]
     assert job["job_handoff"]["dry_run_request"] == job["resume_requirements"]["dry_run_request"]
@@ -17213,7 +17225,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "recommended_call_fields" in tool_by_name["get_job_status"]["response_contract"]
+    assert "recommended_call_gate_fields" in tool_by_name["get_job_status"]["response_contract"]
+    assert "safe_to_call_now" in tool_by_name["get_job_status"]["response_contract"]["recommended_call_fields"]
+    assert "gates" in tool_by_name["get_job_status"]["response_contract"]["recommended_call_fields"]
     assert "requires_user_review" in tool_by_name["get_job_status"]["response_contract"]["recommended_call_fields"]
+    assert "confirm_upload_present" in tool_by_name["get_job_status"]["response_contract"]["recommended_call_gate_fields"]
     assert "safety" in tool_by_name["get_job_status"]["response_contract"]["recommended_call_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "candidate_submission_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["required_fields"]
@@ -18367,7 +18383,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "execute_request" in tools_by_name["resume_job"]["response_contract"]["job_handoff_fields"]
         assert "recommended_call" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
         assert "recommended_call_fields" in tools_by_name["get_job_status"]["response_contract"]
+        assert "recommended_call_gate_fields" in tools_by_name["get_job_status"]["response_contract"]
+        assert "safe_to_call_now" in tools_by_name["get_job_status"]["response_contract"]["recommended_call_fields"]
+        assert "gates" in tools_by_name["get_job_status"]["response_contract"]["recommended_call_fields"]
         assert "requires_user_review" in tools_by_name["get_job_status"]["response_contract"]["recommended_call_fields"]
+        assert "confirm_upload_present" in tools_by_name["get_job_status"]["response_contract"]["recommended_call_gate_fields"]
         assert "candidate_submission_execution" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
         assert "material_input_template" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
         assert "agent_candidate_submission_fields" in tools_by_name["submit_daily_candidate_job"]["response_contract"]
