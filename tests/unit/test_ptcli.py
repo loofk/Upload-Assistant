@@ -10614,6 +10614,23 @@ def test_service_summary_check_exposes_doctor_handoff(tmp_path) -> None:
     assert "live_user_report.report_allowed=true" in payload["live_validation_result"]["complete_when"]
     assert "seedbox_live_validation_completion_report.ready_for_user_report=true" in payload["live_validation_result"]["complete_when"]
     assert payload["live_validation_result"]["blockers"] == []
+    assert payload["live_submission_package"]["kind"] == "ptcli.seedbox_live_submission_package"
+    assert payload["live_submission_package"]["ready"] is True
+    assert payload["live_submission_package"]["status"] == "ready_to_submit"
+    assert payload["live_submission_package"]["submit"]["tool"] == "source_url_check_and_submit"
+    assert payload["live_submission_package"]["submit"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert payload["live_submission_package"]["submit"]["method"] == "POST"
+    assert payload["live_submission_package"]["submit"]["request"] == payload["live_validation_result"]["check_and_submit_request"]
+    assert "Authorization: Bearer <PTCLI_API_TOKEN>" in payload["live_submission_package"]["submit"]["curl"]
+    assert payload["live_submission_package"]["after_submit"]["poll"]["tool"] == "get_job_status"
+    assert payload["live_submission_package"]["after_submit"]["resume"]["tool"] == "resume_job"
+    assert payload["live_submission_package"]["after_submit"]["finish"]["tool"] == "get_job_summary"
+    assert payload["live_submission_package"]["after_submit"]["finish"]["complete_when"] == "live_user_report.report_allowed=true and live_user_report.evidence.missing_evidence=[] and live_user_report.blockers=[]"
+    assert payload["live_submission_package"]["report_contract"]["final_report_field"] == "live_user_report"
+    assert "seedbox_live_validation_completion_report" in payload["live_submission_package"]["report_contract"]["audit_report_fields"]
+    assert "live_user_report.report_allowed=true" in payload["live_submission_package"]["report_contract"]["must_not_report_complete_until"]
+    assert payload["live_submission_package"]["safety"]["submit_requires_separate_call"] is True
+    assert payload["live_submission_package"]["blockers"] == []
 
 
 @pytest.mark.asyncio
@@ -18265,6 +18282,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["summary_check"]["safety"]["does_not_run_next_command"] is True
     assert "doctor_result_handoff" in tool_by_name["summary_check"]["response_contract"]["required_fields"]
     assert "live_validation_result" in tool_by_name["summary_check"]["response_contract"]["required_fields"]
+    assert "live_submission_package" in tool_by_name["summary_check"]["response_contract"]["required_fields"]
     assert "delivery_audit" in tool_by_name["summary_check"]["response_contract"]["optional_fields"]
     assert "delivery_audit_fields" in tool_by_name["summary_check"]["response_contract"]
     assert "mutates_state" in tool_by_name["summary_check"]["response_contract"]["delivery_audit_fields"]
@@ -18274,6 +18292,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_validation_result_fields" in tool_by_name["summary_check"]["response_contract"]
     assert "can_submit_check_and_submit" in tool_by_name["summary_check"]["response_contract"]["live_validation_result_fields"]
     assert "final_evidence_read" in tool_by_name["summary_check"]["response_contract"]["live_validation_result_fields"]
+    assert "live_submission_package_fields" in tool_by_name["summary_check"]["response_contract"]
+    assert "submit" in tool_by_name["summary_check"]["response_contract"]["live_submission_package_fields"]
+    assert "live_submission_submit_fields" in tool_by_name["summary_check"]["response_contract"]
+    assert "curl" in tool_by_name["summary_check"]["response_contract"]["live_submission_submit_fields"]
+    assert "live_submission_after_submit_fields" in tool_by_name["summary_check"]["response_contract"]
+    assert "resume" in tool_by_name["summary_check"]["response_contract"]["live_submission_after_submit_fields"]
+    assert "live_submission_report_contract_fields" in tool_by_name["summary_check"]["response_contract"]
+    assert "must_not_report_complete_until" in tool_by_name["summary_check"]["response_contract"]["live_submission_report_contract_fields"]
     assert tool_by_name["materials_prepare"]["path"] == "/v1/materials/prepare"
     assert tool_by_name["materials_prepare"]["input_schema"]["properties"]["generate_screenshots"]["type"] == "boolean"
     assert tool_by_name["materials_prepare"]["input_schema"]["properties"]["upload_screenshots"]["type"] == "boolean"
@@ -19320,6 +19346,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     summary_check_schema = openapi["paths"]["/v1/summary/check"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "doctor_result_handoff" in summary_check_schema["properties"]
     assert "live_validation_result" in summary_check_schema["properties"]
+    assert "live_submission_package" in summary_check_schema["properties"]
     assert "delivery_audit" in summary_check_schema["properties"]
     assert "service" in summary_check_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
@@ -19790,9 +19817,16 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "seedbox_live_evidence_contract_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "final_report_field" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_evidence_contract_fields"]
         assert "live_validation_result" in tools_by_name["summary_check"]["response_contract"]["required_fields"]
+        assert "live_submission_package" in tools_by_name["summary_check"]["response_contract"]["required_fields"]
         assert "live_validation_result_fields" in tools_by_name["summary_check"]["response_contract"]
         assert "can_submit_check_and_submit" in tools_by_name["summary_check"]["response_contract"]["live_validation_result_fields"]
         assert "final_evidence_read" in tools_by_name["summary_check"]["response_contract"]["live_validation_result_fields"]
+        assert "live_submission_package_fields" in tools_by_name["summary_check"]["response_contract"]
+        assert "live_submission_submit_fields" in tools_by_name["summary_check"]["response_contract"]
+        assert "curl" in tools_by_name["summary_check"]["response_contract"]["live_submission_submit_fields"]
+        assert "live_submission_after_submit_fields" in tools_by_name["summary_check"]["response_contract"]
+        assert "resume" in tools_by_name["summary_check"]["response_contract"]["live_submission_after_submit_fields"]
+        assert "live_submission_report_contract_fields" in tools_by_name["summary_check"]["response_contract"]
         assert "runbook_ref" in tools_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
         assert "submit_if_clear_handoff" in tools_by_name["retorrent_check"]["response_contract"]["required_fields"]
         assert "submit_if_clear_handoff_fields" in tools_by_name["retorrent_check"]["response_contract"]

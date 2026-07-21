@@ -886,9 +886,11 @@ def summary_check_service_payload(request: dict[str, Any]) -> dict[str, Any]:
     payload.setdefault("ok", payload.get("status") == "ok")
     summary_context = {**_summary_check_raw_context(summary_file), **payload}
     live_validation_result = _summary_check_live_validation_result(summary_context, summary_file)
+    live_submission_package = _summary_check_live_submission_package(live_validation_result)
     return {
         **payload,
         "live_validation_result": live_validation_result,
+        "live_submission_package": live_submission_package,
         "service": {
             "kind": "ptcli.service.summary_check",
             "read_only": True,
@@ -940,6 +942,90 @@ def _summary_check_live_validation_result(payload: dict[str, Any], summary_file:
         "blockers": blockers,
         "next_actions": _summary_check_live_validation_result_next_actions(live_safe, bool(submit_request), blockers),
     }
+
+
+def _summary_check_live_submission_package(live_validation_result: dict[str, Any]) -> dict[str, Any]:
+    request = live_validation_result.get("check_and_submit_request") if isinstance(live_validation_result.get("check_and_submit_request"), dict) else None
+    ready = live_validation_result.get("ready") is True and bool(request)
+    blockers = _string_list(live_validation_result.get("blockers"))
+    if live_validation_result.get("live_safe_to_attempt") is not True:
+        blockers.append("doctor_result_handoff.live_safe_to_attempt=true is required before source_url_check_and_submit.")
+    if not request:
+        blockers.append("live_validation_result.check_and_submit_request is missing.")
+    blockers = list(dict.fromkeys(blockers))
+    status_endpoint_template = "/v1/jobs/{job_id}"
+    summary_endpoint_template = "/v1/jobs/{job_id}/summary"
+    submit_endpoint = str(live_validation_result.get("check_and_submit_endpoint") or "/v1/jobs/retorrent/from-url/check-and-submit")
+    return {
+        "kind": "ptcli.seedbox_live_submission_package",
+        "ready": ready and not blockers,
+        "status": "ready_to_submit" if ready and not blockers else "blocked",
+        "summary_file": live_validation_result.get("summary_file"),
+        "submit": {
+            "tool": live_validation_result.get("check_and_submit_tool") or "source_url_check_and_submit",
+            "endpoint": submit_endpoint,
+            "method": "POST",
+            "request": request,
+            "curl": _summary_check_live_submission_curl(submit_endpoint, request) if request else None,
+            "continue_when": "response.job_id is present and response.duplicate_check.exists=false",
+            "stop_when": "response.duplicate_check.exists=true or response.check_and_submit_gate.action=resolve_gate_blockers",
+        },
+        "after_submit": {
+            "read": _string_list(live_validation_result.get("post_submit_read")),
+            "status_endpoint_template": status_endpoint_template,
+            "summary_endpoint_template": summary_endpoint_template,
+            "poll": {
+                "tool": "get_job_status",
+                "endpoint_template": status_endpoint_template,
+                "repeat_when": "status in ['queued', 'running'] or job_handoff.should_poll=true",
+                "read": ["status", "job_handoff", "recovery_handoff", "blockers", "next_actions"],
+            },
+            "resume": {
+                "tool": "resume_job",
+                "endpoint_template": f"{status_endpoint_template}/resume",
+                "preview_when": "recovery_handoff.should_resume=true and recovery_handoff.dry_run_request is present",
+                "execute_when": "user confirms recovery_handoff.execute_request after dry-run preview",
+                "read": ["resume_summary", "resume_audit", "resume_context", "job_resume_handoff"],
+            },
+            "finish": {
+                "tool": "get_job_summary",
+                "endpoint_template": summary_endpoint_template,
+                "read": _string_list(live_validation_result.get("final_evidence_read")),
+                "complete_when": "live_user_report.report_allowed=true and live_user_report.evidence.missing_evidence=[] and live_user_report.blockers=[]",
+            },
+        },
+        "report_contract": {
+            "final_report_field": "live_user_report",
+            "audit_report_fields": ["seedbox_live_validation_completion_report", "live_completion_gate", "closure_summary", "qbit_enforcement_summary", "policy_execution_report"],
+            "complete_when": _string_list(live_validation_result.get("complete_when")),
+            "stop_when": _string_list(live_validation_result.get("stop_when")),
+            "must_not_report_complete_until": ["live_user_report.report_allowed=true", "seedbox_live_validation_completion_report.ready_for_user_report=true"],
+        },
+        "blockers": blockers,
+        "next_actions": _summary_check_live_submission_package_next_actions(ready, blockers),
+        "safety": {
+            "mutates_state": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "live_upload": False,
+            "submit_requires_separate_call": True,
+            "requires_accept_rules": bool(request and request.get("accept_rules") is True),
+            "requires_confirm_upload": bool(request and request.get("confirm_upload") is True),
+        },
+    }
+
+
+def _summary_check_live_submission_curl(endpoint: str, request: dict[str, Any]) -> str:
+    payload = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
+    return f"curl -fsS -X POST http://127.0.0.1:8080{endpoint} -H 'Content-Type: application/json' -H 'Authorization: Bearer <PTCLI_API_TOKEN>' --data-raw '{payload}'"
+
+
+def _summary_check_live_submission_package_next_actions(ready: bool, blockers: list[str]) -> list[str]:
+    if ready and not blockers:
+        return ["POST live_submission_package.submit.request to live_submission_package.submit.endpoint, then poll after_submit.poll.endpoint_template with the returned job_id."]
+    if blockers:
+        return ["Resolve live_submission_package.blockers before submitting any live check-and-submit request."]
+    return ["Rerun summary_check after doctor writes a live-safe summary with a check-and-submit request."]
 
 
 def _summary_check_live_validation_result_next_actions(live_safe: bool, has_submit_request: bool, blockers: list[str]) -> list[str]:
@@ -21175,12 +21261,16 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
 
 def _summary_check_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "summary_file", "summary_kind", "schema_version_ok", "kind_supported", "automation_action", "automation_handoff", "readiness_summary", "doctor_result_handoff", "live_validation_result", "service", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "summary_file", "summary_kind", "schema_version_ok", "kind_supported", "automation_action", "automation_handoff", "readiness_summary", "doctor_result_handoff", "live_validation_result", "live_submission_package", "service", "blockers", "next_actions"],
         "optional_fields": ["delivery_audit"],
         "status_values": ["ok", "blocked"],
         "automation_handoff_fields": ["json", "print_next_command", "print_next_argv", "print_shell", "run_next_command"],
         "doctor_result_handoff_fields": ["ready", "live_safe_to_attempt", "summary_file", "summary_check", "next_step", "after_safe", "blockers", "next_actions"],
         "live_validation_result_fields": ["ready", "status", "summary_file", "summary_kind", "live_safe_to_attempt", "can_submit_check_and_submit", "check_and_submit_tool", "check_and_submit_endpoint", "check_and_submit_request", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "post_submit_read", "final_evidence_read", "complete_when", "stop_when", "blockers", "next_actions"],
+        "live_submission_package_fields": ["ready", "status", "summary_file", "submit", "after_submit", "report_contract", "blockers", "next_actions", "safety"],
+        "live_submission_submit_fields": ["tool", "endpoint", "method", "request", "curl", "continue_when", "stop_when"],
+        "live_submission_after_submit_fields": ["read", "status_endpoint_template", "summary_endpoint_template", "poll", "resume", "finish"],
+        "live_submission_report_contract_fields": ["final_report_field", "audit_report_fields", "complete_when", "stop_when", "must_not_report_complete_until"],
         "delivery_audit_fields": ["ready", "status", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "payload_fingerprint", "payload_ref", "summary_file", "channels", "retry", "continue_when", "stop_when", "blockers", "next_actions"],
         "readiness_summary_fields": ["ready", "flow_ready", "source_mode", "target_mode", "rules_ready", "target_upload_ready", "uploaded_seeding_ready", "daily_candidate_targets", "blockers", "next_actions"],
         "service_fields": ["read_only", "mutates_state", "endpoint", "request"],
@@ -22818,6 +22908,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "readiness_summary": {"type": ["object", "null"]},
             "doctor_result_handoff": {"type": ["object", "null"]},
             "live_validation_result": {"type": "object"},
+            "live_submission_package": {"type": "object"},
             "delivery_audit": {"type": ["object", "null"]},
             "service": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},

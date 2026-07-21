@@ -21177,6 +21177,7 @@
           "readiness_summary",
           "doctor_result_handoff",
           "live_validation_result",
+          "live_submission_package",
           "service",
           "blockers",
           "next_actions"
@@ -21225,6 +21226,41 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_submission_package_fields": [
+          "ready",
+          "status",
+          "summary_file",
+          "submit",
+          "after_submit",
+          "report_contract",
+          "blockers",
+          "next_actions",
+          "safety"
+        ],
+        "live_submission_submit_fields": [
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "curl",
+          "continue_when",
+          "stop_when"
+        ],
+        "live_submission_after_submit_fields": [
+          "read",
+          "status_endpoint_template",
+          "summary_endpoint_template",
+          "poll",
+          "resume",
+          "finish"
+        ],
+        "live_submission_report_contract_fields": [
+          "final_report_field",
+          "audit_report_fields",
+          "complete_when",
+          "stop_when",
+          "must_not_report_complete_until"
         ],
         "delivery_audit_fields": [
           "ready",
