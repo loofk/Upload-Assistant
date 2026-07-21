@@ -15415,11 +15415,11 @@ def _agent_skill_contract(public_base_url: str) -> dict[str, Any]:
                 "endpoint": "/v1/jobs/{job_id}/resume",
                 "method": "POST",
                 "required": ["job_id"],
-                "restriction": "Use only job_handoff.recommended_request or allowlisted overrides.",
+                "restriction": "Use job_control_summary.dry_run_request/recommended_request first, or fall back to job_handoff.recommended_request plus allowlisted overrides.",
             },
         },
         "mandatory_preflight": ["deployment_check", "readiness_bundle", "site_policies", "target duplicate check"],
-        "completion_evidence": ["seedbox_live_validation_completion_report.ready_for_user_report=true", "seedbox_live_validation_completion_report.missing_evidence=[]", "seedbox_live_validation_completion_report.blockers=[]", "job_handoff.action=done", "closure_summary.complete=true", "target_upload_handoff.uploaded_seeding_ready=true", "qBittorrent hash/path/size evidence present"],
+        "completion_evidence": ["seedbox_live_validation_completion_report.ready_for_user_report=true", "seedbox_live_validation_completion_report.missing_evidence=[]", "seedbox_live_validation_completion_report.blockers=[]", "job_control_summary.action=read_summary", "closure_summary.complete=true", "target_upload_handoff.uploaded_seeding_ready=true", "qBittorrent hash/path/size evidence present"],
     }
 
 
@@ -15429,10 +15429,10 @@ def _agent_instructions() -> dict[str, Any]:
         "role": "Operate ptcli as a cautious local Chinese PT retorrent assistant. Prefer structured JSON APIs and never infer success without reading the relevant handoff fields.",
         "must": [
             "Use source_url_check_and_submit for a user-provided source link plus target unless the user explicitly wants a dry run or split audit.",
-            "Read blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call.",
+            "Read job_control_summary, blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call.",
             "Ask for explicit user confirmation before setting accept_rules=true or confirm_upload=true when it was not already supplied by the user.",
             "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes.",
-            "Treat status=blocked as recoverable only when next_step or job_handoff.recommended_request names a safe tool.",
+            "Treat status=blocked as recoverable only when job_control_summary.recommended_call, next_step, or job_handoff.recommended_request names a safe tool.",
             "Report final source, target, torrent hash, content path, uploaded torrent injection, seeding wait, summary_file, and blockers.",
         ],
         "must_not": [
@@ -15655,11 +15655,11 @@ def _agent_closure_contract() -> dict[str, Any]:
     return {
         "primary_field": "closure_handoff",
         "live_validation_report_field": "seedbox_live_validation_completion_report",
-        "control_field": "job_handoff",
+        "control_field": "job_control_summary",
         "complete_when": "seedbox_live_validation_completion_report.ready_for_user_report=true",
         "never_treat_complete_when": ["seedbox_live_validation_completion_report.ready_for_user_report!=true", "seedbox_live_validation_completion_report.missing_evidence is not empty", "seedbox_live_validation_completion_report.blockers is not empty", "closure_handoff.action!=done", "closure_handoff.target.uploaded_seeding_ready=false", "closure_handoff.blockers is not empty"],
-        "next_step_source": "job_handoff when present, otherwise closure_handoff.next_step",
-        "recommended_call_fields": ["seedbox_live_validation_completion_report.recommended_call", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "recommended_tool", "recommended_endpoint", "recommended_request"],
+        "next_step_source": "job_control_summary when present, otherwise job_handoff or closure_handoff.next_step",
+        "recommended_call_fields": ["job_control_summary.recommended_call", "job_control_summary.recommended_tool", "job_control_summary.recommended_endpoint", "job_control_summary.recommended_request", "seedbox_live_validation_completion_report.recommended_call", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "recommended_tool", "recommended_endpoint", "recommended_request"],
         "actions": {
             "done": "Read get_job_summary and report the completed source/target/qBittorrent evidence.",
             "wait": "Poll get_job_status after runtime.poll_after_seconds.",
@@ -15794,6 +15794,9 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "check_submission": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
             "workflow_context": {"type": ["object", "null"]},
+            "job_control_summary": {"type": "object"},
+            "job_handoff": {"type": "object"},
+            "recovery_handoff": {"type": "object"},
             "next_command_argv": {"type": ["array", "null"], "items": {"type": "string"}},
         },
     }
@@ -15863,6 +15866,9 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "check_submission": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
             "workflow_context": {"type": ["object", "null"]},
+            "job_control_summary": {"type": "object"},
+            "job_handoff": {"type": "object"},
+            "recovery_handoff": {"type": "object"},
             "result": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
@@ -15880,7 +15886,26 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "filters": {"type": "object"},
             "status_counts": {"type": "object"},
             "queue": {"type": "object"},
-            "jobs": {"type": "array", "items": {"type": "object"}},
+            "jobs": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "job_id": {"type": "string"},
+                        "kind": {"type": "string"},
+                        "status": {"type": "string", "enum": JOB_STATUS_VALUES},
+                        "runtime": {"type": "object"},
+                        "job_control_summary": {"type": "object"},
+                        "job_handoff": {"type": "object"},
+                        "recovery_handoff": {"type": "object"},
+                        "status_endpoint": {"type": ["string", "null"]},
+                        "summary_endpoint": {"type": ["string", "null"]},
+                        "resume_endpoint": {"type": ["string", "null"]},
+                        "blockers": {"type": "array", "items": {"type": "string"}},
+                        "next_actions": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
     }

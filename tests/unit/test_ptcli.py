@@ -17999,6 +17999,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_submission_summary" in summary_schema["properties"]
     assert "source_reference" in summary_schema["properties"]
     assert "workflow_context" in summary_schema["properties"]
+    assert "job_control_summary" in summary_schema["properties"]
+    assert "job_handoff" in summary_schema["properties"]
+    assert "recovery_handoff" in summary_schema["properties"]
     job_schema = openapi["paths"]["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "interruption" in job_schema["properties"]
     assert "runtime" in job_schema["properties"]
@@ -18022,6 +18025,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_requirements" in job_schema["properties"]
     assert "resume_summary" in job_schema["properties"]
     assert "material_resolution" in job_schema["properties"]
+    assert "job_control_summary" in job_schema["properties"]
+    assert "job_handoff" in job_schema["properties"]
+    assert "recovery_handoff" in job_schema["properties"]
     assert "cancelled" in job_schema["properties"]["status"]["enum"]
     assert "cancellation" in job_schema["properties"]
     candidates_schema = openapi["paths"]["/v1/candidates/daily"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -18041,6 +18047,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "agent_decision" in schedule_jobs_schema["properties"]
     job_list_schema = openapi["paths"]["/v1/jobs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "jobs" in job_list_schema["properties"]
+    assert "job_control_summary" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "status_counts" in job_list_schema["properties"]
     assert "queue" in job_list_schema["properties"]
     preview_schema = openapi["paths"]["/v1/agent/run-preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -18072,7 +18079,7 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert blocked["recommended_tool"] == "source_url_retorrent_preflight"
     assert blocked["next_step"]["endpoint"] == "/v1/retorrent/source-url/preflight"
     assert blocked["closure_contract"]["primary_field"] == "closure_handoff"
-    assert blocked["closure_contract"]["control_field"] == "job_handoff"
+    assert blocked["closure_contract"]["control_field"] == "job_control_summary"
     assert blocked["closure_handoff_examples"]["resume"]["closure_handoff"]["recommended_tool"] == "resume_job"
 
     ready = ptcli_service.agent_run_preview_payload(
@@ -18178,10 +18185,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["tool_selection"]["manual_link_to_target"] == "source_url_check_and_submit"
     assert manifest["tool_selection"]["rules_and_rate_limits"] == "site_policies"
     assert manifest["closure_contract"]["primary_field"] == "closure_handoff"
-    assert manifest["closure_contract"]["control_field"] == "job_handoff"
+    assert manifest["closure_contract"]["control_field"] == "job_control_summary"
     assert manifest["closure_contract"]["complete_when"] == "seedbox_live_validation_completion_report.ready_for_user_report=true"
     assert manifest["closure_contract"]["live_validation_report_field"] == "seedbox_live_validation_completion_report"
-    assert manifest["closure_contract"]["next_step_source"].startswith("job_handoff")
+    assert manifest["closure_contract"]["next_step_source"].startswith("job_control_summary")
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
     assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
