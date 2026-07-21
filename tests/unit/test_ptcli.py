@@ -15994,6 +15994,17 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["delivery_handoff"]["publish_contract"]["payload_field"] == "delivery_handoff.notification_payload"
     assert payload["delivery_handoff"]["recommended_tool"] == "submit_daily_candidate_job"
     assert any("partial coverage" in action for action in payload["delivery_handoff"]["next_actions"])
+    assert payload["daily_schedule_gate"]["kind"] == "ptcli.daily_candidate_schedule_gate"
+    assert payload["daily_schedule_gate"]["ready"] is True
+    assert payload["daily_schedule_gate"]["action"] == "submit_candidate"
+    assert payload["daily_schedule_gate"]["target_count"] == 10
+    assert payload["daily_schedule_gate"]["selected_count"] == 1
+    assert payload["daily_schedule_gate"]["safe_to_submit_count"] == 1
+    assert payload["daily_schedule_gate"]["shortfall_count"] == 9
+    assert payload["daily_schedule_gate"]["target_met"] is False
+    assert payload["daily_schedule_gate"]["recommended_tool"] == "submit_daily_candidate_job"
+    assert payload["daily_schedule_gate"]["recommended_request"] == payload["schedule_digest"]["submission_handoff"]["recommended_request"]
+    assert payload["daily_schedule_gate"]["read_order"][0] == "daily_schedule_gate"
     assert payload["notification_payload"]["submit_items"][0]["submit_tool"] == "submit_daily_candidate_job"
     assert payload["agent_decision"]["decision"] == "review_candidates"
     assert payload["agent_decision"]["can_submit_any"] is True
@@ -17712,6 +17723,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "schedule_digest" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "notification_payload" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "delivery_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+    assert "daily_schedule_gate" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+    assert "daily_schedule_gate_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
+    assert "action" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_schedule_gate_fields"]
     assert "top_submit_requests" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "push_payload" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "approval_queue" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
@@ -18164,6 +18178,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "schedule_digest" in schedule_jobs_schema["properties"]
     assert "notification_payload" in schedule_jobs_schema["properties"]
     assert "delivery_handoff" in schedule_jobs_schema["properties"]
+    assert "daily_schedule_gate" in schedule_jobs_schema["properties"]
     assert "agent_decision" in schedule_jobs_schema["properties"]
     batch_status_schema = openapi["paths"]["/v1/jobs/candidates/daily/batch"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "daily_candidate_batch_summary" in batch_status_schema["properties"]
@@ -18606,6 +18621,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_control_summary" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
         assert "notification_payload" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
         assert "delivery_handoff" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+        assert "daily_schedule_gate" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+        assert "daily_schedule_gate_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
+        assert "action" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_schedule_gate_fields"]
         assert "top_submit_requests" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "push_payload" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "approval_queue" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
