@@ -1816,6 +1816,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -2105,6 +2106,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -2525,6 +2563,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -2902,6 +2945,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -3191,6 +3235,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -3611,6 +3692,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -3855,6 +3941,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -4144,6 +4231,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -4564,6 +4688,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -4808,6 +4937,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -5097,6 +5227,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -5517,6 +5684,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -5765,6 +5937,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -6054,6 +6227,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -6474,6 +6684,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -7222,6 +7437,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -7511,6 +7727,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -7931,6 +8184,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -8630,6 +8888,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -8919,6 +9178,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -9339,6 +9635,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -11848,6 +12149,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -12137,6 +12439,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -12557,6 +12896,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -12763,6 +13107,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -13052,6 +13397,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -13472,6 +13854,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -13687,6 +14074,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -13976,6 +14364,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -14396,6 +14821,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -14580,6 +15010,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -14869,6 +15300,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -15289,6 +15757,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -15534,6 +16007,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -15619,6 +16093,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -15908,6 +16383,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -16329,6 +16841,11 @@
           "blockers",
           "next_actions"
         ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
+        ],
         "completion_report_fields": [
           "complete",
           "ready_for_user_report",
@@ -16390,6 +16907,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -16668,6 +17186,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -16957,6 +17476,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -17377,6 +17933,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
@@ -17458,6 +18019,7 @@
           "qbit_enforcement_summary",
           "policy_execution_report",
           "materials_handoff",
+          "material_evidence_summary",
           "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "retorrent_stage_handoff",
@@ -17747,6 +18309,43 @@
           "recommended_inputs",
           "blockers",
           "next_actions"
+        ],
+        "material_evidence_summary_fields": [
+          "ready",
+          "status",
+          "can_prepare_upload_payload",
+          "missing_domains",
+          "missing_count",
+          "next_missing_domain",
+          "checks",
+          "checks_by_domain",
+          "metadata",
+          "description",
+          "media",
+          "target_payload",
+          "recommended_input_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "read_fields",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_evidence_check_fields": [
+          "domain",
+          "label",
+          "ready",
+          "status",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "resume_overrides",
+          "next_step"
         ],
         "metadata_prepare_handoff_fields": [
           "ready",
@@ -18167,6 +18766,11 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "closure_material_fields": [
+          "ready",
+          "blockers",
+          "evidence_summary"
         ],
         "completion_report_fields": [
           "complete",
