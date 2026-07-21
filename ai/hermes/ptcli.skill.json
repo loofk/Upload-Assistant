@@ -7439,6 +7439,7 @@
           "submitted_job",
           "status_endpoint",
           "summary_endpoint",
+          "check_and_submit_gate",
           "agent_summary",
           "blockers",
           "next_actions"
@@ -7460,6 +7461,30 @@
           "requires_before_call",
           "blockers",
           "next_step"
+        ],
+        "check_and_submit_gate_fields": [
+          "ready",
+          "action",
+          "duplicate_searched",
+          "duplicate_clear",
+          "duplicate_exists",
+          "duplicate_count",
+          "submit_ready",
+          "accept_rules",
+          "confirm_upload",
+          "job_created",
+          "job_id",
+          "status_endpoint",
+          "summary_endpoint",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "read_order",
+          "continue_when",
+          "stop_when",
+          "first_blocker",
+          "blockers",
+          "next_actions"
         ],
         "agent_summary_fields": [
           "ready",

@@ -1578,6 +1578,7 @@ def _source_url_check_and_submit_response(
 ) -> dict[str, Any]:
     duplicate_check = check_result.get("duplicate_check") if isinstance(check_result.get("duplicate_check"), dict) else {}
     ready = bool(submitted_job and not blockers)
+    gate_summary = _source_url_check_and_submit_gate_summary(duplicate_check, handoff, submitted_job, blockers)
     return {
         "kind": "ptcli.source_url_check_and_submit",
         "status": "ok" if ready else "blocked",
@@ -1591,7 +1592,62 @@ def _source_url_check_and_submit_response(
         "submitted_job": submitted_job,
         "status_endpoint": f"/v1/jobs/{submitted_job.get('job_id')}" if isinstance(submitted_job, dict) and submitted_job.get("job_id") else None,
         "summary_endpoint": f"/v1/jobs/{submitted_job.get('job_id')}/summary" if isinstance(submitted_job, dict) and submitted_job.get("job_id") else None,
+        "check_and_submit_gate": gate_summary,
         "agent_summary": _source_url_check_and_submit_agent_summary(duplicate_check, handoff, submitted_job, blockers),
+        "blockers": blockers,
+        "next_actions": _source_url_check_and_submit_next_actions(duplicate_check, handoff, submitted_job, blockers),
+    }
+
+
+def _source_url_check_and_submit_gate_summary(
+    duplicate_check: dict[str, Any],
+    handoff: dict[str, Any] | None,
+    submitted_job: dict[str, Any] | None,
+    blockers: list[str],
+) -> dict[str, Any]:
+    request = handoff.get("request") if isinstance(handoff, dict) and isinstance(handoff.get("request"), dict) else {}
+    job_id = submitted_job.get("job_id") if isinstance(submitted_job, dict) else None
+    duplicate_exists = duplicate_check.get("exists") is True
+    duplicate_searched = duplicate_check.get("searched") is True
+    submit_ready = isinstance(handoff, dict) and handoff.get("ready") is True
+    ready = bool(job_id and not blockers)
+    if ready:
+        action = "poll_job"
+        recommended_tool = "get_job_status"
+        recommended_endpoint = f"/v1/jobs/{job_id}"
+        recommended_request: dict[str, Any] | None = {"job_id": job_id}
+    elif duplicate_exists:
+        action = "stop_duplicate"
+        recommended_tool = None
+        recommended_endpoint = None
+        recommended_request = None
+    else:
+        action = "resolve_gate_blockers"
+        recommended_tool = "source_url_check_and_submit"
+        recommended_endpoint = "/v1/jobs/retorrent/from-url/check-and-submit"
+        recommended_request = request or None
+    return {
+        "kind": "ptcli.check_and_submit_gate",
+        "ready": ready,
+        "action": action,
+        "duplicate_searched": duplicate_searched,
+        "duplicate_clear": duplicate_searched and duplicate_check.get("exists") is False,
+        "duplicate_exists": duplicate_check.get("exists"),
+        "duplicate_count": duplicate_check.get("count"),
+        "submit_ready": submit_ready,
+        "accept_rules": bool(request.get("accept_rules")),
+        "confirm_upload": bool(request.get("confirm_upload")),
+        "job_created": bool(job_id),
+        "job_id": job_id,
+        "status_endpoint": f"/v1/jobs/{job_id}" if job_id else None,
+        "summary_endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
+        "recommended_tool": recommended_tool,
+        "recommended_endpoint": recommended_endpoint,
+        "recommended_request": recommended_request,
+        "read_order": ["check_and_submit_gate", "duplicate_check", "submit_if_clear_handoff", "job_id", "status_endpoint", "summary_endpoint"],
+        "continue_when": "job_id is present; poll status_endpoint until terminal, then read summary_endpoint",
+        "stop_when": "duplicate_exists=true or blockers is non-empty",
+        "first_blocker": blockers[0] if blockers else None,
         "blockers": blockers,
         "next_actions": _source_url_check_and_submit_next_actions(duplicate_check, handoff, submitted_job, blockers),
     }
@@ -15476,10 +15532,11 @@ def _source_url_preflight_response_contract() -> dict[str, Any]:
 
 def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "agent_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "check_and_submit_gate", "agent_summary", "blockers", "next_actions"],
         "status_values": ["ok", "blocked"],
         "duplicate_check_fields": ["searched", "exists", "count", "dupes"],
         "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "request", "requires_before_call", "blockers", "next_step"],
+        "check_and_submit_gate_fields": ["ready", "action", "duplicate_searched", "duplicate_clear", "duplicate_exists", "duplicate_count", "submit_ready", "accept_rules", "confirm_upload", "job_created", "job_id", "status_endpoint", "summary_endpoint", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
         "agent_summary_fields": ["ready", "duplicate_searched", "duplicate_exists", "duplicate_count", "submit_ready", "job_id", "job_status", "blocker_count"],
         "safety": ["runs_duplicate_check_before_job_creation", "stops_when_duplicate_exists", "live_upload_requires_accept_rules_and_confirm_upload"],
     }
@@ -16380,6 +16437,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "submitted_job": {"type": ["object", "null"]},
             "status_endpoint": {"type": ["string", "null"]},
             "summary_endpoint": {"type": ["string", "null"]},
+            "check_and_submit_gate": {"type": "object"},
             "agent_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
