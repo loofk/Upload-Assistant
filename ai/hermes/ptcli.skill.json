@@ -47,6 +47,140 @@
     ],
     "blocked_contract": "When rules, duplicate checks, qBittorrent evidence, or required confirmations are missing, APIs return status=blocked with blockers and next_actions."
   },
+  "skill_contract": {
+    "kind": "ptcli.agent_skill_contract",
+    "base_url": "http://127.0.0.1:8080",
+    "load_order": [
+      "GET /.well-known/ptcli-agent.json or /v1/openclaw/skill.json or /v1/hermes/skill.json",
+      "GET /v1/tools to refresh tool contracts when the service may have changed",
+      "POST /v1/deployment/check before live work",
+      "POST /v1/readiness/bundle before manual retorrent or daily candidate submission"
+    ],
+    "primary_entrypoints": {
+      "manual_source_url_retorrent": {
+        "tool": "source_url_check_and_submit",
+        "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+        "method": "POST",
+        "required": [
+          "source_url",
+          "target",
+          "accept_rules=true",
+          "confirm_upload=true"
+        ],
+        "recommended": [
+          "save_path or path",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
+        ]
+      },
+      "daily_candidate_digest": {
+        "tool": "daily_candidates_schedule_job",
+        "endpoint": "/v1/jobs/candidates/daily/schedule",
+        "method": "POST",
+        "required": [
+          "source_tracker",
+          "target"
+        ],
+        "approval_flow": "Only submit candidates through submit_daily_candidate_job after human approval and confirm_upload=true."
+      },
+      "resume": {
+        "tool": "resume_job",
+        "endpoint": "/v1/jobs/{job_id}/resume",
+        "method": "POST",
+        "required": [
+          "job_id"
+        ],
+        "restriction": "Use only job_handoff.recommended_request or allowlisted overrides."
+      }
+    },
+    "mandatory_preflight": [
+      "deployment_check",
+      "readiness_bundle",
+      "site_policies",
+      "target duplicate check"
+    ],
+    "completion_evidence": [
+      "job_handoff.action=done",
+      "closure_summary.complete=true",
+      "closure_summary.blockers=[]",
+      "target_upload_handoff.uploaded_seeding_ready=true",
+      "qBittorrent hash/path/size evidence present"
+    ]
+  },
+  "agent_instructions": {
+    "kind": "ptcli.agent_instructions",
+    "role": "Operate ptcli as a cautious local Chinese PT retorrent assistant. Prefer structured JSON APIs and never infer success without reading the relevant handoff fields.",
+    "must": [
+      "Use source_url_check_and_submit for a user-provided source link plus target unless the user explicitly wants a dry run or split audit.",
+      "Read blockers, next_actions, next_step, job_handoff, closure_handoff, and closure_summary before choosing the next call.",
+      "Ask for explicit user confirmation before setting accept_rules=true or confirm_upload=true when it was not already supplied by the user.",
+      "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes.",
+      "Treat status=blocked as recoverable only when next_step or job_handoff.recommended_request names a safe tool.",
+      "Report final source, target, torrent hash, content path, uploaded torrent injection, seeding wait, summary_file, and blockers."
+    ],
+    "must_not": [
+      "Do not upload or submit a daily candidate without confirm_upload=true.",
+      "Do not bypass site_policies, rule_obligations, policy_execution_handoff, or duplicate_check.",
+      "Do not assume rule_review_fingerprint placeholders satisfy manual review.",
+      "Do not mark a job complete from status alone; verify closure_summary and target uploaded seeding evidence.",
+      "Do not retry live upload after a duplicate, rule blocker, or missing uploaded torrent evidence unless the next_step explicitly allows recovery."
+    ],
+    "ask_user_when": [
+      "accept_rules or confirm_upload is missing for live upload",
+      "site policy config_audit reports missing_fields or placeholder_fields",
+      "a rule obligation cannot be programmatically verified",
+      "multiple target trackers are requested and the next live target is ambiguous"
+    ],
+    "reporting": {
+      "blocked": [
+        "status",
+        "blockers",
+        "next_actions",
+        "next_step",
+        "recommended_tool",
+        "recommended_request"
+      ],
+      "running": [
+        "job_id",
+        "status_endpoint",
+        "poll_after_seconds",
+        "job_handoff"
+      ],
+      "complete": [
+        "job_id",
+        "summary_file",
+        "closure_summary",
+        "qbit evidence",
+        "uploaded_torrent_hash",
+        "content_path"
+      ]
+    }
+  },
+  "tool_selection": {
+    "kind": "ptcli.agent_tool_selection",
+    "manual_link_to_target": "source_url_check_and_submit",
+    "manual_split_preflight": "source_url_retorrent_preflight",
+    "duplicate_only": "retorrent_check",
+    "deployment_or_seedbox_check": "deployment_check",
+    "all_preflight_signals": "readiness_bundle",
+    "rules_and_rate_limits": "site_policies",
+    "daily_candidates": "daily_candidates_schedule_job",
+    "submit_approved_daily_candidate": "submit_daily_candidate_job",
+    "inspect_or_poll_job": "get_job_status",
+    "read_final_job_result": "get_job_summary",
+    "resume_blocked_job": "resume_job",
+    "prepare_metadata_only": "metadata_prepare_job",
+    "prepare_screenshots_or_image_host_only": "materials_prepare_job",
+    "prepare_target_package_only": "target_package_prepare_job",
+    "upload_prepared_target_package": "target_upload_job",
+    "qbit_read_only_inspection": [
+      "qbit_inspect",
+      "qbit_match"
+    ],
+    "qbit_mutations": [
+      "qbit_inject_torrent"
+    ]
+  },
   "closure_contract": {
     "primary_field": "closure_handoff",
     "control_field": "job_handoff",
@@ -16714,9 +16848,31 @@
           "auth",
           "discovery",
           "safety",
+          "skill_contract",
+          "agent_instructions",
+          "tool_selection",
           "closure_contract",
           "tools",
           "default_workflows"
+        ],
+        "skill_contract_fields": [
+          "load_order",
+          "primary_entrypoints",
+          "mandatory_preflight",
+          "completion_evidence"
+        ],
+        "agent_instruction_fields": [
+          "role",
+          "must",
+          "must_not",
+          "ask_user_when",
+          "reporting"
+        ],
+        "tool_selection_fields": [
+          "manual_link_to_target",
+          "daily_candidates",
+          "inspect_or_poll_job",
+          "resume_blocked_job"
         ]
       },
       "safety": {

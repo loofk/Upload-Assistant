@@ -17781,6 +17781,14 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
+    assert manifest["skill_contract"]["primary_entrypoints"]["manual_source_url_retorrent"]["tool"] == "source_url_check_and_submit"
+    assert "deployment_check" in manifest["skill_contract"]["mandatory_preflight"]
+    assert "closure_summary.complete=true" in manifest["skill_contract"]["completion_evidence"]
+    assert "Ask for explicit user confirmation before setting accept_rules=true or confirm_upload=true when it was not already supplied by the user." in manifest["agent_instructions"]["must"]
+    assert "Do not bypass site_policies, rule_obligations, policy_execution_handoff, or duplicate_check." in manifest["agent_instructions"]["must_not"]
+    assert "site policy config_audit reports missing_fields or placeholder_fields" in manifest["agent_instructions"]["ask_user_when"]
+    assert manifest["tool_selection"]["manual_link_to_target"] == "source_url_check_and_submit"
+    assert manifest["tool_selection"]["rules_and_rate_limits"] == "site_policies"
     assert manifest["closure_contract"]["primary_field"] == "closure_handoff"
     assert manifest["closure_contract"]["control_field"] == "job_handoff"
     assert manifest["closure_contract"]["complete_when"] == "closure_handoff.complete=true"
@@ -17848,6 +17856,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         payload = json.loads(Path(relative_path).read_text(encoding="utf-8"))
         assert payload["schema_version"] == "ptcli.agent_manifest.v1"
         assert payload["auth"]["env"] == "PTCLI_API_TOKEN"
+        assert payload["skill_contract"]["primary_entrypoints"]["manual_source_url_retorrent"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+        assert "target duplicate check" in payload["skill_contract"]["mandatory_preflight"]
+        assert "target_upload_handoff.uploaded_seeding_ready=true" in payload["skill_contract"]["completion_evidence"]
+        assert "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes." in payload["agent_instructions"]["must"]
+        assert "Do not assume rule_review_fingerprint placeholders satisfy manual review." in payload["agent_instructions"]["must_not"]
+        assert payload["tool_selection"]["daily_candidates"] == "daily_candidates_schedule_job"
         assert payload["closure_contract"]["primary_field"] == "closure_handoff"
         assert "collect_confirmations" in payload["closure_contract"]["actions"]
         assert payload["discovery"]["openapi"].endswith("/openapi.json")
@@ -17931,6 +17945,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "job_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "job_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "recommended_tool" in tools_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+        assert "skill_contract" in tools_by_name["agent_manifest"]["response_contract"]["required_fields"]
+        assert "agent_instructions" in tools_by_name["agent_manifest"]["response_contract"]["required_fields"]
+        assert "tool_selection" in tools_by_name["agent_manifest"]["response_contract"]["required_fields"]
+        assert "completion_evidence" in tools_by_name["agent_manifest"]["response_contract"]["skill_contract_fields"]
+        assert "ask_user_when" in tools_by_name["agent_manifest"]["response_contract"]["agent_instruction_fields"]
         source_url_workflow = next(workflow for workflow in payload["default_workflows"] if workflow["name"] == "source_url_retorrent")
         assert source_url_workflow["runbook"][0]["tool"] == "source_url_retorrent_preflight"
         assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
