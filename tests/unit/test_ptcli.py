@@ -16147,6 +16147,14 @@ def test_daily_candidate_schedule_payload_normalizes_job_requests(monkeypatch) -
     assert schedule["schedule"]["time"] == "09:30"
     assert schedule["push_contract"]["items"] == "candidate_digest.push_items"
     assert schedule["submit_top_candidate_with"] == "source_url_retorrent_job"
+    handoff = payload["schedule_handoff"]
+    assert handoff["kind"] == "ptcli.daily_candidate_schedule_handoff"
+    assert handoff["ready"] is True
+    assert handoff["action"] == "create_schedule_jobs"
+    assert handoff["target_count"] == 10
+    assert handoff["api"]["create_jobs"]["endpoint"] == "/v1/jobs/candidates/daily/schedule"
+    assert handoff["api"]["first_job_request"]["source_tracker"] == "U2"
+    assert handoff["safety"]["uploads"] is False
 
 
 def test_daily_candidate_schedule_payload_reads_env(monkeypatch) -> None:
@@ -16161,6 +16169,24 @@ def test_daily_candidate_schedule_payload_reads_env(monkeypatch) -> None:
     assert payload["env"] == "PTCLI_DAILY_CANDIDATE_SCHEDULES"
     assert payload["schedules"][0]["name"] == "CHD-to-MTEAM-daily"
     assert payload["schedules"][0]["job_request"]["source_tracker"] == "CHD"
+    assert payload["schedule_handoff"]["ready"] is True
+    assert payload["schedule_handoff"]["source"] == "env"
+
+
+def test_daily_candidate_schedule_payload_exposes_env_template_when_missing(monkeypatch) -> None:
+    monkeypatch.delenv("PTCLI_DAILY_CANDIDATE_SCHEDULES", raising=False)
+
+    payload = ptcli_service.daily_candidate_schedule_payload({})
+
+    assert payload["status"] == "blocked"
+    assert payload["schedule_handoff"]["ready"] is False
+    assert payload["schedule_handoff"]["action"] == "configure_schedule"
+    assert payload["schedule_handoff"]["env_example"]["json"][0]["limit"] == 10
+    assert payload["schedule_handoff"]["env_example"]["json"][0]["confirm_upload"] is False
+    assert "PTCLI_DAILY_CANDIDATE_SCHEDULES" in payload["schedule_handoff"]["env_example"]["shell"]
+    assert payload["schedule_handoff"]["compose"]["daemon"] == "docker compose --profile daily up -d ptcli-daily-scheduler"
+    assert payload["schedule_handoff"]["api"]["inspect_schedule"]["endpoint"] == "/v1/candidates/daily/schedule"
+    assert "schedule_handoff.env_example.shell" in payload["next_actions"][0]
 
 
 def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_path) -> None:
@@ -18656,6 +18682,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
     assert tool_by_name["daily_candidates_schedule"]["method"] == "POST"
     assert "schedule_fields" in tool_by_name["daily_candidates_schedule"]["response_contract"]
+    assert "schedule_handoff" in tool_by_name["daily_candidates_schedule"]["response_contract"]["required_fields"]
+    assert "schedule_handoff_fields" in tool_by_name["daily_candidates_schedule"]["response_contract"]
+    assert "env_example" in tool_by_name["daily_candidates_schedule"]["response_contract"]["schedule_handoff_fields"]
+    assert "safety" in tool_by_name["daily_candidates_schedule"]["response_contract"]["schedule_handoff_fields"]
     assert tool_by_name["submit_daily_candidate_job"]["path"] == "/v1/jobs/candidates/{job_id}/submit"
     assert tool_by_name["submit_daily_candidate_job"]["input_schema"]["required"] == ["job_id"]
     assert "overrides" in tool_by_name["submit_daily_candidate_job"]["input_schema"]["properties"]
@@ -18975,6 +19005,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/summary/check" in openapi["paths"]
     assert "/v1/site-policies" in openapi["paths"]
     assert "/v1/site-policies/rule-review" in openapi["paths"]
+    candidate_schedule_schema = openapi["paths"]["/v1/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "schedule_handoff" in candidate_schedule_schema["properties"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent/check/{job_id}/submit" in openapi["paths"]
     assert "/v1/jobs/retorrent" in openapi["paths"]
@@ -19712,6 +19744,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
             assert key in manual_properties
             assert key in source_url_properties
         assert tools_by_name["daily_candidates_schedule"]["path"] == "/v1/candidates/daily/schedule"
+        assert "schedule_handoff" in tools_by_name["daily_candidates_schedule"]["response_contract"]["required_fields"]
+        assert "schedule_handoff_fields" in tools_by_name["daily_candidates_schedule"]["response_contract"]
         assert tools_by_name["submit_daily_candidate_job"]["path"] == "/v1/jobs/candidates/{job_id}/submit"
         assert tools_by_name["submit_daily_candidate_job"]["input_schema"]["required"] == ["job_id"]
         assert "overrides" in tools_by_name["submit_daily_candidate_job"]["input_schema"]["properties"]
@@ -20191,6 +20225,7 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     assert "- daily" in compose
     assert 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]' in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=" in env_example
+    assert '"confirm_upload":false' in env_example
     assert "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=" in env_example
     assert "PTCLI_MAX_CONCURRENT_JOBS=1" in env_example
     assert "name: ${PTCLI_DOCKER_NETWORK:-upload-assistant-ptcli}" in compose

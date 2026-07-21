@@ -2368,6 +2368,7 @@ def daily_candidate_schedule_payload(request: dict[str, Any]) -> dict[str, Any]:
             blockers.append(f"schedule[{index}]: {exc}")
     if not schedules and not blockers:
         blockers.append(f"No daily candidate schedules configured. Set {DAILY_CANDIDATE_SCHEDULE_ENV} or POST schedules.")
+    schedule_handoff = _daily_candidate_schedule_handoff(schedules, blockers, source)
     return {
         "kind": "ptcli.daily_candidate_schedule",
         "status": "ok" if schedules and not blockers else "partial" if schedules else "blocked",
@@ -2376,6 +2377,7 @@ def daily_candidate_schedule_payload(request: dict[str, Any]) -> dict[str, Any]:
         "env": DAILY_CANDIDATE_SCHEDULE_ENV,
         "count": len(schedules),
         "schedules": schedules,
+        "schedule_handoff": schedule_handoff,
         "blockers": blockers,
         "next_actions": _daily_candidate_schedule_next_actions(schedules, blockers),
     }
@@ -5844,9 +5846,77 @@ def _normalized_daily_candidate_schedule(schedule: dict[str, Any], *, index: int
     }
 
 
+def _daily_candidate_schedule_handoff(schedules: list[dict[str, Any]], blockers: list[str], source: str) -> dict[str, Any]:
+    enabled = [schedule for schedule in schedules if isinstance(schedule, dict) and schedule.get("enabled") is True and not _string_list(schedule.get("blockers"))]
+    ready = bool(enabled) and not blockers
+    sample_schedule = _daily_candidate_schedule_env_example()
+    first_schedule = enabled[0] if enabled else None
+    first_request = first_schedule.get("job_request") if isinstance(first_schedule, dict) and isinstance(first_schedule.get("job_request"), dict) else sample_schedule[0]
+    return {
+        "kind": "ptcli.daily_candidate_schedule_handoff",
+        "ready": ready,
+        "action": "create_schedule_jobs" if ready else "configure_schedule",
+        "source": source,
+        "env": DAILY_CANDIDATE_SCHEDULE_ENV,
+        "configured_count": len(schedules),
+        "enabled_count": len(enabled),
+        "target_count": int(first_request.get("limit") or DEFAULT_CANDIDATE_LIMIT),
+        "env_example": {
+            "name": DAILY_CANDIDATE_SCHEDULE_ENV,
+            "json": sample_schedule,
+            "shell": f"export {DAILY_CANDIDATE_SCHEDULE_ENV}='{json.dumps(sample_schedule, ensure_ascii=False, separators=(',', ':'))}'",
+        },
+        "compose": {
+            "one_shot": "docker compose --profile daily run --rm ptcli-daily-schedule",
+            "daemon": "docker compose --profile daily up -d ptcli-daily-scheduler",
+            "summary_file": "/Upload-Assistant/tmp/daily-candidates/ptcli-daily-schedule-summary.json",
+            "notification_files": [
+                "/Upload-Assistant/tmp/daily-candidates/ptcli-daily-candidates-notification.json",
+                "/Upload-Assistant/tmp/daily-candidates/ptcli-daily-candidates-notification.txt",
+            ],
+        },
+        "api": {
+            "inspect_schedule": {"tool": "daily_candidates_schedule", "endpoint": "/v1/candidates/daily/schedule", "method": "POST", "request": {"schedules": schedules or sample_schedule}},
+            "create_jobs": {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "request": {"schedules": schedules or sample_schedule}},
+            "first_job_request": first_request,
+        },
+        "read_order": ["schedule_handoff", "schedules", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate"],
+        "continue_when": "schedule_handoff.ready=true, then create daily candidate jobs and read schedule_digest.push_items before any submit action",
+        "stop_when": ["schedule_handoff.ready=false", "site policy gate is not ready", "candidate duplicate_check.exists=true", "confirm_upload is missing before submitting a candidate"],
+        "safety": {
+            "mutates_state": False,
+            "uploads": False,
+            "submitting_candidates_requires": ["human approval", "confirm_upload=true", "accept_rules=true", "target duplicate clear"],
+        },
+        "blockers": blockers,
+        "next_actions": _daily_candidate_schedule_handoff_next_actions(ready),
+    }
+
+
+def _daily_candidate_schedule_env_example() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "u2-to-mteam-daily",
+            "source_tracker": "U2",
+            "target": "MTEAM",
+            "limit": DEFAULT_CANDIDATE_LIMIT,
+            "time": "09:00",
+            "timezone": "Asia/Shanghai",
+            "accept_rules": True,
+            "confirm_upload": False,
+        }
+    ]
+
+
+def _daily_candidate_schedule_handoff_next_actions(ready: bool) -> list[str]:
+    if ready:
+        return ["Create schedule jobs through schedule_handoff.api.create_jobs, then read schedule_digest and delivery_handoff before publishing or submitting candidates."]
+    return ["Copy schedule_handoff.env_example.shell into .env or POST schedule_handoff.env_example.json to /v1/candidates/daily/schedule, then rerun the schedule check."]
+
+
 def _daily_candidate_schedule_next_actions(schedules: list[dict[str, Any]], blockers: list[str]) -> list[str]:
     if blockers and not schedules:
-        return [f"Set {DAILY_CANDIDATE_SCHEDULE_ENV} to a JSON array of daily candidate schedules, or POST schedules to /v1/candidates/daily/schedule."]
+        return [f"Set {DAILY_CANDIDATE_SCHEDULE_ENV} from schedule_handoff.env_example.shell, or POST schedules to /v1/candidates/daily/schedule."]
     actions = ["Create daily jobs by POSTing each enabled schedule.job_request to /v1/jobs/candidates/daily, then poll job status and read candidate_digest."]
     if any(schedule.get("enabled") is False for schedule in schedules):
         actions.append("Enable disabled schedules before expecting daily candidate output.")
@@ -17882,6 +17952,7 @@ def _deployment_daily_candidate_plan(request: dict[str, Any]) -> dict[str, Any]:
         "env": plan.get("env"),
         "count": plan.get("count", 0),
         "schedules": plan.get("schedules", []),
+        "schedule_handoff": plan.get("schedule_handoff") if isinstance(plan.get("schedule_handoff"), dict) else {},
         "blockers": _string_list(plan.get("blockers")),
         "next_actions": _string_list(plan.get("next_actions")),
     }
@@ -19207,8 +19278,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Validate and normalize daily candidate schedules into job requests that external cron, Docker, OpenClaw, or Hermes can run. This endpoint does not contact trackers or upload.",
             "input_schema": candidate_schedule_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "count", "schedules", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "count", "schedules", "schedule_handoff", "blockers", "next_actions"],
                 "schedule_fields": ["name", "enabled", "schedule", "job_endpoint", "job_request", "push_contract"],
+                "schedule_handoff_fields": ["ready", "action", "env", "configured_count", "enabled_count", "target_count", "env_example", "compose", "api", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
@@ -21397,6 +21469,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "env": {"type": "string"},
             "count": {"type": "integer"},
             "schedules": {"type": "array", "items": {"type": "object"}},
+            "schedule_handoff": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },

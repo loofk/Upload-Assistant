@@ -12258,6 +12258,7 @@
           "ok",
           "count",
           "schedules",
+          "schedule_handoff",
           "blockers",
           "next_actions"
         ],
@@ -12268,6 +12269,23 @@
           "job_endpoint",
           "job_request",
           "push_contract"
+        ],
+        "schedule_handoff_fields": [
+          "ready",
+          "action",
+          "env",
+          "configured_count",
+          "enabled_count",
+          "target_count",
+          "env_example",
+          "compose",
+          "api",
+          "read_order",
+          "continue_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
         ]
       },
       "safety": {
