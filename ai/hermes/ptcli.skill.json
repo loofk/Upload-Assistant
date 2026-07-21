@@ -25311,6 +25311,7 @@
           "seedbox_live_validation_report",
           "live_validation_repair_plan",
           "live_validation_sequence",
+          "live_execution_package",
           "next_step",
           "recommended_tool",
           "recommended_endpoint",
@@ -25513,6 +25514,35 @@
           "continue_when",
           "repeat_when",
           "stop_when"
+        ],
+        "live_execution_package_fields": [
+          "ready",
+          "status",
+          "current_action",
+          "first_blocker",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "step_count",
+          "steps",
+          "run_order",
+          "report_contract",
+          "read_order",
+          "continue_when",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_execution_report_contract_fields": [
+          "final_report_field",
+          "audit_report_fields",
+          "read_tool",
+          "complete_when",
+          "stop_when",
+          "required_fields",
+          "report_allowed_when"
         ],
         "seedbox_live_validation_plan_fields": [
           "ready",

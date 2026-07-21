@@ -930,8 +930,8 @@ def _summary_check_live_validation_result(payload: dict[str, Any], summary_file:
         "recommended_endpoint": recommended_endpoint,
         "recommended_request": recommended_request,
         "post_submit_read": ["duplicate_check", "submit_if_clear_handoff", "job_id", "status_endpoint", "summary_endpoint"],
-        "final_evidence_read": ["get_job_summary.live_completion_gate", "get_job_summary.seedbox_live_validation_completion_report", "get_job_summary.closure_summary", "get_job_summary.closure_handoff", "get_job_summary.qbit_execution_gate", "get_job_summary.qbit_enforcement_summary", "get_job_summary.policy_execution_report"],
-        "complete_when": ["doctor_result_handoff.live_safe_to_attempt=true", "source_url_check_and_submit returns job_id", "live_completion_gate.ready_for_user_report=true", "seedbox_live_validation_completion_report.ready_for_user_report=true", "seedbox_live_validation_completion_report.missing_evidence=[]", "seedbox_live_validation_completion_report.blockers=[]"],
+        "final_evidence_read": ["get_job_summary.live_user_report", "get_job_summary.live_completion_gate", "get_job_summary.seedbox_live_validation_completion_report", "get_job_summary.closure_summary", "get_job_summary.closure_handoff", "get_job_summary.qbit_execution_gate", "get_job_summary.qbit_enforcement_summary", "get_job_summary.policy_execution_report"],
+        "complete_when": ["doctor_result_handoff.live_safe_to_attempt=true", "source_url_check_and_submit returns job_id", "live_user_report.report_allowed=true", "live_user_report.evidence.missing_evidence=[]", "live_user_report.blockers=[]", "seedbox_live_validation_completion_report.ready_for_user_report=true"],
         "stop_when": ["doctor_result_handoff.live_safe_to_attempt=false", "duplicate_check.exists=true", "summary_check blockers are non-empty"],
         "blockers": blockers,
         "next_actions": _summary_check_live_validation_result_next_actions(live_safe, bool(submit_request), blockers),
@@ -940,7 +940,7 @@ def _summary_check_live_validation_result(payload: dict[str, Any], summary_file:
 
 def _summary_check_live_validation_result_next_actions(live_safe: bool, has_submit_request: bool, blockers: list[str]) -> list[str]:
     if live_safe and has_submit_request and not blockers:
-        return ["Submit live_validation_result.check_and_submit_request to source_url_check_and_submit, then poll the returned job_id until seedbox_live_validation_completion_report.ready_for_user_report=true."]
+        return ["Submit live_validation_result.check_and_submit_request to source_url_check_and_submit, then poll the returned job_id until live_user_report.report_allowed=true."]
     if live_safe and not has_submit_request:
         return ["Doctor is live-safe, but no check-and-submit request was found; rerun readiness_bundle with source and target to rebuild the manual request."]
     if blockers:
@@ -2833,6 +2833,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
     seedbox_live_validation_report = _seedbox_live_validation_service_report(seedbox_live_validation_handoff, live_validation_summary)
     live_validation_repair_plan = _seedbox_live_validation_repair_plan(seedbox_live_validation_handoff, live_validation_summary, seedbox_live_validation_report)
     live_validation_sequence = _seedbox_live_validation_sequence(seedbox_live_validation_report, live_validation_summary, live_validation_repair_plan)
+    live_execution_package = _seedbox_live_execution_package(seedbox_live_validation_report, live_validation_summary, live_validation_sequence, live_validation_repair_plan)
     return {
         "kind": "ptcli.readiness_bundle",
         "status": "ok" if live_readiness.get("ready_for_ai") else "blocked",
@@ -2850,6 +2851,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
         "seedbox_live_validation_report": seedbox_live_validation_report,
         "live_validation_repair_plan": live_validation_repair_plan,
         "live_validation_sequence": live_validation_sequence,
+        "live_execution_package": live_execution_package,
         "next_step": live_test_handoff.get("next_step"),
         "recommended_tool": live_test_handoff.get("recommended_tool"),
         "recommended_endpoint": live_test_handoff.get("recommended_endpoint"),
@@ -3415,7 +3417,7 @@ def _readiness_bundle_seedbox_live_validation_handoff(
             "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
             "method": "POST",
             "request": manual_request,
-            "continue_when": "job_id is returned; poll get_job_status then read get_job_summary.live_completion_gate",
+            "continue_when": "job_id is returned; poll get_job_status then read get_job_summary.live_user_report",
         },
         "validation_plan": validation_plan,
         "post_submit_handoff": post_submit_handoff,
@@ -3431,7 +3433,7 @@ def _readiness_bundle_seedbox_live_validation_handoff(
         }
         if ready
         else next_step,
-        "continue_when": "doctor_result_handoff.live_safe_to_attempt=true, then submit manual_job.request through source_url_check_and_submit and finish when live_completion_gate.ready_for_user_report=true",
+        "continue_when": "doctor_result_handoff.live_safe_to_attempt=true, then submit manual_job.request through source_url_check_and_submit and finish when live_user_report.report_allowed=true",
         "stop_when": "any blocker is present, duplicate_check.exists=true, or doctor_result_handoff.live_safe_to_attempt=false",
         "blockers": _string_list(live_test_handoff.get("blockers")) or _string_list(live_readiness.get("blockers")),
         "warnings": _string_list(live_test_handoff.get("warnings")) or _string_list(live_readiness.get("warnings")),
@@ -3645,8 +3647,8 @@ def _seedbox_live_validation_sequence(
             after_submit.get("poll_endpoint_template") or "/v1/jobs/{job_id}",
             "GET",
             {"job_id": "<job_id from check_and_submit>"},
-            ["status", "live_completion_gate", "recovery_handoff", "job_control_summary"],
-            "live_completion_gate.action in report_complete,resume_job,stop_duplicate,resolve_blockers",
+            ["status", "live_user_report", "live_completion_gate", "recovery_handoff", "job_control_summary"],
+            "live_user_report.report_allowed=true or live_completion_gate.action in resume_job,stop_duplicate,resolve_blockers",
             "status=failed or status=cancelled",
             action="poll",
             repeat_when="status in queued,running or live_completion_gate.action=poll_job",
@@ -3657,8 +3659,8 @@ def _seedbox_live_validation_sequence(
             f"{after_submit.get('resume_tool') or 'resume_job'} or {after_submit.get('finish_tool') or 'get_job_summary'}",
             f"{after_submit.get('resume_endpoint_template') or '/v1/jobs/{job_id}/resume'} or {after_submit.get('finish_endpoint_template') or '/v1/jobs/{job_id}/summary'}",
             "POST or GET",
-            "live_completion_gate.recommended_request, live_completion_gate.execute_request, or null for summary",
-            ["live_completion_gate", "seedbox_live_validation_completion_report", "closure_summary", "qbit_enforcement_summary", "policy_execution_report"],
+            "live_user_report.recommended_request, live_completion_gate.execute_request, or null for summary",
+            ["live_user_report", "live_completion_gate", "seedbox_live_validation_completion_report", "closure_summary", "qbit_enforcement_summary", "policy_execution_report"],
             after_submit.get("complete_when"),
             "; ".join(_string_list(after_submit.get("stop_when"))),
             action="branch_on_live_completion_gate",
@@ -3674,7 +3676,7 @@ def _seedbox_live_validation_sequence(
         "steps": steps,
         "next_step": steps[0] if ready else repair_plan.get("next_step"),
         "final_read": final_evidence.get("read_tool") or "get_job_summary",
-        "final_report_field": final_evidence.get("final_report_field") or "live_completion_gate",
+        "final_report_field": final_evidence.get("final_report_field") or "live_user_report",
         "audit_report_field": final_evidence.get("audit_report_field") or "seedbox_live_validation_completion_report",
         "complete_when": _string_list(final_evidence.get("complete_when")) or _string_list(service_report.get("complete_when")),
         "stop_when": _string_list(service_report.get("stop_when")),
@@ -3714,7 +3716,7 @@ def _live_validation_sequence_step(
 
 def _live_validation_sequence_next_actions(ready: bool, service_report: dict[str, Any], repair_plan: dict[str, Any]) -> list[str]:
     if ready:
-        return ["Execute live_validation_sequence.steps in index order; after each state change read live_completion_gate before choosing resume or final report."]
+        return ["Execute live_validation_sequence.steps in index order; after each state change read live_user_report before choosing resume or final report."]
     next_step = repair_plan.get("next_step") if isinstance(repair_plan.get("next_step"), dict) else {}
     if next_step.get("tool"):
         return [f"Repair preflight with {next_step.get('tool')}, rerun readiness_bundle, then require live_validation_sequence.ready=true."]
@@ -3722,6 +3724,57 @@ def _live_validation_sequence_next_actions(ready: bool, service_report: dict[str
     if first_blocker:
         return [f"Resolve live_validation_sequence.first_blocker: {first_blocker}."]
     return ["Inspect live_validation_sequence.blockers and live_validation_repair_plan before any live tracker action."]
+
+
+def _seedbox_live_execution_package(
+    service_report: dict[str, Any],
+    summary: dict[str, Any],
+    sequence: dict[str, Any],
+    repair_plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Single handoff for the first real seedbox live validation run."""
+    ready = sequence.get("ready") is True and summary.get("ready") is True
+    steps = sequence.get("steps") if isinstance(sequence.get("steps"), list) else []
+    next_step = sequence.get("next_step") if isinstance(sequence.get("next_step"), dict) else repair_plan.get("next_step") if isinstance(repair_plan.get("next_step"), dict) else {}
+    final_evidence = service_report.get("final_evidence") if isinstance(service_report.get("final_evidence"), dict) else {}
+    report_contract = {
+        "final_report_field": "live_user_report",
+        "audit_report_fields": ["live_completion_gate", "seedbox_live_validation_completion_report", "closure_summary", "qbit_enforcement_summary", "policy_execution_report"],
+        "read_tool": final_evidence.get("read_tool") or "get_job_summary",
+        "complete_when": _string_list(final_evidence.get("complete_when")) or ["live_user_report.report_allowed=true"],
+        "stop_when": _string_list(sequence.get("stop_when")),
+        "required_fields": _string_list(final_evidence.get("required_fields")),
+        "report_allowed_when": "live_user_report.report_allowed=true and live_user_report.evidence.missing_evidence=[] and live_user_report.blockers=[]",
+    }
+    return {
+        "kind": "ptcli.seedbox_live_execution_package",
+        "ready": ready,
+        "status": "ready_for_doctor" if ready else "blocked",
+        "current_action": sequence.get("current_action") or ("run_doctor" if ready else "repair_preflight"),
+        "first_blocker": sequence.get("first_blocker") or repair_plan.get("first_blocker") or service_report.get("first_blocker"),
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_method": next_step.get("method"),
+        "recommended_request": next_step.get("request"),
+        "step_count": len(steps),
+        "steps": steps,
+        "run_order": [str(step.get("name")) for step in steps if isinstance(step, dict) and step.get("name")],
+        "report_contract": report_contract,
+        "read_order": ["live_execution_package", "live_validation_sequence", "seedbox_live_validation_report", "live_validation_summary", "live_validation_repair_plan"],
+        "continue_when": "live_execution_package.ready=true, then execute steps in run_order until live_user_report.report_allowed=true",
+        "complete_when": ["live_user_report.report_allowed=true", "live_user_report.evidence.missing_evidence=[]", "live_user_report.blockers=[]"],
+        "stop_when": report_contract["stop_when"],
+        "blockers": _string_list(sequence.get("blockers")) or _string_list(repair_plan.get("blockers")) or _string_list(service_report.get("blockers")),
+        "next_actions": _seedbox_live_execution_package_next_actions(ready, next_step),
+    }
+
+
+def _seedbox_live_execution_package_next_actions(ready: bool, next_step: dict[str, Any]) -> list[str]:
+    if ready:
+        return ["Run live_execution_package.steps[0].request.argv, check the doctor summary, submit only if duplicate check is clear, then read live_user_report before reporting completion."]
+    if next_step.get("tool"):
+        return [f"Call {next_step.get('tool')} and rerun readiness_bundle until live_execution_package.ready=true."]
+    return ["Resolve live_execution_package.blockers before any live tracker action."]
 
 
 def _seedbox_live_validation_repair_plan(
@@ -3973,7 +4026,7 @@ def _seedbox_live_validation_report(
             "validation_report.ready=true",
             "doctor_result_handoff.live_safe_to_attempt=true",
             "source_url_check_and_submit returns job_id",
-            "final get_job_summary reports live_completion_gate.ready_for_user_report=true",
+            "final get_job_summary reports live_user_report.report_allowed=true",
             "seedbox_live_validation_completion_report.ready_for_user_report=true",
         ],
         "stop_when": ["any component.ready=false", "duplicate_check.exists=true", "doctor_result_handoff.live_safe_to_attempt=false"],
@@ -4063,8 +4116,8 @@ def _seedbox_live_validation_plan(
             "endpoint": "/v1/jobs/{job_id}/resume or /v1/jobs/{job_id}/summary",
             "method": "POST or GET",
             "request": "recovery_handoff.dry_run_request, recovery_handoff.execute_request, or null for summary",
-            "read": ["live_completion_gate", "seedbox_live_validation_completion_report", "recovery_handoff", "closure_summary", "closure_handoff", "qbit_execution_gate", "qbit_enforcement_summary", "evidence"],
-            "continue_when": "live_completion_gate.ready_for_user_report=true",
+            "read": ["live_user_report", "live_completion_gate", "seedbox_live_validation_completion_report", "recovery_handoff", "closure_summary", "closure_handoff", "qbit_execution_gate", "qbit_enforcement_summary", "evidence"],
+            "continue_when": "live_user_report.report_allowed=true",
             "repeat_when": "live_completion_gate.action in poll_job,resume_job",
             "stop_when": "live_completion_gate.action=stop_duplicate or seedbox_live_validation_completion_report.status=duplicate_stopped or recovery_handoff.blockers remain after allowed resume or live_completion_gate.blockers is non-empty",
         },
@@ -4097,11 +4150,11 @@ def _seedbox_post_submit_handoff(manual_request: dict[str, Any] | None) -> dict[
         "resume_order": ["call dry_run_request", "review command_argv and ignored_overrides", "call execute_request only after user approval", "poll child job"],
         "finish_tool": "get_job_summary",
         "finish_endpoint_template": "/v1/jobs/{job_id}/summary",
-        "final_report_field": "live_completion_gate",
-        "final_report_ready_when": "live_completion_gate.ready_for_user_report=true",
-        "complete_when": "live_completion_gate.ready_for_user_report=true and live_completion_gate.missing_evidence=[] and live_completion_gate.blockers=[]",
+        "final_report_field": "live_user_report",
+        "final_report_ready_when": "live_user_report.report_allowed=true",
+        "complete_when": "live_user_report.report_allowed=true and live_user_report.evidence.missing_evidence=[] and live_user_report.blockers=[]",
         "audit_report_field": "seedbox_live_validation_completion_report",
-        "stop_when": ["duplicate_check.exists=true", "live_completion_gate.action=stop_duplicate", "seedbox_live_validation_completion_report.status=duplicate_stopped", "recovery_handoff.action=stop", "live_completion_gate.blockers is non-empty"],
+        "stop_when": ["duplicate_check.exists=true", "live_user_report.report_allowed=false and live_user_report.report_blocked_reason=target_duplicate_exists", "live_completion_gate.action=stop_duplicate", "seedbox_live_validation_completion_report.status=duplicate_stopped", "recovery_handoff.action=stop", "live_user_report.blockers is non-empty"],
     }
 
 
@@ -4109,10 +4162,21 @@ def _seedbox_live_evidence_contract() -> dict[str, Any]:
     return {
         "kind": "ptcli.seedbox_live_evidence_contract",
         "final_read": "get_job_summary",
-        "final_report_field": "live_completion_gate",
+        "final_report_field": "live_user_report",
         "audit_report_field": "seedbox_live_validation_completion_report",
-        "complete_when": ["live_completion_gate.ready_for_user_report=true", "live_completion_gate.missing_evidence=[]", "live_completion_gate.blockers=[]", "seedbox_live_validation_completion_report.ready_for_user_report=true", "qbit_enforcement_summary.ready=true when rate limits are configured"],
+        "complete_when": ["live_user_report.ready_for_user_report=true", "live_user_report.report_allowed=true", "live_user_report.evidence.missing_evidence=[]", "live_user_report.blockers=[]", "seedbox_live_validation_completion_report.ready_for_user_report=true", "qbit_enforcement_summary.ready=true when rate limits are configured"],
         "required_fields": [
+            "live_user_report.ready_for_user_report",
+            "live_user_report.report_allowed",
+            "live_user_report.report_blocked_reason",
+            "live_user_report.source.torrent_hash",
+            "live_user_report.source.content_path",
+            "live_user_report.target.uploaded_torrent_hash",
+            "live_user_report.target.injected_torrent_hash",
+            "live_user_report.target.uploaded_seeding_ready",
+            "live_user_report.duplicate_check.clear",
+            "live_user_report.evidence.uploaded_torrent_path",
+            "live_user_report.evidence.missing_evidence",
             "live_completion_gate.ready_for_user_report",
             "live_completion_gate.status",
             "live_completion_gate.action",
@@ -18343,7 +18407,7 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
             "Manual source-link to target-site retorrent workflow",
             "partial",
             18,
-            ["source_url_check_and_submit", "retorrent_stage_handoff", "closure_handoff", "seedbox_live_validation_completion_report"],
+            ["source_url_check_and_submit", "retorrent_stage_handoff", "closure_handoff", "live_user_report", "seedbox_live_validation_completion_report"],
             blockers=["Requires real seedbox live validation before this can be marked complete."],
         ),
         _goal_progress_item(
@@ -18391,7 +18455,7 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
             "Real seedbox end-to-end live validation",
             "unverified",
             12,
-            ["seedbox_live_validation_handoff", "seedbox_live_validation_completion_report"],
+            ["readiness_bundle.live_execution_package", "live_validation_sequence", "live_user_report", "seedbox_live_validation_completion_report"],
             blockers=["No current-state evidence proves a real seedbox live run completed from source pull through uploaded torrent seeding."],
         ),
         _goal_progress_item(
@@ -18481,7 +18545,7 @@ def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str]
     next_step = _goal_progress_next_step(items, blockers)
     actions = [f"Call {next_step['tool']} at {next_step['endpoint']} and inspect its blockers/next_actions."]
     if any(item.get("id") == "seedbox_live_validation" and item.get("status") != "complete" for item in items):
-        actions.append("Collect one real U2/CHD -> MTEAM seedbox run that reaches seedbox_live_validation_completion_report.ready_for_user_report=true.")
+        actions.append("Use readiness_bundle.live_execution_package to run one real U2/CHD -> MTEAM seedbox validation until live_user_report.report_allowed=true.")
     if any(item.get("id") == "daily_candidates" and item.get("status") != "complete" for item in items):
         actions.append("Configure a daily candidate schedule and validate a 10-item candidate digest before enabling push delivery.")
     return actions
@@ -19914,7 +19978,7 @@ def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
 
 def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "seedbox_live_validation_report", "live_validation_repair_plan", "live_validation_sequence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "seedbox_live_validation_report", "live_validation_repair_plan", "live_validation_sequence", "live_execution_package", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "policy_execution_handoff", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
         "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "policy_execution_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
@@ -19926,6 +19990,8 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "live_validation_repair_category_fields": ["category", "ready", "tool", "endpoint", "method", "request", "read", "continue_when", "stop_when", "blockers", "next_actions"],
         "live_validation_sequence_fields": ["ready", "status", "current_action", "first_blocker", "steps", "next_step", "final_read", "final_report_field", "audit_report_field", "complete_when", "stop_when", "blockers", "next_actions"],
         "live_validation_sequence_step_fields": ["index", "name", "action", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
+        "live_execution_package_fields": ["ready", "status", "current_action", "first_blocker", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "step_count", "steps", "run_order", "report_contract", "read_order", "continue_when", "complete_when", "stop_when", "blockers", "next_actions"],
+        "live_execution_report_contract_fields": ["final_report_field", "audit_report_fields", "read_tool", "complete_when", "stop_when", "required_fields", "report_allowed_when"],
         "seedbox_live_validation_plan_fields": ["ready", "first_step", "steps", "required_order", "read_first"],
         "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "finish_endpoint_template", "final_report_field", "final_report_ready_when", "complete_when", "audit_report_field", "stop_when"],
         "seedbox_live_evidence_contract_fields": ["final_read", "final_report_field", "audit_report_field", "complete_when", "required_fields", "audit_notes"],
@@ -21514,6 +21580,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "live_validation_summary": {"type": "object"},
             "seedbox_live_validation_report": {"type": "object"},
             "live_validation_repair_plan": {"type": "object"},
+            "live_validation_sequence": {"type": "object"},
+            "live_execution_package": {"type": "object"},
             "next_step": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},
