@@ -273,6 +273,7 @@ class JobStore:
             "materials_handoff": _job_materials_handoff(job, summary_payload),
             "metadata_prepare_handoff": _job_metadata_prepare_handoff(job, summary_payload),
             "materials_prepare_handoff": _job_materials_prepare_handoff(job, summary_payload),
+            "retorrent_stage_handoff": _job_retorrent_stage_handoff(job, summary_payload),
             "target_package_handoff": _job_target_package_handoff(job, summary_payload),
             "target_upload_handoff": _job_target_upload_handoff(job, summary_payload),
             "closure_handoff": _job_closure_handoff(job, summary_payload),
@@ -6172,6 +6173,16 @@ def _normalized_request(request: dict[str, Any], source: dict[str, Any], target_
         "config": request.get("config"),
         "path": request.get("path") or request.get("content_path"),
         "save_path": request.get("save_path"),
+        "output_dir": request.get("output_dir"),
+        "source_torrent_file": request.get("source_torrent_file"),
+        "package_dir": request.get("package_dir"),
+        "target_output_dir": request.get("target_output_dir"),
+        "target_torrent_file": request.get("target_torrent_file"),
+        "target_torrent_output_dir": request.get("target_torrent_output_dir"),
+        "uploaded_output_dir": request.get("uploaded_output_dir"),
+        "uploaded_torrent_id": request.get("uploaded_torrent_id"),
+        "uploaded_torrent_file": request.get("uploaded_torrent_file"),
+        "uploaded_save_path": request.get("uploaded_save_path"),
         "qbit_category": request.get("qbit_category"),
         "qbit_tags": request.get("qbit_tags"),
         "qbit_upload_limit": request.get("qbit_upload_limit"),
@@ -6705,6 +6716,7 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
     candidate_submission_summary = _job_candidate_submission_summary(job, payload if isinstance(payload, dict) else None)
     candidate_execution = candidate_submission_summary.get("execution_handoff") if isinstance(candidate_submission_summary, dict) and isinstance(candidate_submission_summary.get("execution_handoff"), dict) else None
     closure_handoff = _job_closure_handoff(job, payload if isinstance(payload, dict) else None)
+    retorrent_stage_handoff = _job_retorrent_stage_handoff(job, payload if isinstance(payload, dict) else None)
     next_step = closure_handoff.get("next_step") if isinstance(closure_handoff.get("next_step"), dict) else {}
     action = str(agent_decision.get("decision") or "inspect")
     recommended_tool = agent_decision.get("next_tool")
@@ -6742,6 +6754,14 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
         recommended_request = submit_if_clear.get("request")
         continue_when = "job_id is returned"
         stop_when = ["duplicate_check.exists=true", "submit_if_clear_handoff.ready=false"]
+    elif isinstance(retorrent_stage_handoff, dict) and retorrent_stage_handoff.get("ready") is True and retorrent_stage_handoff.get("action") in {"prepare_target_package", "target_upload_closure"}:
+        action = str(retorrent_stage_handoff["action"])
+        recommended_tool = retorrent_stage_handoff.get("recommended_tool")
+        recommended_endpoint = retorrent_stage_handoff.get("recommended_endpoint")
+        recommended_method = retorrent_stage_handoff.get("recommended_method")
+        recommended_request = retorrent_stage_handoff.get("recommended_request")
+        continue_when = retorrent_stage_handoff.get("continue_when")
+        stop_when = _string_list(retorrent_stage_handoff.get("stop_when"))
     elif resume_plan.get("recommended") or resume_summary.get("recommended"):
         action = "resume"
         recommended_tool = "resume_job"
@@ -6800,6 +6820,7 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
         "resume_requirements": resume_requirements,
         "resume_execution_handoff": _job_resume_execution_handoff(job, payload if isinstance(payload, dict) else None),
         "candidate_submission_execution": candidate_execution,
+        "retorrent_stage_handoff": retorrent_stage_handoff,
         "material_input_template": candidate_execution.get("material_input_template") if isinstance(candidate_execution, dict) else None,
         "dry_run_request": dry_run_request,
         "execute_request": execute_request,
@@ -6838,6 +6859,16 @@ def _job_recovery_handoff(job: dict[str, Any], payload: dict[str, Any] | None = 
     status = str(job.get("status") or "unknown")
     runtime = _job_runtime(job)
     job_handoff = job.get("job_handoff") if isinstance(job.get("job_handoff"), dict) else {}
+    if not job_handoff:
+        stage_handoff = _job_retorrent_stage_handoff(job, payload if isinstance(payload, dict) else None)
+        if isinstance(stage_handoff, dict) and stage_handoff.get("ready") is True and stage_handoff.get("action") in {"prepare_target_package", "target_upload_closure"}:
+            job_handoff = {
+                "action": stage_handoff.get("action"),
+                "recommended_tool": stage_handoff.get("recommended_tool"),
+                "recommended_endpoint": stage_handoff.get("recommended_endpoint"),
+                "recommended_method": stage_handoff.get("recommended_method"),
+                "recommended_request": stage_handoff.get("recommended_request"),
+            }
     resume_plan = _job_resume_plan(job)
     resume_requirements = _job_resume_requirements(job, payload if isinstance(payload, dict) else None)
     resume_execution = _job_resume_execution_handoff(job, payload if isinstance(payload, dict) else None)
@@ -6862,7 +6893,7 @@ def _job_recovery_handoff(job: dict[str, Any], payload: dict[str, Any] | None = 
         "phase": phase,
         "action": action,
         "reason": reason,
-        "ready": action in {"poll", "preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit", "read_summary"},
+        "ready": action in {"poll", "preview_resume", "execute_resume", "prepare_materials", "prepare_target_package", "target_upload_closure", "repair_target_payload", "repair_qbit", "read_summary"},
         "should_poll": bool(runtime.get("should_poll")),
         "should_resume": action in {"preview_resume", "execute_resume", "prepare_materials", "repair_target_payload", "repair_qbit"},
         "resume_preview_required": action in {"preview_resume", "prepare_materials", "repair_target_payload", "repair_qbit"},
@@ -6880,6 +6911,7 @@ def _job_recovery_handoff(job: dict[str, Any], payload: dict[str, Any] | None = 
         "handoff_sources": {
             "job_handoff_action": job_handoff.get("action"),
             "resume_recommended": bool(resume_plan.get("recommended")),
+            "retorrent_stage_action": job_handoff.get("action") if job_handoff.get("action") in {"prepare_target_package", "target_upload_closure"} else None,
             "materials_ready": materials_handoff.get("ready") if isinstance(materials_handoff, dict) else None,
             "target_upload_action": target_upload_handoff.get("action") if isinstance(target_upload_handoff, dict) else None,
             "closure_action": closure_handoff.get("action") if isinstance(closure_handoff, dict) else None,
@@ -6891,6 +6923,7 @@ def _job_recovery_handoff(job: dict[str, Any], payload: dict[str, Any] | None = 
             "resume_execution_handoff",
             "resume_requirements",
             "materials_handoff",
+            "retorrent_stage_handoff",
             "target_upload_handoff",
             "closure_handoff",
             "qbit_handoff",
@@ -6915,6 +6948,9 @@ def _job_recovery_decision(
 ) -> tuple[str, str, str]:
     if runtime.get("should_poll"):
         return "poll", "runtime", "job_not_terminal"
+    stage_action = str(job_handoff.get("action") or "")
+    if stage_action in {"prepare_target_package", "target_upload_closure"} and job_handoff.get("recommended_request"):
+        return stage_action, "retorrent_stage", f"retorrent_stage.{stage_action}"
     if status == "complete":
         return "read_summary", "complete", "job_complete"
     if status == "cancelled":
@@ -6953,6 +6989,14 @@ def _job_recovery_next_step(
         return {"tool": "get_job_status", "endpoint": runtime.get("status_endpoint"), "method": "GET", "request": None, "reason": "poll_running_job"}
     if action == "read_summary":
         return {"tool": "get_job_summary", "endpoint": runtime.get("summary_endpoint"), "method": "GET", "request": None, "reason": "read_terminal_summary"}
+    if action in {"prepare_target_package", "target_upload_closure"}:
+        return {
+            "tool": job_handoff.get("recommended_tool"),
+            "endpoint": job_handoff.get("recommended_endpoint"),
+            "method": job_handoff.get("recommended_method"),
+            "request": job_handoff.get("recommended_request"),
+            "reason": action,
+        }
     if action == "prepare_materials" and isinstance(materials_handoff, dict):
         resume_handoff = materials_handoff.get("resume_handoff") if isinstance(materials_handoff.get("resume_handoff"), dict) else {}
         if resume_handoff.get("recommended_tool"):
@@ -7182,6 +7226,7 @@ def _job_list_item(job: dict[str, Any], job_lineage: dict[str, Any] | None = Non
         "materials_handoff": _job_materials_handoff(job),
         "metadata_prepare_handoff": _job_metadata_prepare_handoff(job),
         "materials_prepare_handoff": _job_materials_prepare_handoff(job),
+        "retorrent_stage_handoff": _job_retorrent_stage_handoff(job),
         "target_package_handoff": _job_target_package_handoff(job),
         "target_upload_handoff": _job_target_upload_handoff(job),
         "closure_handoff": _job_closure_handoff(job),
@@ -7254,6 +7299,7 @@ def _job_public_payload(job: dict[str, Any], job_lineage: dict[str, Any] | None 
         "materials_handoff": _job_materials_handoff(job),
         "metadata_prepare_handoff": _job_metadata_prepare_handoff(job),
         "materials_prepare_handoff": _job_materials_prepare_handoff(job),
+        "retorrent_stage_handoff": _job_retorrent_stage_handoff(job),
         "target_package_handoff": _job_target_package_handoff(job),
         "target_upload_handoff": _job_target_upload_handoff(job),
         "closure_handoff": _job_closure_handoff(job),
@@ -7824,6 +7870,299 @@ def _job_target_package_handoff(job: dict[str, Any], summary_payload: dict[str, 
         "blockers": blockers,
         "next_actions": _target_package_prepare_next_actions(ready, blockers),
     }
+
+
+def _job_retorrent_stage_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    if not _is_manual_retorrent_job(job, request):
+        return None
+    payload = summary_payload if isinstance(summary_payload, dict) else job.get("result") if isinstance(job.get("result"), dict) else {}
+    duplicate_check = _job_duplicate_check(job)
+    target_package_handoff = _job_target_package_handoff(job, payload)
+    target_upload_handoff = _job_target_upload_handoff(job, payload)
+    if isinstance(target_upload_handoff, dict) and target_upload_handoff.get("uploaded_seeding_ready") is True:
+        return {
+            "kind": "ptcli.retorrent_stage_handoff",
+            "ready": True,
+            "action": "done",
+            "reason": "uploaded_target_torrent_is_seeding",
+            "recommended_tool": "get_job_summary",
+            "recommended_endpoint": f"/v1/jobs/{job.get('job_id')}/summary" if job.get("job_id") else None,
+            "recommended_method": "GET",
+            "recommended_request": None,
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    package_dir = _retorrent_stage_package_dir(request, payload, target_package_handoff, target_upload_handoff)
+    source_info = _retorrent_stage_source_info(job, request, payload)
+    material_options = _retorrent_stage_material_options(request, payload)
+    rule_check = _retorrent_stage_rule_check(job, request, payload)
+    content_path = _retorrent_stage_content_path(request, payload)
+    qbit_evidence = _retorrent_stage_qbit_evidence(request, payload, content_path)
+    duplicate_clear = duplicate_check.get("searched") is True and duplicate_check.get("exists") is False
+    missing_confirmations = _missing_live_confirmations(request)
+    blockers = _retorrent_stage_gate_blockers(duplicate_check, duplicate_clear, missing_confirmations, rule_check)
+
+    if package_dir:
+        upload_request = _retorrent_stage_target_upload_request(request, package_dir, content_path)
+        upload_blockers = list(blockers)
+        if not upload_request.get("torrent_file") or str(upload_request.get("torrent_file")).startswith("<"):
+            upload_blockers.append("target_torrent_file.missing")
+        if not upload_request.get("uploaded_save_path"):
+            upload_blockers.append("uploaded_save_path.missing")
+        upload_blockers = list(dict.fromkeys(upload_blockers))
+        return {
+            "kind": "ptcli.retorrent_stage_handoff",
+            "ready": not upload_blockers,
+            "action": "target_upload_closure",
+            "reason": "target_package_available",
+            "source_info": source_info,
+            "package_dir": package_dir,
+            "duplicate_check": duplicate_check,
+            "rule_check": rule_check,
+            "qbit_evidence": qbit_evidence,
+            "material_options": material_options,
+            "recommended_tool": "target_upload_job",
+            "recommended_endpoint": "/v1/jobs/target/upload",
+            "recommended_method": "POST",
+            "recommended_request": upload_request,
+            "next_step": {"tool": "target_upload_job", "endpoint": "/v1/jobs/target/upload", "method": "POST", "request": upload_request, "reason": "complete_target_upload_and_seeding_closure"},
+            "continue_when": "target_upload_handoff.uploaded_seeding_ready=true and closure_summary.complete=true",
+            "stop_when": ["retorrent_stage_handoff.blockers is not empty", "confirm_upload missing", "target upload preflight fails"],
+            "blockers": upload_blockers,
+            "next_actions": _retorrent_stage_next_actions("target_upload_closure", upload_blockers),
+        }
+
+    package_request = _retorrent_stage_target_package_request(
+        job,
+        request,
+        source_info=source_info,
+        material_options=material_options,
+        duplicate_check=duplicate_check,
+        rule_check=rule_check,
+        qbit_evidence=qbit_evidence,
+        content_path=content_path,
+    )
+    package_blockers = list(dict.fromkeys(blockers + _retorrent_stage_package_blockers(package_request)))
+    return {
+        "kind": "ptcli.retorrent_stage_handoff",
+        "ready": not package_blockers,
+        "action": "prepare_target_package",
+        "reason": "target_package_missing",
+        "source_info": source_info,
+        "package_dir": None,
+        "duplicate_check": duplicate_check,
+        "rule_check": rule_check,
+        "qbit_evidence": qbit_evidence,
+        "material_options": material_options,
+        "recommended_tool": "target_package_prepare_job",
+        "recommended_endpoint": "/v1/jobs/target/package/prepare",
+        "recommended_method": "POST",
+        "recommended_request": package_request,
+        "next_step": {"tool": "target_package_prepare_job", "endpoint": "/v1/jobs/target/package/prepare", "method": "POST", "request": package_request, "reason": "prepare_target_upload_package"},
+        "continue_when": "target_package_handoff.ready=true and target_package_handoff.target_upload_request is present",
+        "stop_when": ["retorrent_stage_handoff.blockers is not empty", "duplicate_check.exists=true", "rule_check.ready=false"],
+        "blockers": package_blockers,
+        "next_actions": _retorrent_stage_next_actions("prepare_target_package", package_blockers),
+    }
+
+
+def _retorrent_stage_package_dir(request: dict[str, Any], payload: dict[str, Any], target_package_handoff: dict[str, Any] | None, target_upload_handoff: dict[str, Any] | None) -> str | None:
+    candidates = [request.get("package_dir")]
+    if isinstance(target_package_handoff, dict):
+        candidates.extend([target_package_handoff.get("package_dir"), _nested_dict(target_package_handoff, "target_upload_request").get("package_dir")])
+    if isinstance(target_upload_handoff, dict):
+        candidates.extend([_nested_dict(target_upload_handoff, "recommended_request").get("package_dir"), _nested_dict(target_upload_handoff, "next_step").get("request", {}).get("package_dir") if isinstance(_nested_dict(target_upload_handoff, "next_step").get("request"), dict) else None])
+    candidates.extend(payload.get(key) for key in ("package_dir", "target_package_dir"))
+    package = payload.get("package") if isinstance(payload.get("package"), dict) else {}
+    candidates.append(package.get("package_dir"))
+    for value in candidates:
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def _retorrent_stage_source_info(job: dict[str, Any], request: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    source_info: dict[str, Any] = {}
+    for candidate in (
+        payload.get("source_info") if isinstance(payload.get("source_info"), dict) else None,
+        payload.get("source") if isinstance(payload.get("source"), dict) else None,
+        request.get("source_info") if isinstance(request.get("source_info"), dict) else None,
+        _job_source_reference(job),
+    ):
+        if isinstance(candidate, dict):
+            source_info.update({key: value for key, value in candidate.items() if value not in (None, "", [], {})})
+    source_reference = _job_source_reference(job)
+    if isinstance(source_reference, dict):
+        if source_reference.get("tracker") and not source_info.get("tracker"):
+            source_info["tracker"] = source_reference["tracker"]
+        if source_reference.get("source_id") and not source_info.get("torrent_id"):
+            source_info["torrent_id"] = source_reference["source_id"]
+    for key in ("imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url"):
+        value = request.get(key) or payload.get(key)
+        if value not in (None, "") and not source_info.get(key):
+            source_info[key] = value
+    return source_info
+
+
+def _retorrent_stage_material_options(request: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    for candidate in (
+        payload.get("material_options") if isinstance(payload.get("material_options"), dict) else None,
+        request.get("metadata_options") if isinstance(request.get("metadata_options"), dict) else None,
+        request.get("material_options") if isinstance(request.get("material_options"), dict) else None,
+        _request_material_options(request),
+    ):
+        if isinstance(candidate, dict):
+            options.update({key: value for key, value in candidate.items() if value not in (None, "", [], {})})
+    return options
+
+
+def _retorrent_stage_rule_check(job: dict[str, Any], request: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    for candidate in (payload.get("rule_check"), request.get("rule_check")):
+        if isinstance(candidate, dict) and candidate:
+            return candidate
+    policy_handoff = _job_policy_handoff(job)
+    obligations = []
+    if isinstance(policy_handoff, dict):
+        if isinstance(policy_handoff.get("source"), dict):
+            obligations.append(policy_handoff["source"])
+        obligations.extend(item for item in policy_handoff.get("targets", []) if isinstance(item, dict))
+    blockers = []
+    if request.get("accept_rules") is not True:
+        blockers.append("accept_rules.missing")
+    if not obligations:
+        blockers.append("rule_check.missing")
+    ready = bool(request.get("accept_rules") is True and obligations and (not isinstance(policy_handoff, dict) or policy_handoff.get("ready") is not False))
+    return {"ready": ready, "source": "retorrent_stage_handoff", "rule_obligations": obligations, "blockers": blockers}
+
+
+def _retorrent_stage_content_path(request: dict[str, Any], payload: dict[str, Any]) -> str | None:
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    closure = payload.get("closure") if isinstance(payload.get("closure"), dict) else {}
+    for value in (
+        request.get("path"),
+        request.get("content_path"),
+        request.get("uploaded_save_path"),
+        evidence.get("content_path"),
+        evidence.get("path"),
+        closure.get("content_path"),
+    ):
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def _retorrent_stage_qbit_evidence(request: dict[str, Any], payload: dict[str, Any], content_path: str | None) -> dict[str, Any]:
+    evidence = request.get("qbit_evidence") if isinstance(request.get("qbit_evidence"), dict) else {}
+    payload_evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    closure_handoff = payload.get("closure_handoff") if isinstance(payload.get("closure_handoff"), dict) else {}
+    source = closure_handoff.get("source") if isinstance(closure_handoff.get("source"), dict) else {}
+    merged = {**payload_evidence, **evidence}
+    for key in ("hash", "torrent_hash", "infohash"):
+        if source.get(key) and not merged.get(key):
+            merged[key] = source[key]
+    if content_path and not merged.get("content_path"):
+        merged["content_path"] = content_path
+    return {key: value for key, value in merged.items() if value not in (None, "", [], {})}
+
+
+def _retorrent_stage_gate_blockers(duplicate_check: dict[str, Any], duplicate_clear: bool, missing_confirmations: list[str], rule_check: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    if duplicate_check.get("exists") is True:
+        blockers.append("duplicate_check.exists")
+    elif not duplicate_clear:
+        blockers.append("duplicate_check.not_clear")
+    blockers.extend(f"missing_confirmation.{item}" for item in missing_confirmations)
+    if rule_check.get("ready") is not True:
+        blockers.append("rule_check.not_ready")
+    blockers.extend(_string_list(rule_check.get("blockers")))
+    return list(dict.fromkeys(blockers))
+
+
+def _retorrent_stage_target_package_request(
+    job: dict[str, Any],
+    request: dict[str, Any],
+    *,
+    source_info: dict[str, Any],
+    material_options: dict[str, Any],
+    duplicate_check: dict[str, Any],
+    rule_check: dict[str, Any],
+    qbit_evidence: dict[str, Any],
+    content_path: str | None,
+) -> dict[str, Any]:
+    target = request.get("target") or request.get("target_tracker") or request.get("target_trackers") or "MTEAM"
+    package_request = {
+        "parent_job_id": job.get("job_id"),
+        "source_info": source_info,
+        "target": target,
+        "path": content_path,
+        "content_path": content_path,
+        "output_dir": request.get("target_output_dir") or request.get("output_dir") or "./tmp/target",
+        "package_dir": request.get("package_dir"),
+        "target_torrent_file": request.get("target_torrent_file") or request.get("torrent_file"),
+        "accept_rules": request.get("accept_rules") is True,
+        "write_payload": True,
+        "material_options": material_options,
+        "duplicate_check": duplicate_check,
+        "rule_check": rule_check,
+        "qbit_evidence": qbit_evidence,
+        "content_verified": bool(content_path or qbit_evidence),
+    }
+    for key in ("config", "base_dir"):
+        if request.get(key) not in (None, ""):
+            package_request[key] = request[key]
+    return {key: value for key, value in package_request.items() if value not in (None, "", [], {})}
+
+
+def _retorrent_stage_package_blockers(package_request: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    source_info = package_request.get("source_info") if isinstance(package_request.get("source_info"), dict) else {}
+    duplicate_check = package_request.get("duplicate_check") if isinstance(package_request.get("duplicate_check"), dict) else {}
+    rule_check = package_request.get("rule_check") if isinstance(package_request.get("rule_check"), dict) else {}
+    if not source_info:
+        blockers.append("source_info.missing")
+    if not package_request.get("path"):
+        blockers.append("content_path.missing")
+    if duplicate_check.get("searched") is not True or duplicate_check.get("exists") is not False:
+        blockers.append("duplicate_check.not_clear")
+    if rule_check.get("ready") is not True:
+        blockers.append("rule_check.not_ready")
+    return blockers
+
+
+def _retorrent_stage_target_upload_request(request: dict[str, Any], package_dir: str, content_path: str | None) -> dict[str, Any]:
+    upload_request = {
+        "package_dir": package_dir,
+        "torrent_file": request.get("target_torrent_file") or request.get("torrent_file"),
+        "execute": True,
+        "accept_rules": request.get("accept_rules") is True,
+        "confirm_upload": request.get("confirm_upload") is True,
+        "download_uploaded_torrent": True,
+        "inject_uploaded_torrent": True,
+        "wait_uploaded_complete": True,
+        "uploaded_save_path": request.get("uploaded_save_path") or content_path or request.get("path") or request.get("content_path"),
+        "uploaded_qbit_category": request.get("uploaded_qbit_category"),
+        "uploaded_qbit_tags": request.get("uploaded_qbit_tags"),
+        "uploaded_qbit_upload_limit": request.get("uploaded_qbit_upload_limit"),
+        "uploaded_qbit_download_limit": request.get("uploaded_qbit_download_limit"),
+        "write_summary": True,
+    }
+    for key in ("config", "base_dir", "uploaded_output_dir"):
+        if request.get(key) not in (None, ""):
+            upload_request[key] = request[key]
+    return {key: value for key, value in upload_request.items() if value not in (None, "", [], {})}
+
+
+def _retorrent_stage_next_actions(action: str, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve retorrent_stage_handoff.blockers before continuing to the next target stage."]
+    if action == "prepare_target_package":
+        return ["POST retorrent_stage_handoff.recommended_request to /v1/jobs/target/package/prepare, then poll the returned job_id."]
+    if action == "target_upload_closure":
+        return ["POST retorrent_stage_handoff.recommended_request to /v1/jobs/target/upload, then poll until uploaded_seeding_ready=true."]
+    return []
 
 
 def _job_materials_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -10069,6 +10408,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     materials_handoff = _job_materials_handoff(job)
     metadata_prepare_handoff = _job_metadata_prepare_handoff(job)
     materials_prepare_handoff = _job_materials_prepare_handoff(job)
+    retorrent_stage_handoff = _job_retorrent_stage_handoff(job)
     target_package_handoff = _job_target_package_handoff(job)
     target_upload_handoff = _job_target_upload_handoff(job)
     closure_handoff = _job_closure_handoff(job)
@@ -10120,6 +10460,10 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
             decision = "target_upload_followup_required"
             stop_reason = None
             recommended_action = "Follow target_upload_handoff.next_step until uploaded target torrent download, qBittorrent injection, and wait evidence are complete."
+    elif isinstance(retorrent_stage_handoff, dict) and retorrent_stage_handoff.get("ready") is True and retorrent_stage_handoff.get("action") in {"prepare_target_package", "target_upload_closure"}:
+        decision = str(retorrent_stage_handoff["action"])
+        stop_reason = None
+        recommended_action = f"Use retorrent_stage_handoff.recommended_request with {retorrent_stage_handoff.get('recommended_tool')} after reviewing blockers and site rules."
     elif duplicate_exists:
         decision = "stop"
         stop_reason = "target_duplicate_exists"
@@ -10177,6 +10521,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "materials_handoff": materials_handoff,
         "metadata_prepare_handoff": metadata_prepare_handoff,
         "materials_prepare_handoff": materials_prepare_handoff,
+        "retorrent_stage_handoff": retorrent_stage_handoff,
         "target_package_handoff": target_package_handoff,
         "target_upload_handoff": target_upload_handoff,
         "closure_handoff": closure_handoff,
@@ -11675,7 +12020,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -12527,12 +12872,12 @@ def _target_upload_service_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
-        "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
+        "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
         "recovery_handoff_fields": ["phase", "action", "reason", "ready", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "gates", "handoff_sources", "read_fields", "continue_when", "stop_when", "blockers", "next_actions"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],
@@ -12546,6 +12891,7 @@ def _job_response_contract() -> dict[str, Any]:
         "materials_handoff_fields": ["ready", "can_prepare_upload_payload", "metadata", "materials", "target_preflight", "material_plan", "resume_request_template", "resume_handoff", "recommended_inputs", "blockers", "next_actions"],
         "metadata_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "parent_job_id", "material_options", "material_evidence", "metadata_prepare_handoff", "resume_request", "execute_request", "source_url_check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
         "materials_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "parent_job_id", "material_options", "material_evidence", "resume_handoff", "resume_request", "execute_request", "source_url_check_and_submit_handoff", "source_url_check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
+        "retorrent_stage_handoff_fields": ["ready", "action", "reason", "source_info", "package_dir", "duplicate_check", "rule_check", "qbit_evidence", "material_options", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
         "target_package_handoff_fields": ["ready", "job_id", "status", "package_dir", "description_draft", "target_upload_preflight_status", "target_upload_request", "resume_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
         "material_plan_fields": ["ready", "missing", "next_item", "items"],
         "material_plan_item_fields": ["key", "label", "ready", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "next_step", "resume_overrides"],
@@ -12562,7 +12908,7 @@ def _job_response_contract() -> dict[str, Any]:
         "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
         "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "execution_state", "execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
         "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "policy_execution_ready", "execution_state", "execution_handoff", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
-        "agent_candidate_submission_fields": ["candidate_submission", "candidate_submission_summary", "candidate_submission_handoff", "candidate_submission_execution", "material_input_template"],
+        "agent_candidate_submission_fields": ["candidate_submission", "candidate_submission_summary", "candidate_submission_handoff", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template"],
         "candidate_submission_execution_handoff_fields": ["state", "reason", "status", "ready_for_live", "should_poll", "should_resume", "should_stop", "manual_action", "closure_action", "policy_execution_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "material_input_template", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_submission_material_input_template_fields": ["ready", "recommended_input_keys", "recommended_inputs", "missing", "next_item", "accepted_override_keys", "resume_request_template", "dry_run_request", "execute_request", "staged_requests", "examples_by_key", "continue_when", "stop_when"],
         "check_submission_fields": ["check_job_id", "check_status", "check_kind", "check_summary_file", "duplicate_check", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides"],
@@ -12598,7 +12944,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -13079,6 +13425,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "materials_handoff": {"type": ["object", "null"]},
             "metadata_prepare_handoff": {"type": ["object", "null"]},
             "materials_prepare_handoff": {"type": ["object", "null"]},
+            "retorrent_stage_handoff": {"type": ["object", "null"]},
             "target_package_handoff": {"type": ["object", "null"]},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},
@@ -13143,6 +13490,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "materials_handoff": {"type": ["object", "null"]},
             "metadata_prepare_handoff": {"type": ["object", "null"]},
             "materials_prepare_handoff": {"type": ["object", "null"]},
+            "retorrent_stage_handoff": {"type": ["object", "null"]},
             "target_package_handoff": {"type": ["object", "null"]},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},

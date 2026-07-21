@@ -10728,7 +10728,7 @@ def test_service_materials_prepare_job_exposes_handoff(monkeypatch, tmp_path) ->
 def test_service_materials_prepare_handoff_can_submit_fresh_source_url() -> None:
     payload = ptcli_service._materials_prepare_handoff(
         {
-            "source_url": "https://chdbits.co/details.php?id=12345",
+            "source_url": "https://ptchdbits.co/details.php?id=12345",
             "target": "MTEAM",
             "accept_rules": True,
             "confirm_upload": True,
@@ -10745,8 +10745,8 @@ def test_service_materials_prepare_handoff_can_submit_fresh_source_url() -> None
     assert payload["next_step"]["tool"] == "source_url_check_and_submit"
     assert payload["source_url_check_and_submit_handoff"]["ready"] is True
     assert payload["source_url_check_and_submit_request"] == {
-        "source_url": "https://chdbits.co/details.php?id=12345",
-        "source": "https://chdbits.co/details.php?id=12345",
+        "source_url": "https://ptchdbits.co/details.php?id=12345",
+        "source": "https://ptchdbits.co/details.php?id=12345",
         "target": "MTEAM",
         "accept_rules": True,
         "confirm_upload": True,
@@ -14352,6 +14352,113 @@ def test_source_url_retorrent_job_handoff_stops_on_duplicate(monkeypatch, tmp_pa
     assert "Do not upload" in job["manual_retorrent_handoff"]["next_actions"][0]
 
 
+def test_source_url_retorrent_job_handoff_prepares_target_package(monkeypatch, tmp_path) -> None:
+    async def fake_retorrent(_request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["target package required."],
+            "next_actions": ["Prepare the MTEAM package."],
+            "source_info": {"tracker": "U2", "torrent_id": "60635", "name": "Example Movie", "imdb_id": "tt1234567", "tmdb_id": "999", "douban_id": "12345678"},
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+            "rule_check": {"ready": True, "rule_obligations": [{"tracker": "U2", "scope": "download_and_retorrent"}, {"tracker": "MTEAM", "scope": "upload_and_seed"}], "blockers": []},
+            "evidence": {"torrent_hash": "abc123", "content_path": "/downloads/Example.Movie.2024"},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_source_url_retorrent_job(
+        store,
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "path": "/downloads/Example.Movie.2024",
+            "target_torrent_file": "/tmp/exported/mteam-safe.torrent",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "mediainfo_file": "/tmp/materials/MI_FULL_00.txt",
+            "screenshot_files": ["/tmp/materials/screen-01.png"],
+            "image_host_file": "/tmp/materials/image-host-uploads.json",
+        },
+    )
+
+    handoff = job["retorrent_stage_handoff"]
+    assert handoff["ready"] is True
+    assert handoff["action"] == "prepare_target_package"
+    assert handoff["recommended_tool"] == "target_package_prepare_job"
+    assert handoff["recommended_endpoint"] == "/v1/jobs/target/package/prepare"
+    assert handoff["source_info"]["tracker"] == "U2"
+    assert handoff["source_info"]["torrent_id"] == "60635"
+    assert handoff["duplicate_check"]["searched"] is True
+    assert handoff["rule_check"]["ready"] is True
+    assert handoff["qbit_evidence"]["content_path"] == "/downloads/Example.Movie.2024"
+    request = handoff["recommended_request"]
+    assert request["parent_job_id"] == job["job_id"]
+    assert request["target"] == "MTEAM"
+    assert request["path"] == "/downloads/Example.Movie.2024"
+    assert request["target_torrent_file"] == "/tmp/exported/mteam-safe.torrent"
+    assert request["material_options"]["mediainfo_file"] == "/tmp/materials/MI_FULL_00.txt"
+    assert request["material_options"]["screenshot_files"] == ["/tmp/materials/screen-01.png"]
+    assert job["job_handoff"]["action"] == "prepare_target_package"
+    assert job["job_handoff"]["recommended_request"] == request
+    assert job["recovery_handoff"]["action"] == "prepare_target_package"
+    assert store.summary(job["job_id"])["retorrent_stage_handoff"]["recommended_request"] == request
+
+
+def test_source_url_retorrent_job_handoff_uploads_existing_target_package(monkeypatch, tmp_path) -> None:
+    async def fake_retorrent(_request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "blockers": ["target upload closure required."],
+            "next_actions": ["Upload and inject the target torrent."],
+            "source_info": {"tracker": "CHD", "torrent_id": "12345", "name": "Example Movie"},
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+            "rule_check": {"ready": True, "rule_obligations": [{"tracker": "CHD", "scope": "download_and_retorrent"}, {"tracker": "MTEAM", "scope": "upload_and_seed"}], "blockers": []},
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_source_url_retorrent_job(
+        store,
+        {
+            "source_url": "https://ptchdbits.co/details.php?id=12345",
+            "target": "MTEAM",
+            "path": "/downloads/Example.Movie.2024",
+            "package_dir": "/tmp/target/CHD-12345-to-MTEAM",
+            "target_torrent_file": "/tmp/exported/mteam-safe.torrent",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "uploaded_qbit_category": "MTEAM",
+            "uploaded_qbit_tags": "retorrent",
+        },
+    )
+
+    handoff = job["retorrent_stage_handoff"]
+    assert handoff["ready"] is True
+    assert handoff["action"] == "target_upload_closure"
+    assert handoff["recommended_tool"] == "target_upload_job"
+    assert handoff["recommended_endpoint"] == "/v1/jobs/target/upload"
+    request = handoff["recommended_request"]
+    assert request["package_dir"] == "/tmp/target/CHD-12345-to-MTEAM"
+    assert request["torrent_file"] == "/tmp/exported/mteam-safe.torrent"
+    assert request["execute"] is True
+    assert request["accept_rules"] is True
+    assert request["confirm_upload"] is True
+    assert request["download_uploaded_torrent"] is True
+    assert request["inject_uploaded_torrent"] is True
+    assert request["wait_uploaded_complete"] is True
+    assert request["uploaded_save_path"] == "/downloads/Example.Movie.2024"
+    assert request["uploaded_qbit_category"] == "MTEAM"
+    assert request["uploaded_qbit_tags"] == "retorrent"
+    assert job["job_handoff"]["action"] == "target_upload_closure"
+    assert job["recovery_handoff"]["recommended_request"] == request
+
+
 class _NonClosingBytesIO(io.BytesIO):
     def close(self) -> None:
         self.flush()
@@ -16878,21 +16985,26 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "requires_injection_evidence" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_enforcement_role_fields"]
     assert "materials_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_prepare_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "retorrent_stage_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_prepare_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "retorrent_stage_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "materials_prepare_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "retorrent_stage_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "materials_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "materials_prepare_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "retorrent_stage_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
     assert "resume_request_template" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
     assert "resume_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_handoff_fields"]
     assert "resume_overrides" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_plan_item_fields"]
     assert "materials_resume_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "retorrent_stage_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "target_package_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "dry_run_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
     assert "staged_requests" in tool_by_name["manual_retorrent_job"]["response_contract"]["materials_resume_handoff_fields"]
@@ -17327,6 +17439,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "submit_if_clear_handoff" in summary_schema["properties"]
     assert "policy_handoff" in summary_schema["properties"]
     assert "metadata_prepare_handoff" in summary_schema["properties"]
+    assert "retorrent_stage_handoff" in summary_schema["properties"]
     site_policy_schema = openapi["paths"]["/v1/site-policies"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_gap_summary" in site_policy_schema["properties"]
     assert "policy_execution_summary" in site_policy_schema["properties"]
@@ -17446,6 +17559,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_handoff" in job_schema["properties"]
     assert "qbit_enforcement_summary" in job_schema["properties"]
     assert "materials_handoff" in job_schema["properties"]
+    assert "retorrent_stage_handoff" in job_schema["properties"]
     assert "target_package_handoff" in job_schema["properties"]
     assert "target_upload_handoff" in job_schema["properties"]
     assert "closure_handoff" in job_schema["properties"]
