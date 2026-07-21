@@ -11057,10 +11057,51 @@ async def test_service_target_upload_returns_closure_handoff(monkeypatch, tmp_pa
     assert payload["summary_file"] == str(summary_file)
     assert payload["command_argv"][:5] == ["ptcli", "target-upload", "--package-dir", "/tmp/package", "--torrent-file"]
     assert "--download-uploaded-torrent" in payload["command_argv"]
+    assert payload["target_upload_service_gate"]["ready"] is True
+    assert payload["target_upload_service_gate"]["uploaded_torrent_closure_requested"] == {
+        "download_uploaded_torrent": True,
+        "inject_uploaded_torrent": True,
+        "wait_uploaded_complete": True,
+    }
     assert payload["target_upload_diagnostics"]["ready_for_uploaded_seeding"] is True
     assert payload["target_upload_handoff"]["ready"] is True
     assert payload["target_upload_handoff"]["uploaded_seeding_ready"] is True
     assert payload["safety"]["does_not_skip_duplicate_check"] is True
+
+
+@pytest.mark.asyncio
+async def test_service_target_upload_blocks_live_without_uploaded_torrent_closure(monkeypatch) -> None:
+    called = False
+
+    async def fail_target_upload_payload(_args):
+        nonlocal called
+        called = True
+        raise AssertionError("target upload CLI payload must not run without uploaded torrent closure flags")
+
+    monkeypatch.setattr(ptcli_service, "cli_target_upload_payload", fail_target_upload_payload)
+
+    payload = await ptcli_service.target_upload_service_payload(
+        {
+            "package_dir": "/tmp/package",
+            "torrent_file": "/tmp/mteam-safe.torrent",
+            "execute": True,
+            "confirm_upload": True,
+        }
+    )
+
+    assert called is False
+    assert payload["status"] == "blocked"
+    assert payload["ok"] is False
+    assert payload["mutates_network"] is False
+    assert payload["target_upload_service_gate"]["ready"] is False
+    assert payload["target_upload_service_gate"]["uploaded_torrent_closure_requested"] == {
+        "download_uploaded_torrent": False,
+        "inject_uploaded_torrent": False,
+        "wait_uploaded_complete": False,
+    }
+    assert "download_uploaded_torrent=true is required to close uploaded target torrent evidence." in payload["blockers"]
+    assert "inject_uploaded_torrent=true is required to seed the uploaded target torrent." in payload["blockers"]
+    assert "wait_uploaded_complete=true is required to verify uploaded target torrent seeding." in payload["blockers"]
 
 
 def test_service_target_upload_job_exposes_handoff(monkeypatch, tmp_path) -> None:
@@ -17979,12 +18020,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "target_upload_preflight" in tool_by_name["target_upload_preflight"]["response_contract"]["required_fields"]
     assert tool_by_name["target_upload"]["path"] == "/v1/target/upload"
     assert tool_by_name["target_upload"]["input_schema"]["required"] == ["package_dir"]
+    assert "target_upload_service_gate" in tool_by_name["target_upload"]["response_contract"]["required_fields"]
+    assert "target_upload_service_gate_fields" in tool_by_name["target_upload"]["response_contract"]
     assert "target_upload_handoff" in tool_by_name["target_upload"]["response_contract"]["required_fields"]
     assert "download_uploaded_torrent" in tool_by_name["target_upload"]["input_schema"]["properties"]
     assert tool_by_name["target_package_prepare_job"]["path"] == "/v1/jobs/target/package/prepare"
     assert "target_package_handoff" in tool_by_name["target_package_prepare_job"]["response_contract"]["required_fields"]
     assert tool_by_name["target_package_prepare_job"]["workflow_hints"]["handoff_field"] == "target_package_handoff"
     assert tool_by_name["target_upload_job"]["path"] == "/v1/jobs/target/upload"
+    assert "target_upload_service_gate" in tool_by_name["target_upload_job"]["response_contract"]["required_fields"]
     assert "target_upload_handoff" in tool_by_name["target_upload_job"]["response_contract"]["required_fields"]
     assert tool_by_name["target_upload_job"]["workflow_hints"]["handoff_field"] == "target_upload_handoff"
     assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
@@ -18866,6 +18910,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "download_uploaded_torrent" in target_upload_request_schema["properties"]
     assert "wait_uploaded_complete" in target_upload_request_schema["properties"]
     target_upload_schema = openapi["paths"]["/v1/target/upload"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "target_upload_service_gate" in target_upload_schema["properties"]
     assert "target_upload_diagnostics" in target_upload_schema["properties"]
     assert "target_upload_handoff" in target_upload_schema["properties"]
     assert openapi["paths"]["/v1/jobs/materials/prepare"]["post"]["operationId"] == "createPtcliMaterialsPrepareJob"
@@ -18879,6 +18924,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "target_package_handoff" in target_package_job_schema["properties"]
     assert openapi["paths"]["/v1/jobs/target/upload"]["post"]["operationId"] == "createPtcliTargetUploadJob"
     target_upload_job_schema = openapi["paths"]["/v1/jobs/target/upload"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "target_upload_service_gate" in target_upload_job_schema["properties"]
     assert "target_upload_handoff" in target_upload_job_schema["properties"]
     summary_check_request_schema = openapi["paths"]["/v1/summary/check"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert summary_check_request_schema["required"] == ["summary_file"]
@@ -18897,6 +18943,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_evidence_summary" in summary_schema["properties"]
     assert "material_gap_summary" in summary_schema["properties"]
     assert "target_package_handoff" in summary_schema["properties"]
+    assert "target_upload_service_gate" in summary_schema["properties"]
     assert "target_upload_handoff" in summary_schema["properties"]
     assert "closure_handoff" in summary_schema["properties"]
     assert "closure_summary" in summary_schema["properties"]
@@ -18942,6 +18989,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "materials_handoff" in job_schema["properties"]
     assert "retorrent_stage_handoff" in job_schema["properties"]
     assert "target_package_handoff" in job_schema["properties"]
+    assert "target_upload_service_gate" in job_schema["properties"]
     assert "material_gap_summary" in job_schema["properties"]
     assert "target_upload_handoff" in job_schema["properties"]
     assert "closure_handoff" in job_schema["properties"]
@@ -19000,6 +19048,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_control_summary" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_enforcement_bundle" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_enforcement_gate" in job_list_schema["properties"]["jobs"]["items"]["properties"]
+    assert "target_upload_service_gate" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "daily_candidate_batch_summary" in job_list_schema["properties"]
     assert "daily_candidate_batch_gate" in job_list_schema["properties"]
     assert "daily_candidate_submission_plan" in job_list_schema["properties"]

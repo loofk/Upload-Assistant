@@ -357,6 +357,7 @@ class JobStore:
             "materials_prepare_handoff": _job_materials_prepare_handoff(job, summary_payload),
             "retorrent_stage_handoff": _job_retorrent_stage_handoff(job, summary_payload),
             "target_package_handoff": _job_target_package_handoff(job, summary_payload),
+            "target_upload_service_gate": _job_target_upload_service_gate(job, summary_payload),
             "target_upload_handoff": _job_target_upload_handoff(job, summary_payload),
             "closure_handoff": _job_closure_handoff(job, summary_payload),
             "closure_summary": _job_closure_summary(job, summary_payload),
@@ -426,6 +427,8 @@ class JobStore:
             "resume_blocker": reason,
             "parent_policy_coverage": _job_policy_coverage(parent),
             "parent_policy_qbit_defaults": _job_policy_qbit_defaults(parent),
+            "parent_policy_enforcement_bundle": _job_policy_enforcement_bundle(parent),
+            "parent_policy_enforcement_gate": _job_policy_enforcement_gate(parent),
             "parent_materials_handoff": _job_materials_handoff(parent),
             "material_resolution": material_resolution,
             "resume_context": resume_context,
@@ -1219,9 +1222,12 @@ async def target_upload_service_payload(request: dict[str, Any] | None = None) -
     """Run target-upload preflight/live upload through the CLI implementation and return AI handoffs."""
     request = request or {}
     context, args, argv = _target_upload_request_context(request)
+    service_gate = _target_upload_service_gate(context)
+    if service_gate["ready"] is not True:
+        return _target_upload_service_blocked_payload(context, argv, service_gate)
     result = await cli_target_upload_payload(args)
     diagnostics = _target_upload_service_diagnostics(result)
-    enriched = {**result, "kind": "ptcli.target_upload", "request": context, "command_argv": ["ptcli", *argv], "target_upload_diagnostics": diagnostics}
+    enriched = {**result, "kind": "ptcli.target_upload", "request": context, "command_argv": ["ptcli", *argv], "target_upload_service_gate": service_gate, "target_upload_diagnostics": diagnostics}
     blockers = list(dict.fromkeys(_string_list(enriched.get("blockers")) + _string_list(diagnostics.get("blockers"))))
     automation_action = enriched.get("automation_action")
     ready = bool((automation_action == "complete" or (not context["execute"] and enriched.get("status") == "ready")) and not blockers)
@@ -1239,11 +1245,119 @@ async def target_upload_service_payload(request: dict[str, Any] | None = None) -
         "mutates_network": bool(context.get("execute") or context.get("uploaded_torrent_id")),
         "live_upload": bool(context.get("execute")),
         "target_upload_handoff": handoff,
+        "target_upload_service_gate": service_gate,
         "closure_handoff": closure_handoff,
         "recommended_request": handoff.get("recommended_request") if isinstance(handoff, dict) else None,
         "blockers": blockers,
         "next_actions": _target_upload_service_next_actions(ready, context, enriched, blockers),
         "safety": _target_upload_service_safety(context),
+    }
+
+
+def _target_upload_service_gate(context: dict[str, Any]) -> dict[str, Any]:
+    execute = bool(context.get("execute"))
+    policy_gate = context.get("policy_enforcement_gate") if isinstance(context.get("policy_enforcement_gate"), dict) else None
+    policy_bundle = context.get("policy_enforcement_bundle") if isinstance(context.get("policy_enforcement_bundle"), dict) else None
+    if policy_gate is None and policy_bundle is not None:
+        policy_gate = _target_upload_policy_gate_from_bundle(policy_bundle)
+    blockers: list[str] = []
+    if execute and context.get("confirm_upload") is not True:
+        blockers.append("confirm_upload=true is required before live target upload.")
+    if execute and context.get("download_uploaded_torrent") is not True:
+        blockers.append("download_uploaded_torrent=true is required to close uploaded target torrent evidence.")
+    if execute and context.get("inject_uploaded_torrent") is not True:
+        blockers.append("inject_uploaded_torrent=true is required to seed the uploaded target torrent.")
+    if execute and context.get("wait_uploaded_complete") is not True:
+        blockers.append("wait_uploaded_complete=true is required to verify uploaded target torrent seeding.")
+    if policy_gate is not None and policy_gate.get("ready") is not True:
+        blockers.append("policy_enforcement_gate.ready=true is required before target upload closure.")
+    ready = not blockers
+    return {
+        "kind": "ptcli.target_upload_service_gate",
+        "ready": ready,
+        "status": "ready" if ready else "blocked",
+        "execute": execute,
+        "confirm_upload": context.get("confirm_upload") is True,
+        "uploaded_torrent_closure_requested": {
+            "download_uploaded_torrent": context.get("download_uploaded_torrent") is True,
+            "inject_uploaded_torrent": context.get("inject_uploaded_torrent") is True,
+            "wait_uploaded_complete": context.get("wait_uploaded_complete") is True,
+        },
+        "policy_enforcement_gate": policy_gate,
+        "policy_enforcement_bundle": policy_bundle,
+        "blockers": list(dict.fromkeys(blockers)),
+        "next_actions": _target_upload_service_gate_next_actions(blockers, policy_gate),
+        "safety": {"mutates_state": False, "live_upload": False, "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True, "requires_uploaded_torrent_seeding_closure": True},
+    }
+
+
+def _target_upload_policy_gate_from_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    rule_gate = bundle.get("rule_gate") if isinstance(bundle.get("rule_gate"), dict) else {}
+    qbit_enforcement = bundle.get("qbit_enforcement") if isinstance(bundle.get("qbit_enforcement"), dict) else {}
+    seeding_enforcement = bundle.get("seeding_enforcement") if isinstance(bundle.get("seeding_enforcement"), dict) else {}
+    blockers: list[str] = []
+    if bundle.get("ready") is not True:
+        blockers.append("policy_enforcement_bundle.ready=true is required before target upload closure.")
+    if rule_gate and rule_gate.get("ready") is not True:
+        blockers.append("policy_enforcement_bundle.rule_gate.ready=true is required before target upload closure.")
+    if qbit_enforcement and qbit_enforcement.get("ready") is not True:
+        blockers.append("policy_enforcement_bundle.qbit_enforcement.ready=true is required before target upload closure.")
+    if seeding_enforcement and seeding_enforcement.get("ready") is not True:
+        blockers.append("policy_enforcement_bundle.seeding_enforcement.ready=true is required before target upload closure.")
+    blockers.extend(_string_list(bundle.get("blockers")))
+    return {
+        "kind": "ptcli.target_upload_policy_enforcement_gate",
+        "ready": not blockers,
+        "status": "ready" if not blockers else "blocked",
+        "policy_enforcement_bundle_ready": bundle.get("ready"),
+        "rule_gate_ready": rule_gate.get("ready") if rule_gate else None,
+        "qbit_enforcement_ready": qbit_enforcement.get("ready") if qbit_enforcement else None,
+        "seeding_enforcement_ready": seeding_enforcement.get("ready") if seeding_enforcement else None,
+        "policy_enforcement_bundle": bundle,
+        "blockers": list(dict.fromkeys(blockers)),
+        "next_actions": _string_list(bundle.get("next_actions")) or ["Resolve policy_enforcement_bundle before target upload closure."],
+        "safety": {"mutates_state": False, "live_upload": False, "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True, "does_not_override_site_rules": True},
+    }
+
+
+def _target_upload_service_gate_next_actions(blockers: list[str], policy_gate: dict[str, Any] | None) -> list[str]:
+    if not blockers:
+        return ["Continue target upload, then verify target_upload_handoff.uploaded_seeding_ready=true before reporting completion."]
+    if isinstance(policy_gate, dict) and policy_gate.get("ready") is not True:
+        actions = _string_list(policy_gate.get("next_actions"))
+        if actions:
+            return actions
+    return ["Retry target_upload_job with confirm_upload=true, download_uploaded_torrent=true, inject_uploaded_torrent=true, wait_uploaded_complete=true, and ready policy enforcement evidence when inherited from a retorrent job."]
+
+
+def _target_upload_service_blocked_payload(context: dict[str, Any], argv: list[str], service_gate: dict[str, Any]) -> dict[str, Any]:
+    blockers = _string_list(service_gate.get("blockers"))
+    next_actions = _string_list(service_gate.get("next_actions"))
+    diagnostics = {"mode": "blocked", "ready": False, "ready_for_uploaded_seeding": False, "blockers": blockers, "next_actions": next_actions}
+    handoff = _target_upload_service_handoff(context, {"status": "blocked", "target_upload_service_gate": service_gate}, diagnostics, False, blockers)
+    return {
+        "kind": "ptcli.target_upload",
+        "status": "blocked",
+        "ok": False,
+        "request": context,
+        "command_argv": ["ptcli", *argv],
+        "mutates_state": False,
+        "mutates_filesystem": False,
+        "mutates_network": False,
+        "live_upload": False,
+        "summary": None,
+        "artifacts": None,
+        "target_upload_service_gate": service_gate,
+        "target_upload_diagnostics": diagnostics,
+        "target_upload_handoff": handoff,
+        "closure_handoff": None,
+        "summary_file": None,
+        "automation_action": "blocked",
+        "resume_state": None,
+        "recommended_request": handoff.get("recommended_request") if isinstance(handoff, dict) else None,
+        "blockers": blockers,
+        "next_actions": next_actions,
+        "safety": service_gate.get("safety"),
     }
 
 
@@ -8653,6 +8767,8 @@ def _target_upload_request_context(request: dict[str, Any]) -> tuple[dict[str, A
         "uploaded_qbit_tags": request.get("uploaded_qbit_tags"),
         "uploaded_qbit_upload_limit": request.get("uploaded_qbit_upload_limit"),
         "uploaded_qbit_download_limit": request.get("uploaded_qbit_download_limit"),
+        "policy_enforcement_bundle": request.get("policy_enforcement_bundle") if isinstance(request.get("policy_enforcement_bundle"), dict) else None,
+        "policy_enforcement_gate": request.get("policy_enforcement_gate") if isinstance(request.get("policy_enforcement_gate"), dict) else None,
         "uploaded_paused": _truthy(request.get("uploaded_paused")),
         "wait_uploaded_complete": _truthy(request.get("wait_uploaded_complete")),
         "uploaded_wait_timeout": _float_or_default(request.get("uploaded_wait_timeout"), 600.0),
@@ -8795,6 +8911,16 @@ def _target_upload_preflight_next_actions(preflight: dict[str, Any]) -> list[str
     if blockers:
         return ["Resolve target_upload_preflight.blockers before attempting live upload."]
     return ["Review target_upload_preflight.upload_payload, then run target-upload live only with explicit confirm_upload and uploaded torrent injection/seeding options."]
+
+
+def _job_target_upload_service_gate(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    for payload in (summary_payload, job.get("result")):
+        if isinstance(payload, dict) and isinstance(payload.get("target_upload_service_gate"), dict):
+            return payload["target_upload_service_gate"]
+    request = job.get("request")
+    if str(job.get("kind") or "") != "ptcli.target_upload" or not isinstance(request, dict):
+        return None
+    return _target_upload_service_gate(request)
 
 
 def _materials_prepare_dry_run_payload(context: dict[str, Any]) -> dict[str, Any]:
@@ -10633,6 +10759,7 @@ def _job_list_item(job: dict[str, Any], job_lineage: dict[str, Any] | None = Non
         "materials_prepare_handoff": _job_materials_prepare_handoff(job),
         "retorrent_stage_handoff": _job_retorrent_stage_handoff(job),
         "target_package_handoff": _job_target_package_handoff(job),
+        "target_upload_service_gate": _job_target_upload_service_gate(job),
         "target_upload_handoff": _job_target_upload_handoff(job),
         "closure_handoff": _job_closure_handoff(job),
         "closure_summary": _job_closure_summary(job),
@@ -11753,6 +11880,7 @@ def _job_public_payload(job: dict[str, Any], job_lineage: dict[str, Any] | None 
         "materials_prepare_handoff": _job_materials_prepare_handoff(job),
         "retorrent_stage_handoff": _job_retorrent_stage_handoff(job),
         "target_package_handoff": _job_target_package_handoff(job),
+        "target_upload_service_gate": _job_target_upload_service_gate(job),
         "target_upload_handoff": _job_target_upload_handoff(job),
         "closure_handoff": _job_closure_handoff(job),
         "closure_summary": _job_closure_summary(job),
@@ -15806,6 +15934,7 @@ def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = 
         "qbit_execution_gate": _job_qbit_execution_gate(job, payload if isinstance(payload, dict) else None),
         "materials_handoff": _job_materials_handoff(job, payload if isinstance(payload, dict) else None),
         "material_gap_summary": _job_material_gap_summary(job, payload if isinstance(payload, dict) else None),
+        "target_upload_service_gate": _job_target_upload_service_gate(job, payload if isinstance(payload, dict) else None),
         "target_upload_handoff": _job_target_upload_handoff(job, payload if isinstance(payload, dict) else None),
         "live_completion_gate": _job_live_completion_gate(job, payload if isinstance(payload, dict) else None),
         "live_action_sequence": _job_live_action_sequence(job, payload if isinstance(payload, dict) else None),
@@ -16114,6 +16243,8 @@ def _resume_lineage(parent: dict[str, Any], *, parent_job_id: str, argv: list[st
         "inherited_policy": {
             "policy_coverage": _job_policy_coverage(parent),
             "policy_qbit_defaults": _job_policy_qbit_defaults(parent),
+            "policy_enforcement_bundle": _job_policy_enforcement_bundle(parent),
+            "policy_enforcement_gate": _job_policy_enforcement_gate(parent),
         },
         "resume_allowed": allowed,
         "resume_blocker": reason,
@@ -19276,7 +19407,8 @@ def _target_upload_preflight_response_contract() -> dict[str, Any]:
 
 def _target_upload_service_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "kind", "request", "command_argv", "mutates_state", "mutates_filesystem", "mutates_network", "live_upload", "summary", "artifacts", "target_upload_diagnostics", "target_upload_handoff", "closure_handoff", "summary_file", "automation_action", "resume_state", "blockers", "next_actions", "safety"],
+        "required_fields": ["status", "ok", "kind", "request", "command_argv", "mutates_state", "mutates_filesystem", "mutates_network", "live_upload", "summary", "artifacts", "target_upload_service_gate", "target_upload_diagnostics", "target_upload_handoff", "closure_handoff", "summary_file", "automation_action", "resume_state", "blockers", "next_actions", "safety"],
+        "target_upload_service_gate_fields": ["ready", "status", "execute", "confirm_upload", "uploaded_torrent_closure_requested", "policy_enforcement_gate", "policy_enforcement_bundle", "blockers", "next_actions", "safety"],
         "target_upload_diagnostics_fields": ["mode", "ready", "uploaded", "ready_for_uploaded_seeding", "uploaded_torrent_id", "uploaded_torrent_hash", "uploaded_torrent_path", "preflight", "completion", "payload_review", "fresh_duplicate_check", "blockers", "next_actions"],
         "target_upload_handoff_fields": ["ready", "action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "completion", "summary_file", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "closure_fields": ["download_uploaded_torrent", "inject_uploaded_torrent", "wait_uploaded_complete", "uploaded_torrent_hash", "injected_torrent_hash", "uploaded_wait"],
@@ -19286,7 +19418,7 @@ def _target_upload_service_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "candidate_control_summary", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_action_sequence", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "candidate_control_summary", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_service_gate", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_action_sequence", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -19383,7 +19515,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "daily_candidate_refill_plan", "daily_candidate_batch_sequence", "daily_candidate_approval_sequence", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_control_summary", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_action_sequence", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_control_summary", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_service_gate", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_action_sequence", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "daily_candidate_batch_summary_fields": ["ready", "filters", "list_window", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "retorrent_status_counts", "retorrent_action_counts", "complete_count", "running_count", "blocked_count", "items", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_gate_fields": ["ready", "action", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "complete_count", "running_count", "blocked_count", "retorrent_status_counts", "retorrent_action_counts", "first_submit_request", "first_submit_endpoint", "first_submitted_job", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
         "daily_candidate_submission_plan_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "running_count", "shortfall_count", "target_met", "ready_target_met", "first_submit_request", "submit_requests", "shortfall_recovery", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "read_order", "continue_when", "stop_when", "shortfall_blockers", "hard_blockers", "blockers", "next_actions"],
@@ -20025,6 +20157,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "materials_prepare_handoff": {"type": ["object", "null"]},
             "retorrent_stage_handoff": {"type": ["object", "null"]},
             "target_package_handoff": {"type": ["object", "null"]},
+            "target_upload_service_gate": {"type": ["object", "null"]},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},
             "closure_summary": {"type": "object"},
@@ -20108,6 +20241,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "materials_prepare_handoff": {"type": ["object", "null"]},
             "retorrent_stage_handoff": {"type": ["object", "null"]},
             "target_package_handoff": {"type": ["object", "null"]},
+            "target_upload_service_gate": {"type": ["object", "null"]},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},
             "closure_summary": {"type": "object"},
@@ -20174,6 +20308,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                         "candidate_submit_sequence": {"type": ["object", "null"]},
                         "policy_enforcement_bundle": {"type": ["object", "null"]},
                         "policy_enforcement_gate": {"type": ["object", "null"]},
+                        "target_upload_service_gate": {"type": ["object", "null"]},
                         "job_handoff": {"type": "object"},
                         "recovery_handoff": {"type": "object"},
                         "status_endpoint": {"type": ["string", "null"]},
@@ -20516,6 +20651,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "live_upload": {"type": "boolean"},
             "summary": {"type": ["object", "null"]},
             "artifacts": {"type": ["object", "null"]},
+            "target_upload_service_gate": {"type": "object"},
             "target_upload_diagnostics": {"type": "object"},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},
