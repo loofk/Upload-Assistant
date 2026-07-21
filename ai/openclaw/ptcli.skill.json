@@ -1859,6 +1859,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -2775,6 +2776,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -3148,6 +3177,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -4064,6 +4094,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -4304,6 +4362,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -5220,6 +5279,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -5460,6 +5547,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -6376,6 +6464,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -6620,6 +6736,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -7536,6 +7653,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -8331,6 +8476,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -9247,6 +9393,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ],
         "result_fields": [
           "ranking",
@@ -9967,6 +10141,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -10883,6 +11058,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -13726,6 +13929,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -14642,6 +14846,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -14844,6 +15076,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -15760,6 +15993,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -15971,6 +16232,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -16887,6 +17149,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -17067,6 +17357,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -17983,6 +18274,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -18230,6 +18549,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "agent_decision",
           "resume_plan",
@@ -18512,6 +18832,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -19428,6 +19749,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "safety": {
@@ -19486,6 +19835,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -19772,6 +20122,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -20688,6 +21039,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "workflow_hints": {
@@ -20765,6 +21144,7 @@
           "closure_summary",
           "seedbox_live_validation_completion_report",
           "live_completion_gate",
+          "live_action_sequence",
           "manual_retorrent_handoff",
           "candidate_batch_handoff",
           "candidate_submission_handoff",
@@ -21681,6 +22061,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_action_sequence_fields": [
+          "ready",
+          "status",
+          "action",
+          "job_id",
+          "summary_file",
+          "steps",
+          "next_step",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_action_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ]
       },
       "safety": {
