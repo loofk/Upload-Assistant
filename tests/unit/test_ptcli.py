@@ -17680,6 +17680,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_validation_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "live_validation_summary" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "seedbox_live_validation_report" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "live_validation_repair_plan" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
@@ -17700,6 +17701,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_validation_service_report_fields" in tool_by_name["readiness_bundle"]["response_contract"]
     assert "check_and_submit" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_service_report_fields"]
     assert "final_evidence" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_service_report_fields"]
+    assert "live_validation_repair_plan_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "blocked_categories" in tool_by_name["readiness_bundle"]["response_contract"]["live_validation_repair_plan_fields"]
+    assert "live_validation_repair_category_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "continue_when" in tool_by_name["readiness_bundle"]["response_contract"]["live_validation_repair_category_fields"]
     assert "doctor" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
     assert "manual_job" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
     assert "validation_plan" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
@@ -18022,6 +18027,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_readiness" in readiness_schema["properties"]
     assert "seedbox_live_validation_handoff" in readiness_schema["properties"]
     assert "seedbox_live_validation_report" in readiness_schema["properties"]
+    assert "live_validation_repair_plan" in readiness_schema["properties"]
     assert "agent_decision" in readiness_schema["properties"]
 
 
@@ -18269,6 +18275,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "seedbox_live_validation_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "live_validation_summary" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "seedbox_live_validation_report" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "live_validation_repair_plan" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
         assert "policy_setup_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
@@ -18290,6 +18297,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "seedbox_live_validation_service_report_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "check_and_submit" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_service_report_fields"]
         assert "final_evidence" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_service_report_fields"]
+        assert "live_validation_repair_plan_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "blocked_categories" in tools_by_name["readiness_bundle"]["response_contract"]["live_validation_repair_plan_fields"]
+        assert "live_validation_repair_category_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "doctor" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
         assert "manual_job" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
         assert "validation_plan" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
@@ -19088,6 +19098,18 @@ services:
     assert payload["seedbox_live_validation_report"]["after_submit"]["finish_tool"] == "get_job_summary"
     assert "closure_summary.target.uploaded_torrent_hash" in payload["seedbox_live_validation_report"]["final_evidence"]["required_fields"]
     assert [step["name"] for step in payload["seedbox_live_validation_report"]["runbook"]] == ["preflight", "doctor", "check_and_submit", "poll_job", "recover_or_finish"]
+    assert payload["live_validation_repair_plan"]["kind"] == "ptcli.live_validation_repair_plan"
+    assert payload["live_validation_repair_plan"]["ready"] is True
+    assert payload["live_validation_repair_plan"]["status"] == "ready_for_doctor"
+    assert payload["live_validation_repair_plan"]["blocked_categories"] == []
+    assert payload["live_validation_repair_plan"]["next_step"]["tool"] == "ptcli_doctor"
+    assert payload["live_validation_repair_plan"]["next_step"]["request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
+    assert "live_validation_repair_plan.ready=true" in payload["live_validation_repair_plan"]["complete_when"]
+    repair_categories = {item["category"]: item for item in payload["live_validation_repair_plan"]["categories"]}
+    assert repair_categories["deployment"]["tool"] == "deployment_check"
+    assert repair_categories["site_policy"]["continue_when"] == "site_policies.ready=true and site_policies.execution_readiness.ready=true"
+    assert repair_categories["confirmations"]["request"] == {"accept_rules": True, "confirm_upload": True}
+    assert repair_categories["manual_job_request"]["tool"] == "source_url_check_and_submit"
     assert payload["seedbox_live_validation_handoff"]["live_validation_summary"] == payload["live_validation_summary"]
     assert payload["seedbox_live_validation_handoff"]["validation_report"]["kind"] == "ptcli.seedbox_live_validation_report"
     assert payload["seedbox_live_validation_handoff"]["validation_report"]["ready"] is True
@@ -19385,6 +19407,14 @@ def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path
     assert payload["seedbox_live_validation_report"]["current_step"] == "preflight"
     assert payload["seedbox_live_validation_report"]["first_blocker"]
     assert payload["seedbox_live_validation_report"]["check_and_submit"]["ready_after_doctor"] is False
+    assert payload["live_validation_repair_plan"]["ready"] is False
+    assert payload["live_validation_repair_plan"]["status"] == "blocked"
+    assert "docker_compose_api" in payload["live_validation_repair_plan"]["blocked_categories"]
+    assert "site_policy" in payload["live_validation_repair_plan"]["blocked_categories"]
+    assert "confirmations" in payload["live_validation_repair_plan"]["blocked_categories"]
+    assert payload["live_validation_repair_plan"]["next_step"]["tool"] == "deployment_check"
+    assert payload["live_validation_repair_plan"]["recommended_endpoint"] == "/v1/deployment/check"
+    assert payload["live_validation_repair_plan"]["first_blocker"]
     assert payload["seedbox_live_validation_handoff"]["live_validation_summary"] == payload["live_validation_summary"]
     assert payload["seedbox_live_validation_handoff"]["validation_report"]["ready"] is False
     assert payload["seedbox_live_validation_handoff"]["validation_report"]["blocked_count"] > 0
@@ -19473,6 +19503,11 @@ def test_readiness_bundle_blocks_live_when_credentials_and_image_host_are_missin
     assert payload["live_readiness"]["policy_execution_handoff"]["ready"] is False
     assert {"tracker": "U2", "field": "download_rate_limit"} in payload["live_readiness"]["policy_execution_summary"]["qbit_limit_plan"]["missing"]
     assert {"tracker": "U2", "field": "download_rate_limit"} in payload["live_readiness"]["policy_execution_handoff"]["qbit"]["missing"]
+    assert payload["live_validation_repair_plan"]["ready"] is False
+    assert "docker_compose_api" in payload["live_validation_repair_plan"]["blocked_categories"]
+    assert "site_policy" in payload["live_validation_repair_plan"]["blocked_categories"]
+    assert "credentials_and_materials" in payload["live_validation_repair_plan"]["blocked_categories"]
+    assert payload["live_validation_repair_plan"]["next_step"]["tool"] == "deployment_check"
     assert {"tracker": "MTEAM", "field": "upload_rate_limit"} in payload["live_readiness"]["policy_execution_summary"]["qbit_limit_plan"]["missing"]
     check_names = {check["name"] for check in payload["live_verification"]["checks"] if check["ok"] is False}
     assert {"U2.passkey", "U2.cookie", "MTEAM.api_key", "materials.image_host"} <= check_names
