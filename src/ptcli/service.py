@@ -11122,6 +11122,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     mounts = _deployment_mount_summary(checks)
     agent_summary = _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan, docker_compose)
     deployment_handoff = _deployment_runtime_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings)
+    deployment_runbook = _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings)
     return {
         "kind": "ptcli.deployment_check",
         "status": "ok" if ready else "blocked",
@@ -11137,6 +11138,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "qbit": qbit,
         "daily_candidates": daily_candidate_plan,
         "docker_compose": docker_compose,
+        "deployment_runbook": deployment_runbook,
         "deployment_handoff": deployment_handoff,
         "agent_summary": agent_summary,
         "agent_handoff": _deployment_agent_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings),
@@ -11484,6 +11486,7 @@ def _deployment_runtime_handoff(
             "connectivity_checked": bool(qbit.get("connectivity_checked")),
         },
         "next_step": _deployment_runtime_next_step(manual_ready, daily_ready, compose_ready, blockers, warnings),
+        "deployment_runbook": _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings),
         "warnings": warnings,
     }
 
@@ -11498,6 +11501,116 @@ def _deployment_runtime_next_step(manual_ready: bool, daily_ready: bool, compose
     if daily_ready:
         return {"action": "run_daily_candidates", "tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule"}
     return {"action": "configure_workflows", "tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "warnings": warnings}
+
+
+def _deployment_runbook(
+    agent_summary: dict[str, Any],
+    paths: dict[str, str],
+    qbit: dict[str, Any],
+    daily_candidate_plan: dict[str, Any],
+    docker_compose: dict[str, Any],
+    blockers: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    api_base_url = os.environ.get("PTCLI_PUBLIC_BASE_URL") or "http://127.0.0.1:8080"
+    compose_file = str(paths.get("compose_file") or docker_compose.get("path") or "docker-compose.yml")
+    ready = bool(agent_summary.get("ready_for_ai") and docker_compose.get("ptcli_api_service_ready"))
+    steps = [
+        {
+            "index": 1,
+            "name": "prepare_env",
+            "kind": "shell",
+            "command": "cp .env.ptcli.example .env",
+            "read": [".env", "PTCLI_API_TOKEN", "PTCLI_PUBLIC_BASE_URL", "PTCLI_DAILY_CANDIDATE_SCHEDULES"],
+            "continue_when": ".env exists and host paths in docker-compose.yml are adjusted for the seedbox",
+            "stop_when": "config/cookies/downloads/tmp host paths are not mapped to the seedbox paths",
+        },
+        {
+            "index": 2,
+            "name": "build_and_start_api",
+            "kind": "shell",
+            "command": f"docker compose -f {compose_file} up -d --build ptcli-api",
+            "read": ["docker compose ps ptcli-api", "healthcheck"],
+            "continue_when": "ptcli-api is running and healthcheck is healthy",
+            "stop_when": "container exits, healthcheck fails, or port 127.0.0.1:8080 is unavailable",
+        },
+        {
+            "index": 3,
+            "name": "verify_api_contracts",
+            "kind": "http",
+            "requests": [
+                {"method": "GET", "url": f"{api_base_url.rstrip('/')}/health"},
+                {"method": "GET", "url": f"{api_base_url.rstrip('/')}/openapi.json"},
+                {"method": "GET", "url": f"{api_base_url.rstrip('/')}/v1/tools"},
+                {"method": "GET", "url": f"{api_base_url.rstrip('/')}/.well-known/ptcli-agent.json"},
+            ],
+            "continue_when": "all requests return 200 and JSON contains expected kind/schema fields",
+            "stop_when": "API token/auth, reverse proxy, or localhost binding prevents AI access",
+        },
+        {
+            "index": 4,
+            "name": "check_deployment",
+            "kind": "http",
+            "request": {"method": "GET", "url": f"{api_base_url.rstrip('/')}/v1/deployment/check"},
+            "read": ["ready", "deployment_runbook", "agent_summary", "docker_compose", "qbit", "blockers"],
+            "continue_when": "ready=true and agent_summary.manual_workflow_ready=true",
+            "stop_when": "blockers is non-empty",
+        },
+        {
+            "index": 5,
+            "name": "readiness_bundle",
+            "kind": "http",
+            "request": {
+                "method": "POST",
+                "url": f"{api_base_url.rstrip('/')}/v1/readiness/bundle",
+                "json": {
+                    "source_tracker": "U2",
+                    "source_id": "60635",
+                    "target": "MTEAM",
+                    "accept_rules": True,
+                    "confirm_upload": True,
+                    "save_path": paths.get("downloads_path") or "/downloads",
+                },
+            },
+            "read": ["live_readiness", "seedbox_live_validation_handoff.validation_report", "seedbox_live_validation_handoff.validation_plan"],
+            "continue_when": "seedbox_live_validation_handoff.validation_report.ready=true",
+            "stop_when": "validation_report.first_blocker is present",
+        },
+        {
+            "index": 6,
+            "name": "first_live_validation",
+            "kind": "guided",
+            "read": ["seedbox_live_validation_handoff.doctor", "seedbox_live_validation_handoff.manual_job", "seedbox_live_validation_handoff.post_submit_handoff"],
+            "continue_when": "doctor_result_handoff.live_safe_to_attempt=true then source_url_check_and_submit returns job_id",
+            "stop_when": "duplicate_check.exists=true, doctor_result_handoff.live_safe_to_attempt=false, or live upload confirmations are missing",
+        },
+    ]
+    return {
+        "kind": "ptcli.deployment_runbook",
+        "ready": ready,
+        "compose_file": compose_file,
+        "api_base_url": api_base_url,
+        "service": "ptcli-api",
+        "steps": steps,
+        "first_step": "build_and_start_api" if docker_compose.get("ptcli_api_service_ready") else "prepare_env",
+        "daily_candidates": {
+            "configured": bool(daily_candidate_plan.get("configured")),
+            "schedule_count": daily_candidate_plan.get("count", 0),
+            "optional_start_command": f"docker compose -f {compose_file} --profile daily up -d ptcli-daily-scheduler",
+        },
+        "qbit": {
+            "configured": bool(qbit.get("configured")),
+            "host_hint": "Use http://host.docker.internal for host qBittorrent, or a Docker service name when qBittorrent shares the compose network.",
+            "client": qbit.get("client"),
+        },
+        "safety": {
+            "api_localhost_bound": bool(docker_compose.get("ptcli_api_localhost_port")),
+            "api_token_configured": bool(agent_summary.get("api_token_configured")),
+            "live_upload_requires": ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "site policy ready"],
+        },
+        "blockers": blockers,
+        "warnings": warnings,
+    }
 
 
 def _deployment_agent_handoff(
@@ -12268,10 +12381,11 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "queue", "qbit", "daily_candidates", "docker_compose", "deployment_handoff", "agent_summary", "agent_handoff"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "queue", "qbit", "daily_candidates", "docker_compose", "deployment_runbook", "deployment_handoff", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
                 "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready"],
-                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "manual_retorrent", "daily_candidates", "qbit", "next_step", "warnings"],
+                "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "qbit", "safety", "blockers", "warnings"],
+                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "manual_retorrent", "daily_candidates", "qbit", "next_step", "deployment_runbook", "warnings"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "qbit", "docker_compose", "safety", "next_tools"],
                 "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },

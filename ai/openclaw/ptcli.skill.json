@@ -16945,6 +16945,7 @@
           "qbit",
           "daily_candidates",
           "docker_compose",
+          "deployment_runbook",
           "deployment_handoff",
           "agent_summary",
           "agent_handoff"
@@ -16968,6 +16969,19 @@
           "docker_compose_api_ready",
           "docker_compose_daily_ready"
         ],
+        "deployment_runbook_fields": [
+          "ready",
+          "compose_file",
+          "api_base_url",
+          "service",
+          "steps",
+          "first_step",
+          "daily_candidates",
+          "qbit",
+          "safety",
+          "blockers",
+          "warnings"
+        ],
         "deployment_handoff_fields": [
           "ready",
           "compose_deployable",
@@ -16976,6 +16990,7 @@
           "daily_candidates",
           "qbit",
           "next_step",
+          "deployment_runbook",
           "warnings"
         ],
         "agent_handoff_fields": [

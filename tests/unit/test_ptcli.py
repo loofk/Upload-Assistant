@@ -18467,6 +18467,16 @@ services:
     assert payload["deployment_handoff"]["daily_candidates"]["ready"] is True
     assert payload["deployment_handoff"]["daily_candidates"]["tool"] == "daily_candidates_schedule_job"
     assert payload["deployment_handoff"]["next_step"]["action"] == "run_manual_preflight"
+    assert payload["deployment_runbook"]["kind"] == "ptcli.deployment_runbook"
+    assert payload["deployment_runbook"]["ready"] is True
+    assert payload["deployment_runbook"]["service"] == "ptcli-api"
+    assert payload["deployment_runbook"]["first_step"] == "build_and_start_api"
+    runbook_steps = {step["name"]: step for step in payload["deployment_runbook"]["steps"]}
+    assert runbook_steps["build_and_start_api"]["command"].endswith("up -d --build ptcli-api")
+    assert runbook_steps["verify_api_contracts"]["requests"][2]["url"] == "http://127.0.0.1:8080/v1/tools"
+    assert runbook_steps["readiness_bundle"]["request"]["json"]["target"] == "MTEAM"
+    assert runbook_steps["first_live_validation"]["continue_when"].startswith("doctor_result_handoff.live_safe_to_attempt=true")
+    assert payload["deployment_handoff"]["deployment_runbook"]["steps"][3]["name"] == "check_deployment"
     assert payload["agent_handoff"]["ready"] is True
     assert payload["agent_handoff"]["recommended_first_step"] == "site_policies"
     assert payload["agent_handoff"]["manual_retorrent"]["ready"] is True
@@ -18505,6 +18515,8 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert payload["agent_summary"]["missing_mounts"]
     assert payload["deployment_handoff"]["ready"] is False
     assert payload["deployment_handoff"]["next_step"]["action"] == "fix_deployment"
+    assert payload["deployment_runbook"]["ready"] is False
+    assert payload["deployment_runbook"]["blockers"]
     assert payload["deployment_handoff"]["manual_retorrent"]["tool"] == "readiness_bundle"
     assert payload["deployment_handoff"]["daily_candidates"]["tool"] == "deployment_check"
     assert payload["agent_handoff"]["ready"] is False
