@@ -14772,12 +14772,19 @@ def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path)
     assert job["manual_retorrent_handoff"]["duplicate_clear"] is True
     assert job["manual_retorrent_handoff"]["missing_confirmations"] == ["accept_rules=true", "confirm_upload=true"]
     assert job["manual_retorrent_handoff"]["can_attempt_live"] is False
+    assert job["manual_retorrent_final_report"]["kind"] == "ptcli.manual_retorrent_final_report"
+    assert job["manual_retorrent_final_report"]["verdict"] == "confirmations_required"
+    assert job["manual_retorrent_final_report"]["report_allowed"] is False
+    assert job["manual_retorrent_final_report"]["duplicate_check"]["clear"] is True
     assert job["agent_decision"]["manual_retorrent_handoff"] == job["manual_retorrent_handoff"]
+    assert job["agent_decision"]["manual_retorrent_final_report"] == job["manual_retorrent_final_report"]
     assert job["workflow_context"]["manual_retorrent_handoff"] == job["manual_retorrent_handoff"]
+    assert job["workflow_context"]["manual_retorrent_final_report"] == job["manual_retorrent_final_report"]
     assert job["agent_decision"]["workflow_context"]["gates"]["duplicate_check"]["status"] == "not_found"
     assert summary["source_reference"] == job["source_reference"]
     assert summary["workflow_context"] == job["workflow_context"]
     assert summary["manual_retorrent_handoff"] == job["manual_retorrent_handoff"]
+    assert summary["manual_retorrent_final_report"] == job["manual_retorrent_final_report"]
     assert summary["closure_handoff"] == job["closure_handoff"]
     assert captured_request["source_url"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
     assert captured_request["source"] == "https://u2.dmhy.org/details.php?id=60635&hit=1"
@@ -14841,6 +14848,9 @@ def test_source_url_retorrent_job_handoff_stops_on_duplicate(monkeypatch, tmp_pa
     assert job["manual_retorrent_handoff"]["duplicate_check"]["dupes"] == [{"id": "999", "name": "Existing"}]
     assert job["manual_retorrent_handoff"]["duplicate_clear"] is False
     assert job["manual_retorrent_handoff"]["can_attempt_live"] is False
+    assert job["manual_retorrent_final_report"]["verdict"] == "duplicate_stopped"
+    assert job["manual_retorrent_final_report"]["duplicate_check"]["exists"] is True
+    assert job["manual_retorrent_final_report"]["report_allowed"] is False
     assert "Do not upload" in job["manual_retorrent_handoff"]["next_actions"][0]
 
 
@@ -18687,12 +18697,19 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "live_checklist" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
     assert "live_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
+    assert "manual_retorrent_final_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "report_allowed" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_final_report_fields"]
+    assert "recommended_call" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_final_report_fields"]
     assert "closure_checklist" in tool_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
     assert "next_step" in tool_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
     assert "recommended_tool" in tool_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "job_control_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_control_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -18892,6 +18909,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "target_upload_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "closure_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "material_resolution" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
@@ -19526,6 +19544,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_validation_submission" in summary_schema["properties"]
     assert "live_validation_followup" in summary_schema["properties"]
     assert "manual_retorrent_handoff" in summary_schema["properties"]
+    assert "manual_retorrent_final_report" in summary_schema["properties"]
     assert "job_progress_handoff" in summary_schema["properties"]
     assert "resume_plan" in summary_schema["properties"]
     assert "resume_requirements" in summary_schema["properties"]
@@ -19584,6 +19603,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_validation_submission" in job_schema["properties"]
     assert "live_validation_followup" in job_schema["properties"]
     assert "manual_retorrent_handoff" in job_schema["properties"]
+    assert "manual_retorrent_final_report" in job_schema["properties"]
     assert "job_progress_handoff" in job_schema["properties"]
     assert "candidate_submission_handoff" in job_schema["properties"]
     assert "candidate_submission_summary" in job_schema["properties"]
@@ -19641,6 +19661,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_validation_submission" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "live_validation_followup" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "live_validation_final_report" in job_list_schema["properties"]["jobs"]["items"]["properties"]
+    assert "manual_retorrent_final_report" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_enforcement_bundle" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_runtime_contract" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "policy_enforcement_gate" in job_list_schema["properties"]["jobs"]["items"]["properties"]
@@ -20411,15 +20432,22 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "manual_retorrent_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "live_checklist" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
         assert "live_ready" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
+        assert "manual_retorrent_final_report_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "report_allowed" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_final_report_fields"]
+        assert "recommended_call" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_final_report_fields"]
         assert "policy_runtime_contract" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
         assert "policy_runtime_ready" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
         assert "closure_checklist" in tools_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
         assert "next_step" in tools_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
         assert "recommended_tool" in tools_by_name["manual_retorrent_job"]["response_contract"]["closure_handoff_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "candidate_submission_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["required_fields"]
         assert "candidate_submission_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "candidate_submission_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -20599,6 +20627,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "target_upload_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "closure_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "manual_retorrent_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "candidate_control_summary" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "material_resolution" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "runtime" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
