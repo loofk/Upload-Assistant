@@ -2211,6 +2211,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     policy_readiness_summary = _site_policy_readiness_summary(policy_execution_summary, policy_setup_summary, config_update_plan, policy_handoff)
     policy_repair_gate = _site_policy_repair_gate(policy_readiness_summary, policy_execution_handoff, config_update_plan, policy_setup_summary, context)
     policy_execution_plan = _site_policy_execution_plan(policy_execution_summary, policy_execution_handoff, policy_repair_gate, context)
+    policy_execution_sequence = _site_policy_execution_sequence(policy_execution_plan, policy_execution_handoff, policy_repair_gate, config_update_plan, context)
     overall_ready = bool(report.get("ready")) and bool(policy_setup_summary.get("ready"))
     rule_obligations = {str(item.get("tracker")): item.get("rule_obligations") for item in matrix if item.get("tracker")}
     return {
@@ -2233,6 +2234,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "policy_repair_gate": policy_repair_gate,
         "policy_execution_handoff": policy_execution_handoff,
         "policy_execution_plan": policy_execution_plan,
+        "policy_execution_sequence": policy_execution_sequence,
         "policy_handoff": policy_handoff,
         "next_step": policy_handoff.get("next_step"),
         "recommended_tool": policy_handoff.get("recommended_tool"),
@@ -7058,6 +7060,173 @@ def _site_policy_execution_plan_next_actions(ready: bool, action: str, next_step
     if blockers:
         return ["Resolve policy_execution_plan.blockers before creating live retorrent jobs."]
     return ["Inspect policy_execution_plan and policy_repair_gate before continuing."]
+
+
+def _site_policy_execution_sequence(
+    policy_execution_plan: dict[str, Any],
+    policy_execution_handoff: dict[str, Any],
+    policy_repair_gate: dict[str, Any],
+    config_update_plan: dict[str, Any],
+    request_context: dict[str, Any],
+) -> dict[str, Any]:
+    blockers = list(
+        dict.fromkeys(
+            _string_list(policy_execution_plan.get("blockers"))
+            + _string_list(policy_execution_handoff.get("blockers"))
+            + _string_list(policy_repair_gate.get("blockers"))
+            + _string_list(config_update_plan.get("blockers"))
+        )
+    )
+    ready = bool(policy_execution_plan.get("ready")) and bool(policy_execution_handoff.get("ready")) and bool(policy_repair_gate.get("ready")) and not blockers
+    action = _site_policy_execution_sequence_action(ready, policy_repair_gate, policy_execution_plan, config_update_plan)
+    steps = _site_policy_execution_sequence_steps(action, ready, policy_execution_plan, policy_repair_gate, config_update_plan, request_context, blockers)
+    return {
+        "kind": "ptcli.policy_execution_sequence",
+        "ready": ready,
+        "status": "ready" if ready else "blocked",
+        "action": action,
+        "accepted_rules": bool(policy_execution_plan.get("accepted_rules") or policy_execution_handoff.get("accepted_rules")),
+        "source_trackers": _string_list(policy_execution_plan.get("source_trackers")),
+        "target_trackers": _string_list(policy_execution_plan.get("target_trackers")),
+        "request_defaults": policy_execution_plan.get("request_defaults") if isinstance(policy_execution_plan.get("request_defaults"), dict) else {},
+        "request_default_sources": policy_execution_plan.get("request_default_sources") if isinstance(policy_execution_plan.get("request_default_sources"), dict) else {},
+        "request_template": _site_policy_execution_sequence_request_template(policy_execution_plan),
+        "qbit_roles": policy_execution_plan.get("qbit_roles") if isinstance(policy_execution_plan.get("qbit_roles"), list) else [],
+        "rule_obligations": policy_execution_plan.get("rule_obligations") if isinstance(policy_execution_plan.get("rule_obligations"), dict) else {},
+        "config_update_plan": config_update_plan,
+        "steps": steps,
+        "next_step": steps[0] if steps else None,
+        "read_order": ["policy_execution_sequence", "policy_execution_plan", "policy_execution_handoff", "policy_repair_gate", "config_update_plan"],
+        "complete_when": [
+            "live job request includes policy_execution_sequence.request_defaults",
+            "policy_execution_report.ready=true",
+            "qbit_enforcement_summary.ready=true after source and uploaded target injection",
+            "live_completion_gate.ready=true before final user report",
+        ],
+        "stop_when": [
+            "policy_execution_sequence.ready=false",
+            "rule_obligations.*.ready=false",
+            "duplicate_check.exists=true",
+            "confirm_upload is not true for live upload",
+        ],
+        "blockers": blockers,
+        "next_actions": _site_policy_execution_sequence_next_actions(ready, action, steps, blockers),
+        "safety": {
+            "mutates_state": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "does_not_edit_config": True,
+            "live_job_requires": ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "policy_execution_sequence.ready=true"],
+        },
+    }
+
+
+def _site_policy_execution_sequence_action(
+    ready: bool,
+    policy_repair_gate: dict[str, Any],
+    policy_execution_plan: dict[str, Any],
+    config_update_plan: dict[str, Any],
+) -> str:
+    if ready:
+        return "create_live_job_with_policy_defaults"
+    repair_action = str(policy_repair_gate.get("action") or "")
+    if repair_action:
+        return repair_action
+    if config_update_plan.get("ready") is not True:
+        return "edit_config"
+    return str(policy_execution_plan.get("action") or "inspect_policy")
+
+
+def _site_policy_execution_sequence_request_template(policy_execution_plan: dict[str, Any]) -> dict[str, Any]:
+    template = {
+        "accept_rules": True,
+        "confirm_upload": True,
+        "source_url": "<source tracker torrent URL>",
+        "target": "<target tracker code>",
+    }
+    defaults = policy_execution_plan.get("request_defaults") if isinstance(policy_execution_plan.get("request_defaults"), dict) else {}
+    template.update(defaults)
+    return template
+
+
+def _site_policy_execution_sequence_steps(
+    action: str,
+    ready: bool,
+    policy_execution_plan: dict[str, Any],
+    policy_repair_gate: dict[str, Any],
+    config_update_plan: dict[str, Any],
+    request_context: dict[str, Any],
+    blockers: list[str],
+) -> list[dict[str, Any]]:
+    if ready:
+        request_template = _site_policy_execution_sequence_request_template(policy_execution_plan)
+        return [
+            {
+                "name": "copy_request_defaults",
+                "tool": "site_policies",
+                "endpoint": "/v1/site-policies",
+                "method": "POST",
+                "read": ["policy_execution_sequence.request_defaults", "policy_execution_sequence.request_default_sources", "policy_execution_sequence.qbit_roles"],
+                "request_template": request_template,
+                "continue_when": "request_defaults are copied into the live request without loosening configured limits",
+                "stop_when": ["policy_execution_sequence.ready=false"],
+            },
+            {
+                "name": "preflight_or_check_submit",
+                "tool": "source_url_check_and_submit",
+                "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+                "method": "POST",
+                "request_template": request_template,
+                "continue_when": "duplicate_check.exists=false and a job_id is returned",
+                "stop_when": ["duplicate_check.exists=true", "policy_execution_report.ready=false", "confirm_upload is not true"],
+            },
+            {
+                "name": "verify_policy_execution",
+                "tool": "get_job_summary",
+                "endpoint": "/v1/jobs/{job_id}/summary",
+                "method": "GET",
+                "read": ["policy_execution_report", "qbit_enforcement_summary", "qbit_execution_gate", "live_completion_gate"],
+                "continue_when": "live_completion_gate.ready=true",
+                "stop_when": ["qbit_enforcement_summary.ready=false", "live_completion_gate.ready=false"],
+            },
+        ]
+    next_step = policy_repair_gate.get("next_step") if isinstance(policy_repair_gate.get("next_step"), dict) else {}
+    if not next_step:
+        next_step = {
+            "tool": "site_policies",
+            "endpoint": "/v1/site-policies",
+            "method": "POST",
+            "request": _site_policy_rerun_request(request_context, {"accept_rules": policy_execution_plan.get("accepted_rules")}),
+            "reason": "inspect_policy_execution_sequence",
+        }
+    return [
+        {
+            "name": "repair_policy_before_live_job",
+            "tool": next_step.get("tool"),
+            "endpoint": next_step.get("endpoint"),
+            "method": next_step.get("method"),
+            "request": next_step.get("request"),
+            "reason": next_step.get("reason") or action,
+            "read": ["policy_repair_gate", "config_update_plan", "policy_readiness_summary", "rule_obligations"],
+            "config_patch": config_update_plan.get("structured_patch") if isinstance(config_update_plan.get("structured_patch"), dict) else {},
+            "continue_when": "site_policies returns policy_execution_sequence.ready=true",
+            "stop_when": ["manual rule review is missing", "required SITE_POLICIES fields are still missing"],
+            "blockers": blockers,
+        }
+    ]
+
+
+def _site_policy_execution_sequence_next_actions(ready: bool, action: str, steps: list[dict[str, Any]], blockers: list[str]) -> list[str]:
+    if ready:
+        return ["Follow policy_execution_sequence.steps in order; do not create the live job until request_defaults are copied and duplicate checks remain clear."]
+    first_step = steps[0] if steps else {}
+    if first_step.get("tool") == "site_policy_rule_review":
+        return ["Review tracker rules, call site_policy_rule_review, apply the config patch manually, then rerun site_policies until policy_execution_sequence.ready=true."]
+    if first_step.get("tool") == "edit_config" or action == "edit_config":
+        return ["Apply config_update_plan.structured_patch manually, keep stricter local limits if present, then rerun site_policies with accept_rules=true."]
+    if blockers:
+        return ["Resolve policy_execution_sequence.blockers before any live retorrent job."]
+    return ["Inspect policy_execution_sequence.next_step before continuing."]
 
 
 def _site_policy_readiness_summary(
@@ -17080,7 +17249,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_execution_sequence", "policy_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -17112,6 +17281,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "policy_execution_handoff_fields": ["ready", "accepted_rules", "phase", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "qbit", "seeding", "transfer_rules", "rule_obligations", "config", "request", "continue_when", "stop_when", "blockers", "next_actions"],
                 "policy_execution_plan_fields": ["ready", "status", "action", "accepted_rules", "source_trackers", "target_trackers", "request_defaults", "request_default_sources", "qbit_roles", "qbit_limit_plan", "seeding_plan", "transfer_rule_plan", "rule_obligations", "required_confirmations", "evidence_required", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety", "request"],
                 "policy_execution_plan_qbit_role_fields": ["role", "tracker", "request_fields", "qbit_client_fields", "limits_human", "seeding_requirements", "evidence_required"],
+                "policy_execution_sequence_fields": ["ready", "status", "action", "accepted_rules", "source_trackers", "target_trackers", "request_defaults", "request_default_sources", "request_template", "qbit_roles", "rule_obligations", "config_update_plan", "steps", "next_step", "read_order", "complete_when", "stop_when", "blockers", "next_actions", "safety"],
+                "policy_execution_sequence_step_fields": ["name", "tool", "endpoint", "method", "request", "request_template", "read", "continue_when", "stop_when", "blockers"],
                 "policy_handoff_fields": ["ready", "config_path", "blocked_trackers", "items", "config_templates", "config_update_plan", "missing_by_category", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "rule_obligations"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
@@ -19160,6 +19331,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_repair_gate": {"type": "object"},
             "policy_execution_handoff": {"type": "object"},
             "policy_execution_plan": {"type": "object"},
+            "policy_execution_sequence": {"type": "object"},
             "policy_handoff": {"type": "object"},
             "next_step": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},

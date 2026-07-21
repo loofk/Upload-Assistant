@@ -16764,6 +16764,19 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert execution_plan["recommended_tool"] == "readiness_bundle"
     assert execution_plan["safety"]["does_not_override_site_rules"] is True
     assert execution_plan["safety"]["live_upload"] is False
+    execution_sequence = payload["policy_execution_sequence"]
+    assert execution_sequence["kind"] == "ptcli.policy_execution_sequence"
+    assert execution_sequence["ready"] is True
+    assert execution_sequence["action"] == "create_live_job_with_policy_defaults"
+    assert execution_sequence["request_defaults"] == execution_plan["request_defaults"]
+    assert execution_sequence["request_template"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert execution_sequence["request_template"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert execution_sequence["steps"][0]["name"] == "copy_request_defaults"
+    assert execution_sequence["steps"][1]["tool"] == "source_url_check_and_submit"
+    assert execution_sequence["steps"][2]["read"] == ["policy_execution_report", "qbit_enforcement_summary", "qbit_execution_gate", "live_completion_gate"]
+    assert "live_completion_gate.ready=true before final user report" in execution_sequence["complete_when"]
+    assert "policy_execution_sequence.ready=false" in execution_sequence["stop_when"]
+    assert execution_sequence["safety"]["does_not_edit_config"] is True
     assert payload["config_templates"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]'
     assert payload["config_templates"]["trackers"]["MTEAM"]["min_ratio"] == 1.0
     assert payload["config_templates"]["structured_trackers"]["U2"]["qbit_limits"]["download_limit"] == "20 MiB/s"
@@ -17502,6 +17515,16 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert payload["policy_execution_handoff"]["next_actions"] == [
         "Apply policy_execution_handoff.config.templates to PTCLI.SITE_POLICIES, replace rule_review_fingerprint placeholders after manual rule review, then rerun site_policies."
     ]
+    execution_sequence = payload["policy_execution_sequence"]
+    assert execution_sequence["kind"] == "ptcli.policy_execution_sequence"
+    assert execution_sequence["ready"] is False
+    assert execution_sequence["action"] == "review_rules"
+    assert execution_sequence["next_step"]["name"] == "repair_policy_before_live_job"
+    assert execution_sequence["next_step"]["tool"] == "site_policy_rule_review"
+    assert execution_sequence["next_step"]["config_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
+    assert "manual rule review is missing" in execution_sequence["next_step"]["stop_when"]
+    assert "policy_execution_sequence.ready=false" in execution_sequence["stop_when"]
+    assert any("Review tracker rules" in action for action in execution_sequence["next_actions"])
     assert payload["agent_summary"]["policy_coverage_ready"] is False
     assert payload["agent_summary"]["execution_ready"] is False
     assert payload["agent_summary"]["policy_execution_summary"] == payload["policy_execution_summary"]
@@ -18107,11 +18130,17 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_repair_gate" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_plan" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "policy_execution_sequence" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_plan_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "request_defaults" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
     assert "qbit_roles" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
     assert "policy_execution_plan_qbit_role_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "qbit_client_fields" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_qbit_role_fields"]
+    assert "policy_execution_sequence_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "request_template" in tool_by_name["site_policies"]["response_contract"]["policy_execution_sequence_fields"]
+    assert "steps" in tool_by_name["site_policies"]["response_contract"]["policy_execution_sequence_fields"]
+    assert "policy_execution_sequence_step_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "request_template" in tool_by_name["site_policies"]["response_contract"]["policy_execution_sequence_step_fields"]
     assert "policy_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -18474,6 +18503,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_repair_gate" in site_policy_schema["properties"]
     assert "policy_execution_handoff" in site_policy_schema["properties"]
     assert "policy_execution_plan" in site_policy_schema["properties"]
+    assert "policy_execution_sequence" in site_policy_schema["properties"]
     assert "config_templates" in site_policy_schema["properties"]
     assert "config_update_plan" in site_policy_schema["properties"]
     rule_review_schema = openapi["paths"]["/v1/site-policies/rule-review"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -19053,11 +19083,17 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_repair_gate" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_handoff" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_plan" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "policy_execution_sequence" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_plan_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "request_defaults" in tools_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
         assert "qbit_roles" in tools_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
         assert "policy_execution_plan_qbit_role_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "qbit_client_fields" in tools_by_name["site_policies"]["response_contract"]["policy_execution_plan_qbit_role_fields"]
+        assert "policy_execution_sequence_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "request_template" in tools_by_name["site_policies"]["response_contract"]["policy_execution_sequence_fields"]
+        assert "steps" in tools_by_name["site_policies"]["response_contract"]["policy_execution_sequence_fields"]
+        assert "policy_execution_sequence_step_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "request_template" in tools_by_name["site_policies"]["response_contract"]["policy_execution_sequence_step_fields"]
         assert "policy_handoff" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "execution_readiness" in tools_by_name["site_policies"]["response_contract"]["policy_fields"]
