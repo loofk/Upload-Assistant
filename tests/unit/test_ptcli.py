@@ -17331,6 +17331,22 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert payload["extension_handoff"]["endpoint_sequence"][0]["tool"] == "site_profiles"
     assert payload["extension_handoff"]["endpoint_sequence"][3]["endpoint"] == "/v1/retorrent/source-url/preflight"
     assert payload["extension_handoff"]["continue_when"] == "extension_plan.ready=true and readiness_bundle.live_readiness.ready_for_ai=true"
+    rollout = payload["tracker_rollout_handoff"]
+    assert rollout["kind"] == "ptcli.tracker_rollout_handoff"
+    assert rollout["ready"] is True
+    assert rollout["action"] == "validate_requested_flow"
+    assert rollout["requested_flow"]["ready"] is True
+    assert rollout["live_reference_sources_to_mteam"] == ["U2"]
+    assert rollout["next_source_tracker"] is None
+    assert rollout["next_target_tracker"] is None
+    assert rollout["recommended_tool"] == "readiness_bundle"
+    source_rollout = {item["tracker"]: item for item in rollout["source_rollout"]}
+    assert source_rollout["U2"]["ready_for_role"] is True
+    assert source_rollout["U2"]["full_live_closure_to_mteam"] is True
+    target_rollout = {item["tracker"]: item for item in rollout["target_rollout"]}
+    assert target_rollout["U2"]["applicable"] is False
+    assert target_rollout["MTEAM"]["ready_for_role"] is True
+    assert "tracker_rollout_handoff" in rollout["read_order"]
     assert payload["agent_summary"]["extension_ready"] is True
     assert payload["agent_summary"]["extension_blocker_count"] == 0
     assert payload["agent_summary"]["coverage_ready"] is True
@@ -18794,6 +18810,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "adapter_coverage_summary" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_validation_matrix" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
+    assert "tracker_rollout_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_checklist" in tool_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
     assert "adapter_coverage_summary_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "adapter_coverage_item_fields" in tool_by_name["site_profiles"]["response_contract"]
@@ -18806,6 +18823,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "validation_check_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "extension_handoff_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "validation_matrix" in tool_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
+    assert "tracker_rollout_handoff_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "source_rollout" in tool_by_name["site_profiles"]["response_contract"]["tracker_rollout_handoff_fields"]
+    assert "tracker_rollout_item_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "applicable" in tool_by_name["site_profiles"]["response_contract"]["tracker_rollout_item_fields"]
+    assert "ready_for_role" in tool_by_name["site_profiles"]["response_contract"]["tracker_rollout_item_fields"]
     assert "next_validation" in tool_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
     assert "endpoint_sequence" in tool_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
     assert "missing_components" in tool_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
@@ -19070,6 +19092,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "extension_plan" in site_profiles_schema["properties"]
     assert "extension_validation_matrix" in site_profiles_schema["properties"]
     assert "extension_handoff" in site_profiles_schema["properties"]
+    assert "tracker_rollout_handoff" in site_profiles_schema["properties"]
     assert "flow_matrix" in site_profiles_schema["properties"]
     qbit_inspect_schema = openapi["paths"]["/v1/qbit/inspect"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "torrents" in qbit_inspect_schema["properties"]
@@ -19639,6 +19662,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "adapter_coverage_summary" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_validation_matrix" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
+        assert "tracker_rollout_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_checklist" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_coverage_summary_fields" in tools_by_name["site_profiles"]["response_contract"]
@@ -19651,6 +19675,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "validation_check_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "extension_handoff_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "validation_matrix" in tools_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
+        assert "tracker_rollout_handoff_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "tracker_rollout_item_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
         assert "missing_components" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
