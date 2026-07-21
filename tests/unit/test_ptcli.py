@@ -13576,6 +13576,16 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["closure_summary"]["target"]["uploaded_torrent_hash"] == "b" * 40
     assert job["closure_summary"]["next_step"] == job["target_upload_handoff"]["next_step"]
     assert "materials_handoff.not_ready" in job["closure_summary"]["blockers"]
+    assert job["closure_summary"]["completion_report"]["kind"] == "ptcli.closure_completion_report"
+    assert job["closure_summary"]["completion_report"]["complete"] is False
+    assert job["closure_summary"]["completion_report"]["ready_for_user_report"] is False
+    assert job["closure_summary"]["completion_report"]["verdict"] == "prepare_materials"
+    assert "target_ready" in job["closure_summary"]["completion_report"]["missing_gates"]
+    assert job["closure_summary"]["completion_report"]["source"]["torrent_hash"] == "a" * 40
+    assert job["closure_summary"]["completion_report"]["target"]["uploaded_torrent_hash"] == "b" * 40
+    assert job["closure_summary"]["completion_report"]["next_step"] == job["target_upload_handoff"]["next_step"]
+    assert job["closure_summary"]["completion_report"]["recommended_tool"] == "resume_job"
+    assert "materials_handoff.not_ready" in job["closure_summary"]["completion_report"]["blockers"]
     assert job["agent_decision"]["closure_handoff"] == job["closure_handoff"]
     assert job["resume_plan"]["available"] is True
     assert job["resume_plan"]["allowed"] is True
@@ -17214,6 +17224,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "closure_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "closure_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "closure_summary_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "completion_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["closure_summary_fields"]
+    assert "completion_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "ready_for_user_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["completion_report_fields"]
+    assert "missing_gates" in tool_by_name["manual_retorrent_job"]["response_contract"]["completion_report_fields"]
     assert "manual_retorrent_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "live_checklist" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
     assert "live_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
@@ -18314,6 +18328,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "closure_summary" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "closure_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "closure_summary_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "completion_report" in tools_by_name["manual_retorrent_job"]["response_contract"]["closure_summary_fields"]
+        assert "completion_report_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "ready_for_user_report" in tools_by_name["manual_retorrent_job"]["response_contract"]["completion_report_fields"]
         assert "manual_retorrent_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "live_checklist" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
         assert "live_ready" in tools_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]

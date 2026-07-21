@@ -9541,12 +9541,14 @@ def _job_closure_summary(job: dict[str, Any], summary_payload: dict[str, Any] | 
     blockers = list(dict.fromkeys(_string_list(closure_handoff.get("blockers")) + _string_list(checklist.get("blockers"))))
     next_step = closure_handoff.get("next_step") if isinstance(closure_handoff.get("next_step"), dict) else {}
     complete = closure_handoff.get("complete") is True
+    completion_report = _closure_completion_report(complete, closure_handoff, gates, source, target, duplicate_check, evidence, blockers, next_step)
     return {
         "kind": "ptcli.closure_summary",
         "complete": complete,
         "status": closure_handoff.get("status"),
         "action": closure_handoff.get("action"),
         "ready_for_report": complete and not blockers,
+        "completion_report": completion_report,
         "source_reference": closure_handoff.get("source_reference"),
         "target_trackers": closure_handoff.get("target_trackers"),
         "gates": gates,
@@ -9593,6 +9595,58 @@ def _job_closure_summary(job: dict[str, Any], summary_payload: dict[str, Any] | 
         "recommended_request": next_step.get("request"),
         "blockers": blockers,
         "next_actions": _closure_summary_next_actions(complete, blockers, next_step),
+    }
+
+
+def _closure_completion_report(
+    complete: bool,
+    closure_handoff: dict[str, Any],
+    gates: dict[str, Any],
+    source: dict[str, Any],
+    target: dict[str, Any],
+    duplicate_check: dict[str, Any],
+    evidence: dict[str, Any],
+    blockers: list[str],
+    next_step: dict[str, Any],
+) -> dict[str, Any]:
+    missing = [key for key, value in gates.items() if value is False]
+    return {
+        "kind": "ptcli.closure_completion_report",
+        "complete": complete and not blockers,
+        "ready_for_user_report": complete and not blockers,
+        "action": closure_handoff.get("action"),
+        "status": closure_handoff.get("status"),
+        "verdict": "complete" if complete and not blockers else str(closure_handoff.get("action") or "blocked"),
+        "required_gates": gates,
+        "missing_gates": missing,
+        "source": {
+            "ready": source.get("ready"),
+            "torrent_hash": source.get("torrent_hash"),
+            "content_path": source.get("content_path"),
+        },
+        "target": {
+            "ready": target.get("ready"),
+            "uploaded_torrent_hash": target.get("uploaded_torrent_hash"),
+            "injected_torrent_hash": target.get("injected_torrent_hash"),
+            "uploaded_seeding_ready": target.get("uploaded_seeding_ready"),
+        },
+        "duplicate_check": {
+            "searched": duplicate_check.get("searched"),
+            "exists": duplicate_check.get("exists"),
+            "count": duplicate_check.get("count"),
+        },
+        "evidence": {
+            "present": evidence.get("present") is True,
+            "source_torrent_path": evidence.get("source_torrent_path"),
+            "target_torrent_file": evidence.get("target_torrent_file"),
+            "uploaded_torrent_path": evidence.get("uploaded_torrent_path"),
+        },
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "blockers": blockers,
+        "next_actions": _closure_summary_next_actions(complete, blockers, next_step),
+        "report_when": "complete=true and blockers=[]; include source/target hash and qBittorrent seeding evidence.",
     }
 
 
@@ -13749,7 +13803,8 @@ def _job_response_contract() -> dict[str, Any]:
         "check_submission_fields": ["check_job_id", "check_status", "check_kind", "check_summary_file", "duplicate_check", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides"],
         "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "tool", "endpoint", "method", "request", "requires_before_call", "next_step", "blockers", "next_actions"],
         "closure_handoff_fields": ["action", "complete", "closure_checklist", "source", "target", "evidence", "duplicate_check", "target_upload_handoff", "qbit_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
-        "closure_summary_fields": ["complete", "ready_for_report", "action", "gates", "source", "target", "duplicate_check", "materials", "policy", "qbit", "evidence", "next_step", "recommended_tool", "blockers", "next_actions"],
+        "closure_summary_fields": ["complete", "ready_for_report", "completion_report", "action", "gates", "source", "target", "duplicate_check", "materials", "policy", "qbit", "evidence", "next_step", "recommended_tool", "blockers", "next_actions"],
+        "completion_report_fields": ["complete", "ready_for_user_report", "verdict", "required_gates", "missing_gates", "source", "target", "duplicate_check", "evidence", "next_step", "recommended_tool", "recommended_endpoint", "blockers", "next_actions", "report_when"],
     }
 
 

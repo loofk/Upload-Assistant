@@ -2484,6 +2484,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -2497,6 +2498,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -3525,6 +3543,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -3538,6 +3557,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -4433,6 +4469,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -4446,6 +4483,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -5341,6 +5395,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -5354,6 +5409,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -6253,6 +6325,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -6266,6 +6339,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -7611,6 +7701,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -7624,6 +7715,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ],
         "result_fields": [
           "ranking",
@@ -8920,6 +9028,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -8933,6 +9042,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -12038,6 +12164,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -12051,6 +12178,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -12908,6 +13052,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -12921,6 +13066,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -13787,6 +13949,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -13800,6 +13963,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -14635,6 +14815,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -14648,6 +14829,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -15606,6 +15804,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -15619,6 +15818,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "safety": {
@@ -16609,6 +16825,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -16622,6 +16839,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "workflow_hints": {
@@ -17354,6 +17588,7 @@
         "closure_summary_fields": [
           "complete",
           "ready_for_report",
+          "completion_report",
           "action",
           "gates",
           "source",
@@ -17367,6 +17602,23 @@
           "recommended_tool",
           "blockers",
           "next_actions"
+        ],
+        "completion_report_fields": [
+          "complete",
+          "ready_for_user_report",
+          "verdict",
+          "required_gates",
+          "missing_gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "blockers",
+          "next_actions",
+          "report_when"
         ]
       },
       "safety": {
