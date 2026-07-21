@@ -13422,7 +13422,7 @@ def _retorrent_stage_source_info(job: dict[str, Any], request: dict[str, Any], p
     ):
         if isinstance(candidate, dict):
             source_info.update({key: value for key, value in candidate.items() if value not in (None, "", [], {})})
-    source_reference = _job_source_reference(job)
+    source_reference = _job_source_reference(job) or {}
     if isinstance(source_reference, dict):
         if source_reference.get("tracker") and not source_info.get("tracker"):
             source_info["tracker"] = source_reference["tracker"]
@@ -14388,7 +14388,7 @@ def _target_upload_confirmation_overrides(missing_confirmations: list[str]) -> d
 def _target_upload_policy_request(job: dict[str, Any]) -> dict[str, Any]:
     request = job.get("request") if isinstance(job.get("request"), dict) else {}
     policy_request: dict[str, Any] = {}
-    source_reference = _job_source_reference(job)
+    source_reference = _job_source_reference(job) or {}
     if isinstance(source_reference, dict) and source_reference.get("tracker"):
         policy_request["source_tracker"] = source_reference.get("tracker")
     target_trackers = request.get("target_trackers")
@@ -18306,9 +18306,10 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
         site_policies = {"status": "blocked", "ok": False, "ready": False, "blockers": [str(exc)]}
     tools = _agent_tool_schemas()
     tool_names = {str(tool.get("name")) for tool in tools}
-    progress_items = _goal_progress_items(deployment, site_policies, tool_names)
+    live_validation_evidence = _goal_progress_live_validation_evidence(request)
+    progress_items = _goal_progress_items(deployment, site_policies, tool_names, live_validation_evidence)
     estimate = _goal_progress_estimate(progress_items)
-    blockers = _goal_progress_blockers(progress_items, deployment, site_policies)
+    blockers = _goal_progress_blockers(progress_items, deployment, site_policies, live_validation_evidence)
     return {
         "kind": "ptcli.goal_progress",
         "status": "ok" if estimate["critical_path_ready"] else "blocked",
@@ -18344,9 +18345,10 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 "policy_repair_ready": (site_policies.get("policy_repair_gate") or {}).get("ready") if isinstance(site_policies.get("policy_repair_gate"), dict) else None,
                 "blockers": _string_list(site_policies.get("blockers")),
             },
+            "live_validation": live_validation_evidence,
             "tool_count": len(tools),
         },
-        "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence", "next_step", "blockers"],
+        "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence.live_validation", "evidence", "next_step", "blockers"],
         "next_actions": _goal_progress_next_actions(progress_items, blockers),
     }
 
@@ -18375,10 +18377,146 @@ def _goal_progress_policy_request(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, Any], tool_names: set[str]) -> list[dict[str, Any]]:
+def _goal_progress_live_validation_evidence(request: dict[str, Any]) -> dict[str, Any]:
+    explicit_job_id = str(request.get("job_id") or request.get("live_job_id") or "").strip()
+    explicit_summary_file = str(request.get("summary_file") or request.get("live_summary_file") or "").strip()
+    job_dir = _resolve_job_dir(request.get("job_dir"))
+    candidates: list[dict[str, Any]] = []
+    checked_jobs = 0
+    if explicit_summary_file:
+        candidates.append(_goal_progress_live_validation_from_summary_file(explicit_summary_file, source="request.summary_file"))
+    if explicit_job_id:
+        candidates.append(_goal_progress_live_validation_from_job_id(job_dir, explicit_job_id, source="request.job_id"))
+    if not explicit_job_id:
+        for path in sorted(job_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:100]:
+            checked_jobs += 1
+            candidates.append(_goal_progress_live_validation_from_job_path(path, source="job_dir"))
+    valid_candidates = [candidate for candidate in candidates if candidate.get("valid")]
+    complete = next((candidate for candidate in valid_candidates if candidate.get("ready")), None)
+    best = complete or (valid_candidates[0] if valid_candidates else None)
+    blockers = [] if complete else ["No current-state job or summary evidence has live_user_report.report_allowed=true."]
+    if best and best.get("blockers"):
+        blockers.extend(_string_list(best.get("blockers")))
+    return {
+        "kind": "ptcli.goal_live_validation_evidence",
+        "ready": bool(complete),
+        "status": "complete" if complete else "missing" if not valid_candidates else "incomplete",
+        "source": complete.get("source") if complete else best.get("source") if best else None,
+        "job_dir": str(job_dir),
+        "requested_job_id": explicit_job_id or None,
+        "requested_summary_file": explicit_summary_file or None,
+        "checked_jobs": checked_jobs,
+        "candidate_count": len(valid_candidates),
+        "best": best,
+        "completion_evidence": complete,
+        "required_condition": "live_user_report.report_allowed=true and live_user_report.evidence.missing_evidence=[] and live_user_report.blockers=[]",
+        "blockers": list(dict.fromkeys(blocker for blocker in blockers if blocker)),
+        "next_actions": _goal_progress_live_validation_evidence_next_actions(bool(complete), bool(valid_candidates)),
+    }
+
+
+def _goal_progress_live_validation_from_job_id(job_dir: Path, job_id: str, *, source: str) -> dict[str, Any]:
+    if not JOB_ID_PATTERN.fullmatch(job_id):
+        return {"valid": False, "source": source, "job_id": job_id, "blockers": ["Invalid job id."]}
+    return _goal_progress_live_validation_from_job_path(job_dir / f"{job_id}.json", source=source)
+
+
+def _goal_progress_live_validation_from_job_path(path: Path, *, source: str) -> dict[str, Any]:
+    try:
+        job = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"valid": False, "source": source, "job_file": str(path), "blockers": [f"Could not read job evidence: {exc}"]}
+    if not isinstance(job, dict):
+        return {"valid": False, "source": source, "job_file": str(path), "blockers": ["Job evidence is not an object."]}
+    summary_payload = _goal_progress_summary_payload_for_job(job)
+    evidence = _goal_progress_live_validation_from_job(job, summary_payload, source=source)
+    evidence["job_file"] = str(path)
+    return evidence
+
+
+def _goal_progress_live_validation_from_summary_file(summary_file: str, *, source: str) -> dict[str, Any]:
+    path = Path(summary_file).expanduser()
+    try:
+        summary_payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"valid": False, "source": source, "summary_file": str(path), "blockers": [f"Could not read summary evidence: {exc}"]}
+    if not isinstance(summary_payload, dict):
+        return {"valid": False, "source": source, "summary_file": str(path), "blockers": ["Summary evidence is not an object."]}
+    job = {"job_id": None, "kind": "summary_file", "status": summary_payload.get("status"), "summary_file": str(path), "result": summary_payload, "blockers": _string_list(summary_payload.get("blockers"))}
+    return _goal_progress_live_validation_from_job(job, summary_payload, source=source)
+
+
+def _goal_progress_summary_payload_for_job(job: dict[str, Any]) -> dict[str, Any] | None:
+    summary_file = _job_summary_file(job)
+    if not summary_file:
+        result = job.get("result")
+        return result if isinstance(result, dict) else None
+    path = Path(summary_file).expanduser()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        result = job.get("result")
+        return result if isinstance(result, dict) else None
+    return payload if isinstance(payload, dict) else None
+
+
+def _goal_progress_live_validation_from_job(job: dict[str, Any], summary_payload: dict[str, Any] | None, *, source: str) -> dict[str, Any]:
+    live_user_report = _job_live_user_report(job, summary_payload)
+    validation = _job_seedbox_live_validation_completion_report(job, summary_payload)
+    closure = _job_closure_summary(job, summary_payload)
+    qbit = _job_qbit_enforcement_summary(job, summary_payload)
+    missing_evidence = _string_list((live_user_report.get("evidence") or {}).get("missing_evidence")) if isinstance(live_user_report.get("evidence"), dict) else []
+    blockers = list(dict.fromkeys(_string_list(live_user_report.get("blockers")) + _string_list(validation.get("blockers"))))
+    ready = live_user_report.get("report_allowed") is True and not missing_evidence and not blockers
+    return {
+        "valid": True,
+        "ready": ready,
+        "status": "complete" if ready else "incomplete",
+        "source": source,
+        "job_id": job.get("job_id"),
+        "job_status": job.get("status"),
+        "kind": job.get("kind"),
+        "summary_file": live_user_report.get("summary_file") or _job_summary_file(job),
+        "live_user_report": {
+            "report_allowed": live_user_report.get("report_allowed"),
+            "ready_for_user_report": live_user_report.get("ready_for_user_report"),
+            "report_blocked_reason": live_user_report.get("report_blocked_reason"),
+            "source": live_user_report.get("source"),
+            "target": live_user_report.get("target"),
+            "duplicate_check": live_user_report.get("duplicate_check"),
+            "qbit": live_user_report.get("qbit"),
+        },
+        "seedbox_live_validation_completion_report": {
+            "ready_for_user_report": validation.get("ready_for_user_report"),
+            "status": validation.get("status"),
+            "missing_evidence": validation.get("missing_evidence"),
+        },
+        "closure_summary": {
+            "complete": closure.get("complete"),
+            "action": closure.get("action"),
+        },
+        "qbit_enforcement_summary": {
+            "ready": qbit.get("ready") if isinstance(qbit, dict) else None,
+            "status": qbit.get("status") if isinstance(qbit, dict) else None,
+        },
+        "missing_evidence": missing_evidence,
+        "blockers": blockers,
+    }
+
+
+def _goal_progress_live_validation_evidence_next_actions(ready: bool, has_candidates: bool) -> list[str]:
+    if ready:
+        return ["Treat seedbox_live_validation as proven for this goal audit and continue with the next incomplete capability."]
+    if has_candidates:
+        return ["Open evidence.live_validation.best, resolve its blockers or missing_evidence, then rerun /v1/goal/progress with the same job_dir/job_id."]
+    return ["Run readiness_bundle.live_execution_package on a real U2/CHD -> MTEAM seedbox job, then rerun /v1/goal/progress with job_id or job_dir."]
+
+
+def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, Any], tool_names: set[str], live_validation_evidence: dict[str, Any]) -> list[dict[str, Any]]:
     docker_compose = deployment.get("docker_compose") if isinstance(deployment.get("docker_compose"), dict) else {}
     qbit = deployment.get("qbit") if isinstance(deployment.get("qbit"), dict) else {}
     policy_repair = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
+    live_verified = live_validation_evidence.get("ready") is True
     return [
         _goal_progress_item(
             "docker_compose_deployment",
@@ -18405,18 +18543,18 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
         _goal_progress_item(
             "manual_source_url_retorrent",
             "Manual source-link to target-site retorrent workflow",
-            "partial",
+            "complete" if live_verified else "partial",
             18,
             ["source_url_check_and_submit", "retorrent_stage_handoff", "closure_handoff", "live_user_report", "seedbox_live_validation_completion_report"],
-            blockers=["Requires real seedbox live validation before this can be marked complete."],
+            blockers=[] if live_verified else ["Requires real seedbox live validation before this can be marked complete."],
         ),
         _goal_progress_item(
             "metadata_and_materials",
             "IMDb/TMDb/Douban/PTGen, MediaInfo/BDInfo, screenshots, and image-host materials",
-            "partial" if {"metadata_prepare_job", "materials_prepare_job", "target_package_prepare_job"}.issubset(tool_names) else "missing",
+            "complete" if live_verified else "partial" if {"metadata_prepare_job", "materials_prepare_job", "target_package_prepare_job"}.issubset(tool_names) else "missing",
             10,
             ["metadata_prepare_handoff", "materials_prepare_handoff", "target_package_handoff"],
-            blockers=["Material generation and description output still need live content validation across U2/CHD -> MTEAM."],
+            blockers=[] if live_verified else ["Material generation and description output still need live content validation across U2/CHD -> MTEAM."],
         ),
         _goal_progress_item(
             "daily_candidates",
@@ -18437,7 +18575,7 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
         _goal_progress_item(
             "qbittorrent_execution",
             "qBittorrent add/wait/export/inject/category/tag/rate-limit evidence",
-            "partial" if qbit.get("configured") else "missing",
+            "complete" if live_verified and qbit.get("configured") else "partial" if qbit.get("configured") else "missing",
             8,
             ["qbit_plan", "qbit_limit_audit", "qbit_execution_gate", "/v1/qbit/*"],
             blockers=[] if qbit.get("configured") else ["qBittorrent client is not configured in data/config.py."],
@@ -18453,10 +18591,10 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
         _goal_progress_item(
             "seedbox_live_validation",
             "Real seedbox end-to-end live validation",
-            "unverified",
+            "complete" if live_verified else "unverified",
             12,
             ["readiness_bundle.live_execution_package", "live_validation_sequence", "live_user_report", "seedbox_live_validation_completion_report"],
-            blockers=["No current-state evidence proves a real seedbox live run completed from source pull through uploaded torrent seeding."],
+            blockers=[] if live_verified else _string_list(live_validation_evidence.get("blockers")) or ["No current-state evidence proves a real seedbox live run completed from source pull through uploaded torrent seeding."],
         ),
         _goal_progress_item(
             "legacy_cleanup",
@@ -18518,10 +18656,12 @@ def _goal_progress_remaining(items: list[dict[str, Any]]) -> list[dict[str, Any]
     ]
 
 
-def _goal_progress_blockers(items: list[dict[str, Any]], deployment: dict[str, Any], site_policies: dict[str, Any]) -> list[str]:
+def _goal_progress_blockers(items: list[dict[str, Any]], deployment: dict[str, Any], site_policies: dict[str, Any], live_validation_evidence: dict[str, Any]) -> list[str]:
     blockers: list[str] = []
     blockers.extend(_string_list(deployment.get("blockers")))
     blockers.extend(_string_list(site_policies.get("blockers")))
+    if live_validation_evidence.get("ready") is not True:
+        blockers.extend(_string_list(live_validation_evidence.get("blockers")))
     for item in items:
         if item.get("id") in {"manual_source_url_retorrent", "metadata_and_materials", "site_policy_config", "qbittorrent_execution", "seedbox_live_validation"}:
             blockers.extend(_string_list(item.get("blockers")))
@@ -19252,7 +19392,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "unverified", "missing", "not_started"],
-                "evidence_fields": ["deployment", "site_policies", "tool_count"],
+                "evidence_fields": ["deployment", "site_policies", "live_validation", "tool_count"],
+                "live_validation_evidence_fields": ["ready", "status", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "required_condition", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "reason"],
             },
             "workflow_hints": {"read_first": "completion_estimate", "then": "critical_path_remaining", "repair_with": "next_step"},
@@ -19846,6 +19987,10 @@ def _readiness_bundle_tool_request_schema() -> dict[str, Any]:
         "source_id": {"type": "string", "description": "Optional source torrent id when source_tracker is provided instead of a full source_url."},
         "cookies_dir": {"type": "string"},
         "job_dir": {"type": "string"},
+        "job_id": {"type": "string", "description": "Optional completed retorrent job id used by goal_progress as live validation evidence."},
+        "live_job_id": {"type": "string", "description": "Alias for job_id when auditing seedbox live validation evidence."},
+        "summary_file": {"type": "string", "description": "Optional ptcli summary JSON used by goal_progress as live validation evidence."},
+        "live_summary_file": {"type": "string", "description": "Alias for summary_file when auditing seedbox live validation evidence."},
         "downloads_path": {"type": "string"},
         "compose_file": {"type": "string"},
         "max_concurrent_jobs": {"type": "integer", "default": DEFAULT_MAX_CONCURRENT_JOBS},

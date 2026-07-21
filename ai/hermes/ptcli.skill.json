@@ -24963,6 +24963,22 @@
           "job_dir": {
             "type": "string"
           },
+          "job_id": {
+            "type": "string",
+            "description": "Optional completed retorrent job id used by goal_progress as live validation evidence."
+          },
+          "live_job_id": {
+            "type": "string",
+            "description": "Alias for job_id when auditing seedbox live validation evidence."
+          },
+          "summary_file": {
+            "type": "string",
+            "description": "Optional ptcli summary JSON used by goal_progress as live validation evidence."
+          },
+          "live_summary_file": {
+            "type": "string",
+            "description": "Alias for summary_file when auditing seedbox live validation evidence."
+          },
           "downloads_path": {
             "type": "string"
           },
@@ -25017,7 +25033,23 @@
         "evidence_fields": [
           "deployment",
           "site_policies",
+          "live_validation",
           "tool_count"
+        ],
+        "live_validation_evidence_fields": [
+          "ready",
+          "status",
+          "source",
+          "job_dir",
+          "requested_job_id",
+          "requested_summary_file",
+          "checked_jobs",
+          "candidate_count",
+          "best",
+          "completion_evidence",
+          "required_condition",
+          "blockers",
+          "next_actions"
         ],
         "next_step_fields": [
           "tool",
@@ -25281,6 +25313,22 @@
           },
           "job_dir": {
             "type": "string"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "Optional completed retorrent job id used by goal_progress as live validation evidence."
+          },
+          "live_job_id": {
+            "type": "string",
+            "description": "Alias for job_id when auditing seedbox live validation evidence."
+          },
+          "summary_file": {
+            "type": "string",
+            "description": "Optional ptcli summary JSON used by goal_progress as live validation evidence."
+          },
+          "live_summary_file": {
+            "type": "string",
+            "description": "Alias for summary_file when auditing seedbox live validation evidence."
           },
           "downloads_path": {
             "type": "string"

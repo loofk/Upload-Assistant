@@ -18726,7 +18726,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "completion_estimate" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_remaining" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_ready" in tool_by_name["goal_progress"]["response_contract"]["estimate_fields"]
+    assert "live_validation" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
+    assert "completion_evidence" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "unverified" in tool_by_name["goal_progress"]["response_contract"]["capability_status_values"]
+    assert "job_id" in tool_by_name["goal_progress"]["input_schema"]["properties"]
+    assert "summary_file" in tool_by_name["goal_progress"]["input_schema"]["properties"]
     assert tool_by_name["site_profiles"]["path"] == "/v1/sites"
     assert "adapter_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "extension_plan" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
@@ -18965,6 +18969,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     goal_progress_schema = openapi["paths"]["/v1/goal/progress"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "completion_estimate" in goal_progress_schema["properties"]
     assert "critical_path_remaining" in goal_progress_schema["properties"]
+    assert "evidence" in goal_progress_schema["properties"]
     resume_schema = openapi["paths"]["/v1/jobs/{job_id}/resume"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert "confirm_upload" in resume_schema["properties"]
     assert "save_path" in resume_schema["properties"]
@@ -20393,9 +20398,133 @@ services:
     assert payload["source_context"]["target"] == "MTEAM"
     assert payload["evidence"]["deployment"]["docker_compose_api_ready"] is True
     assert payload["evidence"]["deployment"]["qbit_configured"] is True
+    assert payload["evidence"]["live_validation"]["status"] == "missing"
+    assert payload["evidence"]["live_validation"]["ready"] is False
     assert payload["next_step"]["tool"] in {"site_policies", "readiness_bundle"}
     assert payload["read_order"][0] == "completion_estimate"
+    assert "evidence.live_validation" in payload["read_order"]
     assert any(item["id"] == "seedbox_live_validation" for item in payload["critical_path_remaining"])
+
+
+def test_goal_progress_payload_uses_completed_live_job_evidence(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    tmp_dir = tmp_path / "tmp"
+    job_dir = tmp_path / "jobs"
+    downloads_dir = tmp_path / "downloads"
+    for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
+        directory.mkdir(parents=True)
+    (data_dir / "config.py").write_text(
+        "config = {'DEFAULT': {'default_torrent_client': 'qbittorrent'}, 'TORRENT_CLIENTS': {'qbittorrent': {'torrent_client': 'qbit', 'qbit_url': 'http://host.docker.internal', 'qbit_port': '8080'}}}",
+        encoding="utf-8",
+    )
+    (tmp_path / "docker-compose.yml").write_text(
+        """
+services:
+  ptcli-api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+      - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+    volumes:
+      - /downloads:/downloads/:rw
+      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
+      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
+      - /app/tmp/:/Upload-Assistant/tmp/:rw
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TMPDIR", str(tmp_dir))
+    summary_file = tmp_path / "ptcli-run-summary.json"
+    result = {
+        "status": "complete",
+        "ok": True,
+        "summary_file": str(summary_file),
+        "duplicate_check": {"searched": True, "exists": False, "count": 0, "dupes": []},
+        "target_upload_diagnostics": {"ready_for_uploaded_seeding": True, "completion": {"ready_for_uploaded_seeding": True}},
+        "closure_status": {
+            "source": {"ready": True, "torrent_hash": "a" * 40, "content_path": "/downloads/Example", "wait_complete": True},
+            "target": {
+                "ready": True,
+                "uploaded_torrent_hash": "b" * 40,
+                "injected_torrent_hash": "c" * 40,
+                "uploaded_wait_evidence": True,
+                "injection_verified": True,
+            },
+        },
+        "evidence": {
+            "source_torrent_path": "/tmp/source/U2-60635.torrent",
+            "target_torrent_file": "/tmp/exported/mteam.torrent",
+            "uploaded_torrent_path": "/tmp/uploaded/MTEAM-999.torrent",
+        },
+    }
+    summary_file.write_text(json.dumps(result), encoding="utf-8")
+    store = ptcli_service.JobStore(job_dir, run_inline=True)
+    job = store.create(
+        "ptcli.source_url_retorrent",
+        {
+            "mode": "source_url_retorrent",
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "source_reference": {"tracker": "U2", "source_id": "60635", "source_url": "https://u2.dmhy.org/details.php?id=60635"},
+            "target": "MTEAM",
+            "target_trackers": ["MTEAM"],
+            "execute": True,
+            "accept_rules": True,
+            "confirm_upload": True,
+            "policy_coverage": {
+                "ready": True,
+                "accept_rules": True,
+                "site_policy_ready": True,
+                "obligations": {
+                    "source": {"tracker": "U2", "scope": "download_and_retorrent", "ready": True},
+                    "targets": [{"tracker": "MTEAM", "scope": "upload_and_seed", "ready": True}],
+                },
+                "missing_policy_fields": {},
+                "disabled_automation": {},
+                "blockers": [],
+            },
+            "policy_enforcement_bundle": {
+                "ready": True,
+                "status": "ready",
+                "action": "use_policy_defaults_for_live_jobs",
+                "accepted_rules": True,
+                "rule_gate": {"ready": True, "accepted_rules": True, "rule_obligations": {}},
+                "blockers": [],
+            },
+        },
+        ["python3", "ptcli.py", "retorrent", "--json"],
+        lambda: result,
+    )
+
+    payload = ptcli_service.goal_progress_payload(
+        {
+            "base_dir": str(tmp_path),
+            "job_dir": str(job_dir),
+            "downloads_path": str(downloads_dir),
+            "job_id": job["job_id"],
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+        }
+    )
+
+    capabilities = {item["id"]: item for item in payload["capabilities"]}
+    assert payload["evidence"]["live_validation"]["ready"] is True
+    assert payload["evidence"]["live_validation"]["status"] == "complete"
+    assert payload["evidence"]["live_validation"]["completion_evidence"]["job_id"] == job["job_id"]
+    assert payload["evidence"]["live_validation"]["completion_evidence"]["live_user_report"]["report_allowed"] is True
+    assert capabilities["manual_source_url_retorrent"]["status"] == "complete"
+    assert capabilities["metadata_and_materials"]["status"] == "complete"
+    assert capabilities["qbittorrent_execution"]["status"] == "complete"
+    assert capabilities["seedbox_live_validation"]["status"] == "complete"
+    assert not any(item["id"] == "seedbox_live_validation" for item in payload["critical_path_remaining"])
 
 
 def test_readiness_bundle_blocks_requested_material_generation_without_runtime_tools(tmp_path, monkeypatch) -> None:
