@@ -31,7 +31,7 @@ from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, 
 from src.ptcli.policies import build_rule_obligations, build_site_policy_coverage, build_site_policy_report, parse_rate_limit, qbit_limits_for_tracker
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.source import fetch_source_info, resolve_source_reference
-from src.ptcli.target import create_mteam_upload_torrent_candidate
+from src.ptcli.target import build_mteam_upload_preflight, create_mteam_upload_torrent_candidate, write_mteam_prepare_package
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
 DEFAULT_SERVICE_PORT = 8080
@@ -272,6 +272,7 @@ class JobStore:
             "materials_handoff": _job_materials_handoff(job, summary_payload),
             "metadata_prepare_handoff": _job_metadata_prepare_handoff(job, summary_payload),
             "materials_prepare_handoff": _job_materials_prepare_handoff(job, summary_payload),
+            "target_package_handoff": _job_target_package_handoff(job, summary_payload),
             "target_upload_handoff": _job_target_upload_handoff(job, summary_payload),
             "closure_handoff": _job_closure_handoff(job, summary_payload),
             "closure_summary": _job_closure_summary(job, summary_payload),
@@ -613,6 +614,8 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/qbit/wait": lambda payload: asyncio.run(qbit_wait_payload(payload)),
                 "/v1/materials/prepare": lambda payload: asyncio.run(materials_prepare_payload(payload)),
                 "/v1/metadata/prepare": lambda payload: asyncio.run(metadata_prepare_payload(payload)),
+                "/v1/target/package/prepare": target_package_prepare_payload,
+                "/v1/target/upload/preflight": target_upload_preflight_payload,
                 "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/summary/check": summary_check_service_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
@@ -624,6 +627,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/jobs/retorrent/from-url/check-and-submit": lambda payload: asyncio.run(create_source_url_check_and_submit_job(job_store, payload)),
                 "/v1/jobs/materials/prepare": lambda payload: create_materials_prepare_job(job_store, payload),
                 "/v1/jobs/metadata/prepare": lambda payload: create_metadata_prepare_job(job_store, payload),
+                "/v1/jobs/target/package/prepare": lambda payload: create_target_package_prepare_job(job_store, payload),
                 "/v1/jobs/candidates/daily": lambda payload: create_daily_candidates_job(job_store, payload),
                 "/v1/jobs/candidates/daily/schedule": lambda payload: create_daily_candidate_schedule_jobs(job_store, payload),
             }
@@ -923,6 +927,95 @@ async def metadata_prepare_payload(request: dict[str, Any] | None = None) -> dic
         "blockers": blockers,
         "next_actions": _metadata_prepare_next_actions(ready, blockers),
         "safety": _metadata_prepare_safety(context),
+    }
+
+
+def target_package_prepare_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Prepare an MTEAM target package and upload preflight from metadata/material evidence."""
+    request = request or {}
+    context = _target_package_prepare_context(request)
+    if context["dry_run"]:
+        return _target_package_prepare_dry_run_payload(context)
+
+    context_blockers = _target_package_prepare_context_blockers(context)
+    source_info = dict(context["source_info"])
+    if context["metadata_enrichment"]:
+        source_info["metadata_enrichment"] = context["metadata_enrichment"]
+    material_files = context["material_options"]
+    stages = _target_package_prepare_stages(context)
+    package = write_mteam_prepare_package(
+        source_info,
+        context["target_trackers"],
+        stages,
+        context.get("path"),
+        context["output_dir"],
+        accept_rules=bool(context["accept_rules"]),
+        material_files=material_files,
+    )
+    preflight = build_mteam_upload_preflight(
+        package["package_dir"],
+        execute=bool(context["target_execute"]),
+        torrent_file=context.get("target_torrent_file"),
+        write_payload=bool(context["write_payload"]),
+    )
+    blockers = list(dict.fromkeys([*context_blockers, *_string_list(package.get("blockers")), *_string_list(preflight.get("blockers"))]))
+    ready = not blockers
+    handoff = _target_package_prepare_handoff(context, package, preflight, ready, blockers)
+    return {
+        "kind": "ptcli.target_package_prepare",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "ready": ready,
+        "dry_run": False,
+        "mutates_state": True,
+        "mutates_filesystem": True,
+        "mutates_network": False,
+        "live_upload": False,
+        "request": context,
+        "package_dir": package.get("package_dir"),
+        "files": package.get("files"),
+        "description_draft": _target_package_description_evidence(package),
+        "package": package,
+        "target_upload_preflight": preflight,
+        "target_package_handoff": handoff,
+        "recommended_request": handoff.get("recommended_request"),
+        "blockers": blockers,
+        "next_actions": _target_package_prepare_next_actions(ready, blockers),
+        "safety": _target_package_prepare_safety(context),
+    }
+
+
+def target_upload_preflight_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Read-only MTEAM target upload preflight for a prepared package."""
+    request = request or {}
+    package_dir = str(request.get("package_dir") or "").strip()
+    if not package_dir:
+        raise ServiceError("package_dir is required.", status=HTTPStatus.BAD_REQUEST)
+    preflight = build_mteam_upload_preflight(
+        package_dir,
+        execute=_truthy(request.get("target_execute") or request.get("execute")),
+        torrent_file=request.get("target_torrent_file") or request.get("torrent_file"),
+        write_payload=_truthy(request.get("write_payload")),
+    )
+    ready = preflight.get("status") == "ready"
+    return {
+        "kind": "ptcli.target_upload_preflight",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "ready": ready,
+        "mutates_state": _truthy(request.get("write_payload")),
+        "mutates_filesystem": _truthy(request.get("write_payload")),
+        "live_upload": False,
+        "request": {
+            "package_dir": package_dir,
+            "target_torrent_file": request.get("target_torrent_file") or request.get("torrent_file"),
+            "target_execute": _truthy(request.get("target_execute") or request.get("execute")),
+            "write_payload": _truthy(request.get("write_payload")),
+        },
+        "target_upload_preflight": preflight,
+        "blockers": _string_list(preflight.get("blockers")),
+        "next_actions": _target_upload_preflight_next_actions(preflight),
+        "safety": {"does_not_upload_to_tracker": True, "live_upload": False, "requires_confirmation_before_live_upload": ["accept_rules=true", "confirm_upload=true"]},
     }
 
 
@@ -1428,6 +1521,17 @@ def create_metadata_prepare_job(job_store: JobStore, request: dict[str, Any]) ->
         normalized_request,
         ["ptcli-service", "metadata-prepare"],
         lambda: asyncio.run(metadata_prepare_payload(request)),
+    )
+
+
+def create_target_package_prepare_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
+    """Create an asynchronous MTEAM target package preparation job."""
+    normalized_request = _target_package_prepare_context(request)
+    return job_store.create(
+        "ptcli.target_package_prepare",
+        normalized_request,
+        ["ptcli-service", "target-package-prepare"],
+        lambda: target_package_prepare_payload(request),
     )
 
 
@@ -5355,6 +5459,178 @@ def _metadata_prepare_needs_tmdb_api(source_info: dict[str, Any], overrides: dic
     return bool((merged.get("imdb_id") and not merged.get("tmdb_id")) or (merged.get("tmdb_id") and not merged.get("imdb_id")))
 
 
+def _target_package_prepare_context(request: dict[str, Any]) -> dict[str, Any]:
+    raw_target = request.get("target") or request.get("target_trackers") or "MTEAM"
+    target_trackers = parse_tracker_list(",".join(str(item) for item in raw_target)) if isinstance(raw_target, list) else parse_tracker_list(str(raw_target))
+    source_info = request.get("source_info") if isinstance(request.get("source_info"), dict) else {}
+    metadata_options = request.get("metadata_options") if isinstance(request.get("metadata_options"), dict) else {}
+    material_options = request.get("material_options") if isinstance(request.get("material_options"), dict) else {}
+    flat_options = _request_material_options(request)
+    merged_material_options = {**metadata_options, **material_options, **flat_options}
+    merged_source_info = {**source_info}
+    for key in ("imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url"):
+        if merged_material_options.get(key) not in (None, "") and not merged_source_info.get(key):
+            merged_source_info[key] = merged_material_options[key]
+    metadata_enrichment = request.get("metadata_enrichment") if isinstance(request.get("metadata_enrichment"), dict) else {}
+    return {
+        "source_info": merged_source_info,
+        "metadata_enrichment": metadata_enrichment,
+        "target": target_trackers[0] if len(target_trackers) == 1 else target_trackers,
+        "target_trackers": target_trackers,
+        "path": request.get("path") or request.get("content_path"),
+        "content_path": request.get("content_path") or request.get("path"),
+        "output_dir": str(request.get("output_dir") or request.get("target_output_dir") or "./tmp/target"),
+        "package_dir": request.get("package_dir"),
+        "target_torrent_file": request.get("target_torrent_file") or request.get("torrent_file"),
+        "accept_rules": _truthy(request.get("accept_rules")),
+        "target_execute": _truthy(request.get("target_execute") or request.get("execute")),
+        "write_payload": _truthy(request.get("write_payload")),
+        "dry_run": _truthy(request.get("dry_run")),
+        "material_options": merged_material_options,
+        "duplicate_check": request.get("duplicate_check") if isinstance(request.get("duplicate_check"), dict) else {},
+        "rule_check": request.get("rule_check") if isinstance(request.get("rule_check"), dict) else {},
+        "qbit_evidence": request.get("qbit_evidence") if isinstance(request.get("qbit_evidence"), dict) else {},
+        "content_verified": _truthy(request.get("content_verified")),
+        "parent_job_id": request.get("parent_job_id") or request.get("job_id") or request.get("retorrent_job_id"),
+    }
+
+
+def _target_package_prepare_dry_run_payload(context: dict[str, Any]) -> dict[str, Any]:
+    blockers = _target_package_prepare_context_blockers(context)
+    ready = not blockers
+    package_preview = {"package_dir": context.get("package_dir"), "files": {}, "blockers": blockers}
+    preflight = {"status": "blocked" if blockers else "dry_run", "blockers": blockers}
+    handoff = _target_package_prepare_handoff(context, package_preview, preflight, ready, blockers)
+    return {
+        "kind": "ptcli.target_package_prepare",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "ready": ready,
+        "dry_run": True,
+        "mutates_state": False,
+        "mutates_filesystem": False,
+        "mutates_network": False,
+        "live_upload": False,
+        "request": context,
+        "package_dir": context.get("package_dir"),
+        "files": {},
+        "description_draft": None,
+        "package": package_preview,
+        "target_upload_preflight": preflight,
+        "target_package_handoff": handoff,
+        "recommended_request": handoff.get("recommended_request"),
+        "blockers": blockers,
+        "next_actions": _target_package_prepare_next_actions(ready, blockers),
+        "safety": _target_package_prepare_safety(context),
+    }
+
+
+def _target_package_prepare_context_blockers(context: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    if "MTEAM" not in context.get("target_trackers", []):
+        blockers.append("target must include MTEAM for target package preparation.")
+    if not context.get("source_info"):
+        blockers.append("source_info is required to prepare an MTEAM package.")
+    if not context.get("path"):
+        blockers.append("path or content_path is required for package content evidence.")
+    return blockers
+
+
+def _target_package_prepare_stages(context: dict[str, Any]) -> list[dict[str, Any]]:
+    stages = []
+    rule_check = context.get("rule_check") if isinstance(context.get("rule_check"), dict) else {}
+    if rule_check:
+        stages.append({"stage": "rule-check", "ok": bool(rule_check.get("ready")), "result": rule_check})
+    else:
+        stages.append({"stage": "rule-check", "ok": False, "result": {"ready": False, "checks": [], "rule_obligations": [], "blockers": ["rule_check is required before live upload."]}})
+    duplicate_check = context.get("duplicate_check") if isinstance(context.get("duplicate_check"), dict) else {}
+    if duplicate_check:
+        stages.append({"stage": "target-dupe-check", "ok": duplicate_check.get("searched") is True and not duplicate_check.get("exists"), "result": duplicate_check})
+    else:
+        stages.append({"stage": "target-dupe-check", "ok": False, "result": {"searched": False, "count": 0, "dupes": [], "blockers": ["duplicate_check is required before live upload."]}})
+    if context.get("content_verified"):
+        stages.append({"stage": "match", "ok": True, "result": {"matches": [{"hash": context.get("qbit_evidence", {}).get("hash") or "verified", "content_path": context.get("path")}], "source": "target_package_prepare_request"}})
+    return stages
+
+
+def _target_package_description_evidence(package: dict[str, Any]) -> dict[str, Any] | None:
+    files = package.get("files") if isinstance(package.get("files"), dict) else {}
+    description_file = files.get("description_draft")
+    if not description_file:
+        return None
+    evidence = _materials_path_evidence(description_file)
+    if not evidence:
+        return None
+    text = ""
+    if evidence.get("exists"):
+        try:
+            text = Path(str(description_file)).expanduser().read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+    return {**evidence, "length": len(text), "has_ptgen": "[b]Movie information[/b]" in text and "PTGen/Douban description: missing" not in text, "has_screenshots": "[img]" in text}
+
+
+def _target_package_prepare_handoff(context: dict[str, Any], package: dict[str, Any], preflight: dict[str, Any], ready: bool, blockers: list[str]) -> dict[str, Any]:
+    package_dir = package.get("package_dir") or context.get("package_dir")
+    target_upload_request = {
+        "package_dir": package_dir,
+        "torrent_file": context.get("target_torrent_file") or "<MTEAM-safe target torrent file>",
+        "write_payload": True,
+    }
+    resume_request = {"overrides": {"package_dir": package_dir}, "dry_run": True}
+    if context.get("parent_job_id"):
+        resume_request["job_id"] = context["parent_job_id"]
+    next_step = {
+        "tool": "target_upload_preflight" if ready else "target_package_prepare",
+        "endpoint": "/v1/target/upload/preflight" if ready else "/v1/target/package/prepare",
+        "method": "POST",
+        "request": target_upload_request if ready else None,
+        "reason": "package_ready_for_target_upload_preflight" if ready else "target_package_blocked",
+    }
+    return {
+        "kind": "ptcli.target_package_handoff",
+        "ready": ready,
+        "package_dir": package_dir,
+        "description_draft": _target_package_description_evidence(package),
+        "target_upload_preflight_status": preflight.get("status"),
+        "target_upload_request": target_upload_request,
+        "resume_request": resume_request,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
+        "next_step": next_step,
+        "continue_when": "Run target upload preflight only after package blockers, duplicate check, rule review, material checks, and MTEAM-safe torrent are ready.",
+        "stop_when": ["blockers is not empty", "target_upload_preflight.blockers is not empty", "confirm_upload missing for live upload"],
+        "blockers": blockers,
+        "next_actions": _target_package_prepare_next_actions(ready, blockers),
+    }
+
+
+def _target_package_prepare_next_actions(ready: bool, blockers: list[str]) -> list[str]:
+    if ready:
+        return ["Review target_package_handoff.target_upload_request, then run target upload preflight with an MTEAM-safe torrent file before any live upload."]
+    if blockers:
+        return ["Resolve target_package_prepare.blockers, especially duplicate_check/rule_check/content/material evidence, then regenerate the package."]
+    return ["Inspect target package and MTEAM upload preflight before live upload."]
+
+
+def _target_package_prepare_safety(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "does_not_upload_to_tracker": True,
+        "live_upload": False,
+        "writes_files": not bool(context.get("dry_run")),
+        "requires_confirmation_before_live_upload": ["accept_rules=true", "confirm_upload=true"],
+        "requires_before_ready": ["target duplicate check clear", "site rules acknowledged", "qBittorrent content evidence", "metadata/material evidence", "MTEAM-safe torrent file"],
+    }
+
+
+def _target_upload_preflight_next_actions(preflight: dict[str, Any]) -> list[str]:
+    blockers = _string_list(preflight.get("blockers"))
+    if blockers:
+        return ["Resolve target_upload_preflight.blockers before attempting live upload."]
+    return ["Review target_upload_preflight.upload_payload, then run target-upload live only with explicit confirm_upload and uploaded torrent injection/seeding options."]
+
+
 def _materials_prepare_dry_run_payload(context: dict[str, Any]) -> dict[str, Any]:
     blockers = [] if context["actions"] else ["No material preparation action was requested."]
     request_template = {
@@ -6665,6 +6941,7 @@ def _job_list_item(job: dict[str, Any], job_lineage: dict[str, Any] | None = Non
         "materials_handoff": _job_materials_handoff(job),
         "metadata_prepare_handoff": _job_metadata_prepare_handoff(job),
         "materials_prepare_handoff": _job_materials_prepare_handoff(job),
+        "target_package_handoff": _job_target_package_handoff(job),
         "target_upload_handoff": _job_target_upload_handoff(job),
         "closure_handoff": _job_closure_handoff(job),
         "closure_summary": _job_closure_summary(job),
@@ -6736,6 +7013,7 @@ def _job_public_payload(job: dict[str, Any], job_lineage: dict[str, Any] | None 
         "materials_handoff": _job_materials_handoff(job),
         "metadata_prepare_handoff": _job_metadata_prepare_handoff(job),
         "materials_prepare_handoff": _job_materials_prepare_handoff(job),
+        "target_package_handoff": _job_target_package_handoff(job),
         "target_upload_handoff": _job_target_upload_handoff(job),
         "closure_handoff": _job_closure_handoff(job),
         "closure_summary": _job_closure_summary(job),
@@ -7269,6 +7547,41 @@ def _job_metadata_prepare_handoff(job: dict[str, Any], summary_payload: dict[str
         "stop_when": ["blockers is not empty", "site rules or live confirmations are missing"],
         "blockers": blockers,
         "next_actions": _metadata_prepare_next_actions(ready, blockers),
+    }
+
+
+def _job_target_package_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    payload = summary_payload if isinstance(summary_payload, dict) else job.get("result") if isinstance(job.get("result"), dict) else {}
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("kind") != "ptcli.target_package_prepare" and job.get("kind") != "ptcli.target_package_prepare":
+        return None
+    handoff = payload.get("target_package_handoff") if isinstance(payload.get("target_package_handoff"), dict) else {}
+    package = payload.get("package") if isinstance(payload.get("package"), dict) else {}
+    preflight = payload.get("target_upload_preflight") if isinstance(payload.get("target_upload_preflight"), dict) else {}
+    blockers = _string_list(payload.get("blockers")) or _string_list(job.get("blockers"))
+    ready = bool(payload.get("ok") is True and not blockers)
+    package_dir = payload.get("package_dir") or package.get("package_dir") or handoff.get("package_dir")
+    fallback_request = {"package_dir": package_dir, "torrent_file": "<MTEAM-safe target torrent file>", "write_payload": True} if package_dir else None
+    next_step = handoff.get("next_step") if isinstance(handoff.get("next_step"), dict) else {"tool": "target_upload_preflight" if ready else "target_package_prepare", "endpoint": "/v1/target/upload/preflight" if ready else "/v1/target/package/prepare", "method": "POST", "request": fallback_request if ready else None}
+    return {
+        "kind": "ptcli.target_package_job_handoff",
+        "ready": ready,
+        "job_id": job.get("job_id"),
+        "status": job.get("status"),
+        "package_dir": package_dir,
+        "description_draft": payload.get("description_draft") if isinstance(payload.get("description_draft"), dict) else handoff.get("description_draft"),
+        "target_upload_preflight_status": preflight.get("status"),
+        "target_upload_request": handoff.get("target_upload_request") or fallback_request,
+        "resume_request": handoff.get("resume_request"),
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
+        "next_step": next_step,
+        "continue_when": "Only continue to target upload preflight/live upload after target package blockers are empty and site confirmations remain explicit.",
+        "stop_when": ["blockers is not empty", "target_upload_preflight.blockers is not empty", "confirm_upload missing for live upload"],
+        "blockers": blockers,
+        "next_actions": _target_package_prepare_next_actions(ready, blockers),
     }
 
 
@@ -9515,6 +9828,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     materials_handoff = _job_materials_handoff(job)
     metadata_prepare_handoff = _job_metadata_prepare_handoff(job)
     materials_prepare_handoff = _job_materials_prepare_handoff(job)
+    target_package_handoff = _job_target_package_handoff(job)
     target_upload_handoff = _job_target_upload_handoff(job)
     closure_handoff = _job_closure_handoff(job)
     candidate_submission_handoff = _job_candidate_submission_handoff(job)
@@ -9552,6 +9866,10 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         decision = "metadata_ready"
         stop_reason = None
         recommended_action = "Use metadata_prepare_handoff.material_options as metadata/material fields for materials_prepare, source_url_check_and_submit, or resume_job after duplicate/rule/confirmation gates are ready."
+    elif job.get("kind") == "ptcli.target_package_prepare" and status == "complete":
+        decision = "target_package_ready"
+        stop_reason = None
+        recommended_action = "Use target_package_handoff.target_upload_request for target upload preflight with an MTEAM-safe torrent file; live upload still requires confirm_upload and seeding closure."
     elif duplicate_exists:
         decision = "stop"
         stop_reason = "target_duplicate_exists"
@@ -9609,6 +9927,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "materials_handoff": materials_handoff,
         "metadata_prepare_handoff": metadata_prepare_handoff,
         "materials_prepare_handoff": materials_prepare_handoff,
+        "target_package_handoff": target_package_handoff,
         "target_upload_handoff": target_upload_handoff,
         "closure_handoff": closure_handoff,
         "policy_coverage_ready": policy_coverage_ready,
@@ -10755,6 +11074,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     qbit_wait_request_schema = _qbit_wait_tool_request_schema()
     materials_prepare_request_schema = _materials_prepare_tool_request_schema()
     metadata_prepare_request_schema = _metadata_prepare_tool_request_schema()
+    target_package_prepare_request_schema = _target_package_prepare_tool_request_schema()
+    target_upload_preflight_request_schema = _target_upload_preflight_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     summary_check_request_schema = _summary_check_tool_request_schema()
@@ -11000,6 +11321,26 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "safety": {"mutates_state": True, "writes_files": False, "may_contact_source_tracker": True, "may_contact_tmdb": True, "may_contact_ptgen_or_douban": True, "live_upload": False, "requires_confirmation": [], "does_not_upload_to_tracker": True},
         },
         {
+            "name": "target_package_prepare",
+            "method": "POST",
+            "path": "/v1/target/package/prepare",
+            "description": "Prepare an MTEAM target package from source_info, metadata/material evidence, rule gate, duplicate check, and qBittorrent content evidence. This writes package/description files but never uploads.",
+            "input_schema": target_package_prepare_request_schema,
+            "response_contract": _target_package_prepare_response_contract(),
+            "workflow_hints": {"after": "metadata_prepare_job and materials_prepare_job", "handoff_field": "target_package_handoff", "preflight_with": "target_upload_preflight"},
+            "safety": {"mutates_state": True, "writes_files": True, "live_upload": False, "requires_confirmation": ["accept_rules before ready", "confirm_upload before live target upload"], "does_not_upload_to_tracker": True},
+        },
+        {
+            "name": "target_upload_preflight",
+            "method": "POST",
+            "path": "/v1/target/upload/preflight",
+            "description": "Validate a prepared MTEAM target package and optional MTEAM-safe torrent file before any live upload. This endpoint never uploads.",
+            "input_schema": target_upload_preflight_request_schema,
+            "response_contract": _target_upload_preflight_response_contract(),
+            "workflow_hints": {"after": "target_package_prepare", "read": "target_upload_preflight.blockers"},
+            "safety": {"mutates_state": True, "writes_files": "only when write_payload=true", "live_upload": False, "requires_confirmation": ["confirm_upload before live target upload"], "does_not_upload_to_tracker": True},
+        },
+        {
             "name": "materials_prepare_job",
             "method": "POST",
             "path": "/v1/jobs/materials/prepare",
@@ -11018,6 +11359,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": _job_response_contract(),
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "handoff_field": "metadata_prepare_handoff"},
             "safety": {"mutates_state": True, "writes_files": False, "may_contact_source_tracker": True, "may_contact_tmdb": True, "may_contact_ptgen_or_douban": True, "live_upload": False, "requires_confirmation": [], "does_not_upload_to_tracker": True},
+        },
+        {
+            "name": "target_package_prepare_job",
+            "method": "POST",
+            "path": "/v1/jobs/target/package/prepare",
+            "description": "Create an asynchronous target-package preparation job that turns metadata/material handoffs into an MTEAM package, description draft, and target upload preflight handoff.",
+            "input_schema": target_package_prepare_request_schema,
+            "response_contract": _job_response_contract(),
+            "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "handoff_field": "target_package_handoff", "preflight_with": "target_upload_preflight"},
+            "safety": {"mutates_state": True, "writes_files": True, "live_upload": False, "requires_confirmation": ["confirm_upload before live target upload"], "does_not_upload_to_tracker": True},
         },
         {
             "name": "summary_check",
@@ -11053,7 +11404,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -11526,6 +11877,75 @@ def _metadata_prepare_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _target_package_prepare_tool_request_schema() -> dict[str, Any]:
+    properties = _materials_prepare_tool_request_schema()["properties"]
+    selected = {
+        key: value
+        for key, value in properties.items()
+        if key
+        in {
+            "job_id",
+            "parent_job_id",
+            "target",
+            "target_tracker",
+            "target_trackers",
+            "accept_rules",
+            "path",
+            "content_path",
+            "output_dir",
+            "dry_run",
+            "metadata_file",
+            "ptgen_description_file",
+            "mediainfo_file",
+            "bdinfo_file",
+            "screenshot_file",
+            "screenshot_files",
+            "image_host_file",
+            "imdb_id",
+            "tmdb_id",
+            "tmdb_type",
+            "douban_id",
+            "douban_url",
+        }
+    }
+    selected.update(
+        {
+            "source_info": {"type": "object", "description": "Fetched source_info or source metadata used to create the target package."},
+            "metadata_options": {"type": "object", "description": "metadata_prepare_handoff.material_options or equivalent metadata overrides."},
+            "material_options": {"type": "object", "description": "materials_prepare_handoff.material_options or explicit material files."},
+            "metadata_enrichment": {"type": "object", "description": "Optional metadata_prepare metadata_enrichment evidence for audit."},
+            "duplicate_check": {"type": "object", "description": "Target duplicate-check result; must be searched=true and exists=false for ready status."},
+            "rule_check": {"type": "object", "description": "Rule gate result with ready=true and rule obligations for source/target scopes."},
+            "qbit_evidence": {"type": "object", "description": "qBittorrent hash/path/progress evidence proving the content is local or complete."},
+            "content_verified": {"type": "boolean", "description": "Whether qBittorrent or path matching has verified the local content."},
+            "target_torrent_file": {"type": "string", "description": "Optional MTEAM-safe torrent file to include in upload preflight."},
+            "torrent_file": {"type": "string", "description": "Alias for target_torrent_file."},
+            "target_execute": {"type": "boolean", "description": "Run target upload preflight in execute mode; this still does not upload."},
+            "write_payload": {"type": "boolean", "description": "Write target upload payload preview files inside the package directory."},
+        }
+    )
+    return {
+        "type": "object",
+        "required": ["source_info", "path"],
+        "properties": selected,
+    }
+
+
+def _target_upload_preflight_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["package_dir"],
+        "properties": {
+            "package_dir": {"type": "string", "description": "Prepared target package directory from target_package_prepare."},
+            "target_torrent_file": {"type": "string", "description": "MTEAM-safe torrent file to validate with the package."},
+            "torrent_file": {"type": "string", "description": "Alias for target_torrent_file."},
+            "target_execute": {"type": "boolean", "description": "Run preflight in target execute mode; this endpoint still does not upload."},
+            "execute": {"type": "boolean", "description": "Alias for target_execute."},
+            "write_payload": {"type": "boolean", "description": "Write target upload payload preview files inside the package directory."},
+        },
+    }
+
+
 def _site_policy_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -11772,9 +12192,28 @@ def _metadata_prepare_response_contract() -> dict[str, Any]:
     }
 
 
+def _target_package_prepare_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "mutates_filesystem", "mutates_network", "live_upload", "request", "package_dir", "files", "description_draft", "package", "target_upload_preflight", "target_package_handoff", "recommended_request", "blockers", "next_actions", "safety"],
+        "package_fields": ["package_dir", "files", "summary_file", "blockers", "next_actions"],
+        "description_draft_fields": ["path", "exists", "size_bytes", "sha1", "length", "has_ptgen", "has_screenshots"],
+        "target_upload_preflight_fields": ["status", "ready", "package_dir", "payload", "blockers", "next_actions"],
+        "target_package_handoff_fields": ["ready", "package_dir", "description_draft", "target_upload_preflight_status", "target_upload_request", "resume_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
+        "safety": ["does_not_upload_to_tracker", "writes_files", "live_upload=false", "requires_confirm_upload_before_live_upload"],
+    }
+
+
+def _target_upload_preflight_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "ready", "mutates_state", "mutates_filesystem", "live_upload", "request", "target_upload_preflight", "blockers", "next_actions", "safety"],
+        "target_upload_preflight_fields": ["status", "ready", "package_dir", "payload", "blockers", "next_actions"],
+        "safety": ["does_not_upload_to_tracker", "live_upload=false", "requires_confirm_upload_before_live_upload"],
+    }
+
+
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -11793,6 +12232,7 @@ def _job_response_contract() -> dict[str, Any]:
         "materials_handoff_fields": ["ready", "can_prepare_upload_payload", "metadata", "materials", "target_preflight", "material_plan", "resume_request_template", "resume_handoff", "recommended_inputs", "blockers", "next_actions"],
         "metadata_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "parent_job_id", "material_options", "material_evidence", "metadata_prepare_handoff", "resume_request", "execute_request", "source_url_check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
         "materials_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "parent_job_id", "material_options", "material_evidence", "resume_handoff", "resume_request", "execute_request", "source_url_check_and_submit_handoff", "source_url_check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
+        "target_package_handoff_fields": ["ready", "job_id", "status", "package_dir", "description_draft", "target_upload_preflight_status", "target_upload_request", "resume_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
         "material_plan_fields": ["ready", "missing", "next_item", "items"],
         "material_plan_item_fields": ["key", "label", "ready", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "next_step", "resume_overrides"],
         "materials_resume_handoff_fields": ["ready", "resume_recommended", "recommended_tool", "recommended_endpoint", "method", "next_item", "missing", "accepted_override_keys", "dry_run_request", "execute_request", "recommended_request", "staged_requests", "continue_when", "stop_when"],
@@ -11844,7 +12284,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -12003,6 +12443,9 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             "materials_prepare_job": f"{public_base_url}/v1/jobs/materials/prepare",
             "metadata_prepare": f"{public_base_url}/v1/metadata/prepare",
             "metadata_prepare_job": f"{public_base_url}/v1/jobs/metadata/prepare",
+            "target_package_prepare": f"{public_base_url}/v1/target/package/prepare",
+            "target_package_prepare_job": f"{public_base_url}/v1/jobs/target/package/prepare",
+            "target_upload_preflight": f"{public_base_url}/v1/target/upload/preflight",
             "openapi": f"{public_base_url}/openapi.json",
             "tools": f"{public_base_url}/v1/tools",
             "manifest": f"{public_base_url}/.well-known/ptcli-agent.json",
@@ -12109,6 +12552,15 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "continue_when": "materials_prepare_handoff.ready=true and material_options is not empty",
                     "resume_with": "materials_prepare_handoff.next_step; prefer resume_job when parent_job_id is known, otherwise source_url_check_and_submit after gates are ready",
                     "stop_when": ["materials_prepare_handoff.blockers is not empty", "image host upload failed", "local content path missing"],
+                },
+                {
+                    "step": "prepare_target_package",
+                    "tool": "target_package_prepare_job",
+                    "request_from": "metadata_prepare_handoff/materials_prepare_handoff material_options plus source_info, duplicate_check, rule_check, and qBittorrent content evidence",
+                    "read": ["job_id", "status", "target_package_handoff.ready", "target_package_handoff.package_dir", "target_package_handoff.description_draft", "target_package_handoff.target_upload_request", "target_package_handoff.next_step", "target_package_handoff.blockers", "blockers"],
+                    "continue_when": "target_package_handoff.ready=true and target_package_handoff.target_upload_request is present",
+                    "resume_with": "target_package_handoff.next_step; run target_upload_preflight with an MTEAM-safe torrent file before live upload",
+                    "stop_when": ["target_package_handoff.blockers is not empty", "duplicate_check missing or exists=true", "rule_check not ready", "qBittorrent content evidence missing"],
                 },
                 {
                     "step": "closure_decision",
@@ -12302,6 +12754,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "materials_handoff": {"type": ["object", "null"]},
             "metadata_prepare_handoff": {"type": ["object", "null"]},
             "materials_prepare_handoff": {"type": ["object", "null"]},
+            "target_package_handoff": {"type": ["object", "null"]},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},
             "closure_summary": {"type": "object"},
@@ -12365,6 +12818,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "materials_handoff": {"type": ["object", "null"]},
             "metadata_prepare_handoff": {"type": ["object", "null"]},
             "materials_prepare_handoff": {"type": ["object", "null"]},
+            "target_package_handoff": {"type": ["object", "null"]},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},
             "closure_summary": {"type": "object"},
@@ -12430,6 +12884,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     qbit_wait_request_schema = _qbit_wait_tool_request_schema()
     materials_prepare_request_schema = _materials_prepare_tool_request_schema()
     metadata_prepare_request_schema = _metadata_prepare_tool_request_schema()
+    target_package_prepare_request_schema = _target_package_prepare_tool_request_schema()
+    target_upload_preflight_request_schema = _target_upload_preflight_tool_request_schema()
     summary_check_request_schema = _summary_check_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
@@ -12641,6 +13097,46 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "metadata_prepare_handoff": {"type": "object"},
             "resume_handoff": {"type": "object"},
             "recommended_request": {"type": ["object", "null"]},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+            "safety": {"type": "object"},
+        },
+    }
+    target_package_prepare_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "dry_run": {"type": "boolean"},
+            "mutates_state": {"type": "boolean"},
+            "mutates_filesystem": {"type": "boolean"},
+            "mutates_network": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "request": {"type": "object"},
+            "package_dir": {"type": ["string", "null"]},
+            "files": {"type": "object"},
+            "description_draft": {"type": ["object", "null"]},
+            "package": {"type": "object"},
+            "target_upload_preflight": {"type": "object"},
+            "target_package_handoff": {"type": "object"},
+            "recommended_request": {"type": ["object", "null"]},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+            "safety": {"type": "object"},
+        },
+    }
+    target_upload_preflight_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "mutates_state": {"type": "boolean"},
+            "mutates_filesystem": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "request": {"type": "object"},
+            "target_upload_preflight": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
             "safety": {"type": "object"},
@@ -13010,6 +13506,22 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "responses": {"200": {"description": "Prepare IMDb/TMDb/Douban/PTGen metadata and return resume-ready material_options.", "content": {"application/json": {"schema": metadata_prepare_response_schema}}}},
                 },
             },
+            "/v1/target/package/prepare": {
+                "post": {
+                    "operationId": "preparePtcliTargetPackage",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": target_package_prepare_request_schema}}},
+                    "responses": {"200": {"description": "Prepare an MTEAM target package, description draft, and upload preflight handoff.", "content": {"application/json": {"schema": target_package_prepare_response_schema}}}},
+                },
+            },
+            "/v1/target/upload/preflight": {
+                "post": {
+                    "operationId": "preflightPtcliTargetUpload",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": target_upload_preflight_request_schema}}},
+                    "responses": {"200": {"description": "Validate a prepared MTEAM package and optional target torrent before live upload.", "content": {"application/json": {"schema": target_upload_preflight_response_schema}}}},
+                },
+            },
             "/v1/site-policies": {
                 "get": {
                     "operationId": "getPtcliSitePolicies",
@@ -13124,6 +13636,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": metadata_prepare_request_schema}}},
                     "responses": {"200": {"description": "Queued metadata/PTGen preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                }
+            },
+            "/v1/jobs/target/package/prepare": {
+                "post": {
+                    "operationId": "createPtcliTargetPackagePrepareJob",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": target_package_prepare_request_schema}}},
+                    "responses": {"200": {"description": "Queued target package preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/candidates/daily": {
