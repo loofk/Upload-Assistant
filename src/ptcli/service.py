@@ -331,6 +331,7 @@ class JobStore:
             "policy_coverage": _job_policy_coverage(job),
             "policy_handoff": _job_policy_handoff(job),
             "policy_qbit_defaults": _job_policy_qbit_defaults(job),
+            "policy_execution_plan": _job_policy_execution_plan(job),
             "qbit_plan": _job_qbit_plan(job),
             "qbit_limit_audit": _job_qbit_limit_audit(job, summary_payload),
             "qbit_handoff": _job_qbit_handoff(job, summary_payload),
@@ -1245,7 +1246,7 @@ def create_retorrent_job(job_store: JobStore, request: dict[str, Any]) -> dict[s
     if execute:
         source = _resolve_request_source(request)
         target_trackers = _target_trackers(request)
-        request = _request_with_policy_qbit_defaults(request, source, target_trackers)
+        request = _request_with_policy_execution_context(request, source, target_trackers)
         _, normalized_request, argv = _retorrent_execute_args(request)
         kind = "ptcli.retorrent"
     else:
@@ -1744,7 +1745,7 @@ def _create_ai_retorrent_job(job_store: JobStore, request: dict[str, Any], *, ki
     effective_request = {**request, "execute": True, "execute_if_no_duplicate": True, "manual_retorrent": True}
     source = _resolve_request_source(effective_request)
     target_trackers = _target_trackers(effective_request)
-    effective_request = _request_with_policy_qbit_defaults(effective_request, source, target_trackers)
+    effective_request = _request_with_policy_execution_context(effective_request, source, target_trackers)
     _, normalized_request, argv = _retorrent_execute_args(effective_request)
     normalized_request = {**normalized_request, "mode": mode, "execute_if_no_duplicate": True}
     if isinstance(effective_request.get("candidate_submission"), dict):
@@ -3827,7 +3828,7 @@ def _pipeline_check_args(request: dict[str, Any]) -> tuple[argparse.Namespace, d
 def _retorrent_execute_args(request: dict[str, Any]) -> tuple[argparse.Namespace, dict[str, Any], list[str]]:
     source = _resolve_request_source(request)
     target_trackers = _target_trackers(request)
-    request = _request_with_policy_qbit_defaults(request, source, target_trackers)
+    request = _request_with_policy_execution_context(request, source, target_trackers)
     argv = [
         "retorrent",
         "--from",
@@ -8296,6 +8297,7 @@ def _normalized_request(request: dict[str, Any], source: dict[str, Any], target_
         "uploaded_qbit_download_limit": request.get("uploaded_qbit_download_limit"),
         "material_options": _request_material_options(request),
         "policy_qbit_defaults": request.get("policy_qbit_defaults"),
+        "policy_execution_plan": request.get("policy_execution_plan"),
         "policy_coverage": _request_policy_coverage(request, source, target_trackers),
     }
 
@@ -8351,6 +8353,60 @@ def _request_with_policy_qbit_defaults(request: dict[str, Any], source: dict[str
         defaults["errors"].append(str(exc))
     enriched["policy_qbit_defaults"] = defaults
     return enriched
+
+
+def _request_with_policy_execution_context(request: dict[str, Any], source: dict[str, Any], target_trackers: str) -> dict[str, Any]:
+    enriched = _request_with_policy_qbit_defaults(request, source, target_trackers)
+    if isinstance(enriched.get("policy_execution_plan"), dict):
+        return enriched
+    enriched["policy_execution_plan"] = _request_policy_execution_plan(enriched, source, target_trackers)
+    return enriched
+
+
+def _request_policy_execution_plan(request: dict[str, Any], source: dict[str, Any], target_trackers: str) -> dict[str, Any]:
+    policy_request = {
+        "source_tracker": source.get("tracker"),
+        "target": target_trackers,
+        "accept_rules": bool(request.get("accept_rules")),
+    }
+    if request.get("config"):
+        policy_request["config"] = request.get("config")
+    try:
+        payload = site_policies_payload(policy_request)
+        plan = payload.get("policy_execution_plan") if isinstance(payload.get("policy_execution_plan"), dict) else None
+        if isinstance(plan, dict):
+            return {**plan, "source": "site_policies", "site_policy_status": payload.get("status"), "site_policy_ready": payload.get("ready")}
+    except Exception as exc:
+        return {
+            "kind": "ptcli.policy_execution_plan",
+            "ready": False,
+            "status": "blocked",
+            "action": "inspect_policy_error",
+            "accepted_rules": bool(request.get("accept_rules")),
+            "source_trackers": [source.get("tracker")] if source.get("tracker") else [],
+            "target_trackers": parse_tracker_list(target_trackers),
+            "request_defaults": {},
+            "request_default_sources": {},
+            "qbit_roles": [],
+            "blockers": [f"policy_execution_plan could not be generated: {exc}"],
+            "next_actions": ["Call site_policies with the same source_tracker/target/config and resolve policy errors before live automation."],
+            "safety": {"mutates_state": False, "live_upload": False, "does_not_override_site_rules": True},
+        }
+    return {
+        "kind": "ptcli.policy_execution_plan",
+        "ready": False,
+        "status": "blocked",
+        "action": "inspect_policy_missing",
+        "accepted_rules": bool(request.get("accept_rules")),
+        "source_trackers": [source.get("tracker")] if source.get("tracker") else [],
+        "target_trackers": parse_tracker_list(target_trackers),
+        "request_defaults": {},
+        "request_default_sources": {},
+        "qbit_roles": [],
+        "blockers": ["site_policies did not return policy_execution_plan."],
+        "next_actions": ["Call site_policies and inspect policy_execution_handoff before live automation."],
+        "safety": {"mutates_state": False, "live_upload": False, "does_not_override_site_rules": True},
+    }
 
 
 def _apply_policy_qbit_default(enriched: dict[str, Any], defaults: dict[str, Any], key: str, value: Any, tracker: str) -> None:
@@ -9686,6 +9742,7 @@ def _job_list_item(job: dict[str, Any], job_lineage: dict[str, Any] | None = Non
         "duplicate_check": _job_duplicate_check(job),
         "submit_if_clear_handoff": _job_submit_if_clear_handoff(job),
         "policy_handoff": _job_policy_handoff(job),
+        "policy_execution_plan": _job_policy_execution_plan(job),
         "qbit_plan": _job_qbit_plan(job),
         "qbit_limit_audit": _job_qbit_limit_audit(job),
         "qbit_handoff": _job_qbit_handoff(job),
@@ -10484,6 +10541,7 @@ def _job_public_payload(job: dict[str, Any], job_lineage: dict[str, Any] | None 
         "policy_coverage": _job_policy_coverage(job),
         "policy_handoff": _job_policy_handoff(job),
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
+        "policy_execution_plan": _job_policy_execution_plan(job),
         "qbit_plan": _job_qbit_plan(job),
         "qbit_limit_audit": _job_qbit_limit_audit(job),
         "qbit_handoff": _job_qbit_handoff(job),
@@ -10733,6 +10791,13 @@ def _job_policy_qbit_defaults(job: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _job_policy_execution_plan(job: dict[str, Any]) -> dict[str, Any] | None:
+    request = job.get("request")
+    if isinstance(request, dict) and isinstance(request.get("policy_execution_plan"), dict):
+        return request["policy_execution_plan"]
+    return None
+
+
 def _job_qbit_plan(job: dict[str, Any]) -> dict[str, Any] | None:
     request = job.get("request")
     if not isinstance(request, dict):
@@ -10845,6 +10910,7 @@ def _job_policy_execution_report(job: dict[str, Any], summary_payload: dict[str,
     if not isinstance(policy_handoff, dict) and not isinstance(qbit_plan, dict):
         return None
     qbit_defaults = _job_policy_qbit_defaults(job)
+    policy_execution_plan = _job_policy_execution_plan(job)
     qbit_audit = _job_qbit_limit_audit(job, summary_payload)
     qbit_handoff = _job_qbit_handoff(job, summary_payload)
     qbit_enforcement = _job_qbit_enforcement_summary(job, summary_payload)
@@ -10867,6 +10933,7 @@ def _job_policy_execution_report(job: dict[str, Any], summary_payload: dict[str,
         "accepted_rules": policy_handoff.get("accepted_rules") if isinstance(policy_handoff, dict) else None,
         "seeding_requirements": _policy_execution_seeding_requirements(policy_handoff),
         "policy_qbit_defaults": qbit_defaults,
+        "policy_execution_plan": policy_execution_plan,
         "request_overrides": _policy_execution_request_overrides(request),
         "qbit_plan": qbit_plan,
         "qbit_limit_audit": qbit_audit,
@@ -13288,6 +13355,7 @@ def _job_candidate_submission_handoff(job: dict[str, Any], summary_payload: dict
     request = job.get("request") if isinstance(job.get("request"), dict) else {}
     manual_handoff = _job_manual_retorrent_handoff(job, summary_payload)
     policy_execution_handoff = submission.get("policy_execution_handoff") if isinstance(submission.get("policy_execution_handoff"), dict) else {}
+    policy_execution_plan = _job_policy_execution_plan(job)
     closure_summary = _job_closure_summary(job, summary_payload)
     execution_handoff = _candidate_submission_execution_handoff(job, manual_handoff if isinstance(manual_handoff, dict) else {}, closure_summary, policy_execution_handoff)
     return {
@@ -13303,6 +13371,7 @@ def _job_candidate_submission_handoff(job: dict[str, Any], summary_payload: dict
         "material_options": submission.get("material_options") if isinstance(submission.get("material_options"), dict) else {},
         "qbit_overrides": submission.get("qbit_overrides") if isinstance(submission.get("qbit_overrides"), dict) else {},
         "policy_execution_handoff": policy_execution_handoff,
+        "policy_execution_plan": policy_execution_plan,
         "retorrent_job_id": job_id,
         "retorrent_status": job.get("status"),
         "source_reference": _job_source_reference(job),
@@ -13331,6 +13400,7 @@ def _job_candidate_submission_summary(job: dict[str, Any], summary_payload: dict
     material_options = submission.get("material_options") if isinstance(submission.get("material_options"), dict) else {}
     qbit_overrides = submission.get("qbit_overrides") if isinstance(submission.get("qbit_overrides"), dict) else {}
     policy_execution_handoff = submission.get("policy_execution_handoff") if isinstance(submission.get("policy_execution_handoff"), dict) else {}
+    policy_execution_plan = _job_policy_execution_plan(job)
     next_step = closure_summary.get("next_step") if isinstance(closure_summary.get("next_step"), dict) else {}
     execution_handoff = handoff.get("execution_handoff") if isinstance(handoff, dict) and isinstance(handoff.get("execution_handoff"), dict) else {}
     blockers = list(
@@ -13355,6 +13425,7 @@ def _job_candidate_submission_summary(job: dict[str, Any], summary_payload: dict
         "material_option_keys": sorted(material_options),
         "qbit_override_keys": sorted(qbit_overrides),
         "policy_execution_handoff": policy_execution_handoff,
+        "policy_execution_plan": policy_execution_plan,
         "policy_execution_ready": policy_execution_handoff.get("ready") if policy_execution_handoff else None,
         "manual_action": manual_handoff.get("action"),
         "closure_action": closure_summary.get("action"),
@@ -13896,6 +13967,7 @@ def _job_workflow_context(job: dict[str, Any], payload: dict[str, Any] | None = 
         "policy_coverage": policy_coverage,
         "policy_handoff": _job_policy_handoff(job),
         "policy_qbit_defaults": _job_policy_qbit_defaults(job),
+        "policy_execution_plan": _job_policy_execution_plan(job),
         "qbit_plan": _job_qbit_plan(job),
         "qbit_limit_audit": _job_qbit_limit_audit(job, payload if isinstance(payload, dict) else None),
         "qbit_handoff": _job_qbit_handoff(job, payload if isinstance(payload, dict) else None),
@@ -14382,6 +14454,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     policy_coverage = _job_policy_coverage(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     policy_handoff = _job_policy_handoff(job) if policy_coverage is not None else None
     policy_qbit_defaults = _job_policy_qbit_defaults(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
+    policy_execution_plan = _job_policy_execution_plan(job) if request.get("execute") is True or request.get("execute_if_no_duplicate") is True or request.get("mode") == "manual_retorrent" else None
     qbit_plan = _job_qbit_plan(job) if policy_qbit_defaults is not None else None
     qbit_limit_audit = _job_qbit_limit_audit(job) if qbit_plan is not None else None
     qbit_handoff = _job_qbit_handoff(job) if qbit_plan is not None else None
@@ -14476,6 +14549,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "policy_coverage": policy_coverage,
         "policy_handoff": policy_handoff,
         "policy_qbit_defaults": policy_qbit_defaults,
+        "policy_execution_plan": policy_execution_plan,
         "qbit_plan": qbit_plan,
         "qbit_limit_audit": qbit_limit_audit,
         "qbit_handoff": qbit_handoff,
@@ -16404,7 +16478,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "candidate_control_summary", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "runtime", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "candidate_control_summary", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "policy_execution_plan", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "runtime", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -17350,7 +17424,7 @@ def _target_upload_service_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "candidate_control_summary", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "candidate_control_summary", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "policy_execution_plan", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -17361,7 +17435,7 @@ def _job_response_contract() -> dict[str, Any]:
         "recommended_call_fields": ["ready", "safe_to_call_now", "tool", "endpoint", "method", "request", "action", "status", "dry_run_request", "execute_request", "requires_user_review", "gates", "safety", "stop_when"],
         "recommended_call_gate_fields": ["dry_run_preview", "execute_available", "requires_rules", "requires_upload_confirmation", "accept_rules_present", "confirm_upload_present", "live_execute_requested", "safe_to_call_now", "missing"],
         "recovery_handoff_fields": ["phase", "action", "reason", "ready", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "gates", "handoff_sources", "read_fields", "continue_when", "stop_when", "blockers", "next_actions"],
-        "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
+        "request_fields": ["policy_coverage", "policy_qbit_defaults", "policy_execution_plan", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],
         "resume_requirement_fields": ["can_call_resume", "resume_recommended", "subcommand", "missing_confirmations", "required_overrides", "suggested_overrides", "request_template", "dry_run_request", "execute_request", "recommended_inputs", "allowed_overrides", "current_flags"],
         "resume_execution_handoff_fields": ["ready", "status", "subcommand", "endpoint", "method", "preview_required", "dry_run_request", "execute_request", "recommended_request", "allowed_overrides", "required_overrides", "suggested_overrides", "recommended_inputs", "unresolved_recommended_inputs", "safety_gates", "continue_when", "execute_when", "stop_when", "blockers", "next_actions"],
@@ -17385,15 +17459,15 @@ def _job_response_contract() -> dict[str, Any]:
         "qbit_enforcement_handoff_fields": ["ready", "status", "roles", "pending_roles", "mismatch_roles", "blockers", "next_step", "continue_when", "stop_when"],
         "qbit_enforcement_summary_fields": ["ready", "status", "client", "expected_role_count", "applied_role_count", "pending_role_count", "mismatch_role_count", "expected_roles", "applied_roles", "pending_roles", "mismatch_roles", "roles", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "qbit_enforcement_role_fields": ["role", "ready", "status", "category", "tags", "expected_limits", "observed_limits", "upload_limit_source", "download_limit_source", "evidence_present", "requires_injection_evidence", "requires_rate_limit_repair", "blockers", "requested_options"],
-        "policy_execution_report_fields": ["ready", "status", "source", "targets", "site_policy_ready", "accepted_rules", "seeding_requirements", "policy_qbit_defaults", "request_overrides", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_ready", "expected_qbit_roles", "applied_qbit_roles", "pending_qbit_roles", "mismatch_qbit_roles", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "policy_execution_report_fields": ["ready", "status", "source", "targets", "site_policy_ready", "accepted_rules", "seeding_requirements", "policy_qbit_defaults", "policy_execution_plan", "request_overrides", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_ready", "expected_qbit_roles", "applied_qbit_roles", "pending_qbit_roles", "mismatch_qbit_roles", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "qbit_execution_gate_fields": ["ready", "status", "action", "client", "expected_role_count", "applied_role_count", "pending_role_count", "mismatch_role_count", "expected_roles", "applied_roles", "pending_roles", "mismatch_roles", "source", "uploaded", "rate_limit_status", "seeding_status", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "dry_run_request", "execute_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
         "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
         "candidate_batch_handoff_fields": ["ready", "candidate_job_id", "status", "submit_count", "submit_tool", "submit_endpoint", "submit_endpoint_template", "required_overrides", "allowed_selector_fields", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items", "blockers", "next_actions"],
         "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
-        "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "execution_state", "execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
-        "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "policy_execution_ready", "execution_state", "execution_handoff", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
+        "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "policy_execution_plan", "execution_state", "execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
+        "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "policy_execution_plan", "policy_execution_ready", "execution_state", "execution_handoff", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
         "candidate_submit_followup_fields": ["ready", "action", "candidate_job_id", "candidate_rank", "candidate_source_id", "retorrent_job_id", "retorrent_status", "source_reference", "target_trackers", "status_endpoint", "summary_endpoint", "resume_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "job_control_summary_ref", "job_handoff_ref", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "agent_candidate_submission_fields": ["candidate_submission", "candidate_submission_summary", "candidate_submission_handoff", "candidate_submit_followup", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template"],
         "candidate_submission_execution_handoff_fields": ["state", "reason", "status", "ready_for_live", "should_poll", "should_resume", "should_stop", "manual_action", "closure_action", "policy_execution_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "material_input_template", "continue_when", "stop_when", "blockers", "next_actions"],
@@ -17439,7 +17513,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "daily_candidate_refill_plan", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_control_summary", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_control_summary", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "policy_execution_plan", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "daily_candidate_batch_summary_fields": ["ready", "filters", "list_window", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "retorrent_status_counts", "retorrent_action_counts", "complete_count", "running_count", "blocked_count", "items", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_gate_fields": ["ready", "action", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "complete_count", "running_count", "blocked_count", "retorrent_status_counts", "retorrent_action_counts", "first_submit_request", "first_submit_endpoint", "first_submitted_job", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
         "daily_candidate_submission_plan_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "running_count", "shortfall_count", "target_met", "ready_target_met", "first_submit_request", "submit_requests", "shortfall_recovery", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "read_order", "continue_when", "stop_when", "shortfall_blockers", "hard_blockers", "blockers", "next_actions"],
@@ -18054,6 +18128,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "candidate_digest": {"type": ["object", "null"]},
             "candidate_control_summary": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
+            "policy_execution_plan": {"type": ["object", "null"]},
             "qbit_plan": {"type": ["object", "null"]},
             "qbit_limit_audit": {"type": ["object", "null"]},
             "qbit_handoff": {"type": ["object", "null"]},
@@ -18129,6 +18204,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_coverage": {"type": ["object", "null"]},
             "policy_handoff": {"type": ["object", "null"]},
             "policy_qbit_defaults": {"type": ["object", "null"]},
+            "policy_execution_plan": {"type": ["object", "null"]},
             "qbit_plan": {"type": ["object", "null"]},
             "qbit_limit_audit": {"type": ["object", "null"]},
             "qbit_handoff": {"type": ["object", "null"]},
