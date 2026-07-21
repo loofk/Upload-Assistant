@@ -9216,6 +9216,7 @@
           "policy_matrix",
           "policy_execution_summary",
           "extension_plan",
+          "extension_validation_matrix",
           "extension_handoff",
           "flow_matrix",
           "agent_summary",
@@ -9294,6 +9295,37 @@
           "blockers",
           "next_action"
         ],
+        "validation_matrix_fields": [
+          "ready",
+          "trackers",
+          "reference_flows",
+          "items",
+          "ready_trackers",
+          "blocked_trackers",
+          "next_item",
+          "next_actions"
+        ],
+        "validation_item_fields": [
+          "tracker",
+          "roles",
+          "ready",
+          "priority",
+          "reference_flow",
+          "checks",
+          "required_evidence",
+          "done_when",
+          "next_tool",
+          "next_endpoint",
+          "next_actions"
+        ],
+        "validation_check_fields": [
+          "name",
+          "ready",
+          "tool",
+          "endpoint",
+          "required_evidence",
+          "blockers"
+        ],
         "extension_handoff_fields": [
           "ready",
           "phase",
@@ -9301,6 +9333,8 @@
           "reference_flow",
           "implementation_order",
           "tracker_steps",
+          "validation_matrix",
+          "next_validation",
           "adapter_contract",
           "endpoint_sequence",
           "validation_sequence",

@@ -16378,7 +16378,33 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert payload["extension_plan"]["items"][1]["tracker"] == "MTEAM"
     assert payload["extension_plan"]["items"][1]["roles"] == ["target"]
     assert payload["extension_plan"]["items"][1]["target_ready"] is True
+    validation_matrix = payload["extension_validation_matrix"]
+    assert validation_matrix["kind"] == "ptcli.site_extension_validation_matrix"
+    assert validation_matrix["ready"] is True
+    validation_by_tracker = {item["tracker"]: item for item in validation_matrix["items"]}
+    assert validation_by_tracker["U2"]["ready"] is True
+    assert validation_by_tracker["U2"]["priority"] == "reference_ready"
+    assert validation_by_tracker["U2"]["reference_flow"]["source_tracker"] == "U2"
+    u2_checks = {item["name"]: item for item in validation_by_tracker["U2"]["checks"]}
+    assert u2_checks["source_info_adapter"]["ready"] is True
+    assert u2_checks["source_info_adapter"]["endpoint"] == "/v1/retorrent/source-url/preflight"
+    assert "source_id" in u2_checks["source_info_adapter"]["required_evidence"]
+    assert u2_checks["source_download_adapter"]["ready"] is True
+    assert "torrent_hash/infohash" in u2_checks["source_download_adapter"]["required_evidence"]
+    assert u2_checks["policy_profile"]["ready"] is True
+    assert u2_checks["retorrent_preflight"]["ready"] is True
+    assert "source_torrent_hash" in validation_by_tracker["U2"]["required_evidence"]
+    mteam_checks = {item["name"]: item for item in validation_by_tracker["MTEAM"]["checks"]}
+    assert validation_by_tracker["MTEAM"]["priority"] == "reference_ready"
+    assert mteam_checks["target_upload_adapter"]["ready"] is True
+    assert mteam_checks["target_upload_adapter"]["tool"] == "target_upload_job"
+    assert "uploaded_torrent_hash" in mteam_checks["target_upload_adapter"]["required_evidence"]
+    assert validation_matrix["ready_trackers"] == ["U2", "MTEAM"]
+    assert validation_matrix["blocked_trackers"] == []
+    assert validation_matrix["next_item"] is None
     assert payload["extension_handoff"]["tracker_steps"]["U2"]["adapter_contract"]["validation_contract"]["steps"][0]["tool"] == "site_profiles"
+    assert payload["extension_handoff"]["validation_matrix"] == validation_matrix
+    assert payload["extension_handoff"]["next_validation"] is None
     assert payload["extension_plan"]["items"][1]["missing_components"] == []
     assert payload["extension_plan"]["ready"] is True
     assert payload["extension_handoff"]["ready"] is True
@@ -17409,10 +17435,16 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["site_profiles"]["path"] == "/v1/sites"
     assert "adapter_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "extension_plan" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
+    assert "extension_validation_matrix" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_checklist" in tool_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
     assert "extension_plan_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "validation_matrix_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "validation_item_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "validation_check_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "extension_handoff_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "validation_matrix" in tool_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
+    assert "next_validation" in tool_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
     assert "endpoint_sequence" in tool_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
     assert "missing_components" in tool_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
     assert "policy_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
@@ -17600,6 +17632,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "capability_matrix" in site_profiles_schema["properties"]
     assert "adapter_profiles" in site_profiles_schema["properties"]
     assert "extension_plan" in site_profiles_schema["properties"]
+    assert "extension_validation_matrix" in site_profiles_schema["properties"]
     assert "extension_handoff" in site_profiles_schema["properties"]
     assert "flow_matrix" in site_profiles_schema["properties"]
     qbit_inspect_schema = openapi["paths"]["/v1/qbit/inspect"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -18057,13 +18090,17 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["site_profiles"]["path"] == "/v1/sites"
         assert "config_audit" in tools_by_name["site_profiles"]["response_contract"]["policy_profile_fields"]
         assert "extension_plan" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
+        assert "extension_validation_matrix" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_checklist" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_contract_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "source_download_contract" in tools_by_name["site_profiles"]["response_contract"]["adapter_contract_fields"]
         assert "extension_plan_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "validation_matrix_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "validation_check_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "extension_handoff_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "validation_matrix" in tools_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
         assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
         assert "missing_components" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
