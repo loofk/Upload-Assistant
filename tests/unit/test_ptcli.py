@@ -15194,8 +15194,25 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert summary["candidate_digest"]["top_submit_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert summary["agent_decision"]["top_submit_job_endpoint"] == "/v1/jobs/retorrent/from-url"
     assert summary["candidate_batch_handoff"] == job["candidate_batch_handoff"]
-    listed = store.list({"kind": "ptcli.daily_candidates"})["jobs"][0]
+    list_payload = store.list({"kind": "ptcli.daily_candidates"})
+    listed = list_payload["jobs"][0]
     assert listed["candidate_batch_handoff"] == job["candidate_batch_handoff"]
+    batch_summary = list_payload["daily_candidate_batch_summary"]
+    assert batch_summary["items"][0]["submit_requests"][0]["candidate_job_id"] == job["job_id"]
+    assert batch_summary["items"][0]["submit_requests"][0]["source_id"] == "60635"
+    assert batch_summary["items"][0]["submit_requests"][0]["endpoint"] == f"/v1/jobs/candidates/{job['job_id']}/submit"
+    assert batch_summary["items"][0]["submit_requests"][0]["request"]["confirm_upload"] is True
+    submission_plan = list_payload["daily_candidate_submission_plan"]
+    assert submission_plan["kind"] == "ptcli.daily_candidate_submission_plan"
+    assert submission_plan["ready"] is True
+    assert submission_plan["action"] == "submit_candidate"
+    assert submission_plan["target_count"] == 1
+    assert submission_plan["safe_to_submit_count"] == 1
+    assert submission_plan["first_submit_request"]["source_id"] == "60635"
+    assert submission_plan["recommended_tool"] == "submit_daily_candidate_job"
+    assert submission_plan["recommended_endpoint"] == f"/v1/jobs/candidates/{job['job_id']}/submit"
+    assert submission_plan["recommended_request"]["source_id"] == "60635"
+    assert submission_plan["hard_blockers"] == []
 
 
 def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(monkeypatch, tmp_path) -> None:
@@ -15481,6 +15498,13 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert daily_gate["first_blocker"].startswith("submitted_job.")
     assert daily_gate["recommended_tool"] == "site_policies"
     assert daily_gate["next_step"]["method"] == "POST"
+    blocked_submission_plan = list_payload["daily_candidate_submission_plan"]
+    assert blocked_submission_plan["kind"] == "ptcli.daily_candidate_submission_plan"
+    assert blocked_submission_plan["ready"] is False
+    assert blocked_submission_plan["action"] == "resolve_blockers"
+    assert blocked_submission_plan["safe_to_submit_count"] == 0
+    assert blocked_submission_plan["submitted_retorrent_job_count"] == 1
+    assert blocked_submission_plan["hard_blockers"][0].startswith("submitted_job.")
     batch_status = store.daily_candidate_batch({"source_tracker": "U2", "target": "MTEAM"})
     assert batch_status["kind"] == "ptcli.daily_candidate_batch_status"
     assert batch_status["filters"]["source_tracker"] == "U2"
@@ -15489,6 +15513,8 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert batch_status["daily_candidate_batch_summary"]["submitted_retorrent_job_count"] == 1
     assert batch_status["daily_candidate_batch_gate"] == daily_gate
     assert batch_status["batch_gate"] == daily_gate
+    assert batch_status["daily_candidate_submission_plan"] == blocked_submission_plan
+    assert batch_status["submission_plan"] == blocked_submission_plan
     assert batch_status["daily_candidate_batch_summary"]["items"][0]["candidate_job_id"] == candidate_job["job_id"]
     assert batch_status["daily_candidate_batch_summary"]["items"][0]["submitted_jobs"][0]["retorrent_job_id"] == retorrent_job["job_id"]
     empty_batch = store.daily_candidate_batch({"source_tracker": "CHD", "target": "MTEAM"})
@@ -15497,6 +15523,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert empty_batch["daily_candidate_batch_summary"]["submitted_retorrent_job_count"] == 0
     assert empty_batch["daily_candidate_batch_gate"]["action"] == "inspect_empty"
     assert empty_batch["daily_candidate_batch_gate"]["recommended_tool"] == "daily_candidates_schedule_job"
+    assert empty_batch["daily_candidate_submission_plan"]["action"] == "inspect_empty"
     assert summary["candidate_submission"] == retorrent_job["candidate_submission"]
     assert summary["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
     assert summary["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
@@ -17520,9 +17547,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "source_tracker" in tool_by_name["daily_candidate_batch_status"]["input_schema"]["properties"]
     assert "daily_candidate_batch_summary" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
     assert "daily_candidate_batch_gate" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+    assert "daily_candidate_submission_plan" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
     assert "batch_gate" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+    assert "submission_plan" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
     assert "submitted_retorrent_job_count" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_summary_fields"]
     assert "action" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_gate_fields"]
+    assert "submit_requests" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_submission_plan_fields"]
+    assert "shortfall_recovery" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_submission_plan_fields"]
     assert "policy_coverage" in tool_by_name["retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_coverage" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
@@ -17764,8 +17795,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_submit_followup" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "daily_candidate_batch_summary" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_batch_gate" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
+    assert "daily_candidate_submission_plan" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_batch_summary_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_batch_gate_fields" in tool_by_name["list_jobs"]["response_contract"]
+    assert "daily_candidate_submission_plan_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "submitted_retorrent_job_count" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_summary_fields"]
     assert "first_submitted_job" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_gate_fields"]
     assert "source_reference" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -18340,13 +18373,16 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     batch_status_schema = openapi["paths"]["/v1/jobs/candidates/daily/batch"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "daily_candidate_batch_summary" in batch_status_schema["properties"]
     assert "daily_candidate_batch_gate" in batch_status_schema["properties"]
+    assert "daily_candidate_submission_plan" in batch_status_schema["properties"]
     assert "batch_summary" in batch_status_schema["properties"]
     assert "batch_gate" in batch_status_schema["properties"]
+    assert "submission_plan" in batch_status_schema["properties"]
     job_list_schema = openapi["paths"]["/v1/jobs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "jobs" in job_list_schema["properties"]
     assert "job_control_summary" in job_list_schema["properties"]["jobs"]["items"]["properties"]
     assert "daily_candidate_batch_summary" in job_list_schema["properties"]
     assert "daily_candidate_batch_gate" in job_list_schema["properties"]
+    assert "daily_candidate_submission_plan" in job_list_schema["properties"]
     assert "status_counts" in job_list_schema["properties"]
     assert "queue" in job_list_schema["properties"]
     preview_schema = openapi["paths"]["/v1/agent/run-preview"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
