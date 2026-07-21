@@ -16929,6 +16929,27 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert payload["extension_plan"]["items"][1]["tracker"] == "MTEAM"
     assert payload["extension_plan"]["items"][1]["roles"] == ["target"]
     assert payload["extension_plan"]["items"][1]["target_ready"] is True
+    coverage = payload["adapter_coverage_summary"]
+    assert coverage["kind"] == "ptcli.adapter_coverage_summary"
+    assert coverage["ready"] is True
+    assert coverage["source_ready_trackers"] == ["U2", "MTEAM"]
+    assert coverage["target_ready_trackers"] == ["MTEAM"]
+    assert coverage["live_reference_sources_to_mteam"] == ["U2"]
+    assert coverage["requested_flow"]["ready"] is True
+    assert coverage["requested_flow"]["source_tracker"] == "U2"
+    assert coverage["requested_flow"]["target_tracker"] == "MTEAM"
+    assert coverage["requested_flow"]["reference_flow"]["source_tracker"] == "U2"
+    assert coverage["coverage_counts"]["source_download"] == 2
+    assert coverage["coverage_counts"]["target_upload"] == 1
+    assert coverage["coverage_counts"]["blocked"] == 0
+    assert coverage["adapter_type_counts"]["nexusphp_passkey"] == 1
+    assert coverage["adapter_type_counts"]["mteam_api"] == 3
+    assert coverage["missing_by_tracker"] == {}
+    assert coverage["priority_next"] is None
+    assert coverage["items"][0]["tracker"] == "U2"
+    assert coverage["items"][0]["source_ready"] is True
+    assert coverage["items"][1]["tracker"] == "MTEAM"
+    assert coverage["items"][1]["target_ready"] is True
     validation_matrix = payload["extension_validation_matrix"]
     assert validation_matrix["kind"] == "ptcli.site_extension_validation_matrix"
     assert validation_matrix["ready"] is True
@@ -16968,6 +16989,9 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert payload["extension_handoff"]["continue_when"] == "extension_plan.ready=true and readiness_bundle.live_readiness.ready_for_ai=true"
     assert payload["agent_summary"]["extension_ready"] is True
     assert payload["agent_summary"]["extension_blocker_count"] == 0
+    assert payload["agent_summary"]["coverage_ready"] is True
+    assert payload["agent_summary"]["coverage_blocker_count"] == 0
+    assert payload["agent_summary"]["coverage_priority_next_tracker"] is None
     assert payload["agent_summary"]["recommended_next_tool"] == "readiness_bundle"
 
 
@@ -18290,9 +18314,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["site_profiles"]["path"] == "/v1/sites"
     assert "adapter_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "extension_plan" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
+    assert "adapter_coverage_summary" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_validation_matrix" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_checklist" in tool_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
+    assert "adapter_coverage_summary_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "adapter_coverage_item_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "requested_flow_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "priority_next" in tool_by_name["site_profiles"]["response_contract"]["adapter_coverage_summary_fields"]
+    assert "source_ready" in tool_by_name["site_profiles"]["response_contract"]["adapter_coverage_item_fields"]
     assert "extension_plan_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "validation_matrix_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "validation_item_fields" in tool_by_name["site_profiles"]["response_contract"]
@@ -18304,6 +18334,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "missing_components" in tool_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
     assert "policy_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "full_live_closure_to_mteam_count" in tool_by_name["site_profiles"]["response_contract"]["agent_summary_fields"]
+    assert "coverage_priority_next_tracker" in tool_by_name["site_profiles"]["response_contract"]["agent_summary_fields"]
     assert tool_by_name["qbit_inspect"]["path"] == "/v1/qbit/inspect"
     assert tool_by_name["qbit_inspect"]["safety"]["mutates_state"] is False
     assert "torrent_fields" in tool_by_name["qbit_inspect"]["response_contract"]
@@ -18544,6 +18575,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "capability_matrix" in site_profiles_schema["properties"]
     assert "adapter_profiles" in site_profiles_schema["properties"]
+    assert "adapter_coverage_summary" in site_profiles_schema["properties"]
     assert "extension_plan" in site_profiles_schema["properties"]
     assert "extension_validation_matrix" in site_profiles_schema["properties"]
     assert "extension_handoff" in site_profiles_schema["properties"]
@@ -19081,10 +19113,14 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["site_profiles"]["path"] == "/v1/sites"
         assert "config_audit" in tools_by_name["site_profiles"]["response_contract"]["policy_profile_fields"]
         assert "extension_plan" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
+        assert "adapter_coverage_summary" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_validation_matrix" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_checklist" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
+        assert "adapter_coverage_summary_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "adapter_coverage_item_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "requested_flow_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "adapter_contract_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "source_download_contract" in tools_by_name["site_profiles"]["response_contract"]["adapter_contract_fields"]
         assert "extension_plan_fields" in tools_by_name["site_profiles"]["response_contract"]
