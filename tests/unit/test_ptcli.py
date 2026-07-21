@@ -15733,6 +15733,15 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert schedule_batch_report["recommended_tool"] == "submit_daily_candidate_job"
     assert "confirm_upload=true" in schedule_batch_report["required_user_inputs"]
     assert schedule_batch_report["safe_to_submit_ids"] == ["60635"]
+    assert schedule_batch_report["shortfall_recovery"]["kind"] == "ptcli.daily_candidate_schedule_shortfall_recovery"
+    assert schedule_batch_report["shortfall_recovery"]["action"] == "rerun_daily_candidate_schedules"
+    assert schedule_batch_report["shortfall_recovery"]["ready_shortfall_count"] == 9
+    assert schedule_batch_report["shortfall_recovery"]["shortfall_items"][0]["schedule_name"] == "u2-to-mteam"
+    assert schedule_batch_report["shortfall_recovery"]["shortfall_items"][0]["source_tracker"] == "U2"
+    assert schedule_batch_report["shortfall_recovery"]["recommended_tool"] == "daily_candidates_schedule_job"
+    assert schedule_batch_report["shortfall_recovery"]["recommended_endpoint"] == "/v1/jobs/candidates/daily/schedule"
+    assert schedule_batch_report["shortfall_recovery"]["recommended_request"]["schedules"][0]["source_tracker"] == "U2"
+    assert schedule_batch_report["shortfall_recovery"]["recommended_request"]["schedules"][0]["target"] == "MTEAM"
     assert schedule_batch_report["blockers"] == []
     assert payload["schedule_digest"]["push_payload"]["daily_candidate_batch_report"] == schedule_batch_report
     assert payload["schedule_digest"]["approval_queue"]["kind"] == "ptcli.daily_candidate_schedule_approval_queue"
@@ -17499,6 +17508,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "decision_summary" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "daily_candidate_batch_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
     assert "daily_candidate_batch_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
+    assert "daily_candidate_batch_report_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
+    assert "shortfall_recovery" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_batch_report_fields"]
+    assert "daily_candidate_shortfall_recovery_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
+    assert "shortfall_items" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
     assert "delivery_handoff_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "approval_queue" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
     assert "publish_contract" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
@@ -17645,6 +17658,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "execution_plan" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "daily_candidate_batch_report" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "daily_candidate_batch_report_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "shortfall_recovery" in tool_by_name["daily_candidates"]["response_contract"]["daily_candidate_report_fields"]
     assert "required_user_inputs" in tool_by_name["daily_candidates"]["response_contract"]["daily_candidate_batch_report_fields"]
     assert "safe_to_submit_ids" in tool_by_name["daily_candidates"]["response_contract"]["daily_candidate_batch_report_fields"]
     assert "push_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
@@ -17663,7 +17677,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "approval_queue_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "safe_count" in tool_by_name["daily_candidates"]["response_contract"]["approval_queue_fields"]
     assert "execution_plan_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "request_context" in tool_by_name["daily_candidates"]["response_contract"]["execution_plan_fields"]
     assert "recommended_submit_requests" in tool_by_name["daily_candidates"]["response_contract"]["execution_plan_fields"]
+    assert "daily_candidate_shortfall_recovery_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "recommended_request" in tool_by_name["daily_candidates"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
     assert "approval_queue_item_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "policy_risk_level" in tool_by_name["daily_candidates"]["response_contract"]["approval_queue_item_fields"]
     assert "policy_execution_handoff" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
@@ -18307,6 +18324,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_batch_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
         assert "daily_candidate_report_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "first_submit_request" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_report_fields"]
+        assert "daily_candidate_batch_report_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
+        assert "shortfall_recovery" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_batch_report_fields"]
+        assert "daily_candidate_shortfall_recovery_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
+        assert "shortfall_items" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
         assert "delivery_handoff_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "approval_queue" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
         assert "daily_candidate_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
@@ -18566,6 +18587,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_report_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "daily_candidate_batch_report_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "first_submit_request" in tools_by_name["daily_candidates_job"]["response_contract"]["daily_candidate_report_fields"]
+        assert "shortfall_recovery" in tools_by_name["daily_candidates_job"]["response_contract"]["daily_candidate_report_fields"]
         assert "required_user_inputs" in tools_by_name["daily_candidates_job"]["response_contract"]["daily_candidate_batch_report_fields"]
         assert "safe_to_submit_ids" in tools_by_name["daily_candidates_job"]["response_contract"]["daily_candidate_batch_report_fields"]
         assert "push_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
@@ -18584,7 +18606,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "approval_queue_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "safe_count" in tools_by_name["daily_candidates_job"]["response_contract"]["approval_queue_fields"]
         assert "execution_plan_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "request_context" in tools_by_name["daily_candidates_job"]["response_contract"]["execution_plan_fields"]
         assert "shortfall_recovery" in tools_by_name["daily_candidates_job"]["response_contract"]["execution_plan_fields"]
+        assert "daily_candidate_shortfall_recovery_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "recommended_request" in tools_by_name["daily_candidates_job"]["response_contract"]["daily_candidate_shortfall_recovery_fields"]
         assert "approval_queue_item_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "policy_risk_level" in tools_by_name["daily_candidates_job"]["response_contract"]["approval_queue_item_fields"]
         assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
@@ -19600,11 +19625,26 @@ async def test_daily_candidates_execution_plan_reports_ready_shortfall(monkeypat
     assert plan["target_count"] == 10
     assert plan["ready_count"] == 1
     assert plan["ready_shortfall_count"] == 9
+    assert plan["request_context"] == {
+        "source_tracker": "U2",
+        "target_trackers": ["MTEAM"],
+        "target": "MTEAM",
+        "limit": 10,
+        "accept_rules": True,
+        "check_dupes": True,
+    }
     assert plan["recommended_submit_requests"][0]["source_id"] == "60635"
     assert "ready_target_shortfall" in plan["blockers"]
+    assert plan["shortfall_recovery"]["kind"] == "ptcli.daily_candidate_shortfall_recovery"
     assert plan["shortfall_recovery"]["action"] == "rerun_daily_candidates"
+    assert plan["shortfall_recovery"]["source_tracker"] == "U2"
+    assert plan["shortfall_recovery"]["target_trackers"] == ["MTEAM"]
+    assert plan["shortfall_recovery"]["ready_shortfall_count"] == 9
+    assert plan["shortfall_recovery"]["recommended_tool"] == "daily_candidates_job"
+    assert plan["shortfall_recovery"]["recommended_endpoint"] == "/v1/jobs/candidates/daily"
+    assert plan["shortfall_recovery"]["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "accept_rules": True, "check_dupes": True}
     assert plan["recommended_tool"] == "daily_candidates_job"
-    assert plan["recommended_request"] == {"limit": 10, "check_dupes": True}
+    assert plan["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "accept_rules": True, "check_dupes": True}
     assert result["digest"]["push_payload"]["execution_plan"] == plan
     batch_report = result["digest"]["daily_candidate_batch_report"]
     assert batch_report["ready"] is False
@@ -19613,6 +19653,7 @@ async def test_daily_candidates_execution_plan_reports_ready_shortfall(monkeypat
     assert batch_report["ready_shortfall_count"] == 9
     assert "ready_target_shortfall" in batch_report["blockers"]
     assert batch_report["shortfall_recovery"]["action"] == "rerun_daily_candidates"
+    assert batch_report["shortfall_recovery"]["recommended_request"] == plan["shortfall_recovery"]["recommended_request"]
     assert result["digest"]["push_payload"]["daily_candidate_batch_report"] == batch_report
 
 
