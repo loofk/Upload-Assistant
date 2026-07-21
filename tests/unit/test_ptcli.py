@@ -16951,6 +16951,17 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["U2"]["policy_profile"]["template"]["required_promotions"] == ["free"]
     assert matrix_by_tracker["U2"]["execution_readiness"]["ready"] is True
     assert matrix_by_tracker["U2"]["execution_readiness"]["role_status"]["source"]["can_download"] is True
+    assert matrix_by_tracker["U2"]["execution_profile"]["kind"] == "ptcli.site_policy_execution_profile"
+    assert matrix_by_tracker["U2"]["execution_profile"]["ready"] is True
+    assert matrix_by_tracker["U2"]["execution_profile"]["accepted_rules"] is True
+    assert matrix_by_tracker["U2"]["execution_profile"]["manual_review"]["rule_obligations_ready"] is True
+    assert matrix_by_tracker["U2"]["execution_profile"]["qbit"]["role_request_fields"]["source"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert matrix_by_tracker["U2"]["execution_profile"]["qbit"]["role_client_fields"]["source"]["download_limit"] == 20 * 1024 * 1024
+    assert matrix_by_tracker["U2"]["execution_profile"]["seeding"]["requirements"]["min_seed_time_hours"] == 72
+    assert matrix_by_tracker["U2"]["execution_profile"]["role_profiles"][0]["scope"] == "download_and_retorrent"
+    assert matrix_by_tracker["U2"]["execution_profile"]["role_profiles"][0]["allowed_actions"]["download"] is True
+    assert matrix_by_tracker["U2"]["execution_profile"]["role_profiles"][0]["request_fields"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert "source_wait.complete=true" in matrix_by_tracker["U2"]["execution_profile"]["role_profiles"][0]["evidence_required"]
     assert matrix_by_tracker["MTEAM"]["roles"] == ["target"]
     assert matrix_by_tracker["MTEAM"]["automation"]["upload"] is True
     assert matrix_by_tracker["MTEAM"]["qbit_limits"]["upload_limit"] == 2 * 1024 * 1024
@@ -16974,6 +16985,22 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["freeleech_required"] is True
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["ready"] is True
     assert matrix_by_tracker["MTEAM"]["execution_readiness"]["role_status"]["target"]["can_upload"] is True
+    assert matrix_by_tracker["MTEAM"]["execution_profile"]["ready"] is True
+    assert matrix_by_tracker["MTEAM"]["execution_profile"]["manual_review"]["required_confirmations"] == [
+        "target_rules_reviewed",
+        "target_upload_allowed",
+        "target_retorrent_allowed",
+        "target_seeding_obligations_accepted",
+    ]
+    assert matrix_by_tracker["MTEAM"]["execution_profile"]["qbit"]["role_request_fields"]["target"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert matrix_by_tracker["MTEAM"]["execution_profile"]["qbit"]["role_client_fields"]["target"]["upload_limit"] == 2 * 1024 * 1024
+    assert matrix_by_tracker["MTEAM"]["execution_profile"]["seeding"]["requirements"]["min_ratio"] == 1.0
+    assert matrix_by_tracker["MTEAM"]["execution_profile"]["role_profiles"][0]["scope"] == "upload_and_seed"
+    assert matrix_by_tracker["MTEAM"]["execution_profile"]["role_profiles"][0]["allowed_actions"]["upload"] is True
+    assert matrix_by_tracker["MTEAM"]["execution_profile"]["role_profiles"][0]["request_fields"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert "uploaded_wait.complete=true" in matrix_by_tracker["MTEAM"]["execution_profile"]["role_profiles"][0]["evidence_required"]
+    assert payload["policy_execution_profiles"]["U2"] == matrix_by_tracker["U2"]["execution_profile"]
+    assert payload["policy_execution_profiles"]["MTEAM"] == matrix_by_tracker["MTEAM"]["execution_profile"]
     assert payload["execution_readiness"]["ready"] is True
     assert payload["execution_readiness"]["ready_trackers"] == ["U2", "MTEAM"]
     assert payload["execution_readiness"]["blocked_trackers"] == []
