@@ -15550,6 +15550,13 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert batch_execution_context["recommended_request"]["source_id"] == "60635"
     assert batch_execution_context["first_submit_request"]["candidate_execution_context"] == execution_context
     assert batch_execution_context["safety"]["requires_human_approval"] is True
+    batch_final_report = list_payload["daily_candidate_final_report"]
+    assert batch_final_report["kind"] == "ptcli.daily_candidate_final_report"
+    assert batch_final_report["report_allowed"] is True
+    assert batch_final_report["verdict"] == "ready_for_user_approval"
+    assert batch_final_report["counts"]["safe_to_submit_count"] == 1
+    assert batch_final_report["submission"]["recommended_tool"] == "submit_daily_candidate_job"
+    assert batch_final_report["audit"]["final_report_field"] == "daily_candidate_final_report"
 
 
 def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(monkeypatch, tmp_path) -> None:
@@ -15939,6 +15946,9 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert batch_status["approval_sequence"] == blocked_approval_sequence
     assert batch_status["daily_candidate_batch_execution_context"] == blocked_batch_context
     assert batch_status["batch_execution_context"] == blocked_batch_context
+    assert batch_status["daily_candidate_final_report"]["kind"] == "ptcli.daily_candidate_final_report"
+    assert batch_status["daily_candidate_final_report"]["verdict"] == "blocked"
+    assert batch_status["daily_candidate_final_report"]["blockers"][0].startswith("submitted_job.")
     assert batch_status["daily_candidate_batch_summary"]["items"][0]["candidate_job_id"] == candidate_job["job_id"]
     assert batch_status["daily_candidate_batch_summary"]["items"][0]["submitted_jobs"][0]["retorrent_job_id"] == retorrent_job["job_id"]
     empty_batch = store.daily_candidate_batch({"source_tracker": "CHD", "target": "MTEAM"})
@@ -16677,6 +16687,25 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["notification_payload"]["daily_candidate_schedule_execution_context"] == schedule_context
     assert payload["delivery_handoff"]["daily_candidate_schedule_execution_context"] == schedule_context
     assert payload["daily_candidate_delivery_plan"]["daily_candidate_schedule_execution_context"] == schedule_context
+    final_report = payload["daily_candidate_final_report"]
+    assert final_report["kind"] == "ptcli.daily_candidate_final_report"
+    assert final_report["report_allowed"] is True
+    assert final_report["verdict"] == "ready_for_user_approval"
+    assert final_report["action"] == "submit_candidate"
+    assert final_report["counts"]["target_count"] == 10
+    assert final_report["counts"]["selected_count"] == 1
+    assert final_report["counts"]["ready_count"] == 1
+    assert final_report["counts"]["safe_to_submit_count"] == 1
+    assert final_report["counts"]["shortfall_count"] == 9
+    assert final_report["notification"]["ready"] is True
+    assert final_report["approval"]["ready"] is True
+    assert final_report["submission"]["ready"] is True
+    assert final_report["submission"]["recommended_tool"] == "submit_daily_candidate_job"
+    assert final_report["audit"]["final_report_field"] == "daily_candidate_final_report"
+    assert payload["schedule_digest"]["daily_candidate_final_report"] == final_report
+    assert payload["notification_payload"]["daily_candidate_final_report"] == final_report
+    assert payload["delivery_handoff"]["daily_candidate_final_report"] == final_report
+    assert payload["daily_candidate_delivery_plan"]["daily_candidate_final_report"] == final_report
     assert payload["notification_payload"]["submit_items"][0]["submit_tool"] == "submit_daily_candidate_job"
     assert payload["agent_decision"]["decision"] == "review_candidates"
     assert payload["agent_decision"]["can_submit_any"] is True
@@ -18781,6 +18810,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_submission_plan_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_execution_summary_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_batch_execution_context_fields" in tool_by_name["list_jobs"]["response_contract"]
+    assert "daily_candidate_final_report" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
+    assert "daily_candidate_final_report_fields" in tool_by_name["list_jobs"]["response_contract"]
+    assert "counts" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_final_report_fields"]
     assert "daily_candidate_refill_plan_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_batch_sequence_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_approval_sequence_fields" in tool_by_name["list_jobs"]["response_contract"]
@@ -18921,8 +18953,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_schedule_gate" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "daily_candidate_delivery_plan" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "daily_candidate_schedule_execution_context" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+    assert "daily_candidate_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "daily_candidate_schedule_execution_context_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "first_candidate_execution_context" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_schedule_execution_context_fields"]
+    assert "daily_candidate_final_report_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
+    assert "submission" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_final_report_fields"]
     assert "daily_schedule_gate_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "action" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_schedule_gate_fields"]
     assert "daily_candidate_delivery_plan_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
@@ -18935,6 +18970,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "approval_prompts" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "first_approval_prompt" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "daily_candidate_schedule_execution_context" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "daily_candidate_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "top_safe_candidates" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "shortfall_count" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "target_met" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
@@ -18947,7 +18983,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "shortfall_count" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "decision_summary" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["push_payload_fields"]
     assert "daily_candidate_batch_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
+    assert "daily_candidate_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["notification_fields"]
     assert "daily_candidate_batch_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
+    assert "daily_candidate_final_report" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["delivery_handoff_fields"]
     assert "daily_candidate_batch_report_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "shortfall_recovery" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_batch_report_fields"]
     assert "daily_candidate_shortfall_recovery_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
@@ -19521,6 +19559,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "delivery_handoff" in schedule_jobs_schema["properties"]
     assert "daily_schedule_gate" in schedule_jobs_schema["properties"]
     assert "daily_candidate_delivery_plan" in schedule_jobs_schema["properties"]
+    assert "daily_candidate_final_report" in schedule_jobs_schema["properties"]
     assert "agent_decision" in schedule_jobs_schema["properties"]
     batch_status_schema = openapi["paths"]["/v1/jobs/candidates/daily/batch"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "daily_candidate_batch_summary" in batch_status_schema["properties"]
@@ -19528,6 +19567,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_submission_plan" in batch_status_schema["properties"]
     assert "daily_candidate_execution_summary" in batch_status_schema["properties"]
     assert "daily_candidate_batch_execution_context" in batch_status_schema["properties"]
+    assert "daily_candidate_final_report" in batch_status_schema["properties"]
     assert "daily_candidate_refill_plan" in batch_status_schema["properties"]
     assert "daily_candidate_batch_sequence" in batch_status_schema["properties"]
     assert "daily_candidate_approval_sequence" in batch_status_schema["properties"]
@@ -19553,6 +19593,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_submission_plan" in job_list_schema["properties"]
     assert "daily_candidate_execution_summary" in job_list_schema["properties"]
     assert "daily_candidate_batch_execution_context" in job_list_schema["properties"]
+    assert "daily_candidate_final_report" in job_list_schema["properties"]
     assert "daily_candidate_refill_plan" in job_list_schema["properties"]
     assert "daily_candidate_batch_sequence" in job_list_schema["properties"]
     assert "daily_candidate_approval_sequence" in job_list_schema["properties"]
