@@ -22472,6 +22472,7 @@
           "live_validation_summary",
           "seedbox_live_validation_report",
           "live_validation_repair_plan",
+          "live_validation_sequence",
           "next_step",
           "recommended_tool",
           "recommended_endpoint",
@@ -22646,6 +22647,34 @@
           "stop_when",
           "blockers",
           "next_actions"
+        ],
+        "live_validation_sequence_fields": [
+          "ready",
+          "status",
+          "current_action",
+          "first_blocker",
+          "steps",
+          "next_step",
+          "final_read",
+          "final_report_field",
+          "audit_report_field",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "live_validation_sequence_step_fields": [
+          "index",
+          "name",
+          "action",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when"
         ],
         "seedbox_live_validation_plan_fields": [
           "ready",
