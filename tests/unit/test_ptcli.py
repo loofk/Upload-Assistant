@@ -17342,6 +17342,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "push_payload" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "approval_queue" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "top_safe_candidates" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
+    assert "execution_plan" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "target_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "shortfall_count" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "message" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
@@ -17351,6 +17352,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "decision_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "approval_queue" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "top_safe_candidates" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
+    assert "execution_plan" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
     assert "push_summary" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "recommended_action" in tool_by_name["daily_candidates"]["response_contract"]["digest_fields"]
     assert "policy_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
@@ -17366,6 +17368,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "execution_priority" in tool_by_name["daily_candidates"]["response_contract"]["policy_risk_summary_fields"]
     assert "approval_queue_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "safe_count" in tool_by_name["daily_candidates"]["response_contract"]["approval_queue_fields"]
+    assert "execution_plan_fields" in tool_by_name["daily_candidates"]["response_contract"]
+    assert "recommended_submit_requests" in tool_by_name["daily_candidates"]["response_contract"]["execution_plan_fields"]
     assert "approval_queue_item_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "policy_risk_level" in tool_by_name["daily_candidates"]["response_contract"]["approval_queue_item_fields"]
     assert "policy_execution_handoff" in tool_by_name["daily_candidates"]["response_contract"]["policy_summary_fields"]
@@ -18197,6 +18201,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "push_payload" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "approval_queue" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "top_safe_candidates" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "execution_plan" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "target_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "shortfall_count" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "message" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
@@ -18206,6 +18211,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "decision_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
         assert "approval_queue" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
         assert "top_safe_candidates" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
+        assert "execution_plan" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
         assert "push_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "recommended_action" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
         assert "policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
@@ -18221,6 +18227,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "execution_priority" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_risk_summary_fields"]
         assert "approval_queue_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "safe_count" in tools_by_name["daily_candidates_job"]["response_contract"]["approval_queue_fields"]
+        assert "execution_plan_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "shortfall_recovery" in tools_by_name["daily_candidates_job"]["response_contract"]["execution_plan_fields"]
         assert "approval_queue_item_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "policy_risk_level" in tools_by_name["daily_candidates_job"]["response_contract"]["approval_queue_item_fields"]
         assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
@@ -19022,6 +19030,21 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["top_safe_candidates"] == approval_queue["top_safe_candidates"]
     assert result["digest"]["push_payload"]["approval_queue"] == approval_queue
     assert result["digest"]["push_payload"]["top_safe_candidates"] == approval_queue["top_safe_candidates"]
+    execution_plan = result["digest"]["execution_plan"]
+    assert execution_plan["kind"] == "ptcli.daily_candidate_execution_plan"
+    assert execution_plan["ready"] is True
+    assert execution_plan["target_count"] == 1
+    assert execution_plan["ready_count"] == 1
+    assert execution_plan["safe_to_submit_count"] == 1
+    assert execution_plan["ready_shortfall_count"] == 0
+    assert execution_plan["submit_tool"] == "submit_daily_candidate_job"
+    assert execution_plan["submit_endpoint_template"] == "/v1/jobs/candidates/{candidate_job_id}/submit"
+    assert execution_plan["recommended_tool"] == "submit_daily_candidate_job"
+    assert execution_plan["recommended_endpoint"] == "/v1/jobs/candidates/{candidate_job_id}/submit"
+    assert execution_plan["recommended_request"] == {"rank": 1, "source_id": "60635", "confirm_upload": True, "save_path": "/downloads"}
+    assert execution_plan["recommended_submit_requests"][0]["source_id"] == "60635"
+    assert execution_plan["recommended_submit_requests"][0]["source_url_retorrent_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert result["digest"]["push_payload"]["execution_plan"] == execution_plan
     assert "#1 [ready] U2-60635" in result["digest"]["push_payload"]["message"]
     assert result["digest"]["recommended_action"].startswith("Review digest.top_candidate")
     assert result["digest"]["push_count"] == 1
@@ -19130,6 +19153,48 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["execute_request"]["qbit_download_limit"] == 20 * 1024 * 1024
     assert candidate["execute_request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert candidate["execute_job_endpoint"] == "/v1/jobs/retorrent/from-url"
+
+
+async def test_daily_candidates_execution_plan_reports_ready_shortfall(monkeypatch) -> None:
+    seed = ptcli_candidates.CandidateSeed("U2", "60635", "Example.Release", "https://u2.dmhy.org/details.php?id=60635", size="42 GiB", promotion="free")
+
+    async def fake_fetch_recent_candidate_seeds(*_args, **_kwargs):
+        return [seed]
+
+    async def fake_fetch_source_info(*_args, **_kwargs):
+        return source_info_from_tuple("U2", "60635", (1234567, 999, "Example.Release", "a" * 40, "desc"), {})
+
+    async def fake_search_mteam_duplicates(_config, _source_info):
+        return {"searched": True, "count": 0, "dupes": []}
+
+    monkeypatch.setattr(ptcli_candidates, "fetch_recent_candidate_seeds", fake_fetch_recent_candidate_seeds)
+    monkeypatch.setattr(ptcli_candidates, "fetch_source_info", fake_fetch_source_info)
+    monkeypatch.setattr(ptcli_candidates, "search_mteam_duplicates", fake_search_mteam_duplicates)
+
+    config = {
+        "TRACKERS": {"MTEAM": {"api_key": "fake"}},
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "MTEAM": {"upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+                "U2": {"download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+            }
+        },
+    }
+
+    result = await ptcli_candidates.build_daily_candidates(config, "U2", "MTEAM", limit=10, accept_rules=True)
+
+    plan = result["digest"]["execution_plan"]
+    assert result["status"] == "partial"
+    assert plan["ready"] is False
+    assert plan["target_count"] == 10
+    assert plan["ready_count"] == 1
+    assert plan["ready_shortfall_count"] == 9
+    assert plan["recommended_submit_requests"][0]["source_id"] == "60635"
+    assert "ready_target_shortfall" in plan["blockers"]
+    assert plan["shortfall_recovery"]["action"] == "rerun_daily_candidates"
+    assert plan["recommended_tool"] == "daily_candidates_job"
+    assert plan["recommended_request"] == {"limit": 10, "check_dupes": True}
+    assert result["digest"]["push_payload"]["execution_plan"] == plan
 
 
 async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers(monkeypatch) -> None:
