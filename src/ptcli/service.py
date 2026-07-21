@@ -614,6 +614,13 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
                 self._send_json(HTTPStatus.OK, readiness_bundle_payload(query))
                 return
+            if path == "/v1/goal/progress":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                self._send_json(HTTPStatus.OK, goal_progress_payload(query))
+                return
             if path == "/v1/site-policies":
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -681,6 +688,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/target/upload/preflight": target_upload_preflight_payload,
                 "/v1/target/upload": lambda payload: asyncio.run(target_upload_service_payload(payload)),
                 "/v1/readiness/bundle": readiness_bundle_payload,
+                "/v1/goal/progress": goal_progress_payload,
                 "/v1/summary/check": summary_check_service_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
                 "/v1/candidates/daily/schedule": daily_candidate_schedule_payload,
@@ -14640,6 +14648,262 @@ def _deployment_next_actions(checks: list[dict[str, Any]]) -> list[str]:
     return actions
 
 
+def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return an AI-readable progress audit for the long-running ptcli product goal."""
+    request = request if isinstance(request, dict) else {}
+    deployment = deployment_check_payload(request)
+    policy_request = _goal_progress_policy_request(request)
+    try:
+        site_policies = site_policies_payload(policy_request)
+    except ServiceError as exc:
+        site_policies = {"status": "blocked", "ok": False, "ready": False, "blockers": [str(exc)]}
+    tools = _agent_tool_schemas()
+    tool_names = {str(tool.get("name")) for tool in tools}
+    progress_items = _goal_progress_items(deployment, site_policies, tool_names)
+    estimate = _goal_progress_estimate(progress_items)
+    blockers = _goal_progress_blockers(progress_items, deployment, site_policies)
+    return {
+        "kind": "ptcli.goal_progress",
+        "status": "ok" if estimate["critical_path_ready"] else "blocked",
+        "ok": estimate["critical_path_ready"],
+        "objective": "Chinese PT-focused Docker Compose deployed AI-callable retorrent/upload/upload-farming automation service.",
+        "completion_estimate": estimate,
+        "capabilities": progress_items,
+        "critical_path_remaining": _goal_progress_remaining(progress_items),
+        "blockers": blockers,
+        "next_step": _goal_progress_next_step(progress_items, blockers),
+        "recommended_tool": "readiness_bundle" if not blockers else "goal_progress",
+        "recommended_endpoint": "/v1/readiness/bundle" if not blockers else "/v1/goal/progress",
+        "source_context": {
+            "source_tracker": policy_request.get("source_tracker"),
+            "source_id": policy_request.get("source_id"),
+            "source_url": policy_request.get("source_url"),
+            "target": policy_request.get("target"),
+            "accept_rules": _truthy(policy_request.get("accept_rules")),
+            "confirm_upload": _truthy(policy_request.get("confirm_upload")),
+        },
+        "evidence": {
+            "deployment": {
+                "ready": deployment.get("ready"),
+                "docker_compose_api_ready": (deployment.get("docker_compose") or {}).get("ptcli_api_service_ready"),
+                "daily_schedule_ready": (deployment.get("docker_compose") or {}).get("daily_scheduler_service_ready")
+                or (deployment.get("docker_compose") or {}).get("daily_schedule_service_ready"),
+                "qbit_configured": (deployment.get("qbit") or {}).get("configured"),
+                "connectivity_checked": deployment.get("connectivity_checked"),
+            },
+            "site_policies": {
+                "ready": site_policies.get("ready"),
+                "policy_repair_action": (site_policies.get("policy_repair_gate") or {}).get("action") if isinstance(site_policies.get("policy_repair_gate"), dict) else None,
+                "policy_repair_ready": (site_policies.get("policy_repair_gate") or {}).get("ready") if isinstance(site_policies.get("policy_repair_gate"), dict) else None,
+                "blockers": _string_list(site_policies.get("blockers")),
+            },
+            "tool_count": len(tools),
+        },
+        "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence", "next_step", "blockers"],
+        "next_actions": _goal_progress_next_actions(progress_items, blockers),
+    }
+
+
+def _goal_progress_policy_request(request: dict[str, Any]) -> dict[str, Any]:
+    source_url = str(request.get("source_url") or request.get("source") or "").strip()
+    source_tracker = str(request.get("source_tracker") or request.get("from") or "").strip().upper()
+    if not source_tracker and source_url:
+        try:
+            source_reference = resolve_source_reference(source_url)
+            source_tracker = str(source_reference.get("tracker") if isinstance(source_reference, dict) else source_reference.tracker).upper()
+            if not request.get("source_id"):
+                source_id = source_reference.get("torrent_id") if isinstance(source_reference, dict) else source_reference.torrent_id
+                request = {**request, "source_id": source_id}
+        except ServiceError:
+            pass
+    return {
+        "source_url": source_url or None,
+        "source_tracker": source_tracker or "U2",
+        "source_id": request.get("source_id"),
+        "target": request.get("target") or request.get("to") or "MTEAM",
+        "accept_rules": request.get("accept_rules"),
+        "confirm_upload": request.get("confirm_upload"),
+        "config": request.get("config"),
+        "base_dir": request.get("base_dir"),
+    }
+
+
+def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, Any], tool_names: set[str]) -> list[dict[str, Any]]:
+    docker_compose = deployment.get("docker_compose") if isinstance(deployment.get("docker_compose"), dict) else {}
+    qbit = deployment.get("qbit") if isinstance(deployment.get("qbit"), dict) else {}
+    policy_repair = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
+    return [
+        _goal_progress_item(
+            "docker_compose_deployment",
+            "Docker Compose local/seedbox deployment",
+            "complete" if docker_compose.get("ptcli_api_service_ready") else "partial",
+            10,
+            ["/v1/deployment/check", "docker-compose.yml", "Dockerfile.ptcli"],
+            blockers=[] if docker_compose.get("ptcli_api_service_ready") else ["ptcli-api compose service is not fully seedbox-ready."],
+        ),
+        _goal_progress_item(
+            "ai_tool_contracts",
+            "OpenAPI, /v1/tools, and OpenClaw/Hermes manifests",
+            "complete" if {"agent_manifest", "source_url_check_and_submit", "readiness_bundle"}.issubset(tool_names) else "partial",
+            10,
+            ["/openapi.json", "/v1/tools", "/.well-known/ptcli-agent.json", "ai/openclaw/ptcli.skill.json", "ai/hermes/ptcli.skill.json"],
+        ),
+        _goal_progress_item(
+            "task_api",
+            "Queued job API, polling, summary, resume, and cancel",
+            "complete" if {"retorrent_job", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}.issubset(tool_names) else "partial",
+            12,
+            ["/v1/jobs/retorrent/from-url/check-and-submit", "/v1/jobs/{job_id}", "/v1/jobs/{job_id}/summary", "/v1/jobs/{job_id}/resume"],
+        ),
+        _goal_progress_item(
+            "manual_source_url_retorrent",
+            "Manual source-link to target-site retorrent workflow",
+            "partial",
+            18,
+            ["source_url_check_and_submit", "retorrent_stage_handoff", "closure_handoff", "seedbox_live_validation_completion_report"],
+            blockers=["Requires real seedbox live validation before this can be marked complete."],
+        ),
+        _goal_progress_item(
+            "metadata_and_materials",
+            "IMDb/TMDb/Douban/PTGen, MediaInfo/BDInfo, screenshots, and image-host materials",
+            "partial" if {"metadata_prepare_job", "materials_prepare_job", "target_package_prepare_job"}.issubset(tool_names) else "missing",
+            10,
+            ["metadata_prepare_handoff", "materials_prepare_handoff", "target_package_handoff"],
+            blockers=["Material generation and description output still need live content validation across U2/CHD -> MTEAM."],
+        ),
+        _goal_progress_item(
+            "daily_candidates",
+            "Daily 10 candidate discovery, digest, and approved submission",
+            "partial" if {"daily_candidates_schedule_job", "submit_daily_candidate_job", "daily_candidate_batch_status"}.issubset(tool_names) else "missing",
+            10,
+            ["daily_schedule_gate", "candidate_control_summary", "daily_candidate_batch_gate"],
+            blockers=[] if (deployment.get("daily_candidates") or {}).get("configured") else ["Daily candidate schedule is not configured in env/request."],
+        ),
+        _goal_progress_item(
+            "site_policy_config",
+            "Configurable, auditable site rules, rate limits, and seeding requirements",
+            "complete" if policy_repair.get("ready") else "partial",
+            10,
+            ["site_policies.policy_readiness_summary", "site_policies.policy_repair_gate", "site_policies.policy_execution_handoff"],
+            blockers=_string_list(policy_repair.get("blockers")) or _string_list(site_policies.get("blockers")),
+        ),
+        _goal_progress_item(
+            "qbittorrent_execution",
+            "qBittorrent add/wait/export/inject/category/tag/rate-limit evidence",
+            "partial" if qbit.get("configured") else "missing",
+            8,
+            ["qbit_plan", "qbit_limit_audit", "qbit_execution_gate", "/v1/qbit/*"],
+            blockers=[] if qbit.get("configured") else ["qBittorrent client is not configured in data/config.py."],
+        ),
+        _goal_progress_item(
+            "tracker_adapters",
+            "Extensible Chinese PT tracker adapter/profile model",
+            "partial",
+            7,
+            ["/v1/sites", "CHINESE_PT_TRACKERS", "extension_handoff"],
+            blockers=["Only U2/CHD -> MTEAM are priority reference flows; more Chinese PT sites still need full live adapter validation."],
+        ),
+        _goal_progress_item(
+            "seedbox_live_validation",
+            "Real seedbox end-to-end live validation",
+            "unverified",
+            12,
+            ["seedbox_live_validation_handoff", "seedbox_live_validation_completion_report"],
+            blockers=["No current-state evidence proves a real seedbox live run completed from source pull through uploaded torrent seeding."],
+        ),
+        _goal_progress_item(
+            "legacy_cleanup",
+            "Trim unrelated Web UI, Discord, overseas tracker, and legacy code",
+            "not_started",
+            3,
+            ["legacy cleanup intentionally deferred until critical service workflow is live-verified"],
+            blockers=["Cleanup is intentionally after live service capability, to avoid breaking inherited UA functionality early."],
+        ),
+    ]
+
+
+def _goal_progress_item(identifier: str, name: str, status: str, weight: int, evidence: list[str], *, blockers: list[str] | None = None) -> dict[str, Any]:
+    status_scores = {"complete": 1.0, "partial": 0.55, "unverified": 0.35, "missing": 0.0, "not_started": 0.0}
+    score = status_scores.get(status, 0.0)
+    return {
+        "id": identifier,
+        "name": name,
+        "status": status,
+        "weight": weight,
+        "score": round(weight * score, 2),
+        "evidence": evidence,
+        "blockers": blockers or [],
+    }
+
+
+def _goal_progress_estimate(items: list[dict[str, Any]]) -> dict[str, Any]:
+    total_weight = sum(int(item.get("weight") or 0) for item in items)
+    score = sum(float(item.get("score") or 0.0) for item in items)
+    by_status: dict[str, int] = {}
+    for item in items:
+        by_status[str(item.get("status"))] = by_status.get(str(item.get("status")), 0) + 1
+    percent = round((score / total_weight) * 100) if total_weight else 0
+    critical_ids = {"manual_source_url_retorrent", "metadata_and_materials", "daily_candidates", "site_policy_config", "qbittorrent_execution", "seedbox_live_validation"}
+    critical_ready = all(item.get("status") == "complete" for item in items if item.get("id") in critical_ids)
+    return {
+        "estimated_percent": percent,
+        "implemented_or_partial_percent": percent,
+        "total_weight": total_weight,
+        "score": round(score, 2),
+        "by_status": by_status,
+        "critical_path_ready": critical_ready,
+        "confidence": "medium",
+        "note": "This is a current-state engineering estimate; live tracker and seedbox evidence are required before completion can be claimed.",
+    }
+
+
+def _goal_progress_remaining(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    remaining_statuses = {"partial", "missing", "unverified", "not_started"}
+    return [
+        {
+            "id": item.get("id"),
+            "status": item.get("status"),
+            "blockers": item.get("blockers", []),
+            "evidence_to_collect": item.get("evidence", []),
+        }
+        for item in items
+        if item.get("status") in remaining_statuses
+    ]
+
+
+def _goal_progress_blockers(items: list[dict[str, Any]], deployment: dict[str, Any], site_policies: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    blockers.extend(_string_list(deployment.get("blockers")))
+    blockers.extend(_string_list(site_policies.get("blockers")))
+    for item in items:
+        if item.get("id") in {"manual_source_url_retorrent", "metadata_and_materials", "site_policy_config", "qbittorrent_execution", "seedbox_live_validation"}:
+            blockers.extend(_string_list(item.get("blockers")))
+    return list(dict.fromkeys(blocker for blocker in blockers if blocker))
+
+
+def _goal_progress_next_step(items: list[dict[str, Any]], blockers: list[str]) -> dict[str, Any]:
+    by_id = {str(item.get("id")): item for item in items}
+    if by_id.get("site_policy_config", {}).get("status") != "complete":
+        return {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "reason": "repair_site_policy_gate"}
+    if by_id.get("qbittorrent_execution", {}).get("status") == "missing":
+        return {"tool": "deployment_check", "endpoint": "/v1/deployment/check", "method": "GET", "reason": "configure_qbittorrent"}
+    if by_id.get("seedbox_live_validation", {}).get("status") != "complete":
+        return {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "reason": "run_seedbox_live_validation_preflight"}
+    if blockers:
+        return {"tool": "goal_progress", "endpoint": "/v1/goal/progress", "method": "GET", "reason": "inspect_remaining_blockers"}
+    return {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "reason": "exercise_daily_candidate_workflow"}
+
+
+def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str]) -> list[str]:
+    next_step = _goal_progress_next_step(items, blockers)
+    actions = [f"Call {next_step['tool']} at {next_step['endpoint']} and inspect its blockers/next_actions."]
+    if any(item.get("id") == "seedbox_live_validation" and item.get("status") != "complete" for item in items):
+        actions.append("Collect one real U2/CHD -> MTEAM seedbox run that reaches seedbox_live_validation_completion_report.ready_for_user_report=true.")
+    if any(item.get("id") == "daily_candidates" and item.get("status") != "complete" for item in items):
+        actions.append("Configure a daily candidate schedule and validate a 10-item candidate digest before enabling push delivery.")
+    return actions
+
+
 def tools_payload() -> dict[str, Any]:
     return {
         "status": "ok",
@@ -15325,6 +15589,23 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "goal_progress",
+            "method": "GET",
+            "path": "/v1/goal/progress",
+            "description": "Return a no-network progress audit against the final Chinese PT AI-service objective, including completed, partial, unverified, and remaining critical-path capabilities.",
+            "input_schema": readiness_bundle_request_schema,
+            "response_contract": {
+                "required_fields": ["status", "ok", "objective", "completion_estimate", "capabilities", "critical_path_remaining", "evidence", "next_step", "blockers", "next_actions"],
+                "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
+                "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
+                "capability_status_values": ["complete", "partial", "unverified", "missing", "not_started"],
+                "evidence_fields": ["deployment", "site_policies", "tool_count"],
+                "next_step_fields": ["tool", "endpoint", "method", "reason"],
+            },
+            "workflow_hints": {"read_first": "completion_estimate", "then": "critical_path_remaining", "repair_with": "next_step"},
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": [], "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},
         },
         {
             "name": "readiness_bundle",
@@ -16418,6 +16699,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
         },
         "discovery": {
             "health": f"{public_base_url}/health",
+            "goal_progress": f"{public_base_url}/v1/goal/progress",
             "deployment_check": f"{public_base_url}/v1/deployment/check",
             "source_url_preflight": f"{public_base_url}/v1/retorrent/source-url/preflight",
             "readiness_bundle": f"{public_base_url}/v1/readiness/bundle",
@@ -16495,7 +16777,7 @@ def _agent_skill_contract(public_base_url: str) -> dict[str, Any]:
                 "restriction": "Use job_control_summary.dry_run_request/recommended_request first, or fall back to job_handoff.recommended_request plus allowlisted overrides.",
             },
         },
-        "mandatory_preflight": ["deployment_check", "readiness_bundle", "site_policies", "target duplicate check"],
+        "mandatory_preflight": ["goal_progress", "deployment_check", "readiness_bundle", "site_policies", "target duplicate check"],
         "completion_evidence": ["seedbox_live_validation_completion_report.ready_for_user_report=true", "seedbox_live_validation_completion_report.missing_evidence=[]", "seedbox_live_validation_completion_report.blockers=[]", "job_control_summary.action=read_summary", "closure_summary.complete=true", "target_upload_handoff.uploaded_seeding_ready=true", "qBittorrent hash/path/size evidence present"],
     }
 
@@ -17447,6 +17729,26 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_handoff": {"type": "object"},
         },
     }
+    goal_progress_response_schema = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string"},
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "objective": {"type": "string"},
+            "completion_estimate": {"type": "object"},
+            "capabilities": {"type": "array", "items": {"type": "object"}},
+            "critical_path_remaining": {"type": "array", "items": {"type": "object"}},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_step": {"type": "object"},
+            "recommended_tool": {"type": ["string", "null"]},
+            "recommended_endpoint": {"type": ["string", "null"]},
+            "source_context": {"type": "object"},
+            "evidence": {"type": "object"},
+            "read_order": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
     readiness_bundle_response_schema = {
         "type": "object",
         "properties": {
@@ -17563,6 +17865,27 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     ],
                     "responses": {"200": {"description": "Local deployment readiness report.", "content": {"application/json": {"schema": deployment_response_schema}}}},
                 }
+            },
+            "/v1/goal/progress": {
+                "get": {
+                    "operationId": "getPtcliGoalProgress",
+                    "security": token_security,
+                    "parameters": [
+                        {"name": "source_url", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "source_tracker", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "source_id", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "target", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "base_dir", "in": "query", "required": False, "schema": {"type": "string"}},
+                        {"name": "config", "in": "query", "required": False, "schema": {"type": "string"}},
+                    ],
+                    "responses": {"200": {"description": "Current progress audit for the final ptcli AI service goal.", "content": {"application/json": {"schema": goal_progress_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "postPtcliGoalProgress",
+                    "security": token_security,
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": _readiness_bundle_tool_request_schema()}}},
+                    "responses": {"200": {"description": "Current progress audit for the final ptcli AI service goal.", "content": {"application/json": {"schema": goal_progress_response_schema}}}},
+                },
             },
             "/v1/readiness/bundle": {
                 "get": {

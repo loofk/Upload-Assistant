@@ -18,6 +18,7 @@
   },
   "discovery": {
     "health": "http://127.0.0.1:8080/health",
+    "goal_progress": "http://127.0.0.1:8080/v1/goal/progress",
     "deployment_check": "http://127.0.0.1:8080/v1/deployment/check",
     "source_url_preflight": "http://127.0.0.1:8080/v1/retorrent/source-url/preflight",
     "readiness_bundle": "http://127.0.0.1:8080/v1/readiness/bundle",
@@ -102,6 +103,7 @@
       }
     },
     "mandatory_preflight": [
+      "goal_progress",
       "deployment_check",
       "readiness_bundle",
       "site_policies",
@@ -21175,6 +21177,325 @@
       }
     },
     {
+      "name": "goal_progress",
+      "method": "GET",
+      "path": "/v1/goal/progress",
+      "description": "Return a no-network progress audit against the final Chinese PT AI-service objective, including completed, partial, unverified, and remaining critical-path capabilities.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Alias for source_url; source_url is preferred for this tool."
+          },
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional tracker code when source is only an id, e.g. U2 or CHD."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Target tracker code(s), currently live upload closure is MTEAM-focused."
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Required for source download and live upload automation."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Required before live target upload."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing completed content path on the seedbox."
+          },
+          "save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for source torrent download/injection."
+          },
+          "uploaded_save_path": {
+            "type": "string",
+            "description": "qBittorrent save path for uploaded target torrent injection."
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent upload limit, e.g. 500KiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Source torrent download limit, e.g. 20MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent upload limit, e.g. 2MiB/s. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Uploaded target torrent download limit. If omitted, PTCLI.SITE_POLICIES may provide a default."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string",
+            "description": "Existing MediaInfo report file to include in the target upload package."
+          },
+          "bdinfo_file": {
+            "type": "string",
+            "description": "Existing BDInfo report file to include in the target upload package."
+          },
+          "image_host_file": {
+            "type": "string",
+            "description": "JSON file containing hosted screenshot URLs and local screenshot evidence."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector used when upload_screenshots=true."
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing screenshot file; use screenshot_files for multiple screenshots."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files to include in the target upload package."
+          },
+          "screenshot_count": {
+            "type": [
+              "string",
+              "integer"
+            ],
+            "description": "Screenshot count to generate when generate_screenshots=true."
+          },
+          "enrich_metadata": {
+            "type": "boolean",
+            "description": "Enrich source metadata before preparing the target package."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description metadata before preparing the target package."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from the resolved local content path before preparing the target package."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray content before preparing the target package."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate video screenshots from the resolved local content path before preparing the target package."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local/generated screenshots to the configured image host before preparing the target package."
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          },
+          "execute_if_no_duplicate": {
+            "type": "boolean",
+            "default": true,
+            "description": "This endpoint treats the request as execute-if-clear; duplicate, rule, and confirmation gates still block unsafe work."
+          },
+          "source_url": {
+            "type": "string",
+            "description": "User-provided source tracker details or download URL. The service infers tracker and torrent id from this URL."
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "source_tracker",
+                "target"
+              ],
+              "properties": {
+                "source_tracker": {
+                  "type": "string",
+                  "description": "Source tracker code, e.g. U2 or CHD."
+                },
+                "target": {
+                  "type": [
+                    "string",
+                    "array"
+                  ],
+                  "description": "Target tracker code(s), currently MTEAM duplicate checks are supported."
+                },
+                "limit": {
+                  "type": "integer",
+                  "default": 10,
+                  "maximum": 10
+                },
+                "accept_rules": {
+                  "type": "boolean",
+                  "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
+                },
+                "check_dupes": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "base_dir": {
+                  "type": "string"
+                },
+                "config": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "time": {
+                  "type": "string",
+                  "default": "09:00"
+                },
+                "timezone": {
+                  "type": "string",
+                  "default": "Asia/Shanghai"
+                }
+              }
+            }
+          },
+          "source_id": {
+            "type": "string",
+            "description": "Optional source torrent id when source_tracker is provided instead of a full source_url."
+          },
+          "cookies_dir": {
+            "type": "string"
+          },
+          "job_dir": {
+            "type": "string"
+          },
+          "downloads_path": {
+            "type": "string"
+          },
+          "compose_file": {
+            "type": "string"
+          },
+          "max_concurrent_jobs": {
+            "type": "integer",
+            "default": 1
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "objective",
+          "completion_estimate",
+          "capabilities",
+          "critical_path_remaining",
+          "evidence",
+          "next_step",
+          "blockers",
+          "next_actions"
+        ],
+        "estimate_fields": [
+          "estimated_percent",
+          "implemented_or_partial_percent",
+          "total_weight",
+          "score",
+          "by_status",
+          "critical_path_ready",
+          "confidence",
+          "note"
+        ],
+        "capability_fields": [
+          "id",
+          "name",
+          "status",
+          "weight",
+          "score",
+          "evidence",
+          "blockers"
+        ],
+        "capability_status_values": [
+          "complete",
+          "partial",
+          "unverified",
+          "missing",
+          "not_started"
+        ],
+        "evidence_fields": [
+          "deployment",
+          "site_policies",
+          "tool_count"
+        ],
+        "next_step_fields": [
+          "tool",
+          "endpoint",
+          "method",
+          "reason"
+        ]
+      },
+      "workflow_hints": {
+        "read_first": "completion_estimate",
+        "then": "critical_path_remaining",
+        "repair_with": "next_step"
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": [],
+        "does_not_contact_trackers": true,
+        "does_not_contact_qbittorrent": true
+      }
+    },
+    {
       "name": "readiness_bundle",
       "method": "POST",
       "path": "/v1/readiness/bundle",
@@ -21995,7 +22316,7 @@
       }
     }
   ],
-  "tool_count": 41,
+  "tool_count": 42,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

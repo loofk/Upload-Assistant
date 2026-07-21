@@ -17864,6 +17864,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "ptcli_api_service_ready" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
     assert "ptcli_api_healthcheck" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
     assert "manual_retorrent" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
+    assert tool_by_name["goal_progress"]["path"] == "/v1/goal/progress"
+    assert tool_by_name["goal_progress"]["method"] == "GET"
+    assert "completion_estimate" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
+    assert "critical_path_remaining" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
+    assert "critical_path_ready" in tool_by_name["goal_progress"]["response_contract"]["estimate_fields"]
+    assert "unverified" in tool_by_name["goal_progress"]["response_contract"]["capability_status_values"]
     assert tool_by_name["site_profiles"]["path"] == "/v1/sites"
     assert "adapter_profile_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "extension_plan" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
@@ -18042,6 +18048,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/openclaw/skill.json" in openapi["paths"]
     assert "/v1/hermes/skill.json" in openapi["paths"]
     assert "/v1/agent/run-preview" in openapi["paths"]
+    assert "/v1/goal/progress" in openapi["paths"]
     assert "/v1/retorrent/source-url/preflight" in openapi["paths"]
     assert "/v1/deployment/check" in openapi["paths"]
     assert "/v1/readiness/bundle" in openapi["paths"]
@@ -18074,6 +18081,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/{job_id}/resume" in openapi["paths"]
     assert "/v1/jobs/{job_id}/cancel" in openapi["paths"]
     assert openapi["paths"]["/v1/jobs/retorrent"]["post"]["security"] == [{"bearerAuth": []}]
+    assert openapi["paths"]["/v1/goal/progress"]["get"]["operationId"] == "getPtcliGoalProgress"
+    goal_progress_schema = openapi["paths"]["/v1/goal/progress"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "completion_estimate" in goal_progress_schema["properties"]
+    assert "critical_path_remaining" in goal_progress_schema["properties"]
     resume_schema = openapi["paths"]["/v1/jobs/{job_id}/resume"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert "confirm_upload" in resume_schema["properties"]
     assert "save_path" in resume_schema["properties"]
@@ -18379,6 +18390,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["schema_version"] == "ptcli.agent_manifest.v1"
     assert manifest["base_url"] == "http://ptcli.local:8080"
     assert manifest["discovery"]["openapi"] == "http://ptcli.local:8080/openapi.json"
+    assert manifest["discovery"]["goal_progress"] == "http://ptcli.local:8080/v1/goal/progress"
     assert manifest["discovery"]["deployment_check"] == "http://ptcli.local:8080/v1/deployment/check"
     assert manifest["discovery"]["source_url_preflight"] == "http://ptcli.local:8080/v1/retorrent/source-url/preflight"
     assert manifest["discovery"]["readiness_bundle"] == "http://ptcli.local:8080/v1/readiness/bundle"
@@ -18397,6 +18409,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
     assert manifest["skill_contract"]["primary_entrypoints"]["manual_source_url_retorrent"]["tool"] == "source_url_check_and_submit"
     assert "deployment_check" in manifest["skill_contract"]["mandatory_preflight"]
+    assert "goal_progress" in manifest["skill_contract"]["mandatory_preflight"]
     assert "seedbox_live_validation_completion_report.ready_for_user_report=true" in manifest["skill_contract"]["completion_evidence"]
     assert "Ask for explicit user confirmation before setting accept_rules=true or confirm_upload=true when it was not already supplied by the user." in manifest["agent_instructions"]["must"]
     assert "Do not bypass site_policies, rule_obligations, policy_execution_handoff, or duplicate_check." in manifest["agent_instructions"]["must_not"]
@@ -18409,7 +18422,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["live_validation_report_field"] == "seedbox_live_validation_completion_report"
     assert manifest["closure_contract"]["next_step_source"].startswith("job_control_summary")
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
-    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "goal_progress", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_check_and_submit"
     assert source_url_workflow["fallback_tool"] == "source_url_retorrent_job"
@@ -19253,6 +19266,67 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert any("No daily candidate schedules configured" in blocker for blocker in payload["agent_handoff"]["daily_candidates"]["blocked_by"])
     assert any("config file is missing" in blocker for blocker in payload["blockers"])
     assert any("Mount or create data/config.py" in action for action in payload["next_actions"])
+
+
+def test_goal_progress_payload_reports_current_goal_gap(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    tmp_dir = tmp_path / "tmp"
+    job_dir = tmp_path / "jobs"
+    downloads_dir = tmp_path / "downloads"
+    for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
+        directory.mkdir(parents=True)
+    (data_dir / "config.py").write_text(
+        "config = {'DEFAULT': {'default_torrent_client': 'qbittorrent'}, 'TORRENT_CLIENTS': {'qbittorrent': {'torrent_client': 'qbit', 'qbit_url': 'http://host.docker.internal', 'qbit_port': '8080'}}}",
+        encoding="utf-8",
+    )
+    (tmp_path / "docker-compose.yml").write_text(
+        """
+services:
+  ptcli-api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+      - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+    volumes:
+      - /downloads:/downloads/:rw
+      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
+      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
+      - /app/tmp/:/Upload-Assistant/tmp/:rw
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TMPDIR", str(tmp_dir))
+
+    payload = ptcli_service.goal_progress_payload({"base_dir": str(tmp_path), "job_dir": str(job_dir), "downloads_path": str(downloads_dir), "source_url": "https://u2.dmhy.org/details.php?id=60635", "target": "MTEAM"})
+
+    assert payload["kind"] == "ptcli.goal_progress"
+    assert payload["status"] == "blocked"
+    assert payload["completion_estimate"]["estimated_percent"] > 50
+    assert payload["completion_estimate"]["critical_path_ready"] is False
+    capabilities = {item["id"]: item for item in payload["capabilities"]}
+    assert capabilities["docker_compose_deployment"]["status"] == "complete"
+    assert capabilities["ai_tool_contracts"]["status"] == "complete"
+    assert capabilities["task_api"]["status"] == "complete"
+    assert capabilities["manual_source_url_retorrent"]["status"] == "partial"
+    assert capabilities["seedbox_live_validation"]["status"] == "unverified"
+    assert capabilities["legacy_cleanup"]["status"] == "not_started"
+    assert payload["source_context"]["source_tracker"] == "U2"
+    assert payload["source_context"]["source_id"] == "60635"
+    assert payload["source_context"]["target"] == "MTEAM"
+    assert payload["evidence"]["deployment"]["docker_compose_api_ready"] is True
+    assert payload["evidence"]["deployment"]["qbit_configured"] is True
+    assert payload["next_step"]["tool"] in {"site_policies", "readiness_bundle"}
+    assert payload["read_order"][0] == "completion_estimate"
+    assert any(item["id"] == "seedbox_live_validation" for item in payload["critical_path_remaining"])
 
 
 def test_readiness_bundle_blocks_requested_material_generation_without_runtime_tools(tmp_path, monkeypatch) -> None:
