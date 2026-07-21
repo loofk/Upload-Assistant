@@ -22,6 +22,7 @@
     "deployment_check": "http://127.0.0.1:8080/v1/deployment/check",
     "source_url_preflight": "http://127.0.0.1:8080/v1/retorrent/source-url/preflight",
     "readiness_bundle": "http://127.0.0.1:8080/v1/readiness/bundle",
+    "site_policy_rule_review": "http://127.0.0.1:8080/v1/site-policies/rule-review",
     "summary_check": "http://127.0.0.1:8080/v1/summary/check",
     "materials_prepare": "http://127.0.0.1:8080/v1/materials/prepare",
     "materials_prepare_job": "http://127.0.0.1:8080/v1/jobs/materials/prepare",
@@ -22314,9 +22315,176 @@
         "live_upload": false,
         "requires_confirmation": []
       }
+    },
+    {
+      "name": "site_policy_rule_review",
+      "method": "POST",
+      "path": "/v1/site-policies/rule-review",
+      "description": "Turn explicit human tracker-rule review evidence into copyable rule_review_fingerprint config patches. This endpoint never contacts trackers and never edits config by itself.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "rules_reviewed",
+          "reviewer",
+          "reviewed_at"
+        ],
+        "properties": {
+          "trackers": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional comma-separated tracker codes or array. Defaults to the full Chinese PT allowlist."
+          },
+          "source_tracker": {
+            "type": "string",
+            "description": "Optional source tracker code when asking for a source/target flow profile."
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional target tracker code(s), e.g. MTEAM."
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Whether manual rule review obligations are acknowledged for policy profile readiness."
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py inside the container."
+          },
+          "source_url": {
+            "type": "string",
+            "description": "Optional source tracker details URL; source tracker is inferred when source_tracker is omitted."
+          },
+          "rules_reviewed": {
+            "type": "boolean",
+            "description": "Must be true only after a human reviewed each tracker's current rules."
+          },
+          "acknowledge_rules": {
+            "type": "boolean",
+            "description": "Alias for rules_reviewed."
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "Human or local account name that performed the rule review."
+          },
+          "reviewed_by": {
+            "type": "string",
+            "description": "Alias for reviewer."
+          },
+          "reviewed_at": {
+            "type": "string",
+            "description": "Review date/time or audit marker, e.g. 2026-07-21."
+          },
+          "date": {
+            "type": "string",
+            "description": "Alias for reviewed_at."
+          },
+          "rules_url": {
+            "type": "string",
+            "description": "Optional single tracker rules URL override when reviewing one tracker."
+          },
+          "rules_urls": {
+            "type": "object",
+            "description": "Optional per-tracker rules URL overrides, e.g. {\"U2\":\"...\",\"MTEAM\":\"...\"}."
+          },
+          "notes": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Optional manual review notes to include in the fingerprint evidence and config patch."
+          },
+          "review_notes": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Alias for notes."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "mutates_state",
+          "requires_manual_review",
+          "request",
+          "reviews",
+          "config_patch",
+          "next_step",
+          "blockers",
+          "next_actions"
+        ],
+        "review_fields": [
+          "tracker",
+          "roles",
+          "rules_url",
+          "reviewer",
+          "reviewed_at",
+          "rule_review_fingerprint",
+          "fingerprint_algorithm",
+          "acknowledged_scopes",
+          "structured_patch",
+          "flat_patch",
+          "manual_steps"
+        ],
+        "config_patch_fields": [
+          "config_path",
+          "preferred_shape",
+          "structured_patch",
+          "flat_patch",
+          "safe_to_auto_apply",
+          "mutates_state",
+          "apply_order"
+        ],
+        "next_step_fields": [
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "reason",
+          "after_edit"
+        ]
+      },
+      "workflow_hints": {
+        "after": "policy_repair_gate.action=review_rules",
+        "copy_to": "PTCLI.SITE_POLICIES",
+        "rerun": "site_policies with accept_rules=true"
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": [
+          "rules_reviewed=true",
+          "reviewer",
+          "reviewed_at"
+        ],
+        "does_not_contact_trackers": true,
+        "does_not_edit_config": true
+      }
     }
   ],
-  "tool_count": 42,
+  "tool_count": 43,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

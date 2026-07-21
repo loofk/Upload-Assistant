@@ -17333,6 +17333,60 @@ def test_service_site_policies_blocks_placeholder_rule_review_fingerprint(monkey
     assert "U2: rule_review_fingerprint still looks like a placeholder." in payload["blockers"]
 
 
+def test_site_policy_rule_review_requires_explicit_manual_evidence(monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"PTCLI": {"SITE_POLICIES": {}}})
+
+    payload = ptcli_service.site_policy_rule_review_payload({"source_tracker": "U2", "target": "MTEAM"})
+
+    assert payload["kind"] == "ptcli.site_policy_rule_review"
+    assert payload["status"] == "blocked"
+    assert payload["ready"] is False
+    assert payload["mutates_state"] is False
+    assert payload["requires_manual_review"] is True
+    assert "rules_reviewed=true is required" in payload["blockers"][0]
+    assert any("reviewer is required" in blocker for blocker in payload["blockers"])
+    assert any("reviewed_at is required" in blocker for blocker in payload["blockers"])
+    assert payload["recommended_tool"] == "site_policy_rule_review"
+    assert payload["recommended_endpoint"] == "/v1/site-policies/rule-review"
+    assert payload["next_step"]["reason"] == "complete_manual_rule_review_evidence"
+
+
+def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"PTCLI": {"SITE_POLICIES": {}}})
+
+    payload = ptcli_service.site_policy_rule_review_payload(
+        {
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "rules_reviewed": True,
+            "reviewer": "liuxiang",
+            "reviewed_at": "2026-07-21",
+            "notes": ["Checked download, retorrent, upload, and seeding rules."],
+        }
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["blockers"] == []
+    assert payload["request"]["roles"] == {"U2": ["source"], "MTEAM": ["target"]}
+    reviews = {item["tracker"]: item for item in payload["reviews"]}
+    assert len(reviews["U2"]["rule_review_fingerprint"]) == 64
+    assert len(reviews["MTEAM"]["rule_review_fingerprint"]) == 64
+    assert reviews["U2"]["acknowledged_scopes"] == ["download_and_retorrent"]
+    assert reviews["MTEAM"]["acknowledged_scopes"] == ["upload_and_seed"]
+    assert reviews["U2"]["structured_patch"]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
+    assert reviews["U2"]["structured_patch"]["automation"]["manual_review_required"] is True
+    assert "Manual rule review by liuxiang at 2026-07-21." in reviews["MTEAM"]["structured_patch"]["notes"]
+    assert payload["config_patch"]["preferred_shape"] == "structured"
+    assert payload["config_patch"]["safe_to_auto_apply"] is False
+    assert payload["config_patch"]["structured_patch"]["U2"]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
+    assert payload["config_patch"]["flat_patch"]["MTEAM"]["rule_review_fingerprint"] == reviews["MTEAM"]["rule_review_fingerprint"]
+    assert payload["next_step"]["tool"] == "edit_config"
+    assert payload["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert payload["recommended_endpoint"] is None
+    assert payload["read_order"][0] == "status"
+
+
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
     tools = ptcli_service.tools_payload()
     paths = {tool["path"] for tool in tools["tools"]}
@@ -17343,6 +17397,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent/from-url/check-and-submit" in paths
     assert "/v1/deployment/check" in paths
     assert "/v1/site-policies" in paths
+    assert "/v1/site-policies/rule-review" in paths
     assert "/v1/candidates/daily" in paths
     assert "/v1/candidates/daily/schedule" in paths
     assert "/v1/jobs/candidates/daily" in paths
@@ -17776,6 +17831,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "missing_rate_limits" in tool_by_name["site_policies"]["response_contract"]["policy_readiness_summary_fields"]
     assert "policy_repair_gate_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "manual_review_required" in tool_by_name["site_policies"]["response_contract"]["policy_repair_gate_fields"]
+    assert tool_by_name["site_policy_rule_review"]["path"] == "/v1/site-policies/rule-review"
+    assert tool_by_name["site_policy_rule_review"]["input_schema"]["required"] == ["rules_reviewed", "reviewer", "reviewed_at"]
+    assert "config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+    assert "rule_review_fingerprint" in tool_by_name["site_policy_rule_review"]["response_contract"]["review_fields"]
+    assert tool_by_name["site_policy_rule_review"]["safety"]["does_not_edit_config"] is True
     assert "policy_execution_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "qbit" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
@@ -18064,6 +18124,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/metadata/prepare" in openapi["paths"]
     assert "/v1/summary/check" in openapi["paths"]
     assert "/v1/site-policies" in openapi["paths"]
+    assert "/v1/site-policies/rule-review" in openapi["paths"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent/check/{job_id}/submit" in openapi["paths"]
     assert "/v1/jobs/retorrent" in openapi["paths"]
@@ -18108,6 +18169,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_execution_handoff" in site_policy_schema["properties"]
     assert "config_templates" in site_policy_schema["properties"]
     assert "config_update_plan" in site_policy_schema["properties"]
+    rule_review_schema = openapi["paths"]["/v1/site-policies/rule-review"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "config_patch" in rule_review_schema["properties"]
+    assert "reviews" in rule_review_schema["properties"]
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "capability_matrix" in site_profiles_schema["properties"]
     assert "adapter_profiles" in site_profiles_schema["properties"]
@@ -18394,6 +18458,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["discovery"]["deployment_check"] == "http://ptcli.local:8080/v1/deployment/check"
     assert manifest["discovery"]["source_url_preflight"] == "http://ptcli.local:8080/v1/retorrent/source-url/preflight"
     assert manifest["discovery"]["readiness_bundle"] == "http://ptcli.local:8080/v1/readiness/bundle"
+    assert manifest["discovery"]["site_policy_rule_review"] == "http://ptcli.local:8080/v1/site-policies/rule-review"
     assert manifest["discovery"]["summary_check"] == "http://ptcli.local:8080/v1/summary/check"
     assert manifest["discovery"]["materials_prepare"] == "http://ptcli.local:8080/v1/materials/prepare"
     assert manifest["discovery"]["materials_prepare_job"] == "http://ptcli.local:8080/v1/jobs/materials/prepare"
@@ -18422,7 +18487,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["live_validation_report_field"] == "seedbox_live_validation_completion_report"
     assert manifest["closure_contract"]["next_step_source"].startswith("job_control_summary")
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
-    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "goal_progress", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "goal_progress", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_profiles", "site_policies", "site_policy_rule_review", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_check_and_submit"
     assert source_url_workflow["fallback_tool"] == "source_url_retorrent_job"
