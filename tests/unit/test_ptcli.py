@@ -17598,6 +17598,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_verification" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "live_test_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "seedbox_live_validation_handoff" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+    assert "live_validation_summary" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["readiness_bundle"]["response_contract"]["required_fields"]
     assert "manual_job_template" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
     assert "policy_execution_summary" in tool_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
@@ -17611,6 +17612,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "preflight_checklist" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "execution_plan" in tool_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
     assert "seedbox_live_validation_handoff_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "live_validation_summary" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+    assert "seedbox_live_validation_summary_fields" in tool_by_name["readiness_bundle"]["response_contract"]
+    assert "can_run_doctor" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_summary_fields"]
     assert "doctor" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
     assert "manual_job" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
     assert "validation_plan" in tool_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
@@ -18167,6 +18171,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_verification" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "live_test_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "seedbox_live_validation_handoff" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
+        assert "live_validation_summary" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
         assert "policy_execution_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
         assert "policy_setup_summary" in tools_by_name["readiness_bundle"]["response_contract"]["live_readiness_fields"]
@@ -18179,6 +18184,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "preflight_checklist" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "execution_plan" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "seedbox_live_validation_handoff_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "live_validation_summary" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+        assert "seedbox_live_validation_summary_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "can_run_doctor" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_summary_fields"]
         assert "validation_report" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
         assert "seedbox_live_validation_report_fields" in tools_by_name["readiness_bundle"]["response_contract"]
         assert "first_blocker" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_report_fields"]
@@ -18938,6 +18946,17 @@ services:
     assert payload["seedbox_live_validation_handoff"]["kind"] == "ptcli.seedbox_live_validation_handoff"
     assert payload["seedbox_live_validation_handoff"]["ready"] is True
     assert payload["seedbox_live_validation_handoff"]["phase"] == "run_doctor"
+    assert payload["live_validation_summary"]["kind"] == "ptcli.seedbox_live_validation_summary"
+    assert payload["live_validation_summary"]["ready"] is True
+    assert payload["live_validation_summary"]["status"] == "ready_for_doctor"
+    assert payload["live_validation_summary"]["can_run_doctor"] is True
+    assert payload["live_validation_summary"]["can_submit_after_doctor"] is True
+    assert payload["live_validation_summary"]["doctor_request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
+    assert payload["live_validation_summary"]["check_and_submit_request"] == payload["live_readiness"]["manual_job_template"]["request"]
+    assert payload["live_validation_summary"]["recommended_tool"] == "ptcli_doctor"
+    assert payload["live_validation_summary"]["post_submit_read"] == ["duplicate_check", "job_id", "status_endpoint", "summary_endpoint"]
+    assert payload["live_validation_summary"]["required_order"] == ["preflight", "doctor", "check_and_submit", "poll_job", "recover_or_finish"]
+    assert payload["seedbox_live_validation_handoff"]["live_validation_summary"] == payload["live_validation_summary"]
     assert payload["seedbox_live_validation_handoff"]["validation_report"]["kind"] == "ptcli.seedbox_live_validation_report"
     assert payload["seedbox_live_validation_handoff"]["validation_report"]["ready"] is True
     assert payload["seedbox_live_validation_handoff"]["validation_report"]["blocked_count"] == 0
@@ -19221,6 +19240,12 @@ def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path
     assert payload["live_test_handoff"]["next_step"]["reason"] == "site_policy_not_ready"
     assert payload["live_test_handoff"]["next_step"]["tool"] == "edit_config"
     assert payload["live_test_handoff"]["next_step"]["policy_execution_summary"]["recommended_tool"] == "edit_config"
+    assert payload["live_validation_summary"]["ready"] is False
+    assert payload["live_validation_summary"]["status"] == "blocked"
+    assert payload["live_validation_summary"]["can_run_doctor"] is False
+    assert payload["live_validation_summary"]["first_blocker"]
+    assert payload["live_validation_summary"]["recommended_tool"] == "edit_config"
+    assert payload["seedbox_live_validation_handoff"]["live_validation_summary"] == payload["live_validation_summary"]
     assert payload["seedbox_live_validation_handoff"]["validation_report"]["ready"] is False
     assert payload["seedbox_live_validation_handoff"]["validation_report"]["blocked_count"] > 0
     assert payload["seedbox_live_validation_handoff"]["validation_report"]["first_blocker"]
