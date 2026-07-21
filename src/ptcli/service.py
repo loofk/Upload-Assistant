@@ -19416,6 +19416,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     progress_items = _goal_progress_items(deployment, site_policies, tool_names, live_validation_evidence)
     estimate = _goal_progress_estimate(progress_items)
     blockers = _goal_progress_blockers(progress_items, deployment, site_policies, live_validation_evidence)
+    next_step = _goal_progress_next_step(progress_items, blockers, live_validation_evidence)
     return {
         "kind": "ptcli.goal_progress",
         "status": "ok" if estimate["critical_path_ready"] else "blocked",
@@ -19425,9 +19426,9 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
         "capabilities": progress_items,
         "critical_path_remaining": _goal_progress_remaining(progress_items),
         "blockers": blockers,
-        "next_step": _goal_progress_next_step(progress_items, blockers),
-        "recommended_tool": "readiness_bundle" if not blockers else "goal_progress",
-        "recommended_endpoint": "/v1/readiness/bundle" if not blockers else "/v1/goal/progress",
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
         "source_context": {
             "source_tracker": policy_request.get("source_tracker"),
             "source_id": policy_request.get("source_id"),
@@ -19455,7 +19456,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
             "tool_count": len(tools),
         },
         "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence.live_validation", "evidence", "next_step", "blockers"],
-        "next_actions": _goal_progress_next_actions(progress_items, blockers),
+        "next_actions": _goal_progress_next_actions(progress_items, blockers, live_validation_evidence),
     }
 
 
@@ -19503,10 +19504,12 @@ def _goal_progress_live_validation_evidence(request: dict[str, Any]) -> dict[str
     blockers = [] if complete else ["No current-state job or summary evidence has live_user_report.report_allowed=true."]
     if best and best.get("blockers"):
         blockers.extend(_string_list(best.get("blockers")))
+    status = "complete" if complete else "missing" if not valid_candidates else str(best.get("status") or "incomplete") if best else "incomplete"
     return {
         "kind": "ptcli.goal_live_validation_evidence",
         "ready": bool(complete),
-        "status": "complete" if complete else "missing" if not valid_candidates else "incomplete",
+        "status": status,
+        "submission_ready": bool(best and best.get("submission_ready")),
         "source": complete.get("source") if complete else best.get("source") if best else None,
         "job_dir": str(job_dir),
         "requested_job_id": explicit_job_id or None,
@@ -19515,6 +19518,12 @@ def _goal_progress_live_validation_evidence(request: dict[str, Any]) -> dict[str
         "candidate_count": len(valid_candidates),
         "best": best,
         "completion_evidence": complete,
+        "live_submission_package": best.get("live_submission_package") if isinstance(best, dict) and isinstance(best.get("live_submission_package"), dict) else None,
+        "next_step": best.get("next_step") if isinstance(best, dict) and isinstance(best.get("next_step"), dict) else None,
+        "recommended_tool": best.get("recommended_tool") if isinstance(best, dict) else None,
+        "recommended_endpoint": best.get("recommended_endpoint") if isinstance(best, dict) else None,
+        "recommended_method": best.get("recommended_method") if isinstance(best, dict) else None,
+        "recommended_request": best.get("recommended_request") if isinstance(best, dict) else None,
         "required_condition": "live_user_report.report_allowed=true and live_user_report.evidence.missing_evidence=[] and live_user_report.blockers=[]",
         "blockers": list(dict.fromkeys(blocker for blocker in blockers if blocker)),
         "next_actions": _goal_progress_live_validation_evidence_next_actions(bool(complete), bool(valid_candidates)),
@@ -19549,7 +19558,57 @@ def _goal_progress_live_validation_from_summary_file(summary_file: str, *, sourc
     if not isinstance(summary_payload, dict):
         return {"valid": False, "source": source, "summary_file": str(path), "blockers": ["Summary evidence is not an object."]}
     job = {"job_id": None, "kind": "summary_file", "status": summary_payload.get("status"), "summary_file": str(path), "result": summary_payload, "blockers": _string_list(summary_payload.get("blockers"))}
-    return _goal_progress_live_validation_from_job(job, summary_payload, source=source)
+    evidence = _goal_progress_live_validation_from_job(job, summary_payload, source=source)
+    submission_evidence = _goal_progress_live_submission_from_summary_file(str(path))
+    if submission_evidence:
+        evidence["live_submission_package"] = submission_evidence
+        evidence["submission_ready"] = submission_evidence.get("ready") is True
+        if evidence.get("ready") is not True and submission_evidence.get("ready") is True:
+            evidence["status"] = "ready_to_submit"
+            evidence["next_step"] = submission_evidence.get("next_step")
+            evidence["recommended_tool"] = submission_evidence.get("recommended_tool")
+            evidence["recommended_endpoint"] = submission_evidence.get("recommended_endpoint")
+            evidence["recommended_method"] = submission_evidence.get("recommended_method")
+            evidence["recommended_request"] = submission_evidence.get("recommended_request")
+            evidence["blockers"] = _string_list(submission_evidence.get("blockers"))
+    return evidence
+
+
+def _goal_progress_live_submission_from_summary_file(summary_file: str) -> dict[str, Any] | None:
+    try:
+        payload = summary_check_service_payload({"summary_file": summary_file})
+    except ServiceError:
+        return None
+    package = payload.get("live_submission_package") if isinstance(payload.get("live_submission_package"), dict) else {}
+    submit = package.get("submit") if isinstance(package.get("submit"), dict) else {}
+    if not package:
+        return None
+    return {
+        "ready": package.get("ready") is True,
+        "status": package.get("status"),
+        "summary_file": package.get("summary_file"),
+        "submit": {
+            "tool": submit.get("tool"),
+            "endpoint": submit.get("endpoint"),
+            "method": submit.get("method"),
+            "request": submit.get("request") if isinstance(submit.get("request"), dict) else None,
+        },
+        "after_submit": package.get("after_submit") if isinstance(package.get("after_submit"), dict) else {},
+        "report_contract": package.get("report_contract") if isinstance(package.get("report_contract"), dict) else {},
+        "next_step": {
+            "tool": submit.get("tool") or "source_url_check_and_submit",
+            "endpoint": submit.get("endpoint") or "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": submit.get("method") or "POST",
+            "request": submit.get("request") if isinstance(submit.get("request"), dict) else None,
+            "reason": "doctor_summary_ready_to_submit",
+        },
+        "recommended_tool": submit.get("tool") or "source_url_check_and_submit",
+        "recommended_endpoint": submit.get("endpoint") or "/v1/jobs/retorrent/from-url/check-and-submit",
+        "recommended_method": submit.get("method") or "POST",
+        "recommended_request": submit.get("request") if isinstance(submit.get("request"), dict) else None,
+        "blockers": _string_list(package.get("blockers")),
+        "next_actions": _string_list(package.get("next_actions")),
+    }
 
 
 def _goal_progress_summary_payload_for_job(job: dict[str, Any]) -> dict[str, Any] | None:
@@ -19623,6 +19682,7 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
     qbit = deployment.get("qbit") if isinstance(deployment.get("qbit"), dict) else {}
     policy_repair = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
     live_verified = live_validation_evidence.get("ready") is True
+    live_ready_to_submit = live_validation_evidence.get("status") == "ready_to_submit"
     return [
         _goal_progress_item(
             "docker_compose_deployment",
@@ -19697,7 +19757,7 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
         _goal_progress_item(
             "seedbox_live_validation",
             "Real seedbox end-to-end live validation",
-            "complete" if live_verified else "unverified",
+            "complete" if live_verified else "ready_to_submit" if live_ready_to_submit else "unverified",
             12,
             ["readiness_bundle.live_execution_package", "live_validation_sequence", "live_user_report", "seedbox_live_validation_completion_report"],
             blockers=[] if live_verified else _string_list(live_validation_evidence.get("blockers")) or ["No current-state evidence proves a real seedbox live run completed from source pull through uploaded torrent seeding."],
@@ -19714,7 +19774,7 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
 
 
 def _goal_progress_item(identifier: str, name: str, status: str, weight: int, evidence: list[str], *, blockers: list[str] | None = None) -> dict[str, Any]:
-    status_scores = {"complete": 1.0, "partial": 0.55, "unverified": 0.35, "missing": 0.0, "not_started": 0.0}
+    status_scores = {"complete": 1.0, "partial": 0.55, "ready_to_submit": 0.7, "unverified": 0.35, "missing": 0.0, "not_started": 0.0}
     score = status_scores.get(status, 0.0)
     return {
         "id": identifier,
@@ -19749,7 +19809,7 @@ def _goal_progress_estimate(items: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _goal_progress_remaining(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    remaining_statuses = {"partial", "missing", "unverified", "not_started"}
+    remaining_statuses = {"partial", "ready_to_submit", "missing", "unverified", "not_started"}
     return [
         {
             "id": item.get("id"),
@@ -19774,23 +19834,29 @@ def _goal_progress_blockers(items: list[dict[str, Any]], deployment: dict[str, A
     return list(dict.fromkeys(blocker for blocker in blockers if blocker))
 
 
-def _goal_progress_next_step(items: list[dict[str, Any]], blockers: list[str]) -> dict[str, Any]:
+def _goal_progress_next_step(items: list[dict[str, Any]], blockers: list[str], live_validation_evidence: dict[str, Any] | None = None) -> dict[str, Any]:
     by_id = {str(item.get("id")): item for item in items}
     if by_id.get("site_policy_config", {}).get("status") != "complete":
         return {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "reason": "repair_site_policy_gate"}
     if by_id.get("qbittorrent_execution", {}).get("status") == "missing":
         return {"tool": "deployment_check", "endpoint": "/v1/deployment/check", "method": "GET", "reason": "configure_qbittorrent"}
     if by_id.get("seedbox_live_validation", {}).get("status") != "complete":
+        live_evidence = live_validation_evidence if isinstance(live_validation_evidence, dict) else {}
+        next_step = live_evidence.get("next_step") if isinstance(live_evidence.get("next_step"), dict) else {}
+        if live_evidence.get("status") == "ready_to_submit" and next_step:
+            return next_step
         return {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "reason": "run_seedbox_live_validation_preflight"}
     if blockers:
         return {"tool": "goal_progress", "endpoint": "/v1/goal/progress", "method": "GET", "reason": "inspect_remaining_blockers"}
     return {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "reason": "exercise_daily_candidate_workflow"}
 
 
-def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str]) -> list[str]:
-    next_step = _goal_progress_next_step(items, blockers)
+def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str], live_validation_evidence: dict[str, Any] | None = None) -> list[str]:
+    next_step = _goal_progress_next_step(items, blockers, live_validation_evidence)
     actions = [f"Call {next_step['tool']} at {next_step['endpoint']} and inspect its blockers/next_actions."]
-    if any(item.get("id") == "seedbox_live_validation" and item.get("status") != "complete" for item in items):
+    if any(item.get("id") == "seedbox_live_validation" and item.get("status") == "ready_to_submit" for item in items):
+        actions.append("Submit evidence.live_validation.live_submission_package.submit.request, then poll the returned job until live_user_report.report_allowed=true.")
+    elif any(item.get("id") == "seedbox_live_validation" and item.get("status") != "complete" for item in items):
         actions.append("Use readiness_bundle.live_execution_package to run one real U2/CHD -> MTEAM seedbox validation until live_user_report.report_allowed=true.")
     if any(item.get("id") == "daily_candidates" and item.get("status") != "complete" for item in items):
         actions.append("Configure a daily candidate schedule and validate a 10-item candidate digest before enabling push delivery.")
@@ -20500,10 +20566,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "capabilities", "critical_path_remaining", "evidence", "next_step", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
-                "capability_status_values": ["complete", "partial", "unverified", "missing", "not_started"],
+                "capability_status_values": ["complete", "partial", "ready_to_submit", "unverified", "missing", "not_started"],
                 "evidence_fields": ["deployment", "site_policies", "live_validation", "tool_count"],
-                "live_validation_evidence_fields": ["ready", "status", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "required_condition", "blockers", "next_actions"],
-                "next_step_fields": ["tool", "endpoint", "method", "reason"],
+                "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
+                "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],
             },
             "workflow_hints": {"read_first": "completion_estimate", "then": "critical_path_remaining", "repair_with": "next_step"},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": [], "does_not_contact_trackers": True, "does_not_contact_qbittorrent": True},

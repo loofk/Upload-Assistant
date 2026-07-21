@@ -26240,6 +26240,7 @@
         "capability_status_values": [
           "complete",
           "partial",
+          "ready_to_submit",
           "unverified",
           "missing",
           "not_started"
@@ -26253,6 +26254,7 @@
         "live_validation_evidence_fields": [
           "ready",
           "status",
+          "submission_ready",
           "source",
           "job_dir",
           "requested_job_id",
@@ -26261,6 +26263,12 @@
           "candidate_count",
           "best",
           "completion_evidence",
+          "live_submission_package",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
           "required_condition",
           "blockers",
           "next_actions"
@@ -26269,6 +26277,7 @@
           "tool",
           "endpoint",
           "method",
+          "request",
           "reason"
         ]
       },
