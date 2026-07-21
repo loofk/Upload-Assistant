@@ -188,6 +188,7 @@ python3 ptcli.py site-policies --from U2 --to MTEAM --accept-rules --json
 
 `digest.daily_candidate_report` 和 `schedule_digest.daily_candidate_report` 是每日候选给 AI 的最短决策路径，会统一暴露 `decision`、`target_count`、`selected_count`、`ready_count`、`safe_to_submit_count`、`ready_shortfall_count`、`target_met`、`submission_ready`、`push_ready`、`first_submit_request`、推荐工具/端点/请求、`continue_when`、`stop_when`、`blockers` 和 `next_actions`。其中 `decision=submit_ready` 只表示已有低风险候选可在用户确认后提交；若 `target_met=false` 或 `ready_shortfall_count>0`，AI 仍应把当天 10 条目标视为未完全达标并继续补候选。
 `digest.daily_candidate_batch_report` 是单个每日候选批次的验收短路径，会把今天目标数量、已扫描/已选/ready/safe 计数、短缺、是否可提交、第一条提交请求、必需用户输入、safe source ids、blocked ids、短缺恢复动作和 blockers 压到一个对象；只有 `ready=true` 且用户补齐 `confirm_upload=true` 与 `save_path`/`path` 后，AI 才应提交候选转种 job。
+`schedule_digest.daily_candidate_batch_report` 则是多个每日候选 schedule 的总验收短路径，会同步出现在 `push_payload`、`notification_payload` 和 `delivery_handoff` 中，便于盒子 cron/OpenClaw/Hermes 一次判断今日整体推送是否 ready、是否有可提交候选、是否仍有目标短缺或待轮询 job。
 
 OpenClaw/Hermes 可直接读取 `/.well-known/ptcli-agent.json` 或 `/v1/openclaw/skill.json`、`/v1/hermes/skill.json`，其中包含 OpenAPI 地址、工具列表、鉴权方式、live 上传安全边界、`skill_contract` 主入口、`agent_instructions` 执行纪律、`tool_selection` 工具选择表、`closure_handoff` 动作契约，以及每个关键工具的 `input_schema`、`response_contract`、`safety`。反向代理或容器内外地址不一致时，设置 `PTCLI_PUBLIC_BASE_URL=https://your-host.example` 让 manifest 输出外部可访问地址；仓库内也提供 `ai/openclaw/ptcli.skill.json` 和 `ai/hermes/ptcli.skill.json` 作为离线模板。
 
