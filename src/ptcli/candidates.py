@@ -879,6 +879,7 @@ def _candidate_push_payload(
     blocked_items = [item for item in items if item.get("can_submit") is not True]
     lines = [push_summary, *[str(item.get("summary_text")) for item in items if item.get("summary_text")]]
     decision_summary = _push_decision_summary(items, ready_items, blocked_items, recommendation)
+    publish_cards = [item["publish_card"] for item in items if isinstance(item.get("publish_card"), dict)]
     return {
         "kind": "ptcli.daily_candidates_push_payload",
         "title": "Daily PT retorrent candidates",
@@ -896,6 +897,7 @@ def _candidate_push_payload(
         "recommendation": recommendation,
         "recommended_action": _candidate_digest_recommended_action(recommendation),
         "decision_summary": decision_summary,
+        "publish_cards": publish_cards,
         "approval_queue": approval_queue,
         "top_safe_candidates": approval_queue["top_safe_candidates"],
         "execution_plan": execution_plan,
@@ -1363,6 +1365,7 @@ def _candidate_approval_queue_item(item: dict[str, Any]) -> dict[str, Any]:
         "execution_priority": policy_risk_summary.get("execution_priority"),
         "duplicate_clear": decision_summary.get("duplicate_clear"),
         "metadata": item.get("metadata"),
+        "publish_card": item.get("publish_card"),
         "policy_risk_summary": policy_risk_summary,
         "submit_tool": item.get("submit_tool") or SOURCE_URL_RETORRENT_JOB_TOOL,
         "submit_endpoint": item.get("submit_job_endpoint") or item.get("action_endpoint") or SOURCE_URL_RETORRENT_JOB_ENDPOINT,
@@ -1397,6 +1400,23 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
     }
     policy_digest = _candidate_digest_policy_summary(policy_summary)
     policy_execution_handoff = policy_digest.get("policy_execution_handoff") if isinstance(policy_digest.get("policy_execution_handoff"), dict) else {}
+    publish_card = _candidate_publish_card(
+        rank=rank,
+        status=status,
+        can_submit=can_submit,
+        source=source,
+        metadata=metadata,
+        duplicate_check=duplicate_check,
+        ranking=ranking,
+        recommendation=candidate.get("recommendation") if isinstance(candidate.get("recommendation"), dict) else {},
+        decision_summary=decision_summary,
+        policy_risk_summary=policy_risk_summary,
+        blockers=blockers,
+        workflow=workflow,
+        submit_request=submit_request,
+        submit_endpoint=candidate.get("submit_job_endpoint"),
+        submit_tool=candidate.get("submit_tool"),
+    )
     return {
         "rank": rank,
         "status": status,
@@ -1412,6 +1432,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "metadata": metadata,
         "duplicate_status": duplicate_check.get("status"),
         "duplicate_count": duplicate_check.get("count"),
+        "publish_card": publish_card,
         "decision_summary": decision_summary,
         "audit_summary": _candidate_audit_summary(
             rank=rank,
@@ -1445,6 +1466,84 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "submit_request": submit_request if can_submit else None,
         "submit_job_endpoint": candidate.get("submit_job_endpoint"),
         "submit_tool": candidate.get("submit_tool"),
+    }
+
+
+def _candidate_publish_card(
+    *,
+    rank: int,
+    status: str,
+    can_submit: bool,
+    source: dict[str, Any],
+    metadata: dict[str, Any],
+    duplicate_check: dict[str, Any],
+    ranking: dict[str, Any],
+    recommendation: dict[str, Any],
+    decision_summary: dict[str, Any],
+    policy_risk_summary: dict[str, Any],
+    blockers: list[str],
+    workflow: dict[str, Any],
+    submit_request: dict[str, Any] | None,
+    submit_endpoint: Any,
+    submit_tool: Any,
+) -> dict[str, Any]:
+    metadata_ready = bool([value for value in metadata.values() if value])
+    duplicate_clear = duplicate_check.get("searched") is True and duplicate_check.get("exists") is False
+    promotion = source.get("promotion")
+    return {
+        "kind": "ptcli.daily_candidate_publish_card",
+        "rank": rank,
+        "status": status,
+        "source_tracker": source.get("tracker"),
+        "source_id": source.get("torrent_id"),
+        "source_url": source.get("details_url"),
+        "title": source.get("title"),
+        "size": source.get("size"),
+        "published_at": source.get("published_at"),
+        "promotion": promotion,
+        "freeleech_like": _promotion_is_free(promotion),
+        "metadata": {
+            "ready": metadata_ready,
+            "imdb_id": metadata.get("imdb_id"),
+            "tmdb_id": metadata.get("tmdb_id"),
+            "douban_id": metadata.get("douban_id"),
+            "douban_url": metadata.get("douban_url"),
+            "name": metadata.get("name"),
+            "missing": [key for key in ("imdb_id", "tmdb_id", "douban_id") if not metadata.get(key)],
+        },
+        "duplicate_check": {
+            "searched": duplicate_check.get("searched"),
+            "status": duplicate_check.get("status"),
+            "exists": duplicate_check.get("exists"),
+            "count": duplicate_check.get("count"),
+            "clear": duplicate_clear,
+            "dupes": duplicate_check.get("dupes") if isinstance(duplicate_check.get("dupes"), list) else [],
+        },
+        "recommendation": {
+            "recommended": recommendation.get("recommended"),
+            "score": ranking.get("score"),
+            "tier": ranking.get("tier"),
+            "reason": recommendation.get("reason"),
+            "reasons": _string_list(ranking.get("reasons")),
+            "penalties": _string_list(ranking.get("penalties")),
+        },
+        "risk": {
+            "level": decision_summary.get("risk_level"),
+            "policy_level": policy_risk_summary.get("risk_level"),
+            "execution_priority": policy_risk_summary.get("execution_priority"),
+            "blocker_count": len(blockers),
+            "primary_blocker": blockers[0] if blockers else None,
+            "blockers": blockers,
+        },
+        "action": {
+            "decision": decision_summary.get("action") or workflow.get("decision"),
+            "can_submit": can_submit,
+            "tool": submit_tool,
+            "endpoint": submit_endpoint,
+            "request": submit_request if can_submit else None,
+            "required_user_inputs": ["accept_rules=true", "confirm_upload=true", "save_path or path"],
+            "next_actions": workflow.get("recommended_action"),
+        },
     }
 
 
