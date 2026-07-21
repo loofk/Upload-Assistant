@@ -1620,6 +1620,7 @@ def _source_url_check_and_submit_response(
     duplicate_check = check_result.get("duplicate_check") if isinstance(check_result.get("duplicate_check"), dict) else {}
     ready = bool(submitted_job and not blockers)
     gate_summary = _source_url_check_and_submit_gate_summary(duplicate_check, handoff, submitted_job, blockers)
+    manual_sequence = _source_url_check_and_submit_manual_sequence(gate_summary, duplicate_check, handoff, submitted_job, blockers)
     return {
         "kind": "ptcli.source_url_check_and_submit",
         "status": "ok" if ready else "blocked",
@@ -1634,7 +1635,8 @@ def _source_url_check_and_submit_response(
         "status_endpoint": f"/v1/jobs/{submitted_job.get('job_id')}" if isinstance(submitted_job, dict) and submitted_job.get("job_id") else None,
         "summary_endpoint": f"/v1/jobs/{submitted_job.get('job_id')}/summary" if isinstance(submitted_job, dict) and submitted_job.get("job_id") else None,
         "check_and_submit_gate": gate_summary,
-        "agent_summary": _source_url_check_and_submit_agent_summary(duplicate_check, handoff, submitted_job, blockers),
+        "manual_retorrent_sequence": manual_sequence,
+        "agent_summary": _source_url_check_and_submit_agent_summary(duplicate_check, handoff, submitted_job, blockers, manual_sequence),
         "blockers": blockers,
         "next_actions": _source_url_check_and_submit_next_actions(duplicate_check, handoff, submitted_job, blockers),
     }
@@ -1694,7 +1696,111 @@ def _source_url_check_and_submit_gate_summary(
     }
 
 
-def _source_url_check_and_submit_agent_summary(duplicate_check: dict[str, Any], handoff: dict[str, Any] | None, submitted_job: dict[str, Any] | None, blockers: list[str]) -> dict[str, Any]:
+def _source_url_check_and_submit_manual_sequence(
+    gate_summary: dict[str, Any],
+    duplicate_check: dict[str, Any],
+    handoff: dict[str, Any] | None,
+    submitted_job: dict[str, Any] | None,
+    blockers: list[str],
+) -> dict[str, Any]:
+    job_id = submitted_job.get("job_id") if isinstance(submitted_job, dict) else None
+    submit_request = handoff.get("request") if isinstance(handoff, dict) and isinstance(handoff.get("request"), dict) else None
+    ready = bool(job_id and not blockers)
+    steps = [
+        {
+            "step": "duplicate_gate",
+            "tool": "source_url_check_and_submit",
+            "read": ["check_and_submit_gate.duplicate_searched", "check_and_submit_gate.duplicate_clear", "duplicate_check.dupes", "blockers"],
+            "continue_when": "check_and_submit_gate.duplicate_clear=true and job_id is present",
+            "stop_when": "duplicate_check.exists=true or check_and_submit_gate.action=stop_duplicate",
+        },
+        {
+            "step": "poll_job",
+            "tool": "get_job_status",
+            "endpoint": f"/v1/jobs/{job_id}" if job_id else None,
+            "request": {"job_id": job_id} if job_id else None,
+            "read": ["status", "job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_request", "closure_handoff", "target_upload_handoff", "blockers"],
+            "continue_when": "status is terminal or job_handoff.action!=wait",
+            "repeat_when": "job_handoff.action=wait and job_handoff.should_poll=true",
+            "stop_when": "status=blocked or status=failed or duplicate_check.exists=true",
+        },
+        {
+            "step": "resolve_materials",
+            "tool": "metadata_prepare_job or materials_prepare_job",
+            "endpoint": "/v1/jobs/metadata/prepare or /v1/jobs/materials/prepare",
+            "request_from": "job_handoff.material_input_template or manual_retorrent_sequence.submit_request plus metadata/material overrides",
+            "read": ["metadata_prepare_handoff.material_options", "materials_prepare_handoff.material_options", "source_url_check_and_submit_request", "blockers"],
+            "continue_when": "material_options contains required metadata, description, MediaInfo/BDInfo, screenshots, and image-host evidence",
+            "stop_when": "metadata/material blockers remain or local content path is missing",
+        },
+        {
+            "step": "prepare_target_package",
+            "tool": "target_package_prepare_job",
+            "endpoint": "/v1/jobs/target/package/prepare",
+            "request_from": "material_options plus source_info, duplicate_check, rule_check, and qBittorrent content evidence",
+            "read": ["target_package_handoff.ready", "target_package_handoff.target_upload_request", "target_package_handoff.blockers"],
+            "continue_when": "target_package_handoff.ready=true and target_upload_request is present",
+            "stop_when": "target_package_handoff.blockers is not empty",
+        },
+        {
+            "step": "target_upload_closure",
+            "tool": "target_upload_job",
+            "endpoint": "/v1/jobs/target/upload",
+            "request_from": "target_package_handoff.target_upload_request plus confirm_upload=true, download_uploaded_torrent=true, inject_uploaded_torrent=true, wait_uploaded_complete=true, qBittorrent category/tag/rate limits",
+            "read": ["target_upload_handoff.ready_for_live_upload", "target_upload_handoff.uploaded_seeding_ready", "uploaded_torrent_hash", "qbit_enforcement_summary", "blockers"],
+            "continue_when": "target_upload_handoff.uploaded_seeding_ready=true",
+            "stop_when": "confirm_upload missing, fresh duplicate exists, rule obligations not ready, or uploaded torrent seeding evidence missing",
+        },
+        {
+            "step": "final_summary",
+            "tool": "get_job_summary",
+            "endpoint": f"/v1/jobs/{job_id}/summary" if job_id else None,
+            "request": {"job_id": job_id} if job_id else None,
+            "read": ["seedbox_live_validation_completion_report", "closure_summary", "closure_handoff", "qbit_execution_gate", "qbit_enforcement_summary", "policy_execution_report"],
+            "complete_when": "seedbox_live_validation_completion_report.ready_for_user_report=true and closure_summary.complete=true",
+            "stop_when": "seedbox_live_validation_completion_report.blockers is not empty",
+        },
+    ]
+    next_step = _source_url_check_and_submit_sequence_next_step(gate_summary, steps)
+    return {
+        "kind": "ptcli.manual_retorrent_sequence",
+        "ready": ready,
+        "phase": gate_summary.get("action") or ("poll_job" if ready else "blocked"),
+        "job_id": job_id,
+        "submit_request": submit_request,
+        "duplicate_gate": {
+            "searched": duplicate_check.get("searched") is True,
+            "clear": duplicate_check.get("exists") is False and duplicate_check.get("searched") is True,
+            "exists": duplicate_check.get("exists"),
+            "count": duplicate_check.get("count"),
+        },
+        "steps": steps,
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool") if isinstance(next_step, dict) else None,
+        "recommended_endpoint": next_step.get("endpoint") if isinstance(next_step, dict) else None,
+        "recommended_request": next_step.get("request") if isinstance(next_step, dict) else None,
+        "continue_when": "final_summary.complete_when is satisfied",
+        "stop_when": "duplicate exists, blockers are non-empty, policy/rule obligations are not ready, or uploaded seeding evidence is missing",
+        "blockers": blockers,
+    }
+
+
+def _source_url_check_and_submit_sequence_next_step(gate_summary: dict[str, Any], steps: list[dict[str, Any]]) -> dict[str, Any]:
+    action = gate_summary.get("action")
+    if action == "poll_job":
+        return steps[1]
+    if action == "stop_duplicate":
+        return {"step": "stop_duplicate", "tool": None, "endpoint": None, "request": None, "reason": "target duplicate exists; do not upload"}
+    return {"step": "resolve_gate_blockers", "tool": gate_summary.get("recommended_tool"), "endpoint": gate_summary.get("recommended_endpoint"), "request": gate_summary.get("recommended_request"), "reason": "check_and_submit_gate is blocked"}
+
+
+def _source_url_check_and_submit_agent_summary(
+    duplicate_check: dict[str, Any],
+    handoff: dict[str, Any] | None,
+    submitted_job: dict[str, Any] | None,
+    blockers: list[str],
+    manual_sequence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "ready": bool(submitted_job and not blockers),
         "duplicate_searched": duplicate_check.get("searched") is True,
@@ -1703,6 +1809,8 @@ def _source_url_check_and_submit_agent_summary(duplicate_check: dict[str, Any], 
         "submit_ready": isinstance(handoff, dict) and handoff.get("ready") is True,
         "job_id": submitted_job.get("job_id") if isinstance(submitted_job, dict) else None,
         "job_status": submitted_job.get("status") if isinstance(submitted_job, dict) else None,
+        "sequence_phase": manual_sequence.get("phase") if isinstance(manual_sequence, dict) else None,
+        "sequence_next_tool": manual_sequence.get("recommended_tool") if isinstance(manual_sequence, dict) else None,
         "blocker_count": len(blockers),
     }
 
@@ -18306,12 +18414,14 @@ def _source_url_preflight_response_contract() -> dict[str, Any]:
 
 def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "check_and_submit_gate", "agent_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "mutates_state", "live_upload", "check_result", "duplicate_check", "submit_if_clear_handoff", "job_id", "submitted_job", "status_endpoint", "summary_endpoint", "check_and_submit_gate", "manual_retorrent_sequence", "agent_summary", "blockers", "next_actions"],
         "status_values": ["ok", "blocked"],
         "duplicate_check_fields": ["searched", "exists", "count", "dupes"],
         "submit_if_clear_handoff_fields": ["ready", "duplicate_clear", "request", "requires_before_call", "blockers", "next_step"],
         "check_and_submit_gate_fields": ["ready", "action", "duplicate_searched", "duplicate_clear", "duplicate_exists", "duplicate_count", "submit_ready", "accept_rules", "confirm_upload", "job_created", "job_id", "status_endpoint", "summary_endpoint", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
-        "agent_summary_fields": ["ready", "duplicate_searched", "duplicate_exists", "duplicate_count", "submit_ready", "job_id", "job_status", "blocker_count"],
+        "manual_retorrent_sequence_fields": ["ready", "phase", "job_id", "submit_request", "duplicate_gate", "steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers"],
+        "manual_retorrent_step_fields": ["step", "tool", "endpoint", "request", "request_from", "read", "continue_when", "repeat_when", "stop_when", "complete_when"],
+        "agent_summary_fields": ["ready", "duplicate_searched", "duplicate_exists", "duplicate_count", "submit_ready", "job_id", "job_status", "sequence_phase", "sequence_next_tool", "blocker_count"],
         "safety": ["runs_duplicate_check_before_job_creation", "stops_when_duplicate_exists", "live_upload_requires_accept_rules_and_confirm_upload"],
     }
 
@@ -19249,6 +19359,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "status_endpoint": {"type": ["string", "null"]},
             "summary_endpoint": {"type": ["string", "null"]},
             "check_and_submit_gate": {"type": "object"},
+            "manual_retorrent_sequence": {"type": "object"},
             "agent_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},

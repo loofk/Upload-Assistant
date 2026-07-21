@@ -8065,6 +8065,7 @@
           "status_endpoint",
           "summary_endpoint",
           "check_and_submit_gate",
+          "manual_retorrent_sequence",
           "agent_summary",
           "blockers",
           "next_actions"
@@ -8111,6 +8112,33 @@
           "blockers",
           "next_actions"
         ],
+        "manual_retorrent_sequence_fields": [
+          "ready",
+          "phase",
+          "job_id",
+          "submit_request",
+          "duplicate_gate",
+          "steps",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "blockers"
+        ],
+        "manual_retorrent_step_fields": [
+          "step",
+          "tool",
+          "endpoint",
+          "request",
+          "request_from",
+          "read",
+          "continue_when",
+          "repeat_when",
+          "stop_when",
+          "complete_when"
+        ],
         "agent_summary_fields": [
           "ready",
           "duplicate_searched",
@@ -8119,6 +8147,8 @@
           "submit_ready",
           "job_id",
           "job_status",
+          "sequence_phase",
+          "sequence_next_tool",
           "blocker_count"
         ],
         "safety": [
