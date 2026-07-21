@@ -38,7 +38,7 @@ from src.ptcli.policies import (
     qbit_limits_for_tracker,
 )
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
-from src.ptcli.source import fetch_source_info, resolve_source_reference
+from src.ptcli.source import fetch_source_info, resolve_source_reference, source_details_url
 from src.ptcli.target import build_mteam_upload_preflight, create_mteam_upload_torrent_candidate, write_mteam_prepare_package
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
@@ -775,8 +775,11 @@ def summary_check_service_payload(request: dict[str, Any]) -> dict[str, Any]:
     payload.setdefault("automation_handoff", None)
     payload.setdefault("summary_kind", payload.get("kind"))
     payload.setdefault("ok", payload.get("status") == "ok")
+    summary_context = {**_summary_check_raw_context(summary_file), **payload}
+    live_validation_result = _summary_check_live_validation_result(summary_context, summary_file)
     return {
         **payload,
+        "live_validation_result": live_validation_result,
         "service": {
             "kind": "ptcli.service.summary_check",
             "read_only": True,
@@ -785,6 +788,91 @@ def summary_check_service_payload(request: dict[str, Any]) -> dict[str, Any]:
             "request": {"summary_file": summary_file},
         },
     }
+
+
+def _summary_check_live_validation_result(payload: dict[str, Any], summary_file: str) -> dict[str, Any]:
+    doctor_handoff = payload.get("doctor_result_handoff") if isinstance(payload.get("doctor_result_handoff"), dict) else {}
+    readiness = payload.get("readiness_summary") if isinstance(payload.get("readiness_summary"), dict) else {}
+    resume_state = payload.get("resume_state") if isinstance(payload.get("resume_state"), dict) else {}
+    live_safe = doctor_handoff.get("live_safe_to_attempt")
+    if not isinstance(live_safe, bool):
+        live_safe = payload.get("live_safe_to_attempt") if isinstance(payload.get("live_safe_to_attempt"), bool) else resume_state.get("live_safe_to_attempt") if isinstance(resume_state.get("live_safe_to_attempt"), bool) else False
+    blockers = list(dict.fromkeys(_string_list(doctor_handoff.get("blockers")) + _string_list(payload.get("blockers"))))
+    next_step = doctor_handoff.get("next_step") if isinstance(doctor_handoff.get("next_step"), dict) else {}
+    after_safe = doctor_handoff.get("after_safe") if isinstance(doctor_handoff.get("after_safe"), dict) else {}
+    submit_request = after_safe.get("request") if isinstance(after_safe.get("request"), dict) else _summary_check_live_submit_request(payload)
+    ready = live_safe and not blockers
+    check_and_submit_tool = "source_url_check_and_submit" if live_safe else None
+    check_and_submit_endpoint = "/v1/jobs/retorrent/from-url/check-and-submit" if live_safe else None
+    recommended_tool = check_and_submit_tool if live_safe and submit_request else next_step.get("tool")
+    recommended_endpoint = check_and_submit_endpoint if live_safe and submit_request else next_step.get("endpoint")
+    recommended_request = submit_request if live_safe and submit_request else next_step.get("request")
+    return {
+        "kind": "ptcli.seedbox_live_validation_result",
+        "ready": ready,
+        "status": "safe_to_submit" if ready else "blocked",
+        "summary_file": summary_file,
+        "summary_kind": payload.get("summary_kind") or payload.get("kind"),
+        "live_safe_to_attempt": live_safe,
+        "doctor_result_handoff": doctor_handoff or None,
+        "readiness_summary": readiness or None,
+        "can_submit_check_and_submit": ready and bool(submit_request),
+        "check_and_submit_tool": check_and_submit_tool,
+        "check_and_submit_endpoint": check_and_submit_endpoint,
+        "check_and_submit_request": submit_request,
+        "next_step": next_step,
+        "recommended_tool": recommended_tool,
+        "recommended_endpoint": recommended_endpoint,
+        "recommended_request": recommended_request,
+        "post_submit_read": ["duplicate_check", "submit_if_clear_handoff", "job_id", "status_endpoint", "summary_endpoint"],
+        "final_evidence_read": ["get_job_summary.closure_summary", "get_job_summary.closure_handoff", "get_job_summary.qbit_enforcement_summary", "get_job_summary.policy_execution_report"],
+        "complete_when": ["doctor_result_handoff.live_safe_to_attempt=true", "source_url_check_and_submit returns job_id", "closure_summary.complete=true", "closure_summary.blockers=[]"],
+        "stop_when": ["doctor_result_handoff.live_safe_to_attempt=false", "duplicate_check.exists=true", "summary_check blockers are non-empty"],
+        "blockers": blockers,
+        "next_actions": _summary_check_live_validation_result_next_actions(live_safe, bool(submit_request), blockers),
+    }
+
+
+def _summary_check_live_validation_result_next_actions(live_safe: bool, has_submit_request: bool, blockers: list[str]) -> list[str]:
+    if live_safe and has_submit_request and not blockers:
+        return ["Submit live_validation_result.check_and_submit_request to source_url_check_and_submit, then poll the returned job_id until closure_summary.complete=true."]
+    if live_safe and not has_submit_request:
+        return ["Doctor is live-safe, but no check-and-submit request was found; rerun readiness_bundle with source and target to rebuild the manual request."]
+    if blockers:
+        return ["Resolve live_validation_result.blockers before submitting any live tracker action."]
+    return ["Read doctor_result_handoff and rerun doctor or readiness_bundle before live submission."]
+
+
+def _summary_check_raw_context(summary_file: str) -> dict[str, Any]:
+    try:
+        raw = json.loads(Path(summary_file).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _summary_check_live_submit_request(payload: dict[str, Any]) -> dict[str, Any] | None:
+    source_url = str(payload.get("source_url") or "").strip()
+    source_tracker = str(payload.get("source_tracker") or "").strip()
+    source_id = str(payload.get("source_torrent_id") or payload.get("torrent_id") or payload.get("requested_source_id") or payload.get("input_source_id") or "").strip()
+    target_trackers = payload.get("target_trackers")
+    targets = parse_tracker_list(",".join(str(item) for item in target_trackers)) if isinstance(target_trackers, list) else parse_tracker_list(str(target_trackers or ""))
+    if not source_url and source_tracker and source_id:
+        source_url = source_details_url(source_tracker, source_id) or ""
+    if not source_url or not targets:
+        return None
+    request: dict[str, Any] = {
+        "source_url": source_url,
+        "target": ",".join(targets),
+        "accept_rules": True,
+        "confirm_upload": True,
+    }
+    inputs = payload.get("inputs") if isinstance(payload.get("inputs"), dict) else {}
+    for key in ("path", "content_path", "save_path", "package_dir", "target_torrent_file", "uploaded_save_path", "uploaded_qbit_category", "uploaded_qbit_tags"):
+        value = payload.get(key) if payload.get(key) is not None else inputs.get(key)
+        if value not in (None, ""):
+            request[key] = value
+    return request
 
 
 async def materials_prepare_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -13983,11 +14071,12 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
 
 def _summary_check_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "summary_file", "summary_kind", "schema_version_ok", "kind_supported", "automation_action", "automation_handoff", "readiness_summary", "doctor_result_handoff", "service", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "summary_file", "summary_kind", "schema_version_ok", "kind_supported", "automation_action", "automation_handoff", "readiness_summary", "doctor_result_handoff", "live_validation_result", "service", "blockers", "next_actions"],
         "optional_fields": ["delivery_audit"],
         "status_values": ["ok", "blocked"],
         "automation_handoff_fields": ["json", "print_next_command", "print_next_argv", "print_shell", "run_next_command"],
         "doctor_result_handoff_fields": ["ready", "live_safe_to_attempt", "summary_file", "summary_check", "next_step", "after_safe", "blockers", "next_actions"],
+        "live_validation_result_fields": ["ready", "status", "summary_file", "summary_kind", "live_safe_to_attempt", "can_submit_check_and_submit", "check_and_submit_tool", "check_and_submit_endpoint", "check_and_submit_request", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "post_submit_read", "final_evidence_read", "complete_when", "stop_when", "blockers", "next_actions"],
         "delivery_audit_fields": ["ready", "status", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "payload_fingerprint", "payload_ref", "summary_file", "channels", "retry", "continue_when", "stop_when", "blockers", "next_actions"],
         "readiness_summary_fields": ["ready", "flow_ready", "source_mode", "target_mode", "rules_ready", "target_upload_ready", "uploaded_seeding_ready", "daily_candidate_targets", "blockers", "next_actions"],
         "service_fields": ["read_only", "mutates_state", "endpoint", "request"],
@@ -15358,6 +15447,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "automation_handoff": {"type": ["object", "null"]},
             "readiness_summary": {"type": ["object", "null"]},
             "doctor_result_handoff": {"type": ["object", "null"]},
+            "live_validation_result": {"type": "object"},
             "delivery_audit": {"type": ["object", "null"]},
             "service": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
