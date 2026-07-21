@@ -14365,6 +14365,9 @@
           "blockers",
           "next_actions"
         ],
+        "optional_fields": [
+          "delivery_audit"
+        ],
         "status_values": [
           "ok",
           "blocked"
@@ -14383,6 +14386,23 @@
           "summary_check",
           "next_step",
           "after_safe",
+          "blockers",
+          "next_actions"
+        ],
+        "delivery_audit_fields": [
+          "ready",
+          "status",
+          "mutates_state",
+          "uploads",
+          "contacts_trackers",
+          "contacts_qbittorrent",
+          "payload_fingerprint",
+          "payload_ref",
+          "summary_file",
+          "channels",
+          "retry",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],

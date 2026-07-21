@@ -15899,6 +15899,7 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert summary["notification_webhook"] == payload["notification_webhook"]
     assert summary["delivery_handoff"] == payload["delivery_handoff"]
     assert summary["delivery_result"] == payload["delivery_result"]
+    assert summary["delivery_audit"] == payload["delivery_audit"]
     assert payload["delivery_result"]["kind"] == "ptcli.daily_schedule.delivery_result"
     assert payload["delivery_result"]["status"] == "delivered"
     assert payload["delivery_result"]["ok"] is True
@@ -15906,6 +15907,17 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert payload["delivery_result"]["file_delivery"]["ok"] is True
     assert payload["delivery_result"]["webhook_delivery"]["ok"] is True
     assert payload["delivery_result"]["agent_handoff"]["execution_summary"] == "delivery_handoff.execution_summary"
+    assert payload["delivery_audit"]["kind"] == "ptcli.daily_schedule.delivery_audit"
+    assert payload["delivery_audit"]["ready"] is True
+    assert payload["delivery_audit"]["mutates_state"] is False
+    assert payload["delivery_audit"]["uploads"] is False
+    assert payload["delivery_audit"]["contacts_trackers"] is False
+    assert payload["delivery_audit"]["channels"]["file"]["ok"] is True
+    assert payload["delivery_audit"]["channels"]["webhook"]["ok"] is True
+    assert payload["delivery_audit"]["payload_fingerprint"]
+    assert payload["delivery_audit"]["retry"]["safe"] is True
+    assert payload["delivery_audit"]["retry"]["requires_upload_confirmation"] is False
+    assert "--notification-webhook-url" in payload["delivery_audit"]["retry"]["argv"]
     assert payload["notification_webhook"]["ok"] is True
     assert payload["notification_webhook"]["status_code"] == 204
     assert webhook_calls[0]["url"] == "https://hooks.example/ptcli"
@@ -15946,6 +15958,7 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert check_payload["notification_payload"]["submission_ready"] is True
     assert check_payload["delivery_handoff"] == payload["delivery_handoff"]
     assert check_payload["delivery_result"] == payload["delivery_result"]
+    assert check_payload["delivery_audit"] == payload["delivery_audit"]
     assert check_payload["live_safe_to_attempt"] is False
     assert check_payload["top_submit_requests"][0]["request"]["source"] == "https://chdbits.co/details.php?id=12345"
     assert check_payload["automation_handoff"]["json"]["argv"] == ["python3", "ptcli.py", "summary-check", "--summary-file", str(summary_path), "--json"]
@@ -16016,9 +16029,14 @@ def test_daily_schedule_webhook_error_is_reported(monkeypatch, tmp_path, capsys)
     assert payload["delivery_result"]["ok"] is False
     assert payload["delivery_result"]["webhook_delivery"]["ok"] is False
     assert "connection refused" in payload["delivery_result"]["blockers"][0]
+    assert payload["delivery_audit"]["ready"] is False
+    assert payload["delivery_audit"]["channels"]["webhook"]["error"] == "connection refused"
+    assert payload["delivery_audit"]["retry"]["safe"] is True
+    assert "connection refused" in payload["delivery_audit"]["blockers"][0]
     summary = json.loads(Path(payload["summary_file"]).read_text(encoding="utf-8"))
     assert summary["notification_webhook"] == payload["notification_webhook"]
     assert summary["delivery_result"] == payload["delivery_result"]
+    assert summary["delivery_audit"] == payload["delivery_audit"]
 
 
 def test_daily_scheduler_once_runs_schedule_and_writes_summary(monkeypatch, tmp_path, capsys) -> None:
@@ -16982,6 +17000,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["summary_check"]["input_schema"]["required"] == ["summary_file"]
     assert tool_by_name["summary_check"]["safety"]["does_not_run_next_command"] is True
     assert "doctor_result_handoff" in tool_by_name["summary_check"]["response_contract"]["required_fields"]
+    assert "delivery_audit" in tool_by_name["summary_check"]["response_contract"]["optional_fields"]
+    assert "delivery_audit_fields" in tool_by_name["summary_check"]["response_contract"]
+    assert "mutates_state" in tool_by_name["summary_check"]["response_contract"]["delivery_audit_fields"]
+    assert "retry" in tool_by_name["summary_check"]["response_contract"]["delivery_audit_fields"]
     assert "doctor_result_handoff_fields" in tool_by_name["summary_check"]["response_contract"]
     assert "live_safe_to_attempt" in tool_by_name["summary_check"]["response_contract"]["doctor_result_handoff_fields"]
     assert tool_by_name["materials_prepare"]["path"] == "/v1/materials/prepare"
@@ -17619,6 +17641,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert summary_check_request_schema["required"] == ["summary_file"]
     summary_check_schema = openapi["paths"]["/v1/summary/check"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "doctor_result_handoff" in summary_check_schema["properties"]
+    assert "delivery_audit" in summary_check_schema["properties"]
     assert "service" in summary_check_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "qbit_plan" in summary_schema["properties"]

@@ -13147,9 +13147,11 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
 def _summary_check_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "summary_file", "summary_kind", "schema_version_ok", "kind_supported", "automation_action", "automation_handoff", "readiness_summary", "doctor_result_handoff", "service", "blockers", "next_actions"],
+        "optional_fields": ["delivery_audit"],
         "status_values": ["ok", "blocked"],
         "automation_handoff_fields": ["json", "print_next_command", "print_next_argv", "print_shell", "run_next_command"],
         "doctor_result_handoff_fields": ["ready", "live_safe_to_attempt", "summary_file", "summary_check", "next_step", "after_safe", "blockers", "next_actions"],
+        "delivery_audit_fields": ["ready", "status", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "payload_fingerprint", "payload_ref", "summary_file", "channels", "retry", "continue_when", "stop_when", "blockers", "next_actions"],
         "readiness_summary_fields": ["ready", "flow_ready", "source_mode", "target_mode", "rules_ready", "target_upload_ready", "uploaded_seeding_ready", "daily_candidate_targets", "blockers", "next_actions"],
         "service_fields": ["read_only", "mutates_state", "endpoint", "request"],
         "safety": ["read_only", "does_not_run_next_command", "does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_upload"],
@@ -14501,6 +14503,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "automation_handoff": {"type": ["object", "null"]},
             "readiness_summary": {"type": ["object", "null"]},
             "doctor_result_handoff": {"type": ["object", "null"]},
+            "delivery_audit": {"type": ["object", "null"]},
             "service": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
