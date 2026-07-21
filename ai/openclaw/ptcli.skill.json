@@ -24672,6 +24672,7 @@
           "docker_compose",
           "deployment_runbook",
           "deployment_handoff",
+          "seedbox_bootstrap_handoff",
           "agent_summary",
           "agent_handoff"
         ],
@@ -24744,6 +24745,29 @@
           "next_step",
           "deployment_runbook",
           "warnings"
+        ],
+        "seedbox_bootstrap_handoff_fields": [
+          "ready",
+          "action",
+          "read_only",
+          "configured_paths",
+          "missing_mounts",
+          "mkdir_commands",
+          "config_file",
+          "env_file",
+          "compose",
+          "qbit",
+          "daily_candidates",
+          "verification_requests",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "continue_when",
+          "stop_when",
+          "blockers",
+          "warnings",
+          "next_actions"
         ],
         "agent_handoff_fields": [
           "ready",
