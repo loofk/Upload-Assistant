@@ -24219,6 +24219,7 @@
           "queue",
           "qbit",
           "daily_candidates",
+          "deployment_env",
           "docker_compose",
           "deployment_runbook",
           "deployment_handoff",
@@ -24242,7 +24243,9 @@
           "qbit_configured",
           "daily_candidates_configured",
           "docker_compose_api_ready",
-          "docker_compose_daily_ready"
+          "docker_compose_daily_ready",
+          "env_template_ready",
+          "env_template_present"
         ],
         "runtime_tools_fields": [
           "ready",
@@ -24250,6 +24253,22 @@
           "optional",
           "missing_required",
           "message"
+        ],
+        "deployment_env_fields": [
+          "ready",
+          "template_present",
+          "template_readable",
+          "template_path",
+          "env_path",
+          "env_present",
+          "required_keys",
+          "daily_keys",
+          "optional_keys",
+          "missing_keys",
+          "copy_command",
+          "edit_after_copy",
+          "security",
+          "next_actions"
         ],
         "deployment_runbook_fields": [
           "ready",
@@ -24259,6 +24278,7 @@
           "steps",
           "first_step",
           "daily_candidates",
+          "env",
           "qbit",
           "safety",
           "blockers",
@@ -24268,6 +24288,7 @@
           "ready",
           "compose_deployable",
           "api",
+          "env",
           "manual_retorrent",
           "daily_candidates",
           "qbit",
@@ -24282,6 +24303,7 @@
           "daily_candidates",
           "qbit",
           "docker_compose",
+          "env",
           "safety",
           "next_tools"
         ],

@@ -18682,6 +18682,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "missing_required" in tool_by_name["deployment_check"]["response_contract"]["runtime_tools_fields"]
     assert "queue" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "deployment_env" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "docker_compose" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "deployment_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_summary" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -18690,6 +18691,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_workflow_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "compose_deployable" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "api_auth_recommended" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "env_template_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "deployment_env_fields" in tool_by_name["deployment_check"]["response_contract"]
+    assert "copy_command" in tool_by_name["deployment_check"]["response_contract"]["deployment_env_fields"]
     assert "deployment_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "next_step" in tool_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
     assert "docker_compose_api_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
@@ -19429,6 +19433,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "missing_required" in tools_by_name["deployment_check"]["response_contract"]["runtime_tools_fields"]
         assert "queue" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "deployment_env" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "docker_compose" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "deployment_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_summary" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -19437,6 +19442,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "manual_workflow_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "compose_deployable" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "api_auth_recommended" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "env_template_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "deployment_env_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "copy_command" in tools_by_name["deployment_check"]["response_contract"]["deployment_env_fields"]
         assert "deployment_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "next_step" in tools_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
         assert "docker_compose_api_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
@@ -20133,6 +20141,7 @@ def test_deployment_check_reports_ready_seedbox_mounts(tmp_path, monkeypatch) ->
     downloads_dir = tmp_path / "downloads"
     for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
         directory.mkdir(parents=True)
+    (tmp_path / ".env.ptcli.example").write_text(Path(".env.ptcli.example").read_text(encoding="utf-8"), encoding="utf-8")
     (data_dir / "config.py").write_text(
         "config = {'DEFAULT': {'default_torrent_client': 'qbittorrent'}, 'TORRENT_CLIENTS': {'qbittorrent': {'torrent_client': 'qbit', 'qbit_url': 'http://host.docker.internal', 'qbit_port': '8080'}}}",
         encoding="utf-8",
@@ -20184,6 +20193,13 @@ services:
     assert {item["name"] for item in payload["runtime_tools"]["required"]} == {"ffmpeg", "mediainfo"}
     assert payload["daily_candidates"]["configured"] is True
     assert payload["daily_candidates"]["count"] == 1
+    assert payload["deployment_env"]["ready"] is True
+    assert payload["deployment_env"]["template_present"] is True
+    assert payload["deployment_env"]["env_present"] is False
+    assert payload["deployment_env"]["copy_command"] == "cp .env.ptcli.example .env"
+    assert payload["deployment_env"]["missing_keys"] == []
+    assert "PTCLI_API_TOKEN" in payload["deployment_env"]["required_keys"]
+    assert "PTCLI_DAILY_CANDIDATE_SCHEDULES" in payload["deployment_env"]["daily_keys"]
     assert payload["docker_compose"]["daily_schedule_service_ready"] is True
     assert payload["docker_compose"]["daily_scheduler_service_ready"] is True
     assert payload["docker_compose"]["ptcli_api_service_ready"] is True
@@ -20200,6 +20216,8 @@ services:
     assert payload["agent_summary"]["api_auth_recommended"] is True
     assert payload["agent_summary"]["docker_compose_daily_ready"] is True
     assert payload["agent_summary"]["docker_compose_api_ready"] is True
+    assert payload["agent_summary"]["env_template_ready"] is True
+    assert payload["agent_summary"]["env_template_present"] is True
     assert payload["agent_summary"]["daily_candidate_schedule_count"] == 1
     assert payload["deployment_handoff"]["kind"] == "ptcli.deployment_runtime_handoff"
     assert payload["deployment_handoff"]["ready"] is True
@@ -20209,6 +20227,8 @@ services:
     assert payload["deployment_handoff"]["api"]["tools"] == "http://127.0.0.1:8080/v1/tools"
     assert payload["deployment_handoff"]["api"]["localhost_bound"] is True
     assert payload["deployment_handoff"]["api"]["auth_recommended"] is True
+    assert payload["deployment_handoff"]["env"]["template_ready"] is True
+    assert payload["deployment_handoff"]["env"]["copy_command"] == "cp .env.ptcli.example .env"
     assert payload["deployment_handoff"]["manual_retorrent"]["ready"] is True
     assert payload["deployment_handoff"]["manual_retorrent"]["tool"] == "source_url_check_and_submit"
     assert payload["deployment_handoff"]["manual_retorrent"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
@@ -20219,7 +20239,9 @@ services:
     assert payload["deployment_runbook"]["ready"] is True
     assert payload["deployment_runbook"]["service"] == "ptcli-api"
     assert payload["deployment_runbook"]["first_step"] == "build_and_start_api"
+    assert payload["deployment_runbook"]["env"]["template_ready"] is True
     runbook_steps = {step["name"]: step for step in payload["deployment_runbook"]["steps"]}
+    assert runbook_steps["prepare_env"]["env_template"]["ready"] is True
     assert runbook_steps["build_and_start_api"]["command"].endswith("up -d --build ptcli-api")
     assert runbook_steps["verify_api_contracts"]["requests"][2]["url"] == "http://127.0.0.1:8080/v1/tools"
     assert runbook_steps["readiness_bundle"]["request"]["json"]["target"] == "MTEAM"
@@ -20238,6 +20260,7 @@ services:
     assert payload["agent_handoff"]["docker_compose"]["api_ready"] is True
     assert payload["agent_handoff"]["docker_compose"]["api_service"]["healthcheck"] is True
     assert payload["agent_handoff"]["docker_compose"]["api_service"]["config_mount"] is True
+    assert payload["agent_handoff"]["env"]["template_ready"] is True
     assert payload["agent_handoff"]["safety"]["live_upload_requires"] == ["accept_rules=true", "confirm_upload=true", "non-duplicate target", "ready site policy gate"]
     assert payload["qbit"]["configured"] is True
     assert payload["qbit"]["qbit_url"] == "http://host.docker.internal"

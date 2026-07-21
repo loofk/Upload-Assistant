@@ -17287,6 +17287,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     downloads_path = Path(str(request.get("downloads_path") or os.environ.get("PTCLI_DOWNLOADS_PATH") or "/downloads")).expanduser()
     client = str(request.get("client") or "default")
     compose_path = _deployment_path(request.get("compose_file") or os.environ.get("PTCLI_COMPOSE_FILE") or "docker-compose.yml", base_dir)
+    env_template = _deployment_env_template_summary(_deployment_path(request.get("env_template") or ".env.ptcli.example", base_dir), _deployment_path(request.get("env_file") or ".env", base_dir))
 
     runtime_check = build_runtime_dependency_check()
     runtime_tools = _deployment_runtime_tools()
@@ -17380,11 +17381,13 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "job_dir": str(job_dir),
         "downloads_path": str(downloads_path),
         "compose_file": str(compose_path),
+        "env_template": str(env_template.get("template_path")),
+        "env_file": str(env_template.get("env_path")),
     }
     mounts = _deployment_mount_summary(checks)
-    agent_summary = _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan, docker_compose)
-    deployment_handoff = _deployment_runtime_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings)
-    deployment_runbook = _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings)
+    agent_summary = _deployment_agent_summary(ready, checks, paths, mounts, qbit, daily_candidate_plan, docker_compose, env_template)
+    deployment_handoff = _deployment_runtime_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
+    deployment_runbook = _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
     return {
         "kind": "ptcli.deployment_check",
         "status": "ok" if ready else "blocked",
@@ -17400,11 +17403,12 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "queue": {"max_concurrent_jobs": max_concurrent_jobs},
         "qbit": qbit,
         "daily_candidates": daily_candidate_plan,
+        "deployment_env": env_template,
         "docker_compose": docker_compose,
         "deployment_runbook": deployment_runbook,
         "deployment_handoff": deployment_handoff,
         "agent_summary": agent_summary,
-        "agent_handoff": _deployment_agent_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings),
+        "agent_handoff": _deployment_agent_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings),
         "connectivity_checked": False,
     }
 
@@ -17476,6 +17480,64 @@ def _deployment_runtime_tools() -> dict[str, Any]:
 def _runtime_binary_status(name: str) -> dict[str, Any]:
     path = shutil.which(name)
     return {"name": name, "available": bool(path), "path": path}
+
+
+def _deployment_env_template_summary(template_path: Path, env_path: Path) -> dict[str, Any]:
+    required_keys = ["TZ", "PTCLI_API_TOKEN", "PTCLI_PUBLIC_BASE_URL", "PTCLI_MAX_CONCURRENT_JOBS", "PTCLI_JOB_DIR", "PTCLI_DOWNLOADS_PATH"]
+    daily_keys = ["PTCLI_DAILY_CANDIDATE_SCHEDULES", "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL"]
+    optional_keys = ["PTCLI_DOCKER_NETWORK"]
+    present = template_path.is_file()
+    text = ""
+    if present:
+        try:
+            text = template_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return {
+                "kind": "ptcli.deployment_env_template",
+                "ready": False,
+                "template_present": True,
+                "template_readable": False,
+                "template_path": str(template_path),
+                "env_path": str(env_path),
+                "error": str(exc),
+                "required_keys": required_keys,
+                "daily_keys": daily_keys,
+                "optional_keys": optional_keys,
+                "missing_keys": required_keys + daily_keys,
+                "copy_command": f"cp {template_path.name} {env_path.name}",
+                "next_actions": [f"Fix permissions on {template_path} so deployment_check can read the env template."],
+            }
+    missing_keys = [key for key in [*required_keys, *daily_keys] if f"{key}=" not in text]
+    ready = present and not missing_keys
+    return {
+        "kind": "ptcli.deployment_env_template",
+        "ready": ready,
+        "template_present": present,
+        "template_readable": present,
+        "template_path": str(template_path),
+        "env_path": str(env_path),
+        "env_present": env_path.is_file(),
+        "required_keys": required_keys,
+        "daily_keys": daily_keys,
+        "optional_keys": optional_keys,
+        "missing_keys": missing_keys,
+        "copy_command": f"cp {template_path.name} {env_path.name}",
+        "edit_after_copy": ["Set PTCLI_API_TOKEN before exposing the API.", "Adjust PTCLI_PUBLIC_BASE_URL if OpenClaw/Hermes reaches ptcli through a reverse proxy.", "Set PTCLI_DAILY_CANDIDATE_SCHEDULES when daily candidate jobs are needed."],
+        "security": {
+            "api_token_default": "change-me",
+            "api_token_required_when_exposed": True,
+            "keep_localhost_binding": True,
+        },
+        "next_actions": _deployment_env_template_next_actions(ready, present, missing_keys),
+    }
+
+
+def _deployment_env_template_next_actions(ready: bool, present: bool, missing_keys: list[str]) -> list[str]:
+    if ready:
+        return ["Copy .env.ptcli.example to .env, set real local values, then start ptcli-api with docker compose."]
+    if not present:
+        return ["Add .env.ptcli.example or pass env_template to deployment_check so AI agents can discover the Docker Compose environment contract."]
+    return [f"Add missing keys to .env.ptcli.example: {', '.join(missing_keys)}."]
 
 
 def _deployment_daily_candidate_plan(request: dict[str, Any]) -> dict[str, Any]:
@@ -17686,6 +17748,7 @@ def _deployment_agent_summary(
     qbit: dict[str, Any],
     daily_candidate_plan: dict[str, Any],
     docker_compose: dict[str, Any],
+    env_template: dict[str, Any],
 ) -> dict[str, Any]:
     check_by_name = {str(check.get("name")): check for check in checks}
     api_token_check = check_by_name.get("security.api_token", {})
@@ -17705,6 +17768,8 @@ def _deployment_agent_summary(
         "daily_candidates_configured": bool(daily_candidate_plan.get("configured")),
         "docker_compose_api_ready": bool(docker_compose.get("ptcli_api_service_ready")),
         "docker_compose_daily_ready": bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready")),
+        "env_template_ready": bool(env_template.get("ready")),
+        "env_template_present": bool(env_template.get("template_present")),
         "missing_mounts": mounts.get("missing", []),
         "blocking_checks": blocking_failures,
         "warning_checks": warning_failures,
@@ -17720,6 +17785,7 @@ def _deployment_runtime_handoff(
     qbit: dict[str, Any],
     daily_candidate_plan: dict[str, Any],
     docker_compose: dict[str, Any],
+    env_template: dict[str, Any],
     blockers: list[str],
     warnings: list[str],
 ) -> dict[str, Any]:
@@ -17741,6 +17807,15 @@ def _deployment_runtime_handoff(
             "token_configured": bool(agent_summary.get("api_token_configured")),
             "auth_header": "Authorization: Bearer <PTCLI_API_TOKEN>",
             "auth_recommended": bool(agent_summary.get("api_auth_recommended")),
+        },
+        "env": {
+            "template_ready": bool(env_template.get("ready")),
+            "template_path": env_template.get("template_path"),
+            "env_path": env_template.get("env_path"),
+            "copy_command": env_template.get("copy_command"),
+            "required_keys": env_template.get("required_keys") if isinstance(env_template.get("required_keys"), list) else [],
+            "daily_keys": env_template.get("daily_keys") if isinstance(env_template.get("daily_keys"), list) else [],
+            "missing_keys": env_template.get("missing_keys") if isinstance(env_template.get("missing_keys"), list) else [],
         },
         "manual_retorrent": {
             "ready": manual_ready,
@@ -17769,7 +17844,7 @@ def _deployment_runtime_handoff(
             "connectivity_checked": bool(qbit.get("connectivity_checked")),
         },
         "next_step": _deployment_runtime_next_step(manual_ready, daily_ready, compose_ready, blockers, warnings),
-        "deployment_runbook": _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, blockers, warnings),
+        "deployment_runbook": _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings),
         "warnings": warnings,
     }
 
@@ -17792,6 +17867,7 @@ def _deployment_runbook(
     qbit: dict[str, Any],
     daily_candidate_plan: dict[str, Any],
     docker_compose: dict[str, Any],
+    env_template: dict[str, Any],
     blockers: list[str],
     warnings: list[str],
 ) -> dict[str, Any]:
@@ -17803,10 +17879,11 @@ def _deployment_runbook(
             "index": 1,
             "name": "prepare_env",
             "kind": "shell",
-            "command": "cp .env.ptcli.example .env",
+            "command": str(env_template.get("copy_command") or "cp .env.ptcli.example .env"),
             "read": [".env", "PTCLI_API_TOKEN", "PTCLI_PUBLIC_BASE_URL", "PTCLI_DAILY_CANDIDATE_SCHEDULES"],
-            "continue_when": ".env exists and host paths in docker-compose.yml are adjusted for the seedbox",
+            "continue_when": "deployment_env.ready=true, .env exists, and host paths in docker-compose.yml are adjusted for the seedbox",
             "stop_when": "config/cookies/downloads/tmp host paths are not mapped to the seedbox paths",
+            "env_template": env_template,
         },
         {
             "index": 2,
@@ -17881,6 +17958,13 @@ def _deployment_runbook(
             "schedule_count": daily_candidate_plan.get("count", 0),
             "optional_start_command": f"docker compose -f {compose_file} --profile daily up -d ptcli-daily-scheduler",
         },
+        "env": {
+            "template_ready": bool(env_template.get("ready")),
+            "template_path": env_template.get("template_path"),
+            "env_path": env_template.get("env_path"),
+            "copy_command": env_template.get("copy_command"),
+            "missing_keys": env_template.get("missing_keys") if isinstance(env_template.get("missing_keys"), list) else [],
+        },
         "qbit": {
             "configured": bool(qbit.get("configured")),
             "host_hint": "Use http://host.docker.internal for host qBittorrent, or a Docker service name when qBittorrent shares the compose network.",
@@ -17902,6 +17986,7 @@ def _deployment_agent_handoff(
     qbit: dict[str, Any],
     daily_candidate_plan: dict[str, Any],
     docker_compose: dict[str, Any],
+    env_template: dict[str, Any],
     blockers: list[str],
     warnings: list[str],
 ) -> dict[str, Any]:
@@ -17958,6 +18043,13 @@ def _deployment_agent_handoff(
                 "cookies_mount": bool(docker_compose.get("cookies_mount")),
                 "tmp_mount": bool(docker_compose.get("tmp_mount")),
             },
+        },
+        "env": {
+            "template_ready": bool(env_template.get("ready")),
+            "template_path": env_template.get("template_path"),
+            "env_path": env_template.get("env_path"),
+            "copy_command": env_template.get("copy_command"),
+            "missing_keys": env_template.get("missing_keys") if isinstance(env_template.get("missing_keys"), list) else [],
         },
         "safety": {
             "api_token_configured": bool(agent_summary.get("api_token_configured")),
@@ -18941,13 +19033,14 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "docker_compose", "deployment_runbook", "deployment_handoff", "agent_summary", "agent_handoff"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
-                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready"],
+                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "env_template_ready", "env_template_present"],
                 "runtime_tools_fields": ["ready", "required", "optional", "missing_required", "message"],
-                "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "qbit", "safety", "blockers", "warnings"],
-                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "manual_retorrent", "daily_candidates", "qbit", "next_step", "deployment_runbook", "warnings"],
-                "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "qbit", "docker_compose", "safety", "next_tools"],
+                "deployment_env_fields": ["ready", "template_present", "template_readable", "template_path", "env_path", "env_present", "required_keys", "daily_keys", "optional_keys", "missing_keys", "copy_command", "edit_after_copy", "security", "next_actions"],
+                "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "env", "qbit", "safety", "blockers", "warnings"],
+                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "env", "manual_retorrent", "daily_candidates", "qbit", "next_step", "deployment_runbook", "warnings"],
+                "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "qbit", "docker_compose", "env", "safety", "next_tools"],
                 "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
@@ -21241,6 +21334,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "queue": {"type": "object"},
             "qbit": {"type": "object"},
             "daily_candidates": {"type": "object"},
+            "deployment_env": {"type": "object"},
             "docker_compose": {"type": "object"},
             "deployment_handoff": {"type": "object"},
             "agent_summary": {"type": "object"},
