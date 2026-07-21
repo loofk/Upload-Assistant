@@ -13302,6 +13302,16 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert job["recovery_handoff"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
     assert job["recovery_handoff"]["should_poll"] is True
     assert job["recovery_handoff"]["poll_after_seconds"] == 5
+    assert job["job_control_summary"]["kind"] == "ptcli.job_control_summary"
+    assert job["job_control_summary"]["state"] == "waiting"
+    assert job["job_control_summary"]["action"] == "poll"
+    assert job["job_control_summary"]["ready"] is True
+    assert job["job_control_summary"]["should_poll"] is True
+    assert job["job_control_summary"]["safe_to_call_now"] is True
+    assert job["job_control_summary"]["recommended_tool"] == "get_job_status"
+    assert job["job_control_summary"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
+    assert job["job_control_summary"]["recommended_call"]["tool"] == "get_job_status"
+    assert job["job_control_summary"]["read_order"][:4] == ["job_control_summary", "job_handoff", "recovery_handoff", "seedbox_live_validation_completion_report"]
 
     payload = store.list({"status": "queued"})
     assert payload["jobs"][0]["runtime"]["should_poll"] is True
@@ -13309,6 +13319,8 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert payload["jobs"][0]["job_handoff"]["action"] == "wait"
     assert payload["jobs"][0]["job_handoff"]["recommended_call"]["endpoint"] == f"/v1/jobs/{job_id}"
     assert payload["jobs"][0]["recovery_handoff"]["action"] == "poll"
+    assert payload["jobs"][0]["job_control_summary"]["action"] == "poll"
+    assert payload["jobs"][0]["job_control_summary"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
     assert any("Poll running jobs" in action for action in payload["next_actions"])
 
 
@@ -13727,6 +13739,15 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["recovery_handoff"]["gates"]["closure_complete"] is False
     assert "materials_handoff.not_ready" in job["recovery_handoff"]["blockers"]
     assert "Call recovery_handoff.dry_run_request" in job["recovery_handoff"]["next_actions"][0]
+    assert job["job_control_summary"]["state"] == "action_required"
+    assert job["job_control_summary"]["action"] == "resume_preview"
+    assert job["job_control_summary"]["should_resume"] is True
+    assert job["job_control_summary"]["resume_preview_required"] is True
+    assert job["job_control_summary"]["recommended_tool"] == "resume_job"
+    assert job["job_control_summary"]["dry_run_request"] == job["materials_handoff"]["resume_handoff"]["dry_run_request"]
+    assert job["job_control_summary"]["execute_request"] == job["materials_handoff"]["resume_handoff"]["execute_request"]
+    assert "materials_handoff.not_ready" in job["job_control_summary"]["blockers"]
+    assert "resume_execution_handoff" in job["job_control_summary"]["read_order"]
     assert summary["agent_summary"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["agent_summary"]["resume"]["materials_missing"] == ["metadata.tmdb"]
     assert summary["materials_handoff"] == job["materials_handoff"]
@@ -13742,6 +13763,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["resume_summary"] == job["resume_summary"]
     assert summary["job_handoff"] == job["job_handoff"]
     assert summary["recovery_handoff"] == job["recovery_handoff"]
+    assert summary["job_control_summary"] == job["job_control_summary"]
     assert summary["workflow_context"]["recovery_handoff"] == job["recovery_handoff"]
     assert summary["workflow_context"]["materials"]["critical_missing"] == ["metadata.tmdb", "description.content"]
     assert summary["workflow_context"]["resume_execution_handoff"] == job["resume_execution_handoff"]
@@ -14035,6 +14057,9 @@ def test_job_store_lists_recent_jobs_with_filters(tmp_path) -> None:
     assert payload["jobs"][0]["job_handoff"]["action"] == "resume"
     assert payload["jobs"][0]["job_handoff"]["recommended_tool"] == "resume_job"
     assert payload["jobs"][0]["job_handoff"]["recommended_request"] == {"job_id": blocked["job_id"], "dry_run": True}
+    assert payload["jobs"][0]["job_control_summary"]["action"] == "resume_preview"
+    assert payload["jobs"][0]["job_control_summary"]["recommended_tool"] == "resume_job"
+    assert payload["jobs"][0]["job_control_summary"]["dry_run_request"] == {"job_id": blocked["job_id"], "dry_run": True}
     assert "Resume recommended blocked jobs" in payload["next_actions"][-1]
 
     limited = store.list({"limit": "1"})
@@ -17384,6 +17409,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "manual_retorrent_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "job_control_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "job_control_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "job_control_summary" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "job_control_summary_fields" in tool_by_name["get_job_status"]["response_contract"]
+    assert "read_order" in tool_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
+    assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
+    assert "job_control_summary_source_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "recommended_call_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "recommended_call_gate_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "safe_to_call_now" in tool_by_name["get_job_status"]["response_contract"]["recommended_call_fields"]
@@ -18614,6 +18646,13 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "recovery_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "recovery_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "recovery_handoff" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "job_control_summary" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "job_control_summary" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "job_control_summary" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "job_control_summary_fields" in tools_by_name["get_job_status"]["response_contract"]
+        assert "read_order" in tools_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
+        assert "recommended_call" in tools_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
+        assert "job_control_summary_source_fields" in tools_by_name["get_job_status"]["response_contract"]
         assert "recovery_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "dry_run_request" in tools_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
         assert "execute_request" in tools_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
