@@ -27,9 +27,10 @@ from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, parse_tracker_list
 from src.ptcli.materials import generate_bdinfo_material, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
+from src.ptcli.metadata import enrich_source_metadata, load_metadata_overrides, load_ptgen_description_override, normalize_metadata_overrides
 from src.ptcli.policies import build_rule_obligations, build_site_policy_coverage, build_site_policy_report, parse_rate_limit, qbit_limits_for_tracker
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
-from src.ptcli.source import resolve_source_reference
+from src.ptcli.source import fetch_source_info, resolve_source_reference
 from src.ptcli.target import create_mteam_upload_torrent_candidate
 
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
@@ -269,6 +270,7 @@ class JobStore:
             "qbit_handoff": _job_qbit_handoff(job, summary_payload),
             "qbit_enforcement_summary": _job_qbit_enforcement_summary(job, summary_payload),
             "materials_handoff": _job_materials_handoff(job, summary_payload),
+            "metadata_prepare_handoff": _job_metadata_prepare_handoff(job, summary_payload),
             "materials_prepare_handoff": _job_materials_prepare_handoff(job, summary_payload),
             "target_upload_handoff": _job_target_upload_handoff(job, summary_payload),
             "closure_handoff": _job_closure_handoff(job, summary_payload),
@@ -610,6 +612,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/qbit/inject": lambda payload: asyncio.run(qbit_inject_payload(payload)),
                 "/v1/qbit/wait": lambda payload: asyncio.run(qbit_wait_payload(payload)),
                 "/v1/materials/prepare": lambda payload: asyncio.run(materials_prepare_payload(payload)),
+                "/v1/metadata/prepare": lambda payload: asyncio.run(metadata_prepare_payload(payload)),
                 "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/summary/check": summary_check_service_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
@@ -620,6 +623,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/jobs/retorrent/from-url": lambda payload: create_source_url_retorrent_job(job_store, payload),
                 "/v1/jobs/retorrent/from-url/check-and-submit": lambda payload: asyncio.run(create_source_url_check_and_submit_job(job_store, payload)),
                 "/v1/jobs/materials/prepare": lambda payload: create_materials_prepare_job(job_store, payload),
+                "/v1/jobs/metadata/prepare": lambda payload: create_metadata_prepare_job(job_store, payload),
                 "/v1/jobs/candidates/daily": lambda payload: create_daily_candidates_job(job_store, payload),
                 "/v1/jobs/candidates/daily/schedule": lambda payload: create_daily_candidate_schedule_jobs(job_store, payload),
             }
@@ -861,6 +865,64 @@ async def materials_prepare_payload(request: dict[str, Any] | None = None) -> di
         "blockers": blockers,
         "next_actions": _materials_prepare_next_actions(ready, blockers),
         "safety": _materials_prepare_safety(context),
+    }
+
+
+async def metadata_prepare_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Prepare external metadata and PTGen/Douban description for retorrent materials."""
+    request = request or {}
+    context = _metadata_prepare_request_context(request)
+    if context["dry_run"]:
+        return _metadata_prepare_dry_run_payload(context)
+
+    blockers: list[str] = []
+    source_info: dict[str, Any] = dict(context["source_info"]) if isinstance(context.get("source_info"), dict) else {}
+    source_reference = context.get("source_reference") if isinstance(context.get("source_reference"), dict) else None
+    if not source_info and context.get("source_url"):
+        try:
+            source_reference = resolve_source_reference(str(context["source_url"]), tracker=context.get("source_tracker"))
+            info = await fetch_source_info(load_config(context.get("config")), str(source_reference["tracker"]), str(source_reference["source_id"]), base_dir=context.get("base_dir"))
+            source_info = info.to_dict()
+            source_info.setdefault("details_url", source_reference.get("details_url"))
+        except Exception as exc:
+            blockers.append(f"source-info fetch failed: {exc}")
+
+    overrides = _metadata_prepare_overrides(context)
+    load_error = overrides.pop("_load_error", None)
+    if load_error:
+        blockers.append(f"metadata override file could not be loaded: {load_error}")
+    if not source_info and not overrides:
+        blockers.append("source_info, source_url, or metadata overrides are required.")
+    config = load_config(context.get("config"))
+    result = await enrich_source_metadata(config, source_info, overrides=overrides, fetch_ptgen=bool(context.get("fetch_ptgen")), base_dir=context.get("base_dir")) if not blockers else {"source_info": source_info, "blockers": blockers, "missing": []}
+    enriched_source = result.get("source_info") if isinstance(result.get("source_info"), dict) else source_info
+    readiness_blockers = _metadata_prepare_readiness_blockers(result, fetch_ptgen=bool(context.get("fetch_ptgen")))
+    blockers = list(dict.fromkeys([*blockers, *_string_list(result.get("blockers")), *readiness_blockers]))
+    ready = not blockers
+    material_options = _metadata_prepare_material_options(enriched_source, context)
+    handoff = _metadata_prepare_handoff(context, material_options, ready, blockers)
+    return {
+        "kind": "ptcli.metadata_prepare",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "ready": ready,
+        "dry_run": False,
+        "mutates_state": True,
+        "mutates_filesystem": False,
+        "mutates_network": bool(context.get("source_url") or context.get("fetch_ptgen") or _metadata_prepare_needs_tmdb_api(source_info, overrides)),
+        "live_upload": False,
+        "request": context,
+        "source_reference": source_reference,
+        "source_info": enriched_source,
+        "metadata_enrichment": {key: result.get(key) for key in ("status", "ready", "applied", "missing", "readiness", "field_evidence", "sources", "ptgen_evidence", "blockers")},
+        "material_options": material_options,
+        "material_evidence": _metadata_prepare_evidence(enriched_source, material_options, result),
+        "metadata_prepare_handoff": handoff,
+        "resume_handoff": handoff,
+        "recommended_request": handoff.get("recommended_request"),
+        "blockers": blockers,
+        "next_actions": _metadata_prepare_next_actions(ready, blockers),
+        "safety": _metadata_prepare_safety(context),
     }
 
 
@@ -1355,6 +1417,17 @@ def create_materials_prepare_job(job_store: JobStore, request: dict[str, Any]) -
         normalized_request,
         ["ptcli-service", "materials-prepare"],
         lambda: asyncio.run(materials_prepare_payload(request)),
+    )
+
+
+def create_metadata_prepare_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
+    """Create an asynchronous metadata/PTGen preparation job."""
+    normalized_request = _metadata_prepare_request_context(request)
+    return job_store.create(
+        "ptcli.metadata_prepare",
+        normalized_request,
+        ["ptcli-service", "metadata-prepare"],
+        lambda: asyncio.run(metadata_prepare_payload(request)),
     )
 
 
@@ -5094,6 +5167,194 @@ def _materials_prepare_request_context(request: dict[str, Any]) -> dict[str, Any
     return context
 
 
+def _metadata_prepare_request_context(request: dict[str, Any]) -> dict[str, Any]:
+    source_url = request.get("source_url") or request.get("source") or request.get("source_link") or request.get("url")
+    source_info = request.get("source_info") if isinstance(request.get("source_info"), dict) else {}
+    context = {
+        "job_id": request.get("job_id") or request.get("parent_job_id") or request.get("retorrent_job_id"),
+        "parent_job_id": request.get("parent_job_id") or request.get("job_id") or request.get("retorrent_job_id"),
+        "source_url": str(source_url) if source_url else None,
+        "source": str(source_url) if source_url else request.get("source"),
+        "source_tracker": request.get("source_tracker") or request.get("from") or source_info.get("tracker"),
+        "target": request.get("target") or request.get("target_tracker") or request.get("target_trackers"),
+        "target_tracker": request.get("target_tracker"),
+        "target_trackers": request.get("target_trackers"),
+        "accept_rules": _truthy(request.get("accept_rules")),
+        "confirm_upload": _truthy(request.get("confirm_upload")),
+        "path": request.get("path") or request.get("content_path"),
+        "content_path": request.get("content_path") or request.get("path"),
+        "save_path": request.get("save_path"),
+        "config": request.get("config"),
+        "base_dir": request.get("base_dir"),
+        "dry_run": _truthy(request.get("dry_run")),
+        "fetch_ptgen": _truthy(request.get("fetch_ptgen")),
+        "source_info": source_info,
+        "metadata_file": request.get("metadata_file"),
+        "ptgen_description_file": request.get("ptgen_description_file"),
+        "imdb_id": request.get("imdb_id"),
+        "tmdb_id": request.get("tmdb_id"),
+        "tmdb_type": request.get("tmdb_type"),
+        "douban_id": request.get("douban_id"),
+        "douban_url": request.get("douban_url"),
+        "qbit_category": request.get("qbit_category"),
+        "qbit_tags": request.get("qbit_tags"),
+        "qbit_upload_limit": request.get("qbit_upload_limit"),
+        "qbit_download_limit": request.get("qbit_download_limit"),
+        "uploaded_qbit_category": request.get("uploaded_qbit_category"),
+        "uploaded_qbit_tags": request.get("uploaded_qbit_tags"),
+        "uploaded_qbit_upload_limit": request.get("uploaded_qbit_upload_limit"),
+        "uploaded_qbit_download_limit": request.get("uploaded_qbit_download_limit"),
+    }
+    if source_url:
+        try:
+            context["source_reference"] = resolve_source_reference(str(source_url), tracker=context.get("source_tracker"))
+        except Exception as exc:
+            context["source_reference"] = {"requested_source": str(source_url), "error": str(exc)}
+    return context
+
+
+def _metadata_prepare_dry_run_payload(context: dict[str, Any]) -> dict[str, Any]:
+    overrides = _metadata_prepare_overrides(context)
+    source_info = dict(context["source_info"]) if isinstance(context.get("source_info"), dict) else {}
+    material_options = _metadata_prepare_material_options({**source_info, **overrides}, context)
+    blockers = [] if source_info or context.get("source_url") or overrides else ["source_info, source_url, or metadata overrides are required."]
+    handoff = _metadata_prepare_handoff(context, material_options, not blockers, blockers)
+    return {
+        "kind": "ptcli.metadata_prepare",
+        "status": "ok" if not blockers else "blocked",
+        "ok": not blockers,
+        "ready": not blockers,
+        "dry_run": True,
+        "mutates_state": False,
+        "mutates_filesystem": False,
+        "mutates_network": False,
+        "live_upload": False,
+        "request": context,
+        "source_reference": context.get("source_reference"),
+        "source_info": source_info,
+        "metadata_enrichment": {"status": "dry_run", "ready": not blockers, "applied": overrides, "missing": [], "readiness": {}, "field_evidence": {}, "sources": ["overrides"] if overrides else [], "ptgen_evidence": {}, "blockers": blockers},
+        "material_options": material_options,
+        "material_evidence": _metadata_prepare_evidence({**source_info, **overrides}, material_options, {}),
+        "metadata_prepare_handoff": handoff,
+        "resume_handoff": handoff,
+        "recommended_request": handoff.get("recommended_request"),
+        "blockers": blockers,
+        "next_actions": _metadata_prepare_next_actions(not blockers, blockers),
+        "safety": _metadata_prepare_safety(context),
+    }
+
+
+def _metadata_prepare_overrides(context: dict[str, Any]) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    try:
+        overrides.update(load_metadata_overrides(context.get("metadata_file")))
+        overrides.update(load_ptgen_description_override(context.get("ptgen_description_file")))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        overrides["_load_error"] = str(exc)
+    overrides.update(
+        normalize_metadata_overrides(
+            {
+                "imdb_id": context.get("imdb_id"),
+                "tmdb_id": context.get("tmdb_id"),
+                "tmdb_type": context.get("tmdb_type"),
+                "douban_id": context.get("douban_id"),
+                "douban_url": context.get("douban_url"),
+            }
+        )
+    )
+    return {key: value for key, value in overrides.items() if value not in (None, "", [])}
+
+
+def _metadata_prepare_readiness_blockers(result: dict[str, Any], *, fetch_ptgen: bool) -> list[str]:
+    blockers = []
+    missing = _string_list(result.get("missing"))
+    if missing:
+        blockers.append(f"Missing metadata after enrichment: {', '.join(missing)}")
+    source_info = result.get("source_info") if isinstance(result.get("source_info"), dict) else {}
+    if fetch_ptgen and not source_info.get("ptgen_description"):
+        blockers.append("PTGen/Douban description is missing after enrichment.")
+    return blockers
+
+
+def _metadata_prepare_material_options(source_info: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    for key in ("metadata_file", "ptgen_description_file"):
+        if context.get(key) not in (None, ""):
+            options[key] = context[key]
+    for key in ("imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url"):
+        if source_info.get(key) not in (None, ""):
+            options[key] = source_info[key]
+    if source_info.get("ptgen_description"):
+        options["fetch_ptgen"] = True
+    return options
+
+
+def _metadata_prepare_evidence(source_info: dict[str, Any], material_options: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    ptgen_description = str(source_info.get("ptgen_description") or "")
+    return {
+        "metadata_fields": {
+            key: {"ready": bool(source_info.get(key)), "value": source_info.get(key)}
+            for key in ("imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url")
+        },
+        "ptgen_description": {"ready": bool(ptgen_description), "length": len(ptgen_description)},
+        "metadata_file": _materials_path_evidence(material_options.get("metadata_file")),
+        "ptgen_description_file": _materials_path_evidence(material_options.get("ptgen_description_file")),
+        "field_evidence": result.get("field_evidence") if isinstance(result.get("field_evidence"), dict) else {},
+        "ptgen_evidence": result.get("ptgen_evidence") if isinstance(result.get("ptgen_evidence"), dict) else {},
+    }
+
+
+def _metadata_prepare_handoff(context: dict[str, Any], material_options: dict[str, Any], ready: bool, blockers: list[str]) -> dict[str, Any]:
+    parent_job_id = str(context.get("parent_job_id") or context.get("job_id") or "").strip()
+    resume_endpoint = f"/v1/jobs/{parent_job_id}/resume" if parent_job_id else "/v1/jobs/{job_id}/resume"
+    resume_request = {"overrides": material_options, "dry_run": True, **({"job_id": parent_job_id} if parent_job_id else {})}
+    submit_request = _materials_prepare_submit_request(context, material_options)
+    next_step = _materials_prepare_next_step(parent_job_id, submit_request, resume_request, ready, blockers)
+    return {
+        "kind": "ptcli.metadata_prepare_handoff",
+        "ready": ready,
+        "parent_job_id": parent_job_id or None,
+        "material_options": material_options,
+        "accepted_override_keys": sorted(material_options),
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint") or resume_endpoint,
+        "method": "POST",
+        "recommended_request": next_step.get("request") or resume_request,
+        "resume_request": resume_request,
+        "execute_request": {**resume_request, "dry_run": False},
+        "source_url_check_and_submit_request": submit_request,
+        "next_step": next_step,
+        "continue_when": "Use resume_request for an existing blocked job, or source_url_check_and_submit_request for a fresh source URL flow after duplicate/rule/confirmation gates are ready.",
+        "stop_when": ["blockers is not empty", "live upload confirmations are missing", "site policy gate is not ready"],
+        "blockers": blockers,
+        "next_actions": _metadata_prepare_next_actions(ready, blockers),
+    }
+
+
+def _metadata_prepare_next_actions(ready: bool, blockers: list[str]) -> list[str]:
+    if ready:
+        return ["Use metadata_prepare_handoff.next_step to resume an existing retorrent job or continue source_url_check_and_submit with metadata material_options."]
+    if blockers:
+        return ["Resolve metadata_prepare.blockers, provide source_info/source_url or metadata overrides, then rerun metadata_prepare."]
+    return ["Provide source_url/source_info and set fetch_ptgen=true when a PTGen/Douban description is required."]
+
+
+def _metadata_prepare_safety(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "does_not_upload_to_tracker": True,
+        "live_upload": False,
+        "requires_confirmation": [],
+        "may_contact_source_tracker": bool(context.get("source_url")),
+        "may_contact_tmdb": True,
+        "may_contact_ptgen_or_douban": bool(context.get("fetch_ptgen")),
+    }
+
+
+def _metadata_prepare_needs_tmdb_api(source_info: dict[str, Any], overrides: dict[str, Any]) -> bool:
+    merged = {**source_info, **{key: value for key, value in overrides.items() if not key.startswith("_")}}
+    return bool((merged.get("imdb_id") and not merged.get("tmdb_id")) or (merged.get("tmdb_id") and not merged.get("imdb_id")))
+
+
 def _materials_prepare_dry_run_payload(context: dict[str, Any]) -> dict[str, Any]:
     blockers = [] if context["actions"] else ["No material preparation action was requested."]
     request_template = {
@@ -6401,9 +6662,10 @@ def _job_list_item(job: dict[str, Any], job_lineage: dict[str, Any] | None = Non
         "qbit_limit_audit": _job_qbit_limit_audit(job),
         "qbit_handoff": _job_qbit_handoff(job),
         "qbit_enforcement_summary": _job_qbit_enforcement_summary(job),
-            "materials_handoff": _job_materials_handoff(job),
-            "materials_prepare_handoff": _job_materials_prepare_handoff(job),
-            "target_upload_handoff": _job_target_upload_handoff(job),
+        "materials_handoff": _job_materials_handoff(job),
+        "metadata_prepare_handoff": _job_metadata_prepare_handoff(job),
+        "materials_prepare_handoff": _job_materials_prepare_handoff(job),
+        "target_upload_handoff": _job_target_upload_handoff(job),
         "closure_handoff": _job_closure_handoff(job),
         "closure_summary": _job_closure_summary(job),
         "manual_retorrent_handoff": _job_manual_retorrent_handoff(job),
@@ -6472,6 +6734,7 @@ def _job_public_payload(job: dict[str, Any], job_lineage: dict[str, Any] | None 
         "qbit_handoff": _job_qbit_handoff(job),
         "qbit_enforcement_summary": _job_qbit_enforcement_summary(job),
         "materials_handoff": _job_materials_handoff(job),
+        "metadata_prepare_handoff": _job_metadata_prepare_handoff(job),
         "materials_prepare_handoff": _job_materials_prepare_handoff(job),
         "target_upload_handoff": _job_target_upload_handoff(job),
         "closure_handoff": _job_closure_handoff(job),
@@ -6968,6 +7231,44 @@ def _job_materials_prepare_handoff(job: dict[str, Any], summary_payload: dict[st
         "stop_when": ["blockers is not empty", "site rules or live confirmations are missing"],
         "blockers": blockers,
         "next_actions": _materials_prepare_next_actions(ready, blockers),
+    }
+
+
+def _job_metadata_prepare_handoff(job: dict[str, Any], summary_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    payload = summary_payload if isinstance(summary_payload, dict) else job.get("result") if isinstance(job.get("result"), dict) else {}
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("kind") != "ptcli.metadata_prepare" and job.get("kind") != "ptcli.metadata_prepare":
+        return None
+    handoff = payload.get("metadata_prepare_handoff") if isinstance(payload.get("metadata_prepare_handoff"), dict) else payload.get("resume_handoff") if isinstance(payload.get("resume_handoff"), dict) else {}
+    material_options = payload.get("material_options") if isinstance(payload.get("material_options"), dict) else {}
+    evidence = payload.get("material_evidence") if isinstance(payload.get("material_evidence"), dict) else {}
+    blockers = _string_list(payload.get("blockers")) or _string_list(job.get("blockers"))
+    ready = bool(payload.get("ok") is True and not blockers)
+    request_context = payload.get("request") if isinstance(payload.get("request"), dict) else job.get("request") if isinstance(job.get("request"), dict) else {}
+    fallback = _metadata_prepare_handoff(request_context, material_options, ready, blockers)
+    next_step = handoff.get("next_step") if isinstance(handoff.get("next_step"), dict) else fallback.get("next_step") if isinstance(fallback.get("next_step"), dict) else {}
+    return {
+        "kind": "ptcli.metadata_prepare_job_handoff",
+        "ready": ready,
+        "job_id": job.get("job_id"),
+        "status": job.get("status"),
+        "dry_run": payload.get("dry_run"),
+        "parent_job_id": handoff.get("parent_job_id") or fallback.get("parent_job_id"),
+        "material_options": material_options,
+        "material_evidence": evidence,
+        "metadata_prepare_handoff": handoff or None,
+        "resume_request": handoff.get("resume_request") or fallback.get("resume_request"),
+        "execute_request": handoff.get("execute_request") or fallback.get("execute_request"),
+        "source_url_check_and_submit_request": handoff.get("source_url_check_and_submit_request") or fallback.get("source_url_check_and_submit_request"),
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request") if isinstance(next_step.get("request"), dict) else handoff.get("recommended_request") or fallback.get("recommended_request"),
+        "next_step": next_step,
+        "continue_when": "Pass metadata material_options to materials_prepare, source_url_check_and_submit, or resume_job only after duplicate/rule/confirmation gates are ready.",
+        "stop_when": ["blockers is not empty", "site rules or live confirmations are missing"],
+        "blockers": blockers,
+        "next_actions": _metadata_prepare_next_actions(ready, blockers),
     }
 
 
@@ -9212,6 +9513,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     workflow_context = _job_workflow_context(job)
     manual_retorrent_handoff = _job_manual_retorrent_handoff(job)
     materials_handoff = _job_materials_handoff(job)
+    metadata_prepare_handoff = _job_metadata_prepare_handoff(job)
     materials_prepare_handoff = _job_materials_prepare_handoff(job)
     target_upload_handoff = _job_target_upload_handoff(job)
     closure_handoff = _job_closure_handoff(job)
@@ -9246,6 +9548,10 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         decision = "materials_ready"
         stop_reason = None
         recommended_action = "Use materials_prepare_handoff.material_options as job creation fields or resume_job overrides after duplicate/rule/confirmation gates are ready."
+    elif job.get("kind") == "ptcli.metadata_prepare" and status == "complete":
+        decision = "metadata_ready"
+        stop_reason = None
+        recommended_action = "Use metadata_prepare_handoff.material_options as metadata/material fields for materials_prepare, source_url_check_and_submit, or resume_job after duplicate/rule/confirmation gates are ready."
     elif duplicate_exists:
         decision = "stop"
         stop_reason = "target_duplicate_exists"
@@ -9301,6 +9607,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "qbit_handoff": qbit_handoff,
         "qbit_enforcement_summary": qbit_enforcement_summary,
         "materials_handoff": materials_handoff,
+        "metadata_prepare_handoff": metadata_prepare_handoff,
         "materials_prepare_handoff": materials_prepare_handoff,
         "target_upload_handoff": target_upload_handoff,
         "closure_handoff": closure_handoff,
@@ -10447,6 +10754,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     qbit_inject_request_schema = _qbit_inject_tool_request_schema()
     qbit_wait_request_schema = _qbit_wait_tool_request_schema()
     materials_prepare_request_schema = _materials_prepare_tool_request_schema()
+    metadata_prepare_request_schema = _metadata_prepare_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     summary_check_request_schema = _summary_check_tool_request_schema()
@@ -10682,6 +10990,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "safety": {"mutates_state": True, "writes_files": True, "may_contact_image_host": True, "live_upload": False, "requires_confirmation": [], "does_not_upload_to_tracker": True},
         },
         {
+            "name": "metadata_prepare",
+            "method": "POST",
+            "path": "/v1/metadata/prepare",
+            "description": "Prepare IMDb/TMDb/Douban/PTGen metadata material_options for retorrent jobs. This may contact source metadata APIs and PTGen, but never uploads to a tracker.",
+            "input_schema": metadata_prepare_request_schema,
+            "response_contract": _metadata_prepare_response_contract(),
+            "workflow_hints": {"resume_with": "pass metadata_prepare_handoff.material_options to resume_job overrides", "manual_job_with": "pass source_url_check_and_submit_request after duplicate/rule gates"},
+            "safety": {"mutates_state": True, "writes_files": False, "may_contact_source_tracker": True, "may_contact_tmdb": True, "may_contact_ptgen_or_douban": True, "live_upload": False, "requires_confirmation": [], "does_not_upload_to_tracker": True},
+        },
+        {
             "name": "materials_prepare_job",
             "method": "POST",
             "path": "/v1/jobs/materials/prepare",
@@ -10690,6 +11008,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": _job_response_contract(),
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "handoff_field": "materials_prepare_handoff"},
             "safety": {"mutates_state": True, "writes_files": True, "may_contact_image_host": True, "live_upload": False, "requires_confirmation": [], "does_not_upload_to_tracker": True},
+        },
+        {
+            "name": "metadata_prepare_job",
+            "method": "POST",
+            "path": "/v1/jobs/metadata/prepare",
+            "description": "Create an asynchronous metadata/PTGen preparation job. Poll get_job_status and read metadata_prepare_handoff.",
+            "input_schema": metadata_prepare_request_schema,
+            "response_contract": _job_response_contract(),
+            "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "handoff_field": "metadata_prepare_handoff"},
+            "safety": {"mutates_state": True, "writes_files": False, "may_contact_source_tracker": True, "may_contact_tmdb": True, "may_contact_ptgen_or_douban": True, "live_upload": False, "requires_confirmation": [], "does_not_upload_to_tracker": True},
         },
         {
             "name": "summary_check",
@@ -10725,7 +11053,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result and parsed summary-file payload when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "materials_prepare_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "summary_file", "summary", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "runtime", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -11148,6 +11476,56 @@ def _materials_prepare_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _metadata_prepare_tool_request_schema() -> dict[str, Any]:
+    properties = _materials_prepare_tool_request_schema()["properties"]
+    return {
+        "type": "object",
+        "required": [],
+        "properties": {
+            key: value
+            for key, value in properties.items()
+            if key
+            in {
+                "job_id",
+                "parent_job_id",
+                "source_url",
+                "source",
+                "source_tracker",
+                "target",
+                "target_tracker",
+                "target_trackers",
+                "accept_rules",
+                "confirm_upload",
+                "path",
+                "content_path",
+                "save_path",
+                "config",
+                "base_dir",
+                "dry_run",
+                "metadata_file",
+                "ptgen_description_file",
+                "imdb_id",
+                "tmdb_id",
+                "tmdb_type",
+                "douban_id",
+                "douban_url",
+                "qbit_category",
+                "qbit_tags",
+                "qbit_upload_limit",
+                "qbit_download_limit",
+                "uploaded_qbit_category",
+                "uploaded_qbit_tags",
+                "uploaded_qbit_upload_limit",
+                "uploaded_qbit_download_limit",
+            }
+        }
+        | {
+            "source_info": {"type": "object", "description": "Optional already-fetched source_info payload; avoids contacting the source tracker."},
+            "fetch_ptgen": {"type": "boolean", "description": "Fetch PTGen/Douban description using configured PTGen support when possible."},
+        },
+    }
+
+
 def _site_policy_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -11383,9 +11761,20 @@ def _materials_prepare_response_contract() -> dict[str, Any]:
     }
 
 
+def _metadata_prepare_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "mutates_filesystem", "mutates_network", "live_upload", "request", "source_reference", "source_info", "metadata_enrichment", "material_options", "material_evidence", "metadata_prepare_handoff", "recommended_request", "blockers", "next_actions", "safety"],
+        "metadata_enrichment_fields": ["status", "ready", "applied", "missing", "readiness", "field_evidence", "sources", "ptgen_evidence", "blockers"],
+        "material_option_fields": ["metadata_file", "ptgen_description_file", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url", "fetch_ptgen"],
+        "material_evidence_fields": ["metadata_fields", "ptgen_description", "metadata_file", "ptgen_description_file", "field_evidence", "ptgen_evidence"],
+        "metadata_prepare_handoff_fields": ["ready", "parent_job_id", "material_options", "accepted_override_keys", "recommended_tool", "recommended_endpoint", "recommended_request", "resume_request", "execute_request", "source_url_check_and_submit_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
+        "safety": ["does_not_upload_to_tracker", "may_contact_source_tracker", "may_contact_tmdb", "may_contact_ptgen_or_douban", "live_upload=false"],
+    }
+
+
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "materials_prepare_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -11402,6 +11791,7 @@ def _job_response_contract() -> dict[str, Any]:
         "resume_summary_fields": ["available", "allowed", "recommended", "status", "subcommand", "missing_confirmations", "recommended_input_keys", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "recommended_tool", "blockers", "next_actions"],
         "recommended_input_fields": ["key", "accepted_keys", "required", "reason", "stage", "resume_tool", "resume_endpoint_hint", "blocking_keys", "examples"],
         "materials_handoff_fields": ["ready", "can_prepare_upload_payload", "metadata", "materials", "target_preflight", "material_plan", "resume_request_template", "resume_handoff", "recommended_inputs", "blockers", "next_actions"],
+        "metadata_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "parent_job_id", "material_options", "material_evidence", "metadata_prepare_handoff", "resume_request", "execute_request", "source_url_check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
         "materials_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "parent_job_id", "material_options", "material_evidence", "resume_handoff", "resume_request", "execute_request", "source_url_check_and_submit_handoff", "source_url_check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
         "material_plan_fields": ["ready", "missing", "next_item", "items"],
         "material_plan_item_fields": ["key", "label", "ready", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "next_step", "resume_overrides"],
@@ -11454,7 +11844,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "materials_prepare_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_upload_handoff", "closure_handoff", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }
@@ -11611,6 +12001,8 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             "summary_check": f"{public_base_url}/v1/summary/check",
             "materials_prepare": f"{public_base_url}/v1/materials/prepare",
             "materials_prepare_job": f"{public_base_url}/v1/jobs/materials/prepare",
+            "metadata_prepare": f"{public_base_url}/v1/metadata/prepare",
+            "metadata_prepare_job": f"{public_base_url}/v1/jobs/metadata/prepare",
             "openapi": f"{public_base_url}/openapi.json",
             "tools": f"{public_base_url}/v1/tools",
             "manifest": f"{public_base_url}/.well-known/ptcli-agent.json",
@@ -11699,6 +12091,15 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "continue_when": "job_handoff.action!=wait and status not in queued,running",
                     "repeat_when": "job_handoff.action=wait and job_handoff.should_poll=true",
                     "stop_when": ["job_handoff.action=stop", "status=blocked", "status=failed", "status=cancelled"],
+                },
+                {
+                    "step": "prepare_metadata",
+                    "tool": "metadata_prepare_job",
+                    "request_from": "job_handoff.material_input_template or materials_handoff.resume_request_template plus parent job_id/source_url/target context",
+                    "read": ["job_id", "status", "metadata_prepare_handoff.ready", "metadata_prepare_handoff.material_options", "metadata_prepare_handoff.material_evidence", "metadata_prepare_handoff.next_step", "metadata_prepare_handoff.resume_request", "metadata_prepare_handoff.source_url_check_and_submit_request", "blockers"],
+                    "continue_when": "metadata_prepare_handoff.ready=true and material_options contains IMDb/TMDb/Douban or PTGen fields",
+                    "resume_with": "metadata_prepare_handoff.next_step; prefer resume_job when parent_job_id is known",
+                    "stop_when": ["metadata_prepare_handoff.blockers is not empty", "PTGen/Douban fetch failed", "metadata IDs still missing"],
                 },
                 {
                     "step": "prepare_materials",
@@ -11899,6 +12300,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "qbit_handoff": {"type": ["object", "null"]},
             "qbit_enforcement_summary": {"type": ["object", "null"]},
             "materials_handoff": {"type": ["object", "null"]},
+            "metadata_prepare_handoff": {"type": ["object", "null"]},
             "materials_prepare_handoff": {"type": ["object", "null"]},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},
@@ -11961,6 +12363,8 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "qbit_handoff": {"type": ["object", "null"]},
             "qbit_enforcement_summary": {"type": ["object", "null"]},
             "materials_handoff": {"type": ["object", "null"]},
+            "metadata_prepare_handoff": {"type": ["object", "null"]},
+            "materials_prepare_handoff": {"type": ["object", "null"]},
             "target_upload_handoff": {"type": ["object", "null"]},
             "closure_handoff": {"type": ["object", "null"]},
             "closure_summary": {"type": "object"},
@@ -12025,6 +12429,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     qbit_inject_request_schema = _qbit_inject_tool_request_schema()
     qbit_wait_request_schema = _qbit_wait_tool_request_schema()
     materials_prepare_request_schema = _materials_prepare_tool_request_schema()
+    metadata_prepare_request_schema = _metadata_prepare_tool_request_schema()
     summary_check_request_schema = _summary_check_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
@@ -12209,6 +12614,31 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "stages": {"type": "array", "items": {"type": "object"}},
             "material_options": {"type": "object"},
             "material_evidence": {"type": "object"},
+            "resume_handoff": {"type": "object"},
+            "recommended_request": {"type": ["object", "null"]},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+            "safety": {"type": "object"},
+        },
+    }
+    metadata_prepare_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "dry_run": {"type": "boolean"},
+            "mutates_state": {"type": "boolean"},
+            "mutates_filesystem": {"type": "boolean"},
+            "mutates_network": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "request": {"type": "object"},
+            "source_reference": {"type": ["object", "null"]},
+            "source_info": {"type": "object"},
+            "metadata_enrichment": {"type": "object"},
+            "material_options": {"type": "object"},
+            "material_evidence": {"type": "object"},
+            "metadata_prepare_handoff": {"type": "object"},
             "resume_handoff": {"type": "object"},
             "recommended_request": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
@@ -12572,6 +13002,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "responses": {"200": {"description": "Prepare local retorrent upload materials and return resume-ready material_options.", "content": {"application/json": {"schema": materials_prepare_response_schema}}}},
                 },
             },
+            "/v1/metadata/prepare": {
+                "post": {
+                    "operationId": "preparePtcliMetadata",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": metadata_prepare_request_schema}}},
+                    "responses": {"200": {"description": "Prepare IMDb/TMDb/Douban/PTGen metadata and return resume-ready material_options.", "content": {"application/json": {"schema": metadata_prepare_response_schema}}}},
+                },
+            },
             "/v1/site-policies": {
                 "get": {
                     "operationId": "getPtcliSitePolicies",
@@ -12678,6 +13116,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": materials_prepare_request_schema}}},
                     "responses": {"200": {"description": "Queued local-material preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                }
+            },
+            "/v1/jobs/metadata/prepare": {
+                "post": {
+                    "operationId": "createPtcliMetadataPrepareJob",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": metadata_prepare_request_schema}}},
+                    "responses": {"200": {"description": "Queued metadata/PTGen preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/candidates/daily": {

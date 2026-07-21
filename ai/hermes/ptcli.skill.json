@@ -24,6 +24,8 @@
     "summary_check": "http://127.0.0.1:8080/v1/summary/check",
     "materials_prepare": "http://127.0.0.1:8080/v1/materials/prepare",
     "materials_prepare_job": "http://127.0.0.1:8080/v1/jobs/materials/prepare",
+    "metadata_prepare": "http://127.0.0.1:8080/v1/metadata/prepare",
+    "metadata_prepare_job": "http://127.0.0.1:8080/v1/jobs/metadata/prepare",
     "openapi": "http://127.0.0.1:8080/openapi.json",
     "tools": "http://127.0.0.1:8080/v1/tools",
     "manifest": "http://127.0.0.1:8080/.well-known/ptcli-agent.json"
@@ -234,6 +236,29 @@
             "status=blocked",
             "status=failed",
             "status=cancelled"
+          ]
+        },
+        {
+          "step": "prepare_metadata",
+          "tool": "metadata_prepare_job",
+          "request_from": "job_handoff.material_input_template or materials_handoff.resume_request_template plus parent job_id/source_url/target context",
+          "read": [
+            "job_id",
+            "status",
+            "metadata_prepare_handoff.ready",
+            "metadata_prepare_handoff.material_options",
+            "metadata_prepare_handoff.material_evidence",
+            "metadata_prepare_handoff.next_step",
+            "metadata_prepare_handoff.resume_request",
+            "metadata_prepare_handoff.source_url_check_and_submit_request",
+            "blockers"
+          ],
+          "continue_when": "metadata_prepare_handoff.ready=true and material_options contains IMDb/TMDb/Douban or PTGen fields",
+          "resume_with": "metadata_prepare_handoff.next_step; prefer resume_job when parent_job_id is known",
+          "stop_when": [
+            "metadata_prepare_handoff.blockers is not empty",
+            "PTGen/Douban fetch failed",
+            "metadata IDs still missing"
           ]
         },
         {
@@ -1602,6 +1627,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -1857,6 +1883,27 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -2551,6 +2598,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -2806,6 +2854,27 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -3367,6 +3436,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -3622,6 +3692,27 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -4183,6 +4274,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -4438,6 +4530,27 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -5003,6 +5116,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -5258,6 +5372,27 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -6218,6 +6353,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -6473,6 +6609,27 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -7384,6 +7541,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -7639,6 +7797,27 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -9329,6 +9508,242 @@
       }
     },
     {
+      "name": "metadata_prepare",
+      "method": "POST",
+      "path": "/v1/metadata/prepare",
+      "description": "Prepare IMDb/TMDb/Douban/PTGen metadata material_options for retorrent jobs. This may contact source metadata APIs and PTGen, but never uploads to a tracker.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Optional existing retorrent job id to resume with generated material_options."
+          },
+          "parent_job_id": {
+            "type": "string",
+            "description": "Alias for job_id when preparing materials for a blocked parent retorrent job."
+          },
+          "source_url": {
+            "type": "string",
+            "description": "Optional source tracker details URL; when target is also supplied the handoff includes a source_url_check_and_submit request."
+          },
+          "source": {
+            "type": "string",
+            "description": "Alias for source_url in materials handoff context."
+          },
+          "source_tracker": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional target tracker(s); used with source_url to build a checked retorrent submit request."
+          },
+          "target_tracker": {
+            "type": "string"
+          },
+          "target_trackers": {
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Copied into generated retorrent submit requests; still required for live upload gates."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Copied into generated retorrent submit requests; live upload remains blocked without explicit true."
+          },
+          "save_path": {
+            "type": "string"
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "qbit_download_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "description": "Local content path visible to the ptcli service/container. Required for generation actions."
+          },
+          "content_path": {
+            "type": "string",
+            "description": "Alias for path."
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py; required when upload_screenshots uses configured image hosts."
+          },
+          "base_dir": {
+            "type": "string"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Preview actions and resume handoff without writing files or contacting image hosts."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          },
+          "source_info": {
+            "type": "object",
+            "description": "Optional already-fetched source_info payload; avoids contacting the source tracker."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description using configured PTGen support when possible."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "dry_run",
+          "mutates_state",
+          "mutates_filesystem",
+          "mutates_network",
+          "live_upload",
+          "request",
+          "source_reference",
+          "source_info",
+          "metadata_enrichment",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "recommended_request",
+          "blockers",
+          "next_actions",
+          "safety"
+        ],
+        "metadata_enrichment_fields": [
+          "status",
+          "ready",
+          "applied",
+          "missing",
+          "readiness",
+          "field_evidence",
+          "sources",
+          "ptgen_evidence",
+          "blockers"
+        ],
+        "material_option_fields": [
+          "metadata_file",
+          "ptgen_description_file",
+          "imdb_id",
+          "tmdb_id",
+          "tmdb_type",
+          "douban_id",
+          "douban_url",
+          "fetch_ptgen"
+        ],
+        "material_evidence_fields": [
+          "metadata_fields",
+          "ptgen_description",
+          "metadata_file",
+          "ptgen_description_file",
+          "field_evidence",
+          "ptgen_evidence"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "parent_job_id",
+          "material_options",
+          "accepted_override_keys",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "safety": [
+          "does_not_upload_to_tracker",
+          "may_contact_source_tracker",
+          "may_contact_tmdb",
+          "may_contact_ptgen_or_douban",
+          "live_upload=false"
+        ]
+      },
+      "workflow_hints": {
+        "resume_with": "pass metadata_prepare_handoff.material_options to resume_job overrides",
+        "manual_job_with": "pass source_url_check_and_submit_request after duplicate/rule gates"
+      },
+      "safety": {
+        "mutates_state": true,
+        "writes_files": false,
+        "may_contact_source_tracker": true,
+        "may_contact_tmdb": true,
+        "may_contact_ptgen_or_douban": true,
+        "live_upload": false,
+        "requires_confirmation": [],
+        "does_not_upload_to_tracker": true
+      }
+    },
+    {
       "name": "materials_prepare_job",
       "method": "POST",
       "path": "/v1/jobs/materials/prepare",
@@ -9553,6 +9968,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -9808,6 +10224,27 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -10160,219 +10597,147 @@
       }
     },
     {
-      "name": "summary_check",
+      "name": "metadata_prepare_job",
       "method": "POST",
-      "path": "/v1/summary/check",
-      "description": "Read a ptcli summary JSON and return the same automation verdict as summary-check --json, including doctor_result_handoff for seedbox live validation. This endpoint is read-only and never runs the next command.",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "summary_file"
-        ],
-        "properties": {
-          "summary_file": {
-            "type": "string",
-            "description": "Path to a ptcli summary JSON, e.g. ptcli-doctor-summary.json or ptcli-run-summary.json."
-          },
-          "path": {
-            "type": "string",
-            "description": "Alias for summary_file."
-          }
-        }
-      },
-      "response_contract": {
-        "required_fields": [
-          "status",
-          "ok",
-          "summary_file",
-          "summary_kind",
-          "schema_version_ok",
-          "kind_supported",
-          "automation_action",
-          "automation_handoff",
-          "readiness_summary",
-          "doctor_result_handoff",
-          "service",
-          "blockers",
-          "next_actions"
-        ],
-        "status_values": [
-          "ok",
-          "blocked"
-        ],
-        "automation_handoff_fields": [
-          "json",
-          "print_next_command",
-          "print_next_argv",
-          "print_shell",
-          "run_next_command"
-        ],
-        "doctor_result_handoff_fields": [
-          "ready",
-          "live_safe_to_attempt",
-          "summary_file",
-          "summary_check",
-          "next_step",
-          "after_safe",
-          "blockers",
-          "next_actions"
-        ],
-        "readiness_summary_fields": [
-          "ready",
-          "flow_ready",
-          "source_mode",
-          "target_mode",
-          "rules_ready",
-          "target_upload_ready",
-          "uploaded_seeding_ready",
-          "daily_candidate_targets",
-          "blockers",
-          "next_actions"
-        ],
-        "service_fields": [
-          "read_only",
-          "mutates_state",
-          "endpoint",
-          "request"
-        ],
-        "safety": [
-          "read_only",
-          "does_not_run_next_command",
-          "does_not_contact_trackers",
-          "does_not_contact_qbittorrent",
-          "does_not_upload"
-        ]
-      },
-      "workflow_hints": {
-        "after_doctor": "read doctor_result_handoff.live_safe_to_attempt before source_url_check_and_submit",
-        "resume_with": "use get_job_status.recovery_handoff for job recovery"
-      },
-      "safety": {
-        "mutates_state": false,
-        "live_upload": false,
-        "requires_confirmation": [],
-        "does_not_run_next_command": true
-      }
-    },
-    {
-      "name": "list_jobs",
-      "method": "GET",
-      "path": "/v1/jobs",
-      "description": "List recent ptcli jobs with short AI-readable status, blockers, resume plan, lineage, and status/summary/resume endpoints. This endpoint never runs work.",
+      "path": "/v1/jobs/metadata/prepare",
+      "description": "Create an asynchronous metadata/PTGen preparation job. Poll get_job_status and read metadata_prepare_handoff.",
       "input_schema": {
         "type": "object",
         "required": [],
         "properties": {
-          "status": {
-            "type": "string",
-            "enum": [
-              "queued",
-              "running",
-              "blocked",
-              "failed",
-              "complete",
-              "cancelled"
-            ]
-          },
-          "kind": {
-            "type": "string"
-          },
-          "limit": {
-            "type": "integer",
-            "default": 20,
-            "minimum": 1,
-            "maximum": 100
-          }
-        }
-      },
-      "response_contract": {
-        "required_fields": [
-          "status",
-          "ok",
-          "count",
-          "total",
-          "limit",
-          "filters",
-          "status_counts",
-          "queue",
-          "jobs",
-          "next_actions"
-        ],
-        "job_fields": [
-          "job_id",
-          "kind",
-          "status",
-          "blockers",
-          "next_actions",
-          "interruption",
-          "cancellation",
-          "runtime",
-          "summary_file",
-          "candidate_submission",
-          "check_submission",
-          "candidate_batch_handoff",
-          "candidate_submission_handoff",
-          "candidate_submission_summary",
-          "source_reference",
-          "duplicate_check",
-          "submit_if_clear_handoff",
-          "policy_handoff",
-          "qbit_plan",
-          "qbit_limit_audit",
-          "qbit_handoff",
-          "qbit_enforcement_summary",
-          "materials_handoff",
-          "materials_prepare_handoff",
-          "target_upload_handoff",
-          "closure_handoff",
-          "manual_retorrent_handoff",
-          "agent_decision",
-          "resume_plan",
-          "resume_requirements",
-          "resume_execution_handoff",
-          "recovery_handoff",
-          "resume_lineage",
-          "job_lineage",
-          "resume_summary",
-          "material_resolution",
-          "job_handoff",
-          "status_endpoint",
-          "summary_endpoint",
-          "resume_endpoint"
-        ],
-        "filters": [
-          "status",
-          "kind",
-          "limit"
-        ],
-        "queue_fields": [
-          "max_concurrent_jobs",
-          "running_count",
-          "queued_count",
-          "available_slots",
-          "backlog_count"
-        ]
-      },
-      "safety": {
-        "mutates_state": false,
-        "live_upload": false,
-        "requires_confirmation": []
-      }
-    },
-    {
-      "name": "get_job_status",
-      "method": "GET",
-      "path": "/v1/jobs/{job_id}",
-      "description": "Return short AI-readable job status, blockers, next actions, duplicate check, summary file, and resume state.",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "job_id"
-        ],
-        "properties": {
           "job_id": {
             "type": "string",
-            "description": "32-character ptcli job id returned by a job creation endpoint."
+            "description": "Optional existing retorrent job id to resume with generated material_options."
+          },
+          "parent_job_id": {
+            "type": "string",
+            "description": "Alias for job_id when preparing materials for a blocked parent retorrent job."
+          },
+          "source_url": {
+            "type": "string",
+            "description": "Optional source tracker details URL; when target is also supplied the handoff includes a source_url_check_and_submit request."
+          },
+          "source": {
+            "type": "string",
+            "description": "Alias for source_url in materials handoff context."
+          },
+          "source_tracker": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional target tracker(s); used with source_url to build a checked retorrent submit request."
+          },
+          "target_tracker": {
+            "type": "string"
+          },
+          "target_trackers": {
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Copied into generated retorrent submit requests; still required for live upload gates."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Copied into generated retorrent submit requests; live upload remains blocked without explicit true."
+          },
+          "save_path": {
+            "type": "string"
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "qbit_download_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "description": "Local content path visible to the ptcli service/container. Required for generation actions."
+          },
+          "content_path": {
+            "type": "string",
+            "description": "Alias for path."
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py; required when upload_screenshots uses configured image hosts."
+          },
+          "base_dir": {
+            "type": "string"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Preview actions and resume handoff without writing files or contacting image hosts."
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          },
+          "source_info": {
+            "type": "object",
+            "description": "Optional already-fetched source_info payload; avoids contacting the source tracker."
+          },
+          "fetch_ptgen": {
+            "type": "boolean",
+            "description": "Fetch PTGen/Douban description using configured PTGen support when possible."
           }
         }
       },
@@ -10403,6 +10768,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -10658,6 +11024,902 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "materials_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "material_plan_fields": [
+          "ready",
+          "missing",
+          "next_item",
+          "items"
+        ],
+        "material_plan_item_fields": [
+          "key",
+          "label",
+          "ready",
+          "stage",
+          "recommended_input_key",
+          "accepted_keys",
+          "blocking_keys",
+          "next_step",
+          "resume_overrides"
+        ],
+        "materials_resume_handoff_fields": [
+          "ready",
+          "resume_recommended",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "next_item",
+          "missing",
+          "accepted_override_keys",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "staged_requests",
+          "continue_when",
+          "stop_when"
+        ],
+        "material_resolution_fields": [
+          "ready_before_resume",
+          "recommended_inputs",
+          "applied_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "blockers_before_resume"
+        ],
+        "qbit_handoff_fields": [
+          "ready",
+          "source",
+          "uploaded",
+          "enforcement_handoff",
+          "policy_defaults",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_handoff_fields": [
+          "ready",
+          "status",
+          "roles",
+          "pending_roles",
+          "mismatch_roles",
+          "blockers",
+          "next_step",
+          "continue_when",
+          "stop_when"
+        ],
+        "qbit_enforcement_summary_fields": [
+          "ready",
+          "status",
+          "client",
+          "expected_role_count",
+          "applied_role_count",
+          "pending_role_count",
+          "mismatch_role_count",
+          "expected_roles",
+          "applied_roles",
+          "pending_roles",
+          "mismatch_roles",
+          "roles",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "blockers",
+          "next_actions"
+        ],
+        "qbit_enforcement_role_fields": [
+          "role",
+          "ready",
+          "status",
+          "category",
+          "tags",
+          "expected_limits",
+          "observed_limits",
+          "upload_limit_source",
+          "download_limit_source",
+          "evidence_present",
+          "requires_injection_evidence",
+          "requires_rate_limit_repair",
+          "blockers",
+          "requested_options"
+        ],
+        "target_upload_handoff_fields": [
+          "action",
+          "ready_for_live_upload",
+          "uploaded_seeding_ready",
+          "preflight",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "blockers",
+          "next_actions"
+        ],
+        "policy_handoff_fields": [
+          "ready",
+          "accepted_rules",
+          "site_policy_ready",
+          "source",
+          "targets",
+          "missing_policy_fields",
+          "disabled_automation",
+          "qbit_defaults",
+          "qbit_plan",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "blockers",
+          "next_actions"
+        ],
+        "manual_retorrent_handoff_fields": [
+          "action",
+          "live_ready",
+          "live_checklist",
+          "duplicate_clear",
+          "missing_confirmations",
+          "policy_coverage_ready",
+          "can_attempt_live",
+          "can_resume",
+          "resume_plan",
+          "blockers",
+          "next_actions"
+        ],
+        "candidate_batch_handoff_fields": [
+          "ready",
+          "candidate_job_id",
+          "status",
+          "submit_count",
+          "submit_tool",
+          "submit_endpoint",
+          "submit_endpoint_template",
+          "required_overrides",
+          "allowed_selector_fields",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "items",
+          "blockers",
+          "next_actions"
+        ],
+        "candidate_batch_item_fields": [
+          "candidate_job_id",
+          "submit_tool",
+          "submit_endpoint",
+          "selector",
+          "request_template",
+          "identity_inherited_from_candidate",
+          "policy_execution",
+          "required_overrides",
+          "allowed_overrides",
+          "after_submit"
+        ],
+        "candidate_submission_handoff_fields": [
+          "candidate_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides",
+          "policy_execution_handoff",
+          "execution_state",
+          "execution_handoff",
+          "retorrent_job_id",
+          "manual_retorrent_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "parent_status_endpoint",
+          "parent_summary_endpoint",
+          "next_actions"
+        ],
+        "candidate_submission_summary_fields": [
+          "candidate_job_id",
+          "retorrent_job_id",
+          "candidate_rank",
+          "candidate_source_id",
+          "submitted_override_keys",
+          "material_option_keys",
+          "qbit_override_keys",
+          "policy_execution_handoff",
+          "policy_execution_ready",
+          "execution_state",
+          "execution_handoff",
+          "manual_action",
+          "closure_action",
+          "closure_complete",
+          "next_step",
+          "recommended_tool",
+          "blockers",
+          "next_actions"
+        ],
+        "agent_candidate_submission_fields": [
+          "candidate_submission",
+          "candidate_submission_summary",
+          "candidate_submission_handoff",
+          "candidate_submission_execution",
+          "material_input_template"
+        ],
+        "candidate_submission_execution_handoff_fields": [
+          "state",
+          "reason",
+          "status",
+          "ready_for_live",
+          "should_poll",
+          "should_resume",
+          "should_stop",
+          "manual_action",
+          "closure_action",
+          "policy_execution_ready",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "material_input_template",
+          "continue_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "candidate_submission_material_input_template_fields": [
+          "ready",
+          "recommended_input_keys",
+          "recommended_inputs",
+          "missing",
+          "next_item",
+          "accepted_override_keys",
+          "resume_request_template",
+          "dry_run_request",
+          "execute_request",
+          "staged_requests",
+          "examples_by_key",
+          "continue_when",
+          "stop_when"
+        ],
+        "check_submission_fields": [
+          "check_job_id",
+          "check_status",
+          "check_kind",
+          "check_summary_file",
+          "duplicate_check",
+          "inherited_request",
+          "submitted_overrides",
+          "material_options",
+          "qbit_overrides"
+        ],
+        "submit_if_clear_handoff_fields": [
+          "ready",
+          "duplicate_clear",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "requires_before_call",
+          "next_step",
+          "blockers",
+          "next_actions"
+        ],
+        "closure_handoff_fields": [
+          "action",
+          "complete",
+          "closure_checklist",
+          "source",
+          "target",
+          "evidence",
+          "duplicate_check",
+          "target_upload_handoff",
+          "qbit_handoff",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "blockers",
+          "next_actions"
+        ],
+        "closure_summary_fields": [
+          "complete",
+          "ready_for_report",
+          "action",
+          "gates",
+          "source",
+          "target",
+          "duplicate_check",
+          "materials",
+          "policy",
+          "qbit",
+          "evidence",
+          "next_step",
+          "recommended_tool",
+          "blockers",
+          "next_actions"
+        ]
+      },
+      "workflow_hints": {
+        "poll_with": "get_job_status",
+        "summary_with": "get_job_summary",
+        "handoff_field": "metadata_prepare_handoff"
+      },
+      "safety": {
+        "mutates_state": true,
+        "writes_files": false,
+        "may_contact_source_tracker": true,
+        "may_contact_tmdb": true,
+        "may_contact_ptgen_or_douban": true,
+        "live_upload": false,
+        "requires_confirmation": [],
+        "does_not_upload_to_tracker": true
+      }
+    },
+    {
+      "name": "summary_check",
+      "method": "POST",
+      "path": "/v1/summary/check",
+      "description": "Read a ptcli summary JSON and return the same automation verdict as summary-check --json, including doctor_result_handoff for seedbox live validation. This endpoint is read-only and never runs the next command.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "summary_file"
+        ],
+        "properties": {
+          "summary_file": {
+            "type": "string",
+            "description": "Path to a ptcli summary JSON, e.g. ptcli-doctor-summary.json or ptcli-run-summary.json."
+          },
+          "path": {
+            "type": "string",
+            "description": "Alias for summary_file."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "summary_file",
+          "summary_kind",
+          "schema_version_ok",
+          "kind_supported",
+          "automation_action",
+          "automation_handoff",
+          "readiness_summary",
+          "doctor_result_handoff",
+          "service",
+          "blockers",
+          "next_actions"
+        ],
+        "status_values": [
+          "ok",
+          "blocked"
+        ],
+        "automation_handoff_fields": [
+          "json",
+          "print_next_command",
+          "print_next_argv",
+          "print_shell",
+          "run_next_command"
+        ],
+        "doctor_result_handoff_fields": [
+          "ready",
+          "live_safe_to_attempt",
+          "summary_file",
+          "summary_check",
+          "next_step",
+          "after_safe",
+          "blockers",
+          "next_actions"
+        ],
+        "readiness_summary_fields": [
+          "ready",
+          "flow_ready",
+          "source_mode",
+          "target_mode",
+          "rules_ready",
+          "target_upload_ready",
+          "uploaded_seeding_ready",
+          "daily_candidate_targets",
+          "blockers",
+          "next_actions"
+        ],
+        "service_fields": [
+          "read_only",
+          "mutates_state",
+          "endpoint",
+          "request"
+        ],
+        "safety": [
+          "read_only",
+          "does_not_run_next_command",
+          "does_not_contact_trackers",
+          "does_not_contact_qbittorrent",
+          "does_not_upload"
+        ]
+      },
+      "workflow_hints": {
+        "after_doctor": "read doctor_result_handoff.live_safe_to_attempt before source_url_check_and_submit",
+        "resume_with": "use get_job_status.recovery_handoff for job recovery"
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": [],
+        "does_not_run_next_command": true
+      }
+    },
+    {
+      "name": "list_jobs",
+      "method": "GET",
+      "path": "/v1/jobs",
+      "description": "List recent ptcli jobs with short AI-readable status, blockers, resume plan, lineage, and status/summary/resume endpoints. This endpoint never runs work.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "blocked",
+              "failed",
+              "complete",
+              "cancelled"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "count",
+          "total",
+          "limit",
+          "filters",
+          "status_counts",
+          "queue",
+          "jobs",
+          "next_actions"
+        ],
+        "job_fields": [
+          "job_id",
+          "kind",
+          "status",
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "summary_file",
+          "candidate_submission",
+          "check_submission",
+          "candidate_batch_handoff",
+          "candidate_submission_handoff",
+          "candidate_submission_summary",
+          "source_reference",
+          "duplicate_check",
+          "submit_if_clear_handoff",
+          "policy_handoff",
+          "qbit_plan",
+          "qbit_limit_audit",
+          "qbit_handoff",
+          "qbit_enforcement_summary",
+          "materials_handoff",
+          "metadata_prepare_handoff",
+          "materials_prepare_handoff",
+          "target_upload_handoff",
+          "closure_handoff",
+          "manual_retorrent_handoff",
+          "agent_decision",
+          "resume_plan",
+          "resume_requirements",
+          "resume_execution_handoff",
+          "recovery_handoff",
+          "resume_lineage",
+          "job_lineage",
+          "resume_summary",
+          "material_resolution",
+          "job_handoff",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint"
+        ],
+        "filters": [
+          "status",
+          "kind",
+          "limit"
+        ],
+        "queue_fields": [
+          "max_concurrent_jobs",
+          "running_count",
+          "queued_count",
+          "available_slots",
+          "backlog_count"
+        ]
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": []
+      }
+    },
+    {
+      "name": "get_job_status",
+      "method": "GET",
+      "path": "/v1/jobs/{job_id}",
+      "description": "Return short AI-readable job status, blockers, next actions, duplicate check, summary file, and resume state.",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "32-character ptcli job id returned by a job creation endpoint."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "job_id",
+          "kind",
+          "request",
+          "command_argv",
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "summary_file",
+          "resume_state",
+          "agent_summary",
+          "agent_decision",
+          "candidate_digest",
+          "submit_if_clear_handoff",
+          "policy_coverage",
+          "policy_handoff",
+          "policy_qbit_defaults",
+          "qbit_plan",
+          "qbit_limit_audit",
+          "qbit_handoff",
+          "qbit_enforcement_summary",
+          "materials_handoff",
+          "metadata_prepare_handoff",
+          "materials_prepare_handoff",
+          "target_upload_handoff",
+          "closure_handoff",
+          "closure_summary",
+          "manual_retorrent_handoff",
+          "candidate_batch_handoff",
+          "candidate_submission_handoff",
+          "candidate_submission_summary",
+          "resume_plan",
+          "resume_requirements",
+          "resume_execution_handoff",
+          "recovery_handoff",
+          "resume_lineage",
+          "job_lineage",
+          "resume_context",
+          "resume_audit",
+          "resume_summary",
+          "material_resolution",
+          "candidate_submission",
+          "check_submission",
+          "source_reference",
+          "workflow_context",
+          "job_handoff"
+        ],
+        "status_values": [
+          "queued",
+          "running",
+          "blocked",
+          "failed",
+          "complete",
+          "cancelled"
+        ],
+        "blocked_fields": [
+          "blockers",
+          "next_actions",
+          "interruption",
+          "cancellation",
+          "runtime",
+          "resume_state",
+          "resume_plan",
+          "resume_requirements",
+          "next_command_argv",
+          "agent_decision"
+        ],
+        "running_fields": [
+          "runtime.should_poll",
+          "runtime.poll_after_seconds",
+          "runtime.status_endpoint",
+          "agent_decision.should_poll"
+        ],
+        "cancel_fields": [
+          "cancellation",
+          "agent_decision.stop_reason",
+          "runtime.terminal"
+        ],
+        "job_handoff_fields": [
+          "action",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "resume_execution_handoff",
+          "candidate_submission_execution",
+          "material_input_template",
+          "continue_when",
+          "stop_when",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "should_poll",
+          "can_resume",
+          "resume_recommended",
+          "can_attempt_live",
+          "blockers",
+          "next_actions"
+        ],
+        "recovery_handoff_fields": [
+          "phase",
+          "action",
+          "reason",
+          "ready",
+          "should_poll",
+          "should_resume",
+          "resume_preview_required",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "dry_run_request",
+          "execute_request",
+          "status_endpoint",
+          "summary_endpoint",
+          "resume_endpoint",
+          "poll_after_seconds",
+          "gates",
+          "handoff_sources",
+          "read_fields",
+          "continue_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "request_fields": [
+          "policy_coverage",
+          "policy_qbit_defaults",
+          "qbit_plan",
+          "material_options",
+          "qbit_upload_limit",
+          "qbit_download_limit",
+          "uploaded_qbit_upload_limit",
+          "uploaded_qbit_download_limit",
+          "qbit_category",
+          "qbit_tags",
+          "uploaded_qbit_category",
+          "uploaded_qbit_tags"
+        ],
+        "material_option_fields": [
+          "metadata_file",
+          "ptgen_description_file",
+          "mediainfo_file",
+          "bdinfo_file",
+          "image_host_file",
+          "screenshot_files",
+          "enrich_metadata",
+          "fetch_ptgen",
+          "generate_mediainfo",
+          "generate_bdinfo",
+          "generate_screenshots",
+          "upload_screenshots"
+        ],
+        "resume_requirement_fields": [
+          "can_call_resume",
+          "resume_recommended",
+          "subcommand",
+          "missing_confirmations",
+          "required_overrides",
+          "suggested_overrides",
+          "request_template",
+          "dry_run_request",
+          "execute_request",
+          "recommended_inputs",
+          "allowed_overrides",
+          "current_flags"
+        ],
+        "resume_execution_handoff_fields": [
+          "ready",
+          "status",
+          "subcommand",
+          "endpoint",
+          "method",
+          "preview_required",
+          "dry_run_request",
+          "execute_request",
+          "recommended_request",
+          "allowed_overrides",
+          "required_overrides",
+          "suggested_overrides",
+          "recommended_inputs",
+          "unresolved_recommended_inputs",
+          "safety_gates",
+          "continue_when",
+          "execute_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "resume_preview_fields": [
+          "dry_run",
+          "mutates_state",
+          "live_upload",
+          "command_argv",
+          "original_next_command_argv",
+          "applied_overrides",
+          "ignored_overrides",
+          "material_resolution",
+          "resume_context",
+          "resume_lineage",
+          "resume_plan",
+          "resume_requirements",
+          "agent_decision"
+        ],
+        "resume_audit_fields": [
+          "is_resume_job",
+          "parent_job_id",
+          "parent_status",
+          "parent_kind",
+          "child_status",
+          "resume_available",
+          "resume_allowed",
+          "resume_recommended",
+          "next_subcommand",
+          "next_command_argv",
+          "applied_override_keys",
+          "ignored_override_keys",
+          "covered_recommended_inputs",
+          "unresolved_recommended_inputs",
+          "dry_run_request",
+          "execute_request",
+          "next_step",
+          "next_actions"
+        ],
+        "job_lineage_fields": [
+          "job_id",
+          "parent_job_id",
+          "root_job_id",
+          "depth",
+          "is_resume_job",
+          "chain",
+          "child_count",
+          "children",
+          "latest_child",
+          "has_active_child",
+          "terminal_child_count",
+          "next_actions"
+        ],
+        "resume_summary_fields": [
+          "available",
+          "allowed",
+          "recommended",
+          "status",
+          "subcommand",
+          "missing_confirmations",
+          "recommended_input_keys",
+          "unresolved_recommended_inputs",
+          "dry_run_request",
+          "execute_request",
+          "next_step",
+          "recommended_tool",
+          "blockers",
+          "next_actions"
+        ],
+        "recommended_input_fields": [
+          "key",
+          "accepted_keys",
+          "required",
+          "reason",
+          "stage",
+          "resume_tool",
+          "resume_endpoint_hint",
+          "blocking_keys",
+          "examples"
+        ],
+        "materials_handoff_fields": [
+          "ready",
+          "can_prepare_upload_payload",
+          "metadata",
+          "materials",
+          "target_preflight",
+          "material_plan",
+          "resume_request_template",
+          "resume_handoff",
+          "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -11037,6 +12299,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -11311,6 +12574,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -11566,6 +12830,27 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -11964,6 +13249,7 @@
           "qbit_handoff",
           "qbit_enforcement_summary",
           "materials_handoff",
+          "metadata_prepare_handoff",
           "materials_prepare_handoff",
           "target_upload_handoff",
           "closure_handoff",
@@ -12219,6 +13505,27 @@
           "resume_request_template",
           "resume_handoff",
           "recommended_inputs",
+          "blockers",
+          "next_actions"
+        ],
+        "metadata_prepare_handoff_fields": [
+          "ready",
+          "job_id",
+          "status",
+          "dry_run",
+          "parent_job_id",
+          "material_options",
+          "material_evidence",
+          "metadata_prepare_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_request",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "next_step",
+          "continue_when",
+          "stop_when",
           "blockers",
           "next_actions"
         ],
@@ -13318,7 +14625,7 @@
       }
     }
   ],
-  "tool_count": 33,
+  "tool_count": 35,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",
