@@ -7381,6 +7381,17 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
     candidate_material_execute_request = _job_handoff_candidate_material_request(candidate_execution, "execute_request")
     dry_run_request = candidate_material_dry_run_request or (resume_requirements.get("dry_run_request") if isinstance(resume_requirements.get("dry_run_request"), dict) else None)
     execute_request = candidate_material_execute_request or (resume_requirements.get("execute_request") if isinstance(resume_requirements.get("execute_request"), dict) else None)
+    recommended_call = _job_handoff_recommended_call(
+        recommended_tool,
+        recommended_endpoint,
+        recommended_method,
+        recommended_request,
+        dry_run_request,
+        execute_request,
+        action,
+        status,
+        stop_when,
+    )
 
     return {
         "kind": "ptcli.job_handoff",
@@ -7393,6 +7404,7 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
         "recommended_endpoint": recommended_endpoint,
         "recommended_method": recommended_method,
         "recommended_request": recommended_request,
+        "recommended_call": recommended_call,
         "continue_when": continue_when,
         "stop_when": stop_when,
         "status_endpoint": runtime.get("status_endpoint"),
@@ -7415,6 +7427,55 @@ def _job_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> 
         "agent_decision": agent_decision,
         "blockers": _string_list(job.get("blockers")),
         "next_actions": _job_handoff_next_actions(status, runtime, resume_plan, recommended_tool, job_id, _string_list(job.get("next_actions"))),
+    }
+
+
+def _job_handoff_recommended_call(
+    tool: Any,
+    endpoint: Any,
+    method: Any,
+    request: Any,
+    dry_run_request: dict[str, Any] | None,
+    execute_request: dict[str, Any] | None,
+    action: str,
+    status: str,
+    stop_when: list[str],
+) -> dict[str, Any]:
+    requires_user_review = action not in {"wait", "done", "stop"} and bool(dry_run_request or execute_request or action in {"resume", "prepare_materials", "target_upload_closure"})
+    if not tool or not endpoint:
+        return {
+            "ready": False,
+            "tool": None,
+            "endpoint": None,
+            "method": None,
+            "request": None,
+            "action": action,
+            "status": status,
+            "dry_run_request": dry_run_request,
+            "execute_request": execute_request,
+            "requires_user_review": requires_user_review,
+            "stop_when": stop_when,
+        }
+    method_value = str(method or ("GET" if str(endpoint).endswith("/summary") or action == "wait" else "POST"))
+    request_value = request if isinstance(request, dict) else None
+    return {
+        "ready": True,
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": method_value,
+        "request": request_value,
+        "action": action,
+        "status": status,
+        "dry_run_request": dry_run_request,
+        "execute_request": execute_request,
+        "requires_user_review": requires_user_review,
+        "safety": {
+            "live_upload_requires_confirm_upload": True,
+            "rules_must_be_accepted": True,
+            "use_dry_run_first": bool(dry_run_request),
+            "do_not_call_when": stop_when,
+        },
+        "stop_when": stop_when,
     }
 
 
@@ -13596,7 +13657,8 @@ def _job_response_contract() -> dict[str, Any]:
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
-        "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
+        "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
+        "recommended_call_fields": ["ready", "tool", "endpoint", "method", "request", "action", "status", "dry_run_request", "execute_request", "requires_user_review", "safety", "stop_when"],
         "recovery_handoff_fields": ["phase", "action", "reason", "ready", "should_poll", "should_resume", "resume_preview_required", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "gates", "handoff_sources", "read_fields", "continue_when", "stop_when", "blockers", "next_actions"],
         "request_fields": ["policy_coverage", "policy_qbit_defaults", "qbit_plan", "material_options", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "screenshot_files", "enrich_metadata", "fetch_ptgen", "generate_mediainfo", "generate_bdinfo", "generate_screenshots", "upload_screenshots"],

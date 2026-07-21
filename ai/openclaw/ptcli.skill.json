@@ -1879,6 +1879,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -1897,6 +1898,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -2892,6 +2907,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -2910,6 +2926,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -3772,6 +3802,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -3790,6 +3821,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -4652,6 +4697,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -4670,6 +4716,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -5536,6 +5596,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -5554,6 +5615,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -6866,6 +6941,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -6884,6 +6960,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -8147,6 +8237,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -8165,6 +8256,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -11237,6 +11342,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -11255,6 +11361,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -12079,6 +12199,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -12097,6 +12218,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -12930,6 +13065,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -12948,6 +13084,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -13750,6 +13900,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -13768,6 +13919,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -14693,6 +14858,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -14711,6 +14877,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -15668,6 +15848,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -15686,6 +15867,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
@@ -16385,6 +16580,7 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "recommended_call",
           "dry_run_request",
           "execute_request",
           "resume_execution_handoff",
@@ -16403,6 +16599,20 @@
           "can_attempt_live",
           "blockers",
           "next_actions"
+        ],
+        "recommended_call_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "action",
+          "status",
+          "dry_run_request",
+          "execute_request",
+          "requires_user_review",
+          "safety",
+          "stop_when"
         ],
         "recovery_handoff_fields": [
           "phase",
