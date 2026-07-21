@@ -26774,6 +26774,7 @@
           "policy_execution_plan",
           "policy_execution_sequence",
           "policy_enforcement_bundle",
+          "policy_runtime_contract",
           "policy_config_handoff",
           "policy_handoff",
           "next_step",
@@ -27131,6 +27132,7 @@
           "seeding_enforcement",
           "rule_gate",
           "config_repair",
+          "runtime_contract",
           "live_job_requirements",
           "completion_evidence",
           "next_step",
@@ -27143,6 +27145,42 @@
           "blockers",
           "next_actions",
           "safety"
+        ],
+        "policy_runtime_contract_fields": [
+          "ready",
+          "status",
+          "accepted_rules",
+          "source_trackers",
+          "target_trackers",
+          "required_request_fields",
+          "request_defaults",
+          "request_default_sources",
+          "request_template",
+          "protected_fields",
+          "override_policy",
+          "qbit_roles",
+          "qbit_contract",
+          "seeding_contract",
+          "rule_contract",
+          "completion_contract",
+          "read_order",
+          "continue_when",
+          "stop_when",
+          "blockers",
+          "next_actions",
+          "safety"
+        ],
+        "policy_runtime_protected_field_fields": [
+          "field",
+          "value",
+          "source",
+          "protection",
+          "override_requires"
+        ],
+        "policy_runtime_completion_contract_fields": [
+          "summary_fields",
+          "required_evidence",
+          "complete_when"
         ],
         "policy_enforcement_qbit_fields": [
           "ready",

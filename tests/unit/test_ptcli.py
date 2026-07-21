@@ -17188,9 +17188,29 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert enforcement_bundle["seeding_enforcement"]["by_role"]["target:MTEAM"]["min_ratio"] == 1.0
     assert enforcement_bundle["rule_gate"]["ready"] is True
     assert enforcement_bundle["config_repair"]["safe_to_auto_apply"] is False
+    assert enforcement_bundle["runtime_contract"]["kind"] == "ptcli.policy_runtime_contract"
+    assert enforcement_bundle["runtime_contract"]["ready"] is True
+    assert enforcement_bundle["runtime_contract"] == payload["policy_runtime_contract"]
     assert "policy_enforcement_bundle.ready=true" in enforcement_bundle["live_job_requirements"]
     assert "qbit_enforcement_summary.ready=true" in enforcement_bundle["completion_evidence"]
     assert enforcement_bundle["safety"]["does_not_override_site_rules"] is True
+    runtime_contract = payload["policy_runtime_contract"]
+    assert runtime_contract["ready"] is True
+    assert runtime_contract["required_request_fields"] == ["source_url", "target", "accept_rules", "confirm_upload", "qbit_download_limit", "uploaded_qbit_upload_limit"]
+    assert runtime_contract["request_defaults"] == execution_plan["request_defaults"]
+    assert runtime_contract["request_template"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert runtime_contract["protected_fields"][0]["field"] == "qbit_download_limit"
+    assert runtime_contract["protected_fields"][0]["source"] == "site_policy:U2"
+    assert runtime_contract["override_policy"]["allow_request_override"] is True
+    assert "Do not remove policy_runtime_contract.request_defaults from live requests." in runtime_contract["override_policy"]["must_not"]
+    assert runtime_contract["qbit_contract"]["ready"] is True
+    assert runtime_contract["qbit_contract"]["request_fields"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert runtime_contract["seeding_contract"]["ready"] is True
+    assert runtime_contract["seeding_contract"]["by_role"]["source:U2"]["min_seed_time_hours"] == 72
+    assert runtime_contract["rule_contract"]["ready"] is True
+    assert "duplicate_check.exists=false" in runtime_contract["completion_contract"]["required_evidence"]
+    assert "live_user_report" in runtime_contract["completion_contract"]["summary_fields"]
+    assert "policy_runtime_contract" in runtime_contract["read_order"]
     assert payload["config_templates"]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]'
     assert payload["config_templates"]["trackers"]["MTEAM"]["min_ratio"] == 1.0
     assert payload["config_templates"]["structured_trackers"]["U2"]["qbit_limits"]["download_limit"] == "20 MiB/s"
@@ -18018,6 +18038,11 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert enforcement_bundle["rule_gate"]["ready"] is False
     assert enforcement_bundle["config_repair"]["preferred_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
     assert enforcement_bundle["config_repair"]["next_step"]["tool"] == "site_policy_rule_review"
+    assert enforcement_bundle["runtime_contract"] == payload["policy_runtime_contract"]
+    assert payload["policy_runtime_contract"]["kind"] == "ptcli.policy_runtime_contract"
+    assert payload["policy_runtime_contract"]["ready"] is False
+    assert payload["policy_runtime_contract"]["status"] == "blocked"
+    assert "policy_runtime_contract.ready=false" in payload["policy_runtime_contract"]["stop_when"]
     assert "rule_gate.ready=false" in enforcement_bundle["stop_when"]
     assert any("Run policy_enforcement_bundle.next_step" in action for action in enforcement_bundle["next_actions"])
     config_handoff = payload["policy_config_handoff"]
@@ -18712,6 +18737,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_execution_plan" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_sequence" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_enforcement_bundle" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "policy_runtime_contract" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_config_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_plan_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "request_defaults" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
@@ -18725,6 +18751,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "request_template" in tool_by_name["site_policies"]["response_contract"]["policy_execution_sequence_step_fields"]
     assert "policy_enforcement_bundle_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "live_request_template" in tool_by_name["site_policies"]["response_contract"]["policy_enforcement_bundle_fields"]
+    assert "runtime_contract" in tool_by_name["site_policies"]["response_contract"]["policy_enforcement_bundle_fields"]
+    assert "policy_runtime_contract_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "protected_fields" in tool_by_name["site_policies"]["response_contract"]["policy_runtime_contract_fields"]
+    assert "policy_runtime_protected_field_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "override_requires" in tool_by_name["site_policies"]["response_contract"]["policy_runtime_protected_field_fields"]
+    assert "policy_runtime_completion_contract_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "required_evidence" in tool_by_name["site_policies"]["response_contract"]["policy_runtime_completion_contract_fields"]
     assert "qbit_enforcement" in tool_by_name["site_policies"]["response_contract"]["policy_enforcement_bundle_fields"]
     assert "policy_enforcement_qbit_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "client_fields" in tool_by_name["site_policies"]["response_contract"]["policy_enforcement_qbit_fields"]
@@ -19173,6 +19206,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_execution_plan" in site_policy_schema["properties"]
     assert "policy_execution_sequence" in site_policy_schema["properties"]
     assert "policy_enforcement_bundle" in site_policy_schema["properties"]
+    assert "policy_runtime_contract" in site_policy_schema["properties"]
     assert "config_templates" in site_policy_schema["properties"]
     assert "config_update_plan" in site_policy_schema["properties"]
     rule_review_schema = openapi["paths"]["/v1/site-policies/rule-review"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -19821,6 +19855,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_execution_plan" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_sequence" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "policy_runtime_contract" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_plan_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "request_defaults" in tools_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
         assert "qbit_roles" in tools_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
@@ -19833,6 +19868,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "request_template" in tools_by_name["site_policies"]["response_contract"]["policy_execution_sequence_step_fields"]
         assert "policy_enforcement_bundle_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "live_request_template" in tools_by_name["site_policies"]["response_contract"]["policy_enforcement_bundle_fields"]
+        assert "runtime_contract" in tools_by_name["site_policies"]["response_contract"]["policy_enforcement_bundle_fields"]
+        assert "policy_runtime_contract_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "protected_fields" in tools_by_name["site_policies"]["response_contract"]["policy_runtime_contract_fields"]
         assert "policy_enforcement_qbit_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "client_fields" in tools_by_name["site_policies"]["response_contract"]["policy_enforcement_qbit_fields"]
         assert "policy_handoff" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
