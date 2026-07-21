@@ -16329,7 +16329,18 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["approval_queue"]["safe_count"] == 1
     assert payload["schedule_digest"]["approval_queue"]["items"][0]["source_id"] == "60635"
     assert payload["schedule_digest"]["approval_queue"]["items"][0]["policy_risk_level"] == "low"
+    assert payload["schedule_digest"]["approval_queue"]["items"][0]["request_template"]["accept_rules"] is True
     assert payload["schedule_digest"]["approval_queue"]["items"][0]["request_template"]["confirm_upload"] is True
+    schedule_execution_context = payload["schedule_digest"]["approval_queue"]["items"][0]["candidate_execution_context"]
+    assert schedule_execution_context["kind"] == "ptcli.daily_candidate_execution_context"
+    assert schedule_execution_context["ready"] is True
+    assert schedule_execution_context["source_tracker"] == "U2"
+    assert schedule_execution_context["target_trackers"] == "MTEAM"
+    assert schedule_execution_context["missing_user_inputs"] == []
+    assert schedule_execution_context["qbit_request"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert schedule_execution_context["qbit_request"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert schedule_execution_context["effective_retorrent_request"]["accept_rules"] is True
+    assert schedule_execution_context["effective_retorrent_request"]["confirm_upload"] is True
     assert payload["schedule_digest"]["top_safe_candidates"] == payload["schedule_digest"]["approval_queue"]["top_safe_candidates"]
     assert payload["schedule_digest"]["push_payload"]["approval_queue"] == payload["schedule_digest"]["approval_queue"]
     assert payload["schedule_digest"]["push_payload"]["top_safe_candidates"] == payload["schedule_digest"]["top_safe_candidates"]
@@ -16351,8 +16362,10 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["submission_handoff"]["top_safe_candidates"] == payload["schedule_digest"]["top_safe_candidates"]
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["submit_endpoint"].startswith("/v1/jobs/candidates/")
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["selector"] == {"rank": 1, "source_id": "60635"}
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["accept_rules"] is True
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["confirm_upload"] is True
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["save_path"] == "/downloads"
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["candidate_execution_context"] == schedule_execution_context
     schedule_policy_execution = payload["schedule_digest"]["submission_handoff"]["items"][0]["policy_execution"]
     assert schedule_policy_execution["ready"] is True
     assert schedule_policy_execution["rule_obligations_ready"] is True
@@ -16480,6 +16493,25 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     }
     assert delivery_plan["read_order"][0] == "daily_candidate_delivery_plan"
     assert "confirm_upload=true" in delivery_plan["next_actions"][0]
+    schedule_context = payload["daily_candidate_schedule_execution_context"]
+    assert schedule_context["kind"] == "ptcli.daily_candidate_schedule_execution_context"
+    assert schedule_context["ready"] is True
+    assert schedule_context["action"] == "submit_candidate"
+    assert schedule_context["target_count"] == 10
+    assert schedule_context["selected_count"] == 1
+    assert schedule_context["ready_count"] == 1
+    assert schedule_context["safe_to_submit_count"] == 1
+    assert schedule_context["shortfall_count"] == 9
+    assert schedule_context["recommended_tool"] == "submit_daily_candidate_job"
+    assert schedule_context["recommended_request"] == delivery_plan["recommended_request"]
+    assert schedule_context["first_candidate_execution_context"] == schedule_execution_context
+    assert schedule_context["first_submit_request"] == delivery_plan["first_submit_request"]
+    assert schedule_context["required_user_inputs"] == ["explicit candidate approval", "accept_rules=true", "confirm_upload=true", "save_path or path"]
+    assert schedule_context["safety"]["does_not_bypass_site_rules"] is True
+    assert payload["schedule_digest"]["daily_candidate_schedule_execution_context"] == schedule_context
+    assert payload["notification_payload"]["daily_candidate_schedule_execution_context"] == schedule_context
+    assert payload["delivery_handoff"]["daily_candidate_schedule_execution_context"] == schedule_context
+    assert payload["daily_candidate_delivery_plan"]["daily_candidate_schedule_execution_context"] == schedule_context
     assert payload["notification_payload"]["submit_items"][0]["submit_tool"] == "submit_daily_candidate_job"
     assert payload["agent_decision"]["decision"] == "review_candidates"
     assert payload["agent_decision"]["can_submit_any"] is True
@@ -18533,14 +18565,19 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "delivery_handoff" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "daily_schedule_gate" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
     assert "daily_candidate_delivery_plan" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+    assert "daily_candidate_schedule_execution_context" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+    assert "daily_candidate_schedule_execution_context_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
+    assert "first_candidate_execution_context" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_schedule_execution_context_fields"]
     assert "daily_schedule_gate_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "action" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_schedule_gate_fields"]
     assert "daily_candidate_delivery_plan_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "recommended_action_safety" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_delivery_plan_fields"]
     assert "publish_request" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_delivery_plan_fields"]
+    assert "daily_candidate_schedule_execution_context" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_delivery_plan_fields"]
     assert "top_submit_requests" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "push_payload" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "approval_queue" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+    assert "daily_candidate_schedule_execution_context" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "top_safe_candidates" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "shortfall_count" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
     assert "target_met" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
@@ -19554,14 +19591,19 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "delivery_handoff" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
         assert "daily_schedule_gate" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
         assert "daily_candidate_delivery_plan" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+        assert "daily_candidate_schedule_execution_context" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["required_fields"]
+        assert "daily_candidate_schedule_execution_context_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
+        assert "first_candidate_execution_context" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_schedule_execution_context_fields"]
         assert "daily_schedule_gate_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "action" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_schedule_gate_fields"]
         assert "daily_candidate_delivery_plan_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "recommended_action_safety" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_delivery_plan_fields"]
         assert "publish_request" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_delivery_plan_fields"]
+        assert "daily_candidate_schedule_execution_context" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_delivery_plan_fields"]
         assert "top_submit_requests" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "push_payload" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "approval_queue" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
+        assert "daily_candidate_schedule_execution_context" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "top_safe_candidates" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "daily_candidate_report" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "candidate_control_summary" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
