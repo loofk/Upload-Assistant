@@ -238,19 +238,23 @@
         },
         {
           "step": "prepare_materials",
-          "tool": "materials_prepare",
+          "tool": "materials_prepare_job",
+          "request_from": "job_handoff.material_input_template or materials_handoff.resume_request_template plus parent job_id/source_url/target context",
           "read": [
-            "ok",
-            "material_options",
-            "material_evidence",
-            "resume_handoff.recommended_request",
-            "resume_handoff.execute_request",
+            "job_id",
+            "status",
+            "materials_prepare_handoff.ready",
+            "materials_prepare_handoff.material_options",
+            "materials_prepare_handoff.material_evidence",
+            "materials_prepare_handoff.next_step",
+            "materials_prepare_handoff.resume_request",
+            "materials_prepare_handoff.source_url_check_and_submit_request",
             "blockers"
           ],
-          "continue_when": "ok=true and material_options is not empty",
-          "resume_with": "resume_job using materials_prepare.resume_handoff.recommended_request after adding job_id, then execute after dry_run review",
+          "continue_when": "materials_prepare_handoff.ready=true and material_options is not empty",
+          "resume_with": "materials_prepare_handoff.next_step; prefer resume_job when parent_job_id is known, otherwise source_url_check_and_submit after gates are ready",
           "stop_when": [
-            "materials_prepare.blockers is not empty",
+            "materials_prepare_handoff.blockers is not empty",
             "image host upload failed",
             "local content path missing"
           ]
@@ -1861,9 +1865,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -2805,9 +2814,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -3616,9 +3630,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -4427,9 +4446,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -5242,9 +5266,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -6452,9 +6481,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -7613,9 +7647,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -9013,6 +9052,91 @@
         "type": "object",
         "required": [],
         "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Optional existing retorrent job id to resume with generated material_options."
+          },
+          "parent_job_id": {
+            "type": "string",
+            "description": "Alias for job_id when preparing materials for a blocked parent retorrent job."
+          },
+          "source_url": {
+            "type": "string",
+            "description": "Optional source tracker details URL; when target is also supplied the handoff includes a source_url_check_and_submit request."
+          },
+          "source": {
+            "type": "string",
+            "description": "Alias for source_url in materials handoff context."
+          },
+          "source_tracker": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional target tracker(s); used with source_url to build a checked retorrent submit request."
+          },
+          "target_tracker": {
+            "type": "string"
+          },
+          "target_trackers": {
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Copied into generated retorrent submit requests; still required for live upload gates."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Copied into generated retorrent submit requests; live upload remains blocked without explicit true."
+          },
+          "save_path": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string"
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "qbit_download_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
           "path": {
             "type": "string",
             "description": "Local content path visible to the ptcli service/container. Required for generation actions."
@@ -9168,10 +9292,15 @@
           "recommended_tool",
           "recommended_endpoint",
           "method",
+          "parent_job_id",
           "material_options",
           "accepted_override_keys",
           "recommended_request",
+          "resume_request",
           "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
+          "next_step",
           "target_job_request_template",
           "continue_when",
           "stop_when",
@@ -9208,6 +9337,91 @@
         "type": "object",
         "required": [],
         "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Optional existing retorrent job id to resume with generated material_options."
+          },
+          "parent_job_id": {
+            "type": "string",
+            "description": "Alias for job_id when preparing materials for a blocked parent retorrent job."
+          },
+          "source_url": {
+            "type": "string",
+            "description": "Optional source tracker details URL; when target is also supplied the handoff includes a source_url_check_and_submit request."
+          },
+          "source": {
+            "type": "string",
+            "description": "Alias for source_url in materials handoff context."
+          },
+          "source_tracker": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "array"
+            ],
+            "description": "Optional target tracker(s); used with source_url to build a checked retorrent submit request."
+          },
+          "target_tracker": {
+            "type": "string"
+          },
+          "target_trackers": {
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "accept_rules": {
+            "type": "boolean",
+            "description": "Copied into generated retorrent submit requests; still required for live upload gates."
+          },
+          "confirm_upload": {
+            "type": "boolean",
+            "description": "Copied into generated retorrent submit requests; live upload remains blocked without explicit true."
+          },
+          "save_path": {
+            "type": "string"
+          },
+          "client": {
+            "type": "string"
+          },
+          "qbit_category": {
+            "type": "string"
+          },
+          "qbit_tags": {
+            "type": "string"
+          },
+          "qbit_upload_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "qbit_download_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "uploaded_qbit_category": {
+            "type": "string"
+          },
+          "uploaded_qbit_tags": {
+            "type": "string"
+          },
+          "uploaded_qbit_upload_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "uploaded_qbit_download_limit": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
           "path": {
             "type": "string",
             "description": "Local content path visible to the ptcli service/container. Required for generation actions."
@@ -9602,9 +9816,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -10447,9 +10666,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -11350,9 +11574,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",
@@ -11998,9 +12227,14 @@
           "job_id",
           "status",
           "dry_run",
+          "parent_job_id",
           "material_options",
           "material_evidence",
           "resume_handoff",
+          "resume_request",
+          "execute_request",
+          "source_url_check_and_submit_handoff",
+          "source_url_check_and_submit_request",
           "recommended_tool",
           "recommended_endpoint",
           "recommended_request",

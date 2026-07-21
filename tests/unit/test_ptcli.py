@@ -10686,24 +10686,78 @@ def test_service_materials_prepare_job_exposes_handoff(monkeypatch, tmp_path) ->
 
     job = ptcli_service.create_materials_prepare_job(
         store,
-        {"path": "/downloads/Example", "output_dir": str(tmp_path / "materials"), "generate_mediainfo": True, "tmdb_id": "999"},
+        {
+            "parent_job_id": "a" * 32,
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "path": "/downloads/Example",
+            "output_dir": str(tmp_path / "materials"),
+            "generate_mediainfo": True,
+            "tmdb_id": "999",
+        },
     )
 
     assert job["kind"] == "ptcli.materials_prepare"
     assert job["status"] == "complete"
     assert job["request"]["path"] == "/downloads/Example"
+    assert job["request"]["parent_job_id"] == "a" * 32
+    assert job["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert job["request"]["actions"] == ["generate_mediainfo"]
     assert job["materials_prepare_handoff"]["ready"] is True
     assert job["materials_prepare_handoff"]["material_options"]["tmdb_id"] == "999"
+    assert job["materials_prepare_handoff"]["parent_job_id"] == "a" * 32
+    assert job["materials_prepare_handoff"]["next_step"]["tool"] == "resume_job"
+    assert job["materials_prepare_handoff"]["next_step"]["endpoint"] == f"/v1/jobs/{'a' * 32}/resume"
+    assert job["materials_prepare_handoff"]["resume_request"]["job_id"] == "a" * 32
+    assert job["materials_prepare_handoff"]["source_url_check_and_submit_request"]["mediainfo_file"].endswith("MI_FULL_00.txt")
+    assert job["materials_prepare_handoff"]["source_url_check_and_submit_request"]["target"] == "MTEAM"
     assert job["agent_decision"]["decision"] == "materials_ready"
     assert job["agent_decision"]["materials_prepare_handoff"] == job["materials_prepare_handoff"]
 
     summary = store.summary(job["job_id"])
     assert summary["materials_prepare_handoff"]["ready"] is True
     assert summary["materials_prepare_handoff"]["recommended_request"]["overrides"]["tmdb_id"] == "999"
+    assert summary["materials_prepare_handoff"]["recommended_endpoint"] == f"/v1/jobs/{'a' * 32}/resume"
 
     listing = store.list({"kind": "ptcli.materials_prepare"})
     assert listing["jobs"][0]["materials_prepare_handoff"]["material_options"]["tmdb_id"] == "999"
+
+
+def test_service_materials_prepare_handoff_can_submit_fresh_source_url() -> None:
+    payload = ptcli_service._materials_prepare_handoff(
+        {
+            "source_url": "https://chdbits.co/details.php?id=12345",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "path": "/downloads/Example",
+            "save_path": "/downloads",
+            "uploaded_qbit_category": "MTEAM",
+            "uploaded_qbit_tags": "retorrent",
+        },
+        {"mediainfo_file": "/tmp/MI_FULL_00.txt", "image_host_file": "/tmp/images.json", "tmdb_id": "999"},
+        True,
+        [],
+    )
+
+    assert payload["next_step"]["tool"] == "source_url_check_and_submit"
+    assert payload["source_url_check_and_submit_handoff"]["ready"] is True
+    assert payload["source_url_check_and_submit_request"] == {
+        "source_url": "https://chdbits.co/details.php?id=12345",
+        "source": "https://chdbits.co/details.php?id=12345",
+        "target": "MTEAM",
+        "accept_rules": True,
+        "confirm_upload": True,
+        "mediainfo_file": "/tmp/MI_FULL_00.txt",
+        "image_host_file": "/tmp/images.json",
+        "tmdb_id": "999",
+        "path": "/downloads/Example",
+        "save_path": "/downloads",
+        "uploaded_qbit_category": "MTEAM",
+        "uploaded_qbit_tags": "retorrent",
+    }
 
 
 def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> None:
@@ -17084,7 +17138,7 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["one_call_handoff"]["tool"] == "source_url_check_and_submit"
     assert ready["one_call_handoff"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert ready["recommended_tool"] == "source_url_check_and_submit"
-    assert [step["tool"] for step in ready["steps"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "materials_prepare", "get_job_summary"]
+    assert [step["tool"] for step in ready["steps"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "materials_prepare_job", "get_job_summary"]
     assert "policy_execution_summary" in ready["steps"][0]["read"]
     assert "policy_execution_handoff" in ready["steps"][0]["read"]
     assert "live_readiness.policy_execution_summary" in ready["steps"][1]["read"]
@@ -17097,8 +17151,9 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert "job_handoff" in ready["steps"][4]["read"]
     assert "job_handoff.action" in ready["steps"][5]["read"]
     assert ready["steps"][5]["repeat_when"] == "job_handoff.action=wait and job_handoff.should_poll=true"
-    assert ready["steps"][6]["tool"] == "materials_prepare"
-    assert "material_options" in ready["steps"][6]["read"]
+    assert ready["steps"][6]["tool"] == "materials_prepare_job"
+    assert "materials_prepare_handoff.material_options" in ready["steps"][6]["read"]
+    assert "materials_prepare_handoff.next_step" in ready["steps"][6]["read"]
     assert ready["steps"][7]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
     assert ready["steps"][7]["resume_with"].startswith("job_handoff")
     assert "source_url_check_and_submit" in ready["next_actions"][0]
@@ -17154,7 +17209,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert source_url_workflow["tool"] == "source_url_check_and_submit"
     assert source_url_workflow["fallback_tool"] == "source_url_retorrent_job"
     assert source_url_workflow["one_call"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
-    assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "materials_prepare", "get_job_summary"]
+    assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "materials_prepare_job", "get_job_summary"]
     assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
     assert "policy_execution_summary" in source_url_workflow["runbook"][0]["read"]
     assert "policy_execution_handoff" in source_url_workflow["runbook"][0]["read"]
@@ -17170,8 +17225,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "job_handoff.action" in source_url_workflow["runbook"][5]["read"]
     assert source_url_workflow["runbook"][5]["repeat_when"] == "job_handoff.action=wait and job_handoff.should_poll=true"
     assert source_url_workflow["runbook"][6]["step"] == "prepare_materials"
-    assert source_url_workflow["runbook"][6]["tool"] == "materials_prepare"
-    assert "material_options" in source_url_workflow["runbook"][6]["read"]
+    assert source_url_workflow["runbook"][6]["tool"] == "materials_prepare_job"
+    assert "materials_prepare_handoff.material_options" in source_url_workflow["runbook"][6]["read"]
+    assert "materials_prepare_handoff.next_step" in source_url_workflow["runbook"][6]["read"]
     assert source_url_workflow["runbook"][7]["step"] == "closure_decision"
     assert "job_handoff.recommended_tool" in source_url_workflow["runbook"][7]["read"]
     assert "closure_summary.next_step" in source_url_workflow["runbook"][7]["read"]
@@ -17281,7 +17337,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
         assert source_url_workflow["runbook"][3]["tool"] == "retorrent_check"
         assert source_url_workflow["runbook"][5]["repeat_when"] == "job_handoff.action=wait and job_handoff.should_poll=true"
-        assert source_url_workflow["runbook"][6]["tool"] == "materials_prepare"
+        assert source_url_workflow["runbook"][6]["tool"] == "materials_prepare_job"
+        assert "materials_prepare_handoff.next_step" in source_url_workflow["runbook"][6]["read"]
         assert source_url_workflow["runbook"][7]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
         assert source_url_workflow["runbook"][7]["resume_with"].startswith("job_handoff")
         assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][7]["stop_when"]

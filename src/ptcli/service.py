@@ -5039,7 +5039,28 @@ def _materials_prepare_request_context(request: dict[str, Any]) -> dict[str, Any
     path = str(request.get("path") or request.get("content_path") or "").strip()
     output_dir = str(request.get("output_dir") or request.get("materials_output_dir") or "./tmp/materials").strip()
     screenshot_files = _string_list(request.get("screenshot_files") or request.get("screenshot_file"))
+    source_url = request.get("source_url") or request.get("source") or request.get("source_link") or request.get("url")
     context = {
+        "job_id": request.get("job_id") or request.get("parent_job_id") or request.get("retorrent_job_id"),
+        "parent_job_id": request.get("parent_job_id") or request.get("job_id") or request.get("retorrent_job_id"),
+        "source_url": str(source_url) if source_url else None,
+        "source": str(source_url) if source_url else request.get("source"),
+        "source_tracker": request.get("source_tracker") or request.get("from"),
+        "target": request.get("target") or request.get("target_tracker") or request.get("target_trackers"),
+        "target_tracker": request.get("target_tracker"),
+        "target_trackers": request.get("target_trackers"),
+        "accept_rules": _truthy(request.get("accept_rules")),
+        "confirm_upload": _truthy(request.get("confirm_upload")),
+        "save_path": request.get("save_path"),
+        "client": request.get("client"),
+        "qbit_category": request.get("qbit_category"),
+        "qbit_tags": request.get("qbit_tags"),
+        "qbit_upload_limit": request.get("qbit_upload_limit"),
+        "qbit_download_limit": request.get("qbit_download_limit"),
+        "uploaded_qbit_category": request.get("uploaded_qbit_category"),
+        "uploaded_qbit_tags": request.get("uploaded_qbit_tags"),
+        "uploaded_qbit_upload_limit": request.get("uploaded_qbit_upload_limit"),
+        "uploaded_qbit_download_limit": request.get("uploaded_qbit_download_limit"),
         "path": path or None,
         "content_path": path or None,
         "output_dir": output_dir,
@@ -5181,18 +5202,30 @@ def _sha1_file(path: Path) -> str:
 
 def _materials_prepare_handoff(context: dict[str, Any], material_options: dict[str, Any], ready: bool, blockers: list[str]) -> dict[str, Any]:
     resume_overrides = {key: value for key, value in material_options.items() if value not in (None, "", [])}
+    parent_job_id = str(context.get("parent_job_id") or context.get("job_id") or "").strip()
+    resume_endpoint = f"/v1/jobs/{parent_job_id}/resume" if parent_job_id else "/v1/jobs/{job_id}/resume"
     recommended_request = {"overrides": resume_overrides, "dry_run": True}
+    resume_request = {**recommended_request, **({"job_id": parent_job_id} if parent_job_id else {})}
+    execute_resume_request = {**resume_request, "dry_run": False}
+    submit_request = _materials_prepare_submit_request(context, resume_overrides)
+    check_and_submit_handoff = _materials_prepare_check_and_submit_handoff(submit_request, ready, blockers)
+    next_step = _materials_prepare_next_step(parent_job_id, submit_request, resume_request, ready, blockers)
     return {
         "kind": "ptcli.materials_prepare_handoff",
         "ready": ready,
         "recommended_tool": "resume_job",
-        "recommended_endpoint": "/v1/jobs/{job_id}/resume",
+        "recommended_endpoint": resume_endpoint,
         "method": "POST",
+        "parent_job_id": parent_job_id or None,
         "material_options": material_options,
         "accepted_override_keys": sorted(resume_overrides),
-        "recommended_request": recommended_request,
-        "execute_request": {**recommended_request, "dry_run": False},
-        "continue_when": "Use these material_options as resume_job overrides or job creation material fields after duplicate/rule gates are ready.",
+        "recommended_request": resume_request,
+        "resume_request": resume_request,
+        "execute_request": execute_resume_request,
+        "source_url_check_and_submit_handoff": check_and_submit_handoff,
+        "source_url_check_and_submit_request": submit_request,
+        "next_step": next_step,
+        "continue_when": "Use resume_request for an existing blocked job, or source_url_check_and_submit_request for a fresh source URL flow after duplicate/rule/confirmation gates are ready.",
         "stop_when": ["blockers is not empty", "live upload confirmations are missing", "site policy gate is not ready"],
         "blockers": blockers,
         "next_actions": _materials_prepare_next_actions(ready, blockers),
@@ -5207,9 +5240,67 @@ def _materials_prepare_handoff(context: dict[str, Any], material_options: dict[s
     }
 
 
+def _materials_prepare_submit_request(context: dict[str, Any], material_options: dict[str, Any]) -> dict[str, Any] | None:
+    source_url = context.get("source_url") or context.get("source")
+    target = context.get("target") or context.get("target_trackers") or context.get("target_tracker")
+    if not source_url or not target:
+        return None
+    request: dict[str, Any] = {
+        "source_url": source_url,
+        "source": source_url,
+        "source_tracker": context.get("source_tracker"),
+        "target": target,
+        "accept_rules": bool(context.get("accept_rules")),
+        "confirm_upload": bool(context.get("confirm_upload")),
+        **material_options,
+    }
+    for key in (
+        "path",
+        "content_path",
+        "save_path",
+        "config",
+        "base_dir",
+        "client",
+        "qbit_category",
+        "qbit_tags",
+        "qbit_upload_limit",
+        "qbit_download_limit",
+        "uploaded_qbit_category",
+        "uploaded_qbit_tags",
+        "uploaded_qbit_upload_limit",
+        "uploaded_qbit_download_limit",
+    ):
+        if context.get(key) not in (None, ""):
+            request[key] = context[key]
+    return {key: value for key, value in request.items() if value not in (None, "", [])}
+
+
+def _materials_prepare_check_and_submit_handoff(submit_request: dict[str, Any] | None, ready: bool, blockers: list[str]) -> dict[str, Any]:
+    return {
+        "ready": bool(ready and submit_request),
+        "tool": "source_url_check_and_submit",
+        "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+        "method": "POST",
+        "request": submit_request,
+        "continue_when": "duplicate_check.exists=false and submitted_job.job_id is returned",
+        "stop_when": ["blockers is not empty", "duplicate_check.exists=true", "accept_rules/confirm_upload/policy gate missing"],
+        "blockers": blockers if blockers else ([] if submit_request else ["source_url and target are required to build source_url_check_and_submit_request."]),
+    }
+
+
+def _materials_prepare_next_step(parent_job_id: str, submit_request: dict[str, Any] | None, resume_request: dict[str, Any], ready: bool, blockers: list[str]) -> dict[str, Any]:
+    if blockers or not ready:
+        return {"tool": "materials_prepare_job", "endpoint": "/v1/jobs/materials/prepare", "method": "POST", "request": None, "reason": "materials_prepare_blocked"}
+    if parent_job_id:
+        return {"tool": "resume_job", "endpoint": f"/v1/jobs/{parent_job_id}/resume", "method": "POST", "request": resume_request, "reason": "resume_existing_retorrent_job_with_materials"}
+    if submit_request:
+        return {"tool": "source_url_check_and_submit", "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit", "method": "POST", "request": submit_request, "reason": "start_checked_source_url_retorrent_with_materials"}
+    return {"tool": "resume_job", "endpoint": "/v1/jobs/{job_id}/resume", "method": "POST", "request": resume_request, "reason": "materials_ready_missing_parent_job"}
+
+
 def _materials_prepare_next_actions(ready: bool, blockers: list[str]) -> list[str]:
     if ready:
-        return ["Pass material_options to source_url_check_and_submit, source_url_retorrent_job, retorrent_job, or resume_job after duplicate/rule/confirmation gates are ready."]
+        return ["Use materials_prepare_handoff.next_step: resume an existing retorrent job when parent_job_id is known, otherwise submit source_url_check_and_submit_request after duplicate/rule/confirmation gates are ready."]
     if blockers:
         return ["Resolve materials_prepare.blockers, then rerun /v1/materials/prepare with explicit material actions."]
     return ["Choose explicit material actions such as generate_mediainfo, generate_screenshots, or upload_screenshots."]
@@ -6850,25 +6941,28 @@ def _job_materials_prepare_handoff(job: dict[str, Any], summary_payload: dict[st
     evidence = payload.get("material_evidence") if isinstance(payload.get("material_evidence"), dict) else {}
     blockers = _string_list(payload.get("blockers")) or _string_list(job.get("blockers"))
     ready = bool(payload.get("ok") is True and not blockers)
-    next_step = {
-        "tool": "resume_job",
-        "endpoint": "/v1/jobs/{job_id}/resume",
-        "method": "POST",
-        "request": resume_handoff.get("recommended_request"),
-        "reason": "materials_ready_for_resume" if ready else "materials_prepare_blocked",
-    }
+    request_context = payload.get("request") if isinstance(payload.get("request"), dict) else job.get("request") if isinstance(job.get("request"), dict) else {}
+    fallback_handoff = _materials_prepare_handoff(request_context, material_options, ready, blockers)
+    next_step = resume_handoff.get("next_step") if isinstance(resume_handoff.get("next_step"), dict) else fallback_handoff.get("next_step") if isinstance(fallback_handoff.get("next_step"), dict) else {}
+    recommended_request = next_step.get("request") if isinstance(next_step, dict) and isinstance(next_step.get("request"), dict) else resume_handoff.get("recommended_request") or fallback_handoff.get("recommended_request")
+    recommended_endpoint = next_step.get("endpoint") if isinstance(next_step, dict) else None
     return {
         "kind": "ptcli.materials_prepare_job_handoff",
         "ready": ready,
         "job_id": job.get("job_id"),
         "status": job.get("status"),
         "dry_run": payload.get("dry_run"),
+        "parent_job_id": resume_handoff.get("parent_job_id") or fallback_handoff.get("parent_job_id"),
         "material_options": material_options,
         "material_evidence": evidence,
         "resume_handoff": resume_handoff or None,
-        "recommended_tool": next_step["tool"],
-        "recommended_endpoint": next_step["endpoint"],
-        "recommended_request": next_step["request"],
+        "resume_request": resume_handoff.get("resume_request") or fallback_handoff.get("resume_request"),
+        "execute_request": resume_handoff.get("execute_request") or fallback_handoff.get("execute_request"),
+        "source_url_check_and_submit_handoff": resume_handoff.get("source_url_check_and_submit_handoff") or fallback_handoff.get("source_url_check_and_submit_handoff"),
+        "source_url_check_and_submit_request": resume_handoff.get("source_url_check_and_submit_request") or fallback_handoff.get("source_url_check_and_submit_request"),
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": recommended_endpoint,
+        "recommended_request": recommended_request,
         "next_step": next_step,
         "continue_when": "Pass material_options to source_url_check_and_submit or resume_job only after duplicate/rule/confirmation gates are ready.",
         "stop_when": ["blockers is not empty", "site rules or live confirmations are missing"],
@@ -11004,6 +11098,26 @@ def _materials_prepare_tool_request_schema() -> dict[str, Any]:
         "type": "object",
         "required": [],
         "properties": {
+            "job_id": {"type": "string", "description": "Optional existing retorrent job id to resume with generated material_options."},
+            "parent_job_id": {"type": "string", "description": "Alias for job_id when preparing materials for a blocked parent retorrent job."},
+            "source_url": {"type": "string", "description": "Optional source tracker details URL; when target is also supplied the handoff includes a source_url_check_and_submit request."},
+            "source": {"type": "string", "description": "Alias for source_url in materials handoff context."},
+            "source_tracker": {"type": "string"},
+            "target": {"type": ["string", "array"], "description": "Optional target tracker(s); used with source_url to build a checked retorrent submit request."},
+            "target_tracker": {"type": "string"},
+            "target_trackers": {"type": ["string", "array"]},
+            "accept_rules": {"type": "boolean", "description": "Copied into generated retorrent submit requests; still required for live upload gates."},
+            "confirm_upload": {"type": "boolean", "description": "Copied into generated retorrent submit requests; live upload remains blocked without explicit true."},
+            "save_path": {"type": "string"},
+            "client": {"type": "string"},
+            "qbit_category": {"type": "string"},
+            "qbit_tags": {"type": "string"},
+            "qbit_upload_limit": {"type": ["integer", "string"]},
+            "qbit_download_limit": {"type": ["integer", "string"]},
+            "uploaded_qbit_category": {"type": "string"},
+            "uploaded_qbit_tags": {"type": "string"},
+            "uploaded_qbit_upload_limit": {"type": ["integer", "string"]},
+            "uploaded_qbit_download_limit": {"type": ["integer", "string"]},
             "path": {"type": "string", "description": "Local content path visible to the ptcli service/container. Required for generation actions."},
             "content_path": {"type": "string", "description": "Alias for path."},
             "output_dir": {"type": "string", "default": "./tmp/materials", "description": "Directory where generated MediaInfo, BDInfo, screenshots, and image-host evidence are written."},
@@ -11264,7 +11378,7 @@ def _materials_prepare_response_contract() -> dict[str, Any]:
         "stage_fields": ["stage", "ok", "result", "message"],
         "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "screenshot_files", "image_host_file", "image_host", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url"],
         "material_evidence_fields": ["path", "exists", "size_bytes", "sha1"],
-        "resume_handoff_fields": ["ready", "recommended_tool", "recommended_endpoint", "method", "material_options", "accepted_override_keys", "recommended_request", "execute_request", "target_job_request_template", "continue_when", "stop_when", "blockers", "next_actions"],
+        "resume_handoff_fields": ["ready", "recommended_tool", "recommended_endpoint", "method", "parent_job_id", "material_options", "accepted_override_keys", "recommended_request", "resume_request", "execute_request", "source_url_check_and_submit_handoff", "source_url_check_and_submit_request", "next_step", "target_job_request_template", "continue_when", "stop_when", "blockers", "next_actions"],
         "safety": ["does_not_contact_trackers", "does_not_upload_to_tracker", "may_contact_image_host", "writes_files", "dry_run"],
     }
 
@@ -11288,7 +11402,7 @@ def _job_response_contract() -> dict[str, Any]:
         "resume_summary_fields": ["available", "allowed", "recommended", "status", "subcommand", "missing_confirmations", "recommended_input_keys", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "recommended_tool", "blockers", "next_actions"],
         "recommended_input_fields": ["key", "accepted_keys", "required", "reason", "stage", "resume_tool", "resume_endpoint_hint", "blocking_keys", "examples"],
         "materials_handoff_fields": ["ready", "can_prepare_upload_payload", "metadata", "materials", "target_preflight", "material_plan", "resume_request_template", "resume_handoff", "recommended_inputs", "blockers", "next_actions"],
-        "materials_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "material_options", "material_evidence", "resume_handoff", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
+        "materials_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "parent_job_id", "material_options", "material_evidence", "resume_handoff", "resume_request", "execute_request", "source_url_check_and_submit_handoff", "source_url_check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],
         "material_plan_fields": ["ready", "missing", "next_item", "items"],
         "material_plan_item_fields": ["key", "label", "ready", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "next_step", "resume_overrides"],
         "materials_resume_handoff_fields": ["ready", "resume_recommended", "recommended_tool", "recommended_endpoint", "method", "next_item", "missing", "accepted_override_keys", "dry_run_request", "execute_request", "recommended_request", "staged_requests", "continue_when", "stop_when"],
@@ -11588,11 +11702,12 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 },
                 {
                     "step": "prepare_materials",
-                    "tool": "materials_prepare",
-                    "read": ["ok", "material_options", "material_evidence", "resume_handoff.recommended_request", "resume_handoff.execute_request", "blockers"],
-                    "continue_when": "ok=true and material_options is not empty",
-                    "resume_with": "resume_job using materials_prepare.resume_handoff.recommended_request after adding job_id, then execute after dry_run review",
-                    "stop_when": ["materials_prepare.blockers is not empty", "image host upload failed", "local content path missing"],
+                    "tool": "materials_prepare_job",
+                    "request_from": "job_handoff.material_input_template or materials_handoff.resume_request_template plus parent job_id/source_url/target context",
+                    "read": ["job_id", "status", "materials_prepare_handoff.ready", "materials_prepare_handoff.material_options", "materials_prepare_handoff.material_evidence", "materials_prepare_handoff.next_step", "materials_prepare_handoff.resume_request", "materials_prepare_handoff.source_url_check_and_submit_request", "blockers"],
+                    "continue_when": "materials_prepare_handoff.ready=true and material_options is not empty",
+                    "resume_with": "materials_prepare_handoff.next_step; prefer resume_job when parent_job_id is known, otherwise source_url_check_and_submit after gates are ready",
+                    "stop_when": ["materials_prepare_handoff.blockers is not empty", "image host upload failed", "local content path missing"],
                 },
                 {
                     "step": "closure_decision",
