@@ -10347,6 +10347,25 @@ def _job_seedbox_live_validation_completion_report(job: dict[str, Any], summary_
     )
     status = _seedbox_live_validation_completion_status(job_status, ready_for_user_report, duplicate_exists, blockers, missing_evidence, recovery_handoff, job_handoff)
     recommended = _seedbox_live_validation_completion_recommended_step(status, job_id, recovery_handoff, job_handoff, closure_summary)
+    dry_run_request = _seedbox_live_validation_completion_request("dry_run_request", recovery_handoff, job_handoff)
+    execute_request = _seedbox_live_validation_completion_request("execute_request", recovery_handoff, job_handoff)
+    stop_when = [
+        "seedbox_live_validation_completion_report.status=duplicate_stopped",
+        "seedbox_live_validation_completion_report.status=blocked and recommended_tool is null",
+        "seedbox_live_validation_completion_report.status=failed",
+    ]
+    call_action = _seedbox_live_validation_completion_call_action(status, recommended)
+    recommended_call = _job_handoff_recommended_call(
+        recommended.get("tool"),
+        recommended.get("endpoint"),
+        recommended.get("method"),
+        recommended.get("request"),
+        dry_run_request,
+        execute_request,
+        call_action,
+        job_status,
+        stop_when,
+    )
     return {
         "kind": "ptcli.seedbox_live_validation_completion_report",
         "ready": ready_for_user_report,
@@ -10403,6 +10422,9 @@ def _job_seedbox_live_validation_completion_report(job: dict[str, Any], summary_
         "recommended_endpoint": recommended.get("endpoint"),
         "recommended_method": recommended.get("method"),
         "recommended_request": recommended.get("request"),
+        "recommended_call": recommended_call,
+        "dry_run_request": dry_run_request,
+        "execute_request": execute_request,
         "next_step": recommended,
         "read_fields": [
             "seedbox_live_validation_completion_report.status",
@@ -10419,11 +10441,7 @@ def _job_seedbox_live_validation_completion_report(job: dict[str, Any], summary_
             "seedbox_live_validation_completion_report.missing_evidence=[]",
             "seedbox_live_validation_completion_report.blockers=[]",
         ],
-        "stop_when": [
-            "seedbox_live_validation_completion_report.status=duplicate_stopped",
-            "seedbox_live_validation_completion_report.status=blocked and recommended_tool is null",
-            "seedbox_live_validation_completion_report.status=failed",
-        ],
+        "stop_when": stop_when,
         "blockers": blockers,
         "next_actions": _seedbox_live_validation_completion_next_actions(status, recommended, missing_evidence, blockers),
     }
@@ -10476,6 +10494,26 @@ def _seedbox_live_validation_completion_recommended_step(
                 "reason": f"continue_from_{handoff.get('kind') or handoff.get('action') or 'handoff'}",
             }
     return {"tool": None, "endpoint": None, "method": None, "request": None, "reason": "manual_review_required"}
+
+
+def _seedbox_live_validation_completion_request(key: str, recovery_handoff: dict[str, Any], job_handoff: dict[str, Any]) -> dict[str, Any] | None:
+    for handoff in (recovery_handoff, job_handoff):
+        value = handoff.get(key) if isinstance(handoff, dict) else None
+        if isinstance(value, dict) and value:
+            return value
+    return None
+
+
+def _seedbox_live_validation_completion_call_action(status: str, next_step: dict[str, Any]) -> str:
+    if status == "running":
+        return "wait"
+    if status == "complete":
+        return "done"
+    if status in {"duplicate_stopped", "failed", "cancelled"}:
+        return "stop"
+    if next_step.get("tool") == "resume_job":
+        return "resume"
+    return status
 
 
 def _seedbox_live_validation_completion_next_actions(status: str, next_step: dict[str, Any], missing_evidence: list[str], blockers: list[str]) -> list[str]:
@@ -14649,7 +14687,7 @@ def _job_response_contract() -> dict[str, Any]:
         "closure_summary_fields": ["complete", "ready_for_report", "completion_report", "action", "gates", "source", "target", "duplicate_check", "materials", "policy", "qbit", "evidence", "next_step", "recommended_tool", "blockers", "next_actions"],
         "closure_material_fields": ["ready", "blockers", "evidence_summary"],
         "completion_report_fields": ["complete", "ready_for_user_report", "verdict", "required_gates", "missing_gates", "source", "target", "duplicate_check", "evidence", "next_step", "recommended_tool", "recommended_endpoint", "blockers", "next_actions", "report_when"],
-        "seedbox_live_validation_completion_report_fields": ["ready", "ready_for_user_report", "status", "job_id", "job_status", "summary_file", "checks", "missing_evidence", "duplicate_check", "materials", "policy", "qbit", "source", "target", "evidence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_fields", "complete_when", "stop_when", "blockers", "next_actions"],
+        "seedbox_live_validation_completion_report_fields": ["ready", "ready_for_user_report", "status", "job_id", "job_status", "summary_file", "checks", "missing_evidence", "duplicate_check", "materials", "policy", "qbit", "source", "target", "evidence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "read_fields", "complete_when", "stop_when", "blockers", "next_actions"],
     }
 
 
