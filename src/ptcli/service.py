@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -25,6 +26,7 @@ from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
 from src.ptcli.mainland import CHINESE_PT_TRACKERS, parse_tracker_list
+from src.ptcli.materials import generate_bdinfo_material, generate_mediainfo_material, generate_screenshot_materials, upload_screenshot_image_hosts
 from src.ptcli.policies import build_rule_obligations, build_site_policy_coverage, build_site_policy_report, parse_rate_limit, qbit_limits_for_tracker
 from src.ptcli.qbit import QbitReadOnlyService, match_torrents, summaries_to_dicts
 from src.ptcli.source import resolve_source_reference
@@ -606,6 +608,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/qbit/export": lambda payload: asyncio.run(qbit_export_payload(payload)),
                 "/v1/qbit/inject": lambda payload: asyncio.run(qbit_inject_payload(payload)),
                 "/v1/qbit/wait": lambda payload: asyncio.run(qbit_wait_payload(payload)),
+                "/v1/materials/prepare": lambda payload: asyncio.run(materials_prepare_payload(payload)),
                 "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/summary/check": summary_check_service_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
@@ -759,6 +762,103 @@ def summary_check_service_payload(request: dict[str, Any]) -> dict[str, Any]:
             "endpoint": "/v1/summary/check",
             "request": {"summary_file": summary_file},
         },
+    }
+
+
+async def materials_prepare_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Prepare local upload materials without contacting any tracker."""
+    request = request or {}
+    context = _materials_prepare_request_context(request)
+    if context["dry_run"]:
+        return _materials_prepare_dry_run_payload(context)
+
+    stages: list[dict[str, Any]] = []
+    material_options: dict[str, Any] = {}
+    screenshot_files = list(context["screenshot_files"])
+    blockers: list[str] = []
+
+    if not context["actions"]:
+        blockers.append("No material preparation action was requested.")
+
+    if context["generate_bdinfo"]:
+        if not context["path"]:
+            stage = _materials_prepare_missing_path_stage("materials-bdinfo", "--generate-bdinfo")
+        else:
+            result = await generate_bdinfo_material(context["path"], context["output_dir"], base_dir=context.get("base_dir"), playlist=context.get("bdinfo_playlist"))
+            stage = _materials_prepare_stage("materials-bdinfo", result, ready_statuses={"generated", "skipped"})
+            if result.get("status") == "generated" and result.get("bdinfo_file"):
+                material_options["bdinfo_file"] = result.get("bdinfo_file")
+        stages.append(stage)
+
+    if context["generate_mediainfo"]:
+        if not context["path"]:
+            stage = _materials_prepare_missing_path_stage("materials-mediainfo", "--generate-mediainfo")
+        else:
+            result = await generate_mediainfo_material(context["path"], context["output_dir"])
+            stage = _materials_prepare_stage("materials-mediainfo", result, ready_statuses={"generated"})
+            if result.get("status") == "generated" and result.get("mediainfo_file"):
+                material_options["mediainfo_file"] = result.get("mediainfo_file")
+        stages.append(stage)
+
+    if context["generate_screenshots"]:
+        if not context["path"]:
+            stage = _materials_prepare_missing_path_stage("materials-screenshots", "--generate-screenshots")
+        else:
+            screenshot_output_dir = str(Path(context["output_dir"]) / "screenshots")
+            result = await generate_screenshot_materials(context["path"], screenshot_output_dir, count=context["screenshot_count"])
+            stage = _materials_prepare_stage("materials-screenshots", result, ready_statuses={"generated"})
+            if result.get("status") == "generated":
+                screenshot_files = _string_list(result.get("screenshot_files"))
+                material_options["screenshot_files"] = screenshot_files
+                material_options["screenshot_count"] = context["screenshot_count"]
+        stages.append(stage)
+    elif screenshot_files:
+        material_options["screenshot_files"] = screenshot_files
+
+    if context["upload_screenshots"]:
+        if not screenshot_files:
+            stage = {
+                "stage": "materials-image-host",
+                "ok": False,
+                "result": {"status": "blocked", "blockers": ["upload_screenshots requires screenshot_files or a successful generate_screenshots stage."]},
+                "message": "Screenshot image-host upload is blocked because no local screenshots are available.",
+            }
+        else:
+            config = load_config(context.get("config"))
+            result = await upload_screenshot_image_hosts(config, screenshot_files, context["output_dir"], image_host=context.get("image_host"))
+            stage = _materials_prepare_stage("materials-image-host", result, ready_statuses={"uploaded"})
+            if result.get("status") == "uploaded" and result.get("image_host_file"):
+                material_options["image_host_file"] = result.get("image_host_file")
+                if context.get("image_host"):
+                    material_options["image_host"] = context.get("image_host")
+        stages.append(stage)
+
+    for key in ("metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "image_host", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url"):
+        if context.get(key) not in (None, ""):
+            material_options.setdefault(key, context.get(key))
+
+    blockers.extend(_materials_prepare_stage_blockers(stages))
+    ready = bool(context["actions"]) and not blockers
+    handoff = _materials_prepare_handoff(context, material_options, ready, blockers)
+    return {
+        "kind": "ptcli.materials_prepare",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "dry_run": False,
+        "mutates_state": True,
+        "mutates_filesystem": any(context[key] for key in ("generate_bdinfo", "generate_mediainfo", "generate_screenshots")),
+        "mutates_network": bool(context["upload_screenshots"]),
+        "live_upload": False,
+        "request": context,
+        "output_dir": context["output_dir"],
+        "stages": stages,
+        "material_options": material_options,
+        "material_evidence": _materials_prepare_evidence(material_options),
+        "resume_handoff": handoff,
+        "recommended_request": handoff.get("recommended_request"),
+        "blockers": blockers,
+        "next_actions": _materials_prepare_next_actions(ready, blockers),
+        "safety": _materials_prepare_safety(context),
     }
 
 
@@ -4919,6 +5019,198 @@ def _site_policy_agent_summary(matrix: list[dict[str, Any]], report: dict[str, A
         "policy_recommendations": [recommendation for item in matrix for recommendation in _string_list((item.get("policy_coverage") or {}).get("recommendations"))],
         "blockers": _string_list(report.get("blockers")),
         "next_actions": _string_list(report.get("next_actions")),
+    }
+
+
+def _materials_prepare_request_context(request: dict[str, Any]) -> dict[str, Any]:
+    path = str(request.get("path") or request.get("content_path") or "").strip()
+    output_dir = str(request.get("output_dir") or request.get("materials_output_dir") or "./tmp/materials").strip()
+    screenshot_files = _string_list(request.get("screenshot_files") or request.get("screenshot_file"))
+    context = {
+        "path": path or None,
+        "content_path": path or None,
+        "output_dir": output_dir,
+        "config": request.get("config"),
+        "base_dir": request.get("base_dir"),
+        "dry_run": _truthy(request.get("dry_run")),
+        "generate_bdinfo": _truthy(request.get("generate_bdinfo")),
+        "generate_mediainfo": _truthy(request.get("generate_mediainfo")),
+        "generate_screenshots": _truthy(request.get("generate_screenshots")),
+        "upload_screenshots": _truthy(request.get("upload_screenshots")),
+        "screenshot_count": _bounded_int(request.get("screenshot_count"), default=3, minimum=1, maximum=20),
+        "screenshot_files": screenshot_files,
+        "image_host": request.get("image_host"),
+        "bdinfo_playlist": request.get("bdinfo_playlist"),
+        "metadata_file": request.get("metadata_file"),
+        "ptgen_description_file": request.get("ptgen_description_file"),
+        "mediainfo_file": request.get("mediainfo_file"),
+        "bdinfo_file": request.get("bdinfo_file"),
+        "image_host_file": request.get("image_host_file"),
+        "imdb_id": request.get("imdb_id"),
+        "tmdb_id": request.get("tmdb_id"),
+        "tmdb_type": request.get("tmdb_type"),
+        "douban_id": request.get("douban_id"),
+        "douban_url": request.get("douban_url"),
+    }
+    context["actions"] = [
+        name
+        for name in ("generate_bdinfo", "generate_mediainfo", "generate_screenshots", "upload_screenshots")
+        if context[name]
+    ]
+    return context
+
+
+def _materials_prepare_dry_run_payload(context: dict[str, Any]) -> dict[str, Any]:
+    blockers = [] if context["actions"] else ["No material preparation action was requested."]
+    request_template = {
+        "path": context.get("path") or "/downloads/content",
+        "output_dir": context["output_dir"],
+        "generate_mediainfo": True,
+        "generate_screenshots": True,
+        "screenshot_count": context["screenshot_count"],
+        "upload_screenshots": True,
+        "image_host": context.get("image_host") or "<configured image host>",
+        "dry_run": False,
+    }
+    return {
+        "kind": "ptcli.materials_prepare",
+        "status": "ok" if not blockers else "blocked",
+        "ok": not blockers,
+        "dry_run": True,
+        "mutates_state": False,
+        "mutates_filesystem": False,
+        "mutates_network": False,
+        "live_upload": False,
+        "request": context,
+        "output_dir": context["output_dir"],
+        "planned_actions": context["actions"],
+        "stages": [{"stage": action.replace("_", "-"), "ok": True, "dry_run": True} for action in context["actions"]],
+        "material_options": _materials_prepare_existing_options(context),
+        "material_evidence": _materials_prepare_evidence(_materials_prepare_existing_options(context)),
+        "resume_handoff": _materials_prepare_handoff(context, _materials_prepare_existing_options(context), not blockers, blockers),
+        "recommended_request": request_template,
+        "blockers": blockers,
+        "next_actions": _materials_prepare_next_actions(not blockers, blockers),
+        "safety": _materials_prepare_safety(context),
+    }
+
+
+def _materials_prepare_existing_options(context: dict[str, Any]) -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    for key in ("metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "image_host_file", "image_host", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url"):
+        if context.get(key) not in (None, ""):
+            options[key] = context.get(key)
+    if context.get("screenshot_files"):
+        options["screenshot_files"] = list(context["screenshot_files"])
+    return options
+
+
+def _materials_prepare_stage(stage_name: str, result: dict[str, Any], *, ready_statuses: set[str]) -> dict[str, Any]:
+    status = str(result.get("status") or "")
+    ok = status in ready_statuses and not _string_list(result.get("blockers"))
+    return {
+        "stage": stage_name,
+        "ok": ok,
+        "result": result,
+        "message": f"{stage_name} completed." if ok else f"{stage_name} is blocked.",
+    }
+
+
+def _materials_prepare_missing_path_stage(stage_name: str, flag: str) -> dict[str, Any]:
+    return {
+        "stage": stage_name,
+        "ok": False,
+        "result": {"status": "blocked", "blockers": [f"{flag} requires path or content_path."]},
+        "message": f"{stage_name} requires path or content_path.",
+    }
+
+
+def _materials_prepare_stage_blockers(stages: list[dict[str, Any]]) -> list[str]:
+    blockers: list[str] = []
+    for stage in stages:
+        if stage.get("ok") is True:
+            continue
+        stage_name = str(stage.get("stage") or "materials")
+        result = stage.get("result") if isinstance(stage.get("result"), dict) else {}
+        stage_blockers = _string_list(result.get("blockers")) or [str(stage.get("message") or f"{stage_name} failed.")]
+        blockers.extend(f"{stage_name}: {blocker}" for blocker in stage_blockers)
+    return blockers
+
+
+def _materials_prepare_evidence(material_options: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "metadata_file": _materials_path_evidence(material_options.get("metadata_file")),
+        "ptgen_description_file": _materials_path_evidence(material_options.get("ptgen_description_file")),
+        "mediainfo_file": _materials_path_evidence(material_options.get("mediainfo_file")),
+        "bdinfo_file": _materials_path_evidence(material_options.get("bdinfo_file")),
+        "image_host_file": _materials_path_evidence(material_options.get("image_host_file")),
+        "screenshot_files": [_materials_path_evidence(path) for path in _string_list(material_options.get("screenshot_files"))],
+    }
+
+
+def _materials_path_evidence(value: Any) -> dict[str, Any] | None:
+    if value in (None, ""):
+        return None
+    path = Path(str(value)).expanduser()
+    evidence: dict[str, Any] = {"path": str(path), "exists": path.is_file()}
+    if path.is_file():
+        evidence.update({"size_bytes": path.stat().st_size, "sha1": _sha1_file(path)})
+    return evidence
+
+
+def _sha1_file(path: Path) -> str:
+    digest = hashlib.sha1()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _materials_prepare_handoff(context: dict[str, Any], material_options: dict[str, Any], ready: bool, blockers: list[str]) -> dict[str, Any]:
+    resume_overrides = {key: value for key, value in material_options.items() if value not in (None, "", [])}
+    recommended_request = {"overrides": resume_overrides, "dry_run": True}
+    return {
+        "kind": "ptcli.materials_prepare_handoff",
+        "ready": ready,
+        "recommended_tool": "resume_job",
+        "recommended_endpoint": "/v1/jobs/{job_id}/resume",
+        "method": "POST",
+        "material_options": material_options,
+        "accepted_override_keys": sorted(resume_overrides),
+        "recommended_request": recommended_request,
+        "execute_request": {**recommended_request, "dry_run": False},
+        "continue_when": "Use these material_options as resume_job overrides or job creation material fields after duplicate/rule gates are ready.",
+        "stop_when": ["blockers is not empty", "live upload confirmations are missing", "site policy gate is not ready"],
+        "blockers": blockers,
+        "next_actions": _materials_prepare_next_actions(ready, blockers),
+        "target_job_request_template": {
+            "source_url": "<source tracker details url>",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            **resume_overrides,
+        },
+        "request": context,
+    }
+
+
+def _materials_prepare_next_actions(ready: bool, blockers: list[str]) -> list[str]:
+    if ready:
+        return ["Pass material_options to source_url_check_and_submit, source_url_retorrent_job, retorrent_job, or resume_job after duplicate/rule/confirmation gates are ready."]
+    if blockers:
+        return ["Resolve materials_prepare.blockers, then rerun /v1/materials/prepare with explicit material actions."]
+    return ["Choose explicit material actions such as generate_mediainfo, generate_screenshots, or upload_screenshots."]
+
+
+def _materials_prepare_safety(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "does_not_contact_trackers": True,
+        "does_not_upload_to_tracker": True,
+        "live_upload": False,
+        "requires_confirmation": [],
+        "writes_files": any(context.get(key) for key in ("generate_bdinfo", "generate_mediainfo", "generate_screenshots")),
+        "may_contact_image_host": bool(context.get("upload_screenshots")),
+        "dry_run": bool(context.get("dry_run")),
     }
 
 
@@ -10001,6 +10293,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     qbit_export_request_schema = _qbit_export_tool_request_schema()
     qbit_inject_request_schema = _qbit_inject_tool_request_schema()
     qbit_wait_request_schema = _qbit_wait_tool_request_schema()
+    materials_prepare_request_schema = _materials_prepare_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     summary_check_request_schema = _summary_check_tool_request_schema()
@@ -10224,6 +10517,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "input_schema": qbit_wait_request_schema,
             "response_contract": _qbit_wait_response_contract(),
             "safety": {"mutates_state": False, "mutates_qbittorrent": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "materials_prepare",
+            "method": "POST",
+            "path": "/v1/materials/prepare",
+            "description": "Prepare local upload materials for retorrent jobs: MediaInfo/BDInfo, screenshots, optional image-host upload evidence, and resume-ready material_options. This never uploads to a tracker.",
+            "input_schema": materials_prepare_request_schema,
+            "response_contract": _materials_prepare_response_contract(),
+            "workflow_hints": {"resume_with": "pass material_options to resume_job overrides", "manual_job_with": "pass material_options fields to source_url_check_and_submit after duplicate/rule gates"},
+            "safety": {"mutates_state": True, "writes_files": True, "may_contact_image_host": True, "live_upload": False, "requires_confirmation": [], "does_not_upload_to_tracker": True},
         },
         {
             "name": "summary_check",
@@ -10627,6 +10930,41 @@ def _qbit_wait_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _materials_prepare_tool_request_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": [],
+        "properties": {
+            "path": {"type": "string", "description": "Local content path visible to the ptcli service/container. Required for generation actions."},
+            "content_path": {"type": "string", "description": "Alias for path."},
+            "output_dir": {"type": "string", "default": "./tmp/materials", "description": "Directory where generated MediaInfo, BDInfo, screenshots, and image-host evidence are written."},
+            "materials_output_dir": {"type": "string", "description": "Alias for output_dir."},
+            "config": {"type": "string", "description": "Path to data/config.py; required when upload_screenshots uses configured image hosts."},
+            "base_dir": {"type": "string"},
+            "dry_run": {"type": "boolean", "description": "Preview actions and resume handoff without writing files or contacting image hosts."},
+            "generate_mediainfo": {"type": "boolean", "description": "Generate MediaInfo from path."},
+            "generate_bdinfo": {"type": "boolean", "description": "Generate BDInfo for Blu-ray disc content from path when BDMV is present."},
+            "generate_screenshots": {"type": "boolean", "description": "Generate local screenshots from path using ffmpeg."},
+            "upload_screenshots": {"type": "boolean", "description": "Upload local or generated screenshots to the configured image host; never uploads to a tracker."},
+            "screenshot_count": {"type": "integer", "default": 3, "minimum": 1, "maximum": 20},
+            "screenshot_file": {"type": "string", "description": "Single existing local screenshot file."},
+            "screenshot_files": {"type": "array", "items": {"type": "string"}, "description": "Existing local screenshot files, used directly or uploaded when upload_screenshots=true."},
+            "image_host": {"type": "string", "description": "Optional image host selector."},
+            "bdinfo_playlist": {"type": "string"},
+            "metadata_file": {"type": "string"},
+            "ptgen_description_file": {"type": "string"},
+            "mediainfo_file": {"type": "string"},
+            "bdinfo_file": {"type": "string"},
+            "image_host_file": {"type": "string"},
+            "imdb_id": {"type": "string"},
+            "tmdb_id": {"type": "string"},
+            "tmdb_type": {"type": "string", "enum": ["movie", "tv"]},
+            "douban_id": {"type": "string"},
+            "douban_url": {"type": "string"},
+        },
+    }
+
+
 def _site_policy_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -10848,6 +11186,17 @@ def _qbit_wait_response_contract() -> dict[str, Any]:
         "match_fields": ["name", "hash", "save_path", "content_path", "size", "progress", "state", "category", "tags", "tracker"],
         "agent_summary_fields": ["ready", "read_only", "client", "hash", "path", "complete", "matched_count", "complete_count", "observed_hashes", "observed_content_paths", "blocker_count"],
         "safety": ["read_only", "does_not_add_torrents", "does_not_upload", "does_not_change_rate_limits"],
+    }
+
+
+def _materials_prepare_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "dry_run", "mutates_state", "mutates_filesystem", "mutates_network", "live_upload", "request", "output_dir", "stages", "material_options", "material_evidence", "resume_handoff", "recommended_request", "blockers", "next_actions", "safety"],
+        "stage_fields": ["stage", "ok", "result", "message"],
+        "material_option_fields": ["metadata_file", "ptgen_description_file", "mediainfo_file", "bdinfo_file", "screenshot_files", "image_host_file", "image_host", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url"],
+        "material_evidence_fields": ["path", "exists", "size_bytes", "sha1"],
+        "resume_handoff_fields": ["ready", "recommended_tool", "recommended_endpoint", "method", "material_options", "accepted_override_keys", "recommended_request", "execute_request", "target_job_request_template", "continue_when", "stop_when", "blockers", "next_actions"],
+        "safety": ["does_not_contact_trackers", "does_not_upload_to_tracker", "may_contact_image_host", "writes_files", "dry_run"],
     }
 
 
@@ -11076,6 +11425,7 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             "source_url_preflight": f"{public_base_url}/v1/retorrent/source-url/preflight",
             "readiness_bundle": f"{public_base_url}/v1/readiness/bundle",
             "summary_check": f"{public_base_url}/v1/summary/check",
+            "materials_prepare": f"{public_base_url}/v1/materials/prepare",
             "openapi": f"{public_base_url}/openapi.json",
             "tools": f"{public_base_url}/v1/tools",
             "manifest": f"{public_base_url}/.well-known/ptcli-agent.json",
@@ -11164,6 +11514,14 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "continue_when": "job_handoff.action!=wait and status not in queued,running",
                     "repeat_when": "job_handoff.action=wait and job_handoff.should_poll=true",
                     "stop_when": ["job_handoff.action=stop", "status=blocked", "status=failed", "status=cancelled"],
+                },
+                {
+                    "step": "prepare_materials",
+                    "tool": "materials_prepare",
+                    "read": ["ok", "material_options", "material_evidence", "resume_handoff.recommended_request", "resume_handoff.execute_request", "blockers"],
+                    "continue_when": "ok=true and material_options is not empty",
+                    "resume_with": "resume_job using materials_prepare.resume_handoff.recommended_request after adding job_id, then execute after dry_run review",
+                    "stop_when": ["materials_prepare.blockers is not empty", "image host upload failed", "local content path missing"],
                 },
                 {
                     "step": "closure_decision",
@@ -11479,6 +11837,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     qbit_export_request_schema = _qbit_export_tool_request_schema()
     qbit_inject_request_schema = _qbit_inject_tool_request_schema()
     qbit_wait_request_schema = _qbit_wait_tool_request_schema()
+    materials_prepare_request_schema = _materials_prepare_tool_request_schema()
     summary_check_request_schema = _summary_check_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
@@ -11646,6 +12005,28 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "agent_summary": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    materials_prepare_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "dry_run": {"type": "boolean"},
+            "mutates_state": {"type": "boolean"},
+            "mutates_filesystem": {"type": "boolean"},
+            "mutates_network": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "request": {"type": "object"},
+            "output_dir": {"type": "string"},
+            "stages": {"type": "array", "items": {"type": "object"}},
+            "material_options": {"type": "object"},
+            "material_evidence": {"type": "object"},
+            "resume_handoff": {"type": "object"},
+            "recommended_request": {"type": ["object", "null"]},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+            "safety": {"type": "object"},
         },
     }
     site_policy_response_schema = {
@@ -11994,6 +12375,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": qbit_wait_request_schema}}},
                     "responses": {"200": {"description": "Wait for qBittorrent completion by hash or content path.", "content": {"application/json": {"schema": qbit_wait_response_schema}}}},
+                },
+            },
+            "/v1/materials/prepare": {
+                "post": {
+                    "operationId": "preparePtcliMaterials",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": materials_prepare_request_schema}}},
+                    "responses": {"200": {"description": "Prepare local retorrent upload materials and return resume-ready material_options.", "content": {"application/json": {"schema": materials_prepare_response_schema}}}},
                 },
             },
             "/v1/site-policies": {

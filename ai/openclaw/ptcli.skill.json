@@ -22,6 +22,7 @@
     "source_url_preflight": "http://127.0.0.1:8080/v1/retorrent/source-url/preflight",
     "readiness_bundle": "http://127.0.0.1:8080/v1/readiness/bundle",
     "summary_check": "http://127.0.0.1:8080/v1/summary/check",
+    "materials_prepare": "http://127.0.0.1:8080/v1/materials/prepare",
     "openapi": "http://127.0.0.1:8080/openapi.json",
     "tools": "http://127.0.0.1:8080/v1/tools",
     "manifest": "http://127.0.0.1:8080/.well-known/ptcli-agent.json"
@@ -232,6 +233,25 @@
             "status=blocked",
             "status=failed",
             "status=cancelled"
+          ]
+        },
+        {
+          "step": "prepare_materials",
+          "tool": "materials_prepare",
+          "read": [
+            "ok",
+            "material_options",
+            "material_evidence",
+            "resume_handoff.recommended_request",
+            "resume_handoff.execute_request",
+            "blockers"
+          ],
+          "continue_when": "ok=true and material_options is not empty",
+          "resume_with": "resume_job using materials_prepare.resume_handoff.recommended_request after adding job_id, then execute after dry_run review",
+          "stop_when": [
+            "materials_prepare.blockers is not empty",
+            "image host upload failed",
+            "local content path missing"
           ]
         },
         {
@@ -8858,6 +8878,201 @@
       }
     },
     {
+      "name": "materials_prepare",
+      "method": "POST",
+      "path": "/v1/materials/prepare",
+      "description": "Prepare local upload materials for retorrent jobs: MediaInfo/BDInfo, screenshots, optional image-host upload evidence, and resume-ready material_options. This never uploads to a tracker.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Local content path visible to the ptcli service/container. Required for generation actions."
+          },
+          "content_path": {
+            "type": "string",
+            "description": "Alias for path."
+          },
+          "output_dir": {
+            "type": "string",
+            "default": "./tmp/materials",
+            "description": "Directory where generated MediaInfo, BDInfo, screenshots, and image-host evidence are written."
+          },
+          "materials_output_dir": {
+            "type": "string",
+            "description": "Alias for output_dir."
+          },
+          "config": {
+            "type": "string",
+            "description": "Path to data/config.py; required when upload_screenshots uses configured image hosts."
+          },
+          "base_dir": {
+            "type": "string"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Preview actions and resume handoff without writing files or contacting image hosts."
+          },
+          "generate_mediainfo": {
+            "type": "boolean",
+            "description": "Generate MediaInfo from path."
+          },
+          "generate_bdinfo": {
+            "type": "boolean",
+            "description": "Generate BDInfo for Blu-ray disc content from path when BDMV is present."
+          },
+          "generate_screenshots": {
+            "type": "boolean",
+            "description": "Generate local screenshots from path using ffmpeg."
+          },
+          "upload_screenshots": {
+            "type": "boolean",
+            "description": "Upload local or generated screenshots to the configured image host; never uploads to a tracker."
+          },
+          "screenshot_count": {
+            "type": "integer",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 20
+          },
+          "screenshot_file": {
+            "type": "string",
+            "description": "Single existing local screenshot file."
+          },
+          "screenshot_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing local screenshot files, used directly or uploaded when upload_screenshots=true."
+          },
+          "image_host": {
+            "type": "string",
+            "description": "Optional image host selector."
+          },
+          "bdinfo_playlist": {
+            "type": "string"
+          },
+          "metadata_file": {
+            "type": "string"
+          },
+          "ptgen_description_file": {
+            "type": "string"
+          },
+          "mediainfo_file": {
+            "type": "string"
+          },
+          "bdinfo_file": {
+            "type": "string"
+          },
+          "image_host_file": {
+            "type": "string"
+          },
+          "imdb_id": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          },
+          "tmdb_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "douban_id": {
+            "type": "string"
+          },
+          "douban_url": {
+            "type": "string"
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "dry_run",
+          "mutates_state",
+          "mutates_filesystem",
+          "mutates_network",
+          "live_upload",
+          "request",
+          "output_dir",
+          "stages",
+          "material_options",
+          "material_evidence",
+          "resume_handoff",
+          "recommended_request",
+          "blockers",
+          "next_actions",
+          "safety"
+        ],
+        "stage_fields": [
+          "stage",
+          "ok",
+          "result",
+          "message"
+        ],
+        "material_option_fields": [
+          "metadata_file",
+          "ptgen_description_file",
+          "mediainfo_file",
+          "bdinfo_file",
+          "screenshot_files",
+          "image_host_file",
+          "image_host",
+          "imdb_id",
+          "tmdb_id",
+          "tmdb_type",
+          "douban_id",
+          "douban_url"
+        ],
+        "material_evidence_fields": [
+          "path",
+          "exists",
+          "size_bytes",
+          "sha1"
+        ],
+        "resume_handoff_fields": [
+          "ready",
+          "recommended_tool",
+          "recommended_endpoint",
+          "method",
+          "material_options",
+          "accepted_override_keys",
+          "recommended_request",
+          "execute_request",
+          "target_job_request_template",
+          "continue_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
+        ],
+        "safety": [
+          "does_not_contact_trackers",
+          "does_not_upload_to_tracker",
+          "may_contact_image_host",
+          "writes_files",
+          "dry_run"
+        ]
+      },
+      "workflow_hints": {
+        "resume_with": "pass material_options to resume_job overrides",
+        "manual_job_with": "pass material_options fields to source_url_check_and_submit after duplicate/rule gates"
+      },
+      "safety": {
+        "mutates_state": true,
+        "writes_files": true,
+        "may_contact_image_host": true,
+        "live_upload": false,
+        "requires_confirmation": [],
+        "does_not_upload_to_tracker": true
+      }
+    },
+    {
       "name": "summary_check",
       "method": "POST",
       "path": "/v1/summary/check",
@@ -11945,7 +12160,7 @@
       }
     }
   ],
-  "tool_count": 31,
+  "tool_count": 32,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

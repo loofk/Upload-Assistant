@@ -10593,6 +10593,77 @@ def test_service_summary_check_exposes_doctor_handoff(tmp_path) -> None:
     assert payload["doctor_result_handoff"]["next_step"]["tool"] == "source_url_retorrent_job"
 
 
+@pytest.mark.asyncio
+async def test_service_materials_prepare_returns_resume_ready_options(monkeypatch, tmp_path) -> None:
+    content = tmp_path / "content"
+    output_dir = tmp_path / "materials"
+    screenshot = output_dir / "screenshots" / "screenshot-01.png"
+    image_host_file = output_dir / "image-host-uploads.json"
+
+    async def fake_generate_mediainfo_material(_content_path, material_output_dir):
+        mediainfo = Path(material_output_dir) / "MI_FULL_00.txt"
+        mediainfo.parent.mkdir(parents=True, exist_ok=True)
+        mediainfo.write_text("General\nComplete name : Example.mkv\n", encoding="utf-8")
+        return {"status": "generated", "mediainfo_file": str(mediainfo), "blockers": []}
+
+    async def fake_generate_screenshot_materials(_content_path, _screenshot_output_dir, count):
+        assert count == 1
+        screenshot.parent.mkdir(parents=True, exist_ok=True)
+        screenshot.write_bytes(b"png")
+        return {"status": "generated", "screenshot_files": [str(screenshot)], "count": 1, "blockers": []}
+
+    async def fake_upload_screenshot_image_hosts(_config, screenshot_files, _material_output_dir, image_host=None):
+        assert screenshot_files == [str(screenshot)]
+        assert image_host == "ptpimg"
+        image_host_file.parent.mkdir(parents=True, exist_ok=True)
+        image_host_file.write_text(json.dumps({"items": [image_host_item_for_screenshot(screenshot, img_url="https://img.example/thumb.png")]}), encoding="utf-8")
+        return {"status": "uploaded", "image_host_file": str(image_host_file), "count": 1, "items": [], "blockers": []}
+
+    monkeypatch.setattr(ptcli_service, "generate_mediainfo_material", fake_generate_mediainfo_material)
+    monkeypatch.setattr(ptcli_service, "generate_screenshot_materials", fake_generate_screenshot_materials)
+    monkeypatch.setattr(ptcli_service, "upload_screenshot_image_hosts", fake_upload_screenshot_image_hosts)
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"DEFAULT": {"img_host_1": "ptpimg"}})
+
+    payload = await ptcli_service.materials_prepare_payload(
+        {
+            "path": str(content),
+            "output_dir": str(output_dir),
+            "generate_mediainfo": True,
+            "generate_screenshots": True,
+            "upload_screenshots": True,
+            "screenshot_count": 1,
+            "image_host": "ptpimg",
+            "tmdb_id": "999",
+        }
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["ok"] is True
+    assert payload["live_upload"] is False
+    assert payload["mutates_filesystem"] is True
+    assert payload["mutates_network"] is True
+    assert payload["material_options"]["mediainfo_file"].endswith("MI_FULL_00.txt")
+    assert payload["material_options"]["screenshot_files"] == [str(screenshot)]
+    assert payload["material_options"]["image_host_file"] == str(image_host_file)
+    assert payload["material_options"]["tmdb_id"] == "999"
+    assert payload["material_evidence"]["mediainfo_file"]["exists"] is True
+    assert payload["material_evidence"]["screenshot_files"][0]["sha1"] == hashlib.sha1(b"png").hexdigest()
+    assert payload["resume_handoff"]["recommended_tool"] == "resume_job"
+    assert payload["resume_handoff"]["recommended_request"]["overrides"]["image_host_file"] == str(image_host_file)
+    assert "does_not_upload_to_tracker" in payload["safety"]
+
+
+@pytest.mark.asyncio
+async def test_service_materials_prepare_dry_run_blocks_without_actions() -> None:
+    payload = await ptcli_service.materials_prepare_payload({"dry_run": True})
+
+    assert payload["status"] == "blocked"
+    assert payload["dry_run"] is True
+    assert payload["mutates_state"] is False
+    assert payload["recommended_request"]["generate_mediainfo"] is True
+    assert "No material preparation action was requested." in payload["blockers"]
+
+
 def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
@@ -16276,6 +16347,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/candidates/daily/schedule" in paths
     assert "/v1/qbit/inject" in paths
     assert "/v1/qbit/wait" in paths
+    assert "/v1/materials/prepare" in paths
     assert "/v1/summary/check" in paths
     assert "/v1/jobs" in paths
     assert "/v1/jobs/{job_id}" in paths
@@ -16303,6 +16375,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "doctor_result_handoff" in tool_by_name["summary_check"]["response_contract"]["required_fields"]
     assert "doctor_result_handoff_fields" in tool_by_name["summary_check"]["response_contract"]
     assert "live_safe_to_attempt" in tool_by_name["summary_check"]["response_contract"]["doctor_result_handoff_fields"]
+    assert tool_by_name["materials_prepare"]["path"] == "/v1/materials/prepare"
+    assert tool_by_name["materials_prepare"]["input_schema"]["properties"]["generate_screenshots"]["type"] == "boolean"
+    assert tool_by_name["materials_prepare"]["input_schema"]["properties"]["upload_screenshots"]["type"] == "boolean"
+    assert "material_options" in tool_by_name["materials_prepare"]["response_contract"]["required_fields"]
+    assert "resume_handoff" in tool_by_name["materials_prepare"]["response_contract"]["required_fields"]
+    assert "does_not_upload_to_tracker" in tool_by_name["materials_prepare"]["safety"]
     assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     manual_properties = tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
@@ -16764,6 +16842,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/qbit/export" in openapi["paths"]
     assert "/v1/qbit/inject" in openapi["paths"]
     assert "/v1/qbit/wait" in openapi["paths"]
+    assert "/v1/materials/prepare" in openapi["paths"]
     assert "/v1/summary/check" in openapi["paths"]
     assert "/v1/site-policies" in openapi["paths"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
@@ -16825,6 +16904,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     qbit_wait_schema = openapi["paths"]["/v1/qbit/wait"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "completion_verification" in qbit_wait_schema["properties"]
     assert "matches" in qbit_wait_schema["properties"]
+    materials_prepare_request_schema = openapi["paths"]["/v1/materials/prepare"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert openapi["paths"]["/v1/materials/prepare"]["post"]["operationId"] == "preparePtcliMaterials"
+    assert "path" in materials_prepare_request_schema["properties"]
+    assert "screenshot_files" in materials_prepare_request_schema["properties"]
+    materials_prepare_schema = openapi["paths"]["/v1/materials/prepare"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "material_options" in materials_prepare_schema["properties"]
+    assert "resume_handoff" in materials_prepare_schema["properties"]
     summary_check_request_schema = openapi["paths"]["/v1/summary/check"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert summary_check_request_schema["required"] == ["summary_file"]
     summary_check_schema = openapi["paths"]["/v1/summary/check"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -16942,7 +17028,7 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["one_call_handoff"]["tool"] == "source_url_check_and_submit"
     assert ready["one_call_handoff"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert ready["recommended_tool"] == "source_url_check_and_submit"
-    assert [step["tool"] for step in ready["steps"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
+    assert [step["tool"] for step in ready["steps"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "materials_prepare", "get_job_summary"]
     assert "policy_execution_summary" in ready["steps"][0]["read"]
     assert "policy_execution_handoff" in ready["steps"][0]["read"]
     assert "live_readiness.policy_execution_summary" in ready["steps"][1]["read"]
@@ -16955,8 +17041,10 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert "job_handoff" in ready["steps"][4]["read"]
     assert "job_handoff.action" in ready["steps"][5]["read"]
     assert ready["steps"][5]["repeat_when"] == "job_handoff.action=wait and job_handoff.should_poll=true"
-    assert ready["steps"][6]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
-    assert ready["steps"][6]["resume_with"].startswith("job_handoff")
+    assert ready["steps"][6]["tool"] == "materials_prepare"
+    assert "material_options" in ready["steps"][6]["read"]
+    assert ready["steps"][7]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
+    assert ready["steps"][7]["resume_with"].startswith("job_handoff")
     assert "source_url_check_and_submit" in ready["next_actions"][0]
 
     daily_blocked = ptcli_service.agent_run_preview_payload({"workflow": "daily_candidates", "source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
@@ -16995,6 +17083,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["discovery"]["source_url_preflight"] == "http://ptcli.local:8080/v1/retorrent/source-url/preflight"
     assert manifest["discovery"]["readiness_bundle"] == "http://ptcli.local:8080/v1/readiness/bundle"
     assert manifest["discovery"]["summary_check"] == "http://ptcli.local:8080/v1/summary/check"
+    assert manifest["discovery"]["materials_prepare"] == "http://ptcli.local:8080/v1/materials/prepare"
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
@@ -17003,12 +17092,12 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["complete_when"] == "closure_handoff.complete=true"
     assert manifest["closure_contract"]["next_step_source"].startswith("job_handoff")
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
-    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_check_and_submit"
     assert source_url_workflow["fallback_tool"] == "source_url_retorrent_job"
     assert source_url_workflow["one_call"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
-    assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "get_job_summary"]
+    assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "materials_prepare", "get_job_summary"]
     assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
     assert "policy_execution_summary" in source_url_workflow["runbook"][0]["read"]
     assert "policy_execution_handoff" in source_url_workflow["runbook"][0]["read"]
@@ -17023,11 +17112,14 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "job_handoff.action=stop" in source_url_workflow["runbook"][4]["stop_when"]
     assert "job_handoff.action" in source_url_workflow["runbook"][5]["read"]
     assert source_url_workflow["runbook"][5]["repeat_when"] == "job_handoff.action=wait and job_handoff.should_poll=true"
-    assert source_url_workflow["runbook"][6]["step"] == "closure_decision"
-    assert "job_handoff.recommended_tool" in source_url_workflow["runbook"][6]["read"]
-    assert "closure_summary.next_step" in source_url_workflow["runbook"][6]["read"]
-    assert source_url_workflow["runbook"][6]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
-    assert source_url_workflow["runbook"][6]["resume_with"].startswith("job_handoff")
+    assert source_url_workflow["runbook"][6]["step"] == "prepare_materials"
+    assert source_url_workflow["runbook"][6]["tool"] == "materials_prepare"
+    assert "material_options" in source_url_workflow["runbook"][6]["read"]
+    assert source_url_workflow["runbook"][7]["step"] == "closure_decision"
+    assert "job_handoff.recommended_tool" in source_url_workflow["runbook"][7]["read"]
+    assert "closure_summary.next_step" in source_url_workflow["runbook"][7]["read"]
+    assert source_url_workflow["runbook"][7]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
+    assert source_url_workflow["runbook"][7]["resume_with"].startswith("job_handoff")
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
     assert manual_workflow["tool"] == "manual_retorrent_job"
     assert manual_workflow["runbook_ref"] == "source_url_retorrent"
@@ -17058,8 +17150,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["source_url_preflight"].endswith("/v1/retorrent/source-url/preflight")
         assert payload["discovery"]["readiness_bundle"].endswith("/v1/readiness/bundle")
         assert payload["discovery"]["summary_check"].endswith("/v1/summary/check")
+        assert payload["discovery"]["materials_prepare"].endswith("/v1/materials/prepare")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+        assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]
@@ -17130,9 +17223,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
         assert source_url_workflow["runbook"][3]["tool"] == "retorrent_check"
         assert source_url_workflow["runbook"][5]["repeat_when"] == "job_handoff.action=wait and job_handoff.should_poll=true"
-        assert source_url_workflow["runbook"][6]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
-        assert source_url_workflow["runbook"][6]["resume_with"].startswith("job_handoff")
-        assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][6]["stop_when"]
+        assert source_url_workflow["runbook"][6]["tool"] == "materials_prepare"
+        assert source_url_workflow["runbook"][7]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
+        assert source_url_workflow["runbook"][7]["resume_with"].startswith("job_handoff")
+        assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][7]["stop_when"]
         assert tools_by_name["site_profiles"]["path"] == "/v1/sites"
         assert "extension_plan" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
