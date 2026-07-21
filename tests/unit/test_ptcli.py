@@ -10958,6 +10958,118 @@ def test_service_target_package_prepare_job_exposes_handoff(monkeypatch, tmp_pat
     assert store.list({"kind": "ptcli.target_package_prepare"})["jobs"][0]["target_package_handoff"]["ready"] is True
 
 
+@pytest.mark.asyncio
+async def test_service_target_upload_returns_closure_handoff(monkeypatch, tmp_path) -> None:
+    summary_file = tmp_path / "ptcli-target-upload-summary.json"
+
+    async def fake_target_upload_payload(args):
+        assert args.package_dir == "/tmp/package"
+        assert args.torrent_file == "/tmp/mteam-safe.torrent"
+        assert args.execute is True
+        assert args.confirm_upload is True
+        assert args.download_uploaded_torrent is True
+        assert args.inject_uploaded_torrent is True
+        assert args.wait_uploaded_complete is True
+        assert args.write_summary is True
+        return {
+            "status": "uploaded",
+            "summary_file": str(summary_file),
+            "automation_action": "complete",
+            "resume_state": {},
+            "summary": {
+                "status": "uploaded",
+                "mode": "live_upload",
+                "ready": True,
+                "uploaded": True,
+                "uploaded_torrent_id": "999",
+                "uploaded_torrent_hash": "a" * 40,
+                "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
+                "blockers": [],
+                "target_preparation_audit": {
+                    "ready": True,
+                    "materials_ready": True,
+                    "metadata_ready": True,
+                    "assets_ready": True,
+                    "description_ready": True,
+                    "payload": {"payload_checks_ready": True, "materials_ready_required": True},
+                    "description": {"missing": []},
+                    "missing": [],
+                    "blockers": [],
+                    "payload_review": {"recovery_missing": []},
+                },
+                "completion_review": {
+                    "complete": True,
+                    "checks": {"uploaded_wait_complete": True},
+                    "uploaded_torrent_hash": "a" * 40,
+                    "injected_torrent_hash": "a" * 40,
+                    "uploaded_torrent_path": "/tmp/MTEAM-999.torrent",
+                },
+                "fresh_duplicate_check": {"searched": True, "exists": False, "count": 0},
+            },
+            "artifacts": {"target_preparation_audit": {"ready": True}},
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    monkeypatch.setattr(ptcli_service, "cli_target_upload_payload", fake_target_upload_payload)
+
+    payload = await ptcli_service.target_upload_service_payload(
+        {
+            "package_dir": "/tmp/package",
+            "torrent_file": "/tmp/mteam-safe.torrent",
+            "execute": True,
+            "confirm_upload": True,
+            "download_uploaded_torrent": True,
+            "inject_uploaded_torrent": True,
+            "wait_uploaded_complete": True,
+            "uploaded_save_path": "/downloads/Example",
+            "uploaded_qbit_category": "MTEAM",
+            "uploaded_qbit_tags": "retorrent",
+        }
+    )
+
+    assert payload["kind"] == "ptcli.target_upload"
+    assert payload["status"] == "ok"
+    assert payload["ok"] is True
+    assert payload["live_upload"] is True
+    assert payload["summary_file"] == str(summary_file)
+    assert payload["command_argv"][:5] == ["ptcli", "target-upload", "--package-dir", "/tmp/package", "--torrent-file"]
+    assert "--download-uploaded-torrent" in payload["command_argv"]
+    assert payload["target_upload_diagnostics"]["ready_for_uploaded_seeding"] is True
+    assert payload["target_upload_handoff"]["ready"] is True
+    assert payload["target_upload_handoff"]["uploaded_seeding_ready"] is True
+    assert payload["safety"]["does_not_skip_duplicate_check"] is True
+
+
+def test_service_target_upload_job_exposes_handoff(monkeypatch, tmp_path) -> None:
+    async def fake_target_upload_service_payload(_request):
+        return {
+            "kind": "ptcli.target_upload",
+            "status": "ok",
+            "ok": True,
+            "summary_file": str(tmp_path / "summary.json"),
+            "automation_action": "complete",
+            "summary": {"ready": True, "completion_review": {"complete": True}, "target_preparation_audit": {"ready": True}},
+            "target_upload_diagnostics": {"ready": True, "ready_for_uploaded_seeding": True, "preflight": {"ready": True, "payload_ready": True}, "completion": {"complete": True}, "blockers": []},
+            "target_upload_handoff": {"ready": True, "uploaded_seeding_ready": True, "recommended_tool": "get_job_summary"},
+            "blockers": [],
+            "next_actions": ["Report closure."],
+        }
+
+    monkeypatch.setattr(ptcli_service, "target_upload_service_payload", fake_target_upload_service_payload)
+    store = ptcli_service.JobStore(tmp_path / "jobs", run_inline=True)
+
+    job = ptcli_service.create_target_upload_job(store, {"package_dir": "/tmp/package", "torrent_file": "/tmp/mteam-safe.torrent", "execute": True, "confirm_upload": True, "download_uploaded_torrent": True, "inject_uploaded_torrent": True, "wait_uploaded_complete": True})
+
+    assert job["kind"] == "ptcli.target_upload"
+    assert job["status"] == "complete"
+    assert job["request"]["write_summary"] is True
+    assert job["target_upload_handoff"]["ready"] is True
+    assert job["agent_decision"]["decision"] == "target_upload_complete"
+    assert store.summary(job["job_id"])["target_upload_handoff"]["uploaded_seeding_ready"] is True
+    assert store.list({"kind": "ptcli.target_upload"})["jobs"][0]["target_upload_handoff"]["ready"] is True
+
+
 def test_summary_check_blocks_unsupported_schema_version(tmp_path, capsys) -> None:
     summary_file = tmp_path / "ptcli-run-summary.json"
     summary_file.write_text(
@@ -16647,7 +16759,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/metadata/prepare" in paths
     assert "/v1/target/package/prepare" in paths
     assert "/v1/target/upload/preflight" in paths
+    assert "/v1/target/upload" in paths
     assert "/v1/jobs/target/package/prepare" in paths
+    assert "/v1/jobs/target/upload" in paths
     assert "/v1/summary/check" in paths
     assert "/v1/jobs" in paths
     assert "/v1/jobs/{job_id}" in paths
@@ -16700,9 +16814,16 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["target_upload_preflight"]["path"] == "/v1/target/upload/preflight"
     assert tool_by_name["target_upload_preflight"]["input_schema"]["required"] == ["package_dir"]
     assert "target_upload_preflight" in tool_by_name["target_upload_preflight"]["response_contract"]["required_fields"]
+    assert tool_by_name["target_upload"]["path"] == "/v1/target/upload"
+    assert tool_by_name["target_upload"]["input_schema"]["required"] == ["package_dir"]
+    assert "target_upload_handoff" in tool_by_name["target_upload"]["response_contract"]["required_fields"]
+    assert "download_uploaded_torrent" in tool_by_name["target_upload"]["input_schema"]["properties"]
     assert tool_by_name["target_package_prepare_job"]["path"] == "/v1/jobs/target/package/prepare"
     assert "target_package_handoff" in tool_by_name["target_package_prepare_job"]["response_contract"]["required_fields"]
     assert tool_by_name["target_package_prepare_job"]["workflow_hints"]["handoff_field"] == "target_package_handoff"
+    assert tool_by_name["target_upload_job"]["path"] == "/v1/jobs/target/upload"
+    assert "target_upload_handoff" in tool_by_name["target_upload_job"]["response_contract"]["required_fields"]
+    assert tool_by_name["target_upload_job"]["workflow_hints"]["handoff_field"] == "target_upload_handoff"
     assert "execute" not in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     assert "confirm_upload" in tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
     manual_properties = tool_by_name["manual_retorrent_job"]["input_schema"]["properties"]
@@ -17265,6 +17386,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert target_preflight_request_schema["required"] == ["package_dir"]
     target_preflight_schema = openapi["paths"]["/v1/target/upload/preflight"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "target_upload_preflight" in target_preflight_schema["properties"]
+    target_upload_request_schema = openapi["paths"]["/v1/target/upload"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert openapi["paths"]["/v1/target/upload"]["post"]["operationId"] == "runPtcliTargetUpload"
+    assert target_upload_request_schema["required"] == ["package_dir"]
+    assert "download_uploaded_torrent" in target_upload_request_schema["properties"]
+    assert "wait_uploaded_complete" in target_upload_request_schema["properties"]
+    target_upload_schema = openapi["paths"]["/v1/target/upload"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "target_upload_diagnostics" in target_upload_schema["properties"]
+    assert "target_upload_handoff" in target_upload_schema["properties"]
     assert openapi["paths"]["/v1/jobs/materials/prepare"]["post"]["operationId"] == "createPtcliMaterialsPrepareJob"
     materials_prepare_job_schema = openapi["paths"]["/v1/jobs/materials/prepare"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "materials_prepare_handoff" in materials_prepare_job_schema["properties"]
@@ -17274,6 +17403,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert openapi["paths"]["/v1/jobs/target/package/prepare"]["post"]["operationId"] == "createPtcliTargetPackagePrepareJob"
     target_package_job_schema = openapi["paths"]["/v1/jobs/target/package/prepare"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "target_package_handoff" in target_package_job_schema["properties"]
+    assert openapi["paths"]["/v1/jobs/target/upload"]["post"]["operationId"] == "createPtcliTargetUploadJob"
+    target_upload_job_schema = openapi["paths"]["/v1/jobs/target/upload"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "target_upload_handoff" in target_upload_job_schema["properties"]
     summary_check_request_schema = openapi["paths"]["/v1/summary/check"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert summary_check_request_schema["required"] == ["summary_file"]
     summary_check_schema = openapi["paths"]["/v1/summary/check"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -17393,7 +17525,7 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["one_call_handoff"]["tool"] == "source_url_check_and_submit"
     assert ready["one_call_handoff"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert ready["recommended_tool"] == "source_url_check_and_submit"
-    assert [step["tool"] for step in ready["steps"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "metadata_prepare_job", "materials_prepare_job", "target_package_prepare_job", "get_job_summary"]
+    assert [step["tool"] for step in ready["steps"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "metadata_prepare_job", "materials_prepare_job", "target_package_prepare_job", "target_upload_job", "get_job_summary"]
     assert "policy_execution_summary" in ready["steps"][0]["read"]
     assert "policy_execution_handoff" in ready["steps"][0]["read"]
     assert "live_readiness.policy_execution_summary" in ready["steps"][1]["read"]
@@ -17415,8 +17547,10 @@ def test_agent_run_preview_exposes_closure_walkthrough() -> None:
     assert ready["steps"][8]["tool"] == "target_package_prepare_job"
     assert "target_package_handoff.package_dir" in ready["steps"][8]["read"]
     assert "target_package_handoff.target_upload_request" in ready["steps"][8]["read"]
-    assert ready["steps"][9]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
-    assert ready["steps"][9]["resume_with"].startswith("job_handoff")
+    assert ready["steps"][9]["tool"] == "target_upload_job"
+    assert "target_upload_handoff.uploaded_seeding_ready" in ready["steps"][9]["read"]
+    assert ready["steps"][10]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
+    assert ready["steps"][10]["resume_with"].startswith("job_handoff")
     assert "source_url_check_and_submit" in ready["next_actions"][0]
 
     daily_blocked = ptcli_service.agent_run_preview_payload({"workflow": "daily_candidates", "source_tracker": "U2", "target": "MTEAM", "accept_rules": True})
@@ -17462,6 +17596,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["discovery"]["target_package_prepare"] == "http://ptcli.local:8080/v1/target/package/prepare"
     assert manifest["discovery"]["target_package_prepare_job"] == "http://ptcli.local:8080/v1/jobs/target/package/prepare"
     assert manifest["discovery"]["target_upload_preflight"] == "http://ptcli.local:8080/v1/target/upload/preflight"
+    assert manifest["discovery"]["target_upload"] == "http://ptcli.local:8080/v1/target/upload"
+    assert manifest["discovery"]["target_upload_job"] == "http://ptcli.local:8080/v1/jobs/target/upload"
     assert manifest["auth"]["env"] == "PTCLI_API_TOKEN"
     assert "accept_rules=true" in manifest["safety"]["live_upload_requires"]
     assert "confirm_upload=true" in manifest["safety"]["live_upload_requires"]
@@ -17470,12 +17606,12 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert manifest["closure_contract"]["complete_when"] == "closure_handoff.complete=true"
     assert manifest["closure_contract"]["next_step_source"].startswith("job_handoff")
     assert manifest["closure_contract"]["actions"]["repair_qbit"].startswith("Use closure_handoff.next_step")
-    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_package_prepare_job", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+    assert {tool["name"] for tool in manifest["tools"]} >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_profiles", "site_policies", "qbit_inspect", "qbit_match", "qbit_export_target_torrent", "qbit_inject_torrent", "qbit_wait_complete", "source_url_check_and_submit", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "retorrent_check_job", "submit_checked_retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
     source_url_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "source_url_retorrent")
     assert source_url_workflow["tool"] == "source_url_check_and_submit"
     assert source_url_workflow["fallback_tool"] == "source_url_retorrent_job"
     assert source_url_workflow["one_call"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
-    assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "metadata_prepare_job", "materials_prepare_job", "target_package_prepare_job", "get_job_summary"]
+    assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "metadata_prepare_job", "materials_prepare_job", "target_package_prepare_job", "target_upload_job", "get_job_summary"]
     assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
     assert "policy_execution_summary" in source_url_workflow["runbook"][0]["read"]
     assert "policy_execution_handoff" in source_url_workflow["runbook"][0]["read"]
@@ -17501,11 +17637,14 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert source_url_workflow["runbook"][8]["step"] == "prepare_target_package"
     assert source_url_workflow["runbook"][8]["tool"] == "target_package_prepare_job"
     assert "target_package_handoff.next_step" in source_url_workflow["runbook"][8]["read"]
-    assert source_url_workflow["runbook"][9]["step"] == "closure_decision"
-    assert "job_handoff.recommended_tool" in source_url_workflow["runbook"][9]["read"]
-    assert "closure_summary.next_step" in source_url_workflow["runbook"][9]["read"]
-    assert source_url_workflow["runbook"][9]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
-    assert source_url_workflow["runbook"][9]["resume_with"].startswith("job_handoff")
+    assert source_url_workflow["runbook"][9]["step"] == "target_upload_closure"
+    assert source_url_workflow["runbook"][9]["tool"] == "target_upload_job"
+    assert "target_upload_handoff.summary_file" in source_url_workflow["runbook"][9]["read"]
+    assert source_url_workflow["runbook"][10]["step"] == "closure_decision"
+    assert "job_handoff.recommended_tool" in source_url_workflow["runbook"][10]["read"]
+    assert "closure_summary.next_step" in source_url_workflow["runbook"][10]["read"]
+    assert source_url_workflow["runbook"][10]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
+    assert source_url_workflow["runbook"][10]["resume_with"].startswith("job_handoff")
     manual_workflow = next(workflow for workflow in manifest["default_workflows"] if workflow["name"] == "manual_retorrent")
     assert manual_workflow["tool"] == "manual_retorrent_job"
     assert manual_workflow["runbook_ref"] == "source_url_retorrent"
@@ -17543,8 +17682,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert payload["discovery"]["target_package_prepare"].endswith("/v1/target/package/prepare")
         assert payload["discovery"]["target_package_prepare_job"].endswith("/v1/jobs/target/package/prepare")
         assert payload["discovery"]["target_upload_preflight"].endswith("/v1/target/upload/preflight")
+        assert payload["discovery"]["target_upload"].endswith("/v1/target/upload")
+        assert payload["discovery"]["target_upload_job"].endswith("/v1/jobs/target/upload")
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
-        assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_package_prepare_job", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
+        assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]
@@ -17621,9 +17762,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "materials_prepare_handoff.next_step" in source_url_workflow["runbook"][7]["read"]
         assert source_url_workflow["runbook"][8]["tool"] == "target_package_prepare_job"
         assert "target_package_handoff.next_step" in source_url_workflow["runbook"][8]["read"]
-        assert source_url_workflow["runbook"][9]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
-        assert source_url_workflow["runbook"][9]["resume_with"].startswith("job_handoff")
-        assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][9]["stop_when"]
+        assert source_url_workflow["runbook"][9]["tool"] == "target_upload_job"
+        assert "target_upload_handoff.uploaded_seeding_ready" in source_url_workflow["runbook"][9]["read"]
+        assert source_url_workflow["runbook"][10]["complete_when"] == "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]"
+        assert source_url_workflow["runbook"][10]["resume_with"].startswith("job_handoff")
+        assert "closure_summary.action=resolve_blockers and recommended_tool is null" in source_url_workflow["runbook"][10]["stop_when"]
         assert tools_by_name["site_profiles"]["path"] == "/v1/sites"
         assert "extension_plan" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]

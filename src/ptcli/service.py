@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, build_daily_candidates
 from src.ptcli.cli import build_parser, build_sites_payload, pipeline_payload, retorrent_payload, summary_check_payload
+from src.ptcli.cli import target_upload_payload as cli_target_upload_payload
 from src.ptcli.config import load_config, resolve_client_config
 from src.ptcli.credentials import build_flow_check
 from src.ptcli.doctor import build_runtime_dependency_check
@@ -616,6 +617,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/metadata/prepare": lambda payload: asyncio.run(metadata_prepare_payload(payload)),
                 "/v1/target/package/prepare": target_package_prepare_payload,
                 "/v1/target/upload/preflight": target_upload_preflight_payload,
+                "/v1/target/upload": lambda payload: asyncio.run(target_upload_service_payload(payload)),
                 "/v1/readiness/bundle": readiness_bundle_payload,
                 "/v1/summary/check": summary_check_service_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
@@ -628,6 +630,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/jobs/materials/prepare": lambda payload: create_materials_prepare_job(job_store, payload),
                 "/v1/jobs/metadata/prepare": lambda payload: create_metadata_prepare_job(job_store, payload),
                 "/v1/jobs/target/package/prepare": lambda payload: create_target_package_prepare_job(job_store, payload),
+                "/v1/jobs/target/upload": lambda payload: create_target_upload_job(job_store, payload),
                 "/v1/jobs/candidates/daily": lambda payload: create_daily_candidates_job(job_store, payload),
                 "/v1/jobs/candidates/daily/schedule": lambda payload: create_daily_candidate_schedule_jobs(job_store, payload),
             }
@@ -1016,6 +1019,38 @@ def target_upload_preflight_payload(request: dict[str, Any] | None = None) -> di
         "blockers": _string_list(preflight.get("blockers")),
         "next_actions": _target_upload_preflight_next_actions(preflight),
         "safety": {"does_not_upload_to_tracker": True, "live_upload": False, "requires_confirmation_before_live_upload": ["accept_rules=true", "confirm_upload=true"]},
+    }
+
+
+async def target_upload_service_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run target-upload preflight/live upload through the CLI implementation and return AI handoffs."""
+    request = request or {}
+    context, args, argv = _target_upload_request_context(request)
+    result = await cli_target_upload_payload(args)
+    diagnostics = _target_upload_service_diagnostics(result)
+    enriched = {**result, "kind": "ptcli.target_upload", "request": context, "command_argv": ["ptcli", *argv], "target_upload_diagnostics": diagnostics}
+    blockers = list(dict.fromkeys(_string_list(enriched.get("blockers")) + _string_list(diagnostics.get("blockers"))))
+    automation_action = enriched.get("automation_action")
+    ready = bool((automation_action == "complete" or (not context["execute"] and enriched.get("status") == "ready")) and not blockers)
+    if not ready and blockers:
+        enriched["status"] = "blocked"
+    synthetic_job = {"kind": "ptcli.target_upload", "status": "complete" if ready else "blocked", "ok": ready, "request": context, "result": enriched, "summary_file": enriched.get("summary_file"), "blockers": blockers, "next_actions": _target_upload_service_next_actions(ready, context, enriched, blockers)}
+    handoff = _job_target_upload_handoff(synthetic_job) or _target_upload_service_handoff(context, enriched, diagnostics, ready, blockers)
+    closure_handoff = _job_closure_handoff(synthetic_job)
+    return {
+        **enriched,
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "mutates_state": True,
+        "mutates_filesystem": bool(context.get("write_payload") or context.get("write_summary") or context.get("download_uploaded_torrent")),
+        "mutates_network": bool(context.get("execute") or context.get("uploaded_torrent_id")),
+        "live_upload": bool(context.get("execute")),
+        "target_upload_handoff": handoff,
+        "closure_handoff": closure_handoff,
+        "recommended_request": handoff.get("recommended_request") if isinstance(handoff, dict) else None,
+        "blockers": blockers,
+        "next_actions": _target_upload_service_next_actions(ready, context, enriched, blockers),
+        "safety": _target_upload_service_safety(context),
     }
 
 
@@ -1532,6 +1567,17 @@ def create_target_package_prepare_job(job_store: JobStore, request: dict[str, An
         normalized_request,
         ["ptcli-service", "target-package-prepare"],
         lambda: target_package_prepare_payload(request),
+    )
+
+
+def create_target_upload_job(job_store: JobStore, request: dict[str, Any]) -> dict[str, Any]:
+    """Create an asynchronous target upload/preflight/follow-up job."""
+    normalized_request, _args, argv = _target_upload_request_context(request)
+    return job_store.create(
+        "ptcli.target_upload",
+        normalized_request,
+        ["ptcli", *argv],
+        lambda: asyncio.run(target_upload_service_payload(request)),
     )
 
 
@@ -3727,6 +3773,39 @@ def _truthy(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _truthy_default(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    return _truthy(value)
+
+
+def _float_or_default(value: Any, default: float) -> float:
+    if value in (None, ""):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _nested_bool(payload: dict[str, Any], *keys: str) -> bool | None:
+    value: Any = payload
+    for key in keys:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value if isinstance(value, bool) else None
+
+
+def _nested_string_list(payload: dict[str, Any], *keys: str) -> list[str]:
+    value: Any = payload
+    for key in keys:
+        if not isinstance(value, dict):
+            return []
+        value = value.get(key)
+    return _string_list(value)
+
+
 def _daily_candidate_schedules_from_env() -> Any:
     raw = os.environ.get(DAILY_CANDIDATE_SCHEDULE_ENV)
     if not raw:
@@ -5621,6 +5700,168 @@ def _target_package_prepare_safety(context: dict[str, Any]) -> dict[str, Any]:
         "writes_files": not bool(context.get("dry_run")),
         "requires_confirmation_before_live_upload": ["accept_rules=true", "confirm_upload=true"],
         "requires_before_ready": ["target duplicate check clear", "site rules acknowledged", "qBittorrent content evidence", "metadata/material evidence", "MTEAM-safe torrent file"],
+    }
+
+
+def _target_upload_request_context(request: dict[str, Any]) -> tuple[dict[str, Any], argparse.Namespace, list[str]]:
+    package_dir = str(request.get("package_dir") or "").strip()
+    if not package_dir:
+        raise ServiceError("package_dir is required.", status=HTTPStatus.BAD_REQUEST)
+    execute = _truthy(request.get("execute") or request.get("target_execute"))
+    uploaded_torrent_id = request.get("uploaded_torrent_id")
+    uploaded_torrent_file = request.get("uploaded_torrent_file")
+    write_summary = _truthy_default(request.get("write_summary"), bool(execute or uploaded_torrent_id or uploaded_torrent_file or request.get("inject_uploaded_torrent") or request.get("wait_uploaded_complete")))
+    context = {
+        "config": request.get("config"),
+        "package_dir": package_dir,
+        "torrent_file": request.get("torrent_file") or request.get("target_torrent_file"),
+        "write_payload": _truthy(request.get("write_payload")),
+        "execute": execute,
+        "confirm_upload": _truthy(request.get("confirm_upload")),
+        "download_uploaded_torrent": _truthy(request.get("download_uploaded_torrent")),
+        "uploaded_output_dir": request.get("uploaded_output_dir"),
+        "uploaded_torrent_id": str(uploaded_torrent_id) if uploaded_torrent_id else None,
+        "uploaded_torrent_file": str(uploaded_torrent_file) if uploaded_torrent_file else None,
+        "inject_uploaded_torrent": _truthy(request.get("inject_uploaded_torrent")),
+        "uploaded_save_path": request.get("uploaded_save_path") or request.get("path") or request.get("content_path"),
+        "uploaded_qbit_category": request.get("uploaded_qbit_category"),
+        "uploaded_qbit_tags": request.get("uploaded_qbit_tags"),
+        "uploaded_qbit_upload_limit": request.get("uploaded_qbit_upload_limit"),
+        "uploaded_qbit_download_limit": request.get("uploaded_qbit_download_limit"),
+        "uploaded_paused": _truthy(request.get("uploaded_paused")),
+        "wait_uploaded_complete": _truthy(request.get("wait_uploaded_complete")),
+        "uploaded_wait_timeout": _float_or_default(request.get("uploaded_wait_timeout"), 600.0),
+        "uploaded_wait_interval": _float_or_default(request.get("uploaded_wait_interval"), 15.0),
+        "check_runtime": _truthy(request.get("check_runtime")),
+        "write_summary": write_summary,
+        "summary_output_dir": request.get("summary_output_dir"),
+        "client": str(request.get("client") or "default"),
+        "json": True,
+    }
+    args = argparse.Namespace(**context)
+    return context, args, _target_upload_command_argv(context)
+
+
+def _target_upload_command_argv(context: dict[str, Any]) -> list[str]:
+    argv = ["target-upload", "--package-dir", str(context["package_dir"])]
+    option_map = {
+        "config": "--config",
+        "torrent_file": "--torrent-file",
+        "uploaded_output_dir": "--uploaded-output-dir",
+        "uploaded_torrent_id": "--uploaded-torrent-id",
+        "uploaded_torrent_file": "--uploaded-torrent-file",
+        "uploaded_save_path": "--uploaded-save-path",
+        "uploaded_qbit_category": "--uploaded-qbit-category",
+        "uploaded_qbit_tags": "--uploaded-qbit-tags",
+        "uploaded_qbit_upload_limit": "--uploaded-qbit-upload-limit",
+        "uploaded_qbit_download_limit": "--uploaded-qbit-download-limit",
+        "summary_output_dir": "--summary-output-dir",
+        "client": "--client",
+    }
+    for key, flag in option_map.items():
+        value = context.get(key)
+        if value not in (None, ""):
+            argv.extend([flag, str(value)])
+    flag_map = {
+        "write_payload": "--write-payload",
+        "execute": "--execute",
+        "confirm_upload": "--confirm-upload",
+        "download_uploaded_torrent": "--download-uploaded-torrent",
+        "inject_uploaded_torrent": "--inject-uploaded-torrent",
+        "uploaded_paused": "--uploaded-paused",
+        "wait_uploaded_complete": "--wait-uploaded-complete",
+        "check_runtime": "--check-runtime",
+        "write_summary": "--write-summary",
+    }
+    for key, flag in flag_map.items():
+        if context.get(key):
+            argv.append(flag)
+    argv.extend(["--uploaded-wait-timeout", str(context["uploaded_wait_timeout"]), "--uploaded-wait-interval", str(context["uploaded_wait_interval"]), "--json"])
+    return argv
+
+
+def _target_upload_service_diagnostics(result: dict[str, Any]) -> dict[str, Any]:
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    artifacts = result.get("artifacts") if isinstance(result.get("artifacts"), dict) else {}
+    preflight = result.get("preflight") if isinstance(result.get("preflight"), dict) else result
+    preparation = summary.get("target_preparation_audit") if isinstance(summary.get("target_preparation_audit"), dict) else artifacts.get("target_preparation_audit") if isinstance(artifacts.get("target_preparation_audit"), dict) else {}
+    completion = summary.get("completion_review") if isinstance(summary.get("completion_review"), dict) else {}
+    payload_review = preparation.get("payload_review") if isinstance(preparation.get("payload_review"), dict) else {}
+    blockers = list(dict.fromkeys(_string_list(result.get("blockers")) + _string_list(summary.get("blockers")) + _string_list(preparation.get("blockers"))))
+    return {
+        "mode": summary.get("mode") or result.get("status"),
+        "ready": bool(summary.get("ready")) if isinstance(summary.get("ready"), bool) else result.get("status") in {"ready", "uploaded"} and not blockers,
+        "uploaded": bool(summary.get("uploaded")),
+        "ready_for_uploaded_seeding": bool(completion.get("complete")),
+        "uploaded_torrent_id": summary.get("uploaded_torrent_id") or result.get("uploaded_torrent_id"),
+        "uploaded_torrent_hash": summary.get("uploaded_torrent_hash"),
+        "uploaded_torrent_path": summary.get("uploaded_torrent_path"),
+        "preflight": {
+            "ready": preparation.get("ready") if isinstance(preparation.get("ready"), bool) else preflight.get("status") == "ready",
+            "status": preflight.get("status"),
+            "payload_ready": _nested_bool(preparation, "payload", "payload_checks_ready"),
+            "materials_ready": preparation.get("materials_ready"),
+            "metadata_ready": preparation.get("metadata_ready"),
+            "assets_ready": preparation.get("assets_ready"),
+            "description_ready": preparation.get("description_ready"),
+            "materials_ready_required": _nested_bool(preparation, "payload", "materials_ready_required"),
+            "missing": _string_list(preparation.get("missing")),
+            "description_missing": _nested_string_list(preparation, "description", "missing"),
+            "blockers": list(dict.fromkeys(_string_list(preflight.get("blockers")) + _string_list(preparation.get("blockers")))),
+        },
+        "completion": completion,
+        "payload_review": payload_review,
+        "fresh_duplicate_check": summary.get("fresh_duplicate_check") if isinstance(summary.get("fresh_duplicate_check"), dict) else result.get("fresh_duplicate_check") if isinstance(result.get("fresh_duplicate_check"), dict) else None,
+        "blockers": blockers,
+        "next_actions": _string_list(result.get("next_actions")),
+    }
+
+
+def _target_upload_service_handoff(context: dict[str, Any], result: dict[str, Any], diagnostics: dict[str, Any], ready: bool, blockers: list[str]) -> dict[str, Any]:
+    request = _target_upload_retry_request(context, execute=bool(context.get("execute")))
+    return {
+        "kind": "ptcli.target_upload_handoff",
+        "ready": ready,
+        "action": "complete" if ready else "resolve_blockers",
+        "ready_for_live_upload": diagnostics.get("preflight", {}).get("ready") and not blockers,
+        "uploaded_seeding_ready": bool(diagnostics.get("ready_for_uploaded_seeding")),
+        "preflight": diagnostics.get("preflight"),
+        "completion": diagnostics.get("completion"),
+        "summary_file": result.get("summary_file"),
+        "next_step": {"tool": "target_upload_job", "endpoint": "/v1/jobs/target/upload", "method": "POST", "request": request, "reason": "retry_or_complete_target_upload"},
+        "recommended_tool": "target_upload_job",
+        "recommended_endpoint": "/v1/jobs/target/upload",
+        "recommended_request": request,
+        "blockers": blockers,
+        "next_actions": _target_upload_service_next_actions(ready, context, result, blockers),
+    }
+
+
+def _target_upload_retry_request(context: dict[str, Any], *, execute: bool) -> dict[str, Any]:
+    request = {key: value for key, value in context.items() if key != "json" and value not in (None, "", False)}
+    if execute:
+        request["execute"] = True
+    return request
+
+
+def _target_upload_service_next_actions(ready: bool, context: dict[str, Any], result: dict[str, Any], blockers: list[str]) -> list[str]:
+    if ready:
+        return ["Target upload closure is complete; report summary_file, uploaded_torrent_hash, injected_torrent_hash, qBittorrent wait evidence, and duplicate/rule gates."]
+    if blockers:
+        return ["Resolve target_upload.blockers, then retry /v1/jobs/target/upload with target_upload_handoff.recommended_request."]
+    if context.get("execute") and result.get("status") == "uploaded":
+        return ["Download the uploaded MTEAM torrent, inject it into qBittorrent, wait for completion, then rerun target upload summary verification."]
+    return ["Inspect target_upload_handoff and target_upload_diagnostics before attempting live upload."]
+
+
+def _target_upload_service_safety(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "live_upload": bool(context.get("execute")),
+        "requires_confirmation_before_live_upload": ["accept_rules=true via package rule review", "confirm_upload=true"],
+        "requires_for_full_closure": ["download_uploaded_torrent=true", "inject_uploaded_torrent=true", "wait_uploaded_complete=true", "uploaded_save_path/path available"],
+        "does_not_skip_duplicate_check": True,
+        "does_not_skip_rule_gate": True,
+        "mutates_qbittorrent": bool(context.get("inject_uploaded_torrent")),
     }
 
 
@@ -9870,6 +10111,15 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         decision = "target_package_ready"
         stop_reason = None
         recommended_action = "Use target_package_handoff.target_upload_request for target upload preflight with an MTEAM-safe torrent file; live upload still requires confirm_upload and seeding closure."
+    elif job.get("kind") == "ptcli.target_upload" and status == "complete":
+        if isinstance(target_upload_handoff, dict) and target_upload_handoff.get("uploaded_seeding_ready"):
+            decision = "target_upload_complete"
+            stop_reason = None
+            recommended_action = "Target upload and uploaded torrent seeding closure are complete; report summary_file and qBittorrent evidence."
+        else:
+            decision = "target_upload_followup_required"
+            stop_reason = None
+            recommended_action = "Follow target_upload_handoff.next_step until uploaded target torrent download, qBittorrent injection, and wait evidence are complete."
     elif duplicate_exists:
         decision = "stop"
         stop_reason = "target_duplicate_exists"
@@ -11076,6 +11326,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     metadata_prepare_request_schema = _metadata_prepare_tool_request_schema()
     target_package_prepare_request_schema = _target_package_prepare_tool_request_schema()
     target_upload_preflight_request_schema = _target_upload_preflight_tool_request_schema()
+    target_upload_request_schema = _target_upload_tool_request_schema()
     site_policy_request_schema = _site_policy_tool_request_schema()
     readiness_bundle_request_schema = _readiness_bundle_tool_request_schema()
     summary_check_request_schema = _summary_check_tool_request_schema()
@@ -11341,6 +11592,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "safety": {"mutates_state": True, "writes_files": "only when write_payload=true", "live_upload": False, "requires_confirmation": ["confirm_upload before live target upload"], "does_not_upload_to_tracker": True},
         },
         {
+            "name": "target_upload",
+            "method": "POST",
+            "path": "/v1/target/upload",
+            "description": "Run MTEAM target upload preflight or live upload from a prepared package. Live mode requires confirm_upload and full uploaded-torrent seeding follow-up gates.",
+            "input_schema": target_upload_request_schema,
+            "response_contract": _target_upload_service_response_contract(),
+            "workflow_hints": {"job_with": "target_upload_job", "summary_with": "summary_check", "handoff_field": "target_upload_handoff"},
+            "safety": _live_upload_safety_contract(),
+        },
+        {
             "name": "materials_prepare_job",
             "method": "POST",
             "path": "/v1/jobs/materials/prepare",
@@ -11369,6 +11630,16 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": _job_response_contract(),
             "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "handoff_field": "target_package_handoff", "preflight_with": "target_upload_preflight"},
             "safety": {"mutates_state": True, "writes_files": True, "live_upload": False, "requires_confirmation": ["confirm_upload before live target upload"], "does_not_upload_to_tracker": True},
+        },
+        {
+            "name": "target_upload_job",
+            "method": "POST",
+            "path": "/v1/jobs/target/upload",
+            "description": "Create an asynchronous MTEAM target upload job for upload, generated torrent download, qBittorrent injection, wait-complete evidence, summary, and recovery handoff.",
+            "input_schema": target_upload_request_schema,
+            "response_contract": _job_response_contract(),
+            "workflow_hints": {"poll_with": "get_job_status", "summary_with": "get_job_summary", "handoff_field": "target_upload_handoff"},
+            "safety": _live_upload_safety_contract(),
         },
         {
             "name": "summary_check",
@@ -11946,6 +12217,39 @@ def _target_upload_preflight_tool_request_schema() -> dict[str, Any]:
     }
 
 
+def _target_upload_tool_request_schema() -> dict[str, Any]:
+    schema = _target_upload_preflight_tool_request_schema()
+    properties = dict(schema["properties"])
+    properties.update(
+        {
+            "config": {"type": "string", "description": "Path to data/config.py inside the container; required for live upload or qBittorrent follow-up."},
+            "execute": {"type": "boolean", "description": "Submit the prepared MTEAM payload after every gate passes."},
+            "confirm_upload": {"type": "boolean", "description": "Required with execute=true; confirms live upload intent and manual rule review."},
+            "download_uploaded_torrent": {"type": "boolean", "description": "Required with execute=true so the generated MTEAM torrent can be seeded."},
+            "uploaded_output_dir": {"type": "string"},
+            "uploaded_torrent_id": {"type": "string", "description": "Existing MTEAM torrent id to download and inject without re-submitting upload."},
+            "uploaded_torrent_file": {"type": "string", "description": "Already downloaded MTEAM uploaded torrent for qBittorrent injection."},
+            "inject_uploaded_torrent": {"type": "boolean", "description": "Required for full closure; adds the uploaded MTEAM torrent to qBittorrent."},
+            "uploaded_save_path": {"type": "string", "description": "qBittorrent save path for uploaded torrent injection; path/content_path are aliases."},
+            "path": {"type": "string"},
+            "content_path": {"type": "string"},
+            "uploaded_qbit_category": {"type": "string"},
+            "uploaded_qbit_tags": {"type": "string"},
+            "uploaded_qbit_upload_limit": {"type": ["integer", "string"]},
+            "uploaded_qbit_download_limit": {"type": ["integer", "string"]},
+            "uploaded_paused": {"type": "boolean"},
+            "wait_uploaded_complete": {"type": "boolean", "description": "Required for full closure after injected uploaded torrent."},
+            "uploaded_wait_timeout": {"type": "number", "default": 600.0},
+            "uploaded_wait_interval": {"type": "number", "default": 15.0},
+            "check_runtime": {"type": "boolean"},
+            "write_summary": {"type": "boolean", "description": "Write ptcli-target-upload-summary.json. Defaults to true for mutating/follow-up modes."},
+            "summary_output_dir": {"type": "string"},
+            "client": {"type": "string", "default": "default"},
+        }
+    )
+    return {"type": "object", "required": ["package_dir"], "properties": properties}
+
+
 def _site_policy_tool_request_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -12211,6 +12515,16 @@ def _target_upload_preflight_response_contract() -> dict[str, Any]:
     }
 
 
+def _target_upload_service_response_contract() -> dict[str, Any]:
+    return {
+        "required_fields": ["status", "ok", "kind", "request", "command_argv", "mutates_state", "mutates_filesystem", "mutates_network", "live_upload", "summary", "artifacts", "target_upload_diagnostics", "target_upload_handoff", "closure_handoff", "summary_file", "automation_action", "resume_state", "blockers", "next_actions", "safety"],
+        "target_upload_diagnostics_fields": ["mode", "ready", "uploaded", "ready_for_uploaded_seeding", "uploaded_torrent_id", "uploaded_torrent_hash", "uploaded_torrent_path", "preflight", "completion", "payload_review", "fresh_duplicate_check", "blockers", "next_actions"],
+        "target_upload_handoff_fields": ["ready", "action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "completion", "summary_file", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "closure_fields": ["download_uploaded_torrent", "inject_uploaded_torrent", "wait_uploaded_complete", "uploaded_torrent_hash", "injected_torrent_hash", "uploaded_wait"],
+        "safety": ["live_upload_requires_confirm_upload", "does_not_skip_duplicate_check", "does_not_skip_rule_gate", "requires_uploaded_torrent_seeding_closure"],
+    }
+
+
 def _job_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "resume_state", "agent_summary", "agent_decision", "candidate_digest", "submit_if_clear_handoff", "policy_coverage", "policy_handoff", "policy_qbit_defaults", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "materials_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "manual_retorrent_handoff", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
@@ -12446,6 +12760,8 @@ def agent_manifest_payload(*, base_url: str | None = None) -> dict[str, Any]:
             "target_package_prepare": f"{public_base_url}/v1/target/package/prepare",
             "target_package_prepare_job": f"{public_base_url}/v1/jobs/target/package/prepare",
             "target_upload_preflight": f"{public_base_url}/v1/target/upload/preflight",
+            "target_upload": f"{public_base_url}/v1/target/upload",
+            "target_upload_job": f"{public_base_url}/v1/jobs/target/upload",
             "openapi": f"{public_base_url}/openapi.json",
             "tools": f"{public_base_url}/v1/tools",
             "manifest": f"{public_base_url}/.well-known/ptcli-agent.json",
@@ -12561,6 +12877,15 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                     "continue_when": "target_package_handoff.ready=true and target_package_handoff.target_upload_request is present",
                     "resume_with": "target_package_handoff.next_step; run target_upload_preflight with an MTEAM-safe torrent file before live upload",
                     "stop_when": ["target_package_handoff.blockers is not empty", "duplicate_check missing or exists=true", "rule_check not ready", "qBittorrent content evidence missing"],
+                },
+                {
+                    "step": "target_upload_closure",
+                    "tool": "target_upload_job",
+                    "request_from": "target_package_handoff.target_upload_request plus confirm_upload, download_uploaded_torrent, inject_uploaded_torrent, wait_uploaded_complete, uploaded_save_path/path, qBittorrent category/tag/rate limits",
+                    "read": ["job_id", "status", "target_upload_handoff.action", "target_upload_handoff.ready", "target_upload_handoff.uploaded_seeding_ready", "target_upload_handoff.summary_file", "target_upload_handoff.next_step", "target_upload_handoff.blockers", "agent_decision", "blockers"],
+                    "continue_when": "target_upload_handoff.uploaded_seeding_ready=true and blockers=[]",
+                    "resume_with": "target_upload_handoff.next_step or resume_job when uploaded torrent download/injection/wait evidence is incomplete",
+                    "stop_when": ["confirm_upload missing", "fresh duplicate exists", "rule obligations not ready", "uploaded torrent seeding evidence missing after retry"],
                 },
                 {
                     "step": "closure_decision",
@@ -12886,6 +13211,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     metadata_prepare_request_schema = _metadata_prepare_tool_request_schema()
     target_package_prepare_request_schema = _target_package_prepare_tool_request_schema()
     target_upload_preflight_request_schema = _target_upload_preflight_tool_request_schema()
+    target_upload_request_schema = _target_upload_tool_request_schema()
     summary_check_request_schema = _summary_check_tool_request_schema()
     candidate_response_schema = {
         "type": "object",
@@ -13137,6 +13463,31 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "live_upload": {"type": "boolean"},
             "request": {"type": "object"},
             "target_upload_preflight": {"type": "object"},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+            "safety": {"type": "object"},
+        },
+    }
+    target_upload_response_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["ok", "blocked"]},
+            "ok": {"type": "boolean"},
+            "kind": {"type": "string"},
+            "request": {"type": "object"},
+            "command_argv": {"type": "array", "items": {"type": "string"}},
+            "mutates_state": {"type": "boolean"},
+            "mutates_filesystem": {"type": "boolean"},
+            "mutates_network": {"type": "boolean"},
+            "live_upload": {"type": "boolean"},
+            "summary": {"type": ["object", "null"]},
+            "artifacts": {"type": ["object", "null"]},
+            "target_upload_diagnostics": {"type": "object"},
+            "target_upload_handoff": {"type": ["object", "null"]},
+            "closure_handoff": {"type": ["object", "null"]},
+            "summary_file": {"type": ["string", "null"]},
+            "automation_action": {"type": ["string", "null"]},
+            "resume_state": {"type": ["object", "null"]},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
             "safety": {"type": "object"},
@@ -13522,6 +13873,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "responses": {"200": {"description": "Validate a prepared MTEAM package and optional target torrent before live upload.", "content": {"application/json": {"schema": target_upload_preflight_response_schema}}}},
                 },
             },
+            "/v1/target/upload": {
+                "post": {
+                    "operationId": "runPtcliTargetUpload",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": target_upload_request_schema}}},
+                    "responses": {"200": {"description": "Run MTEAM target upload preflight/live upload and uploaded-torrent closure handoff.", "content": {"application/json": {"schema": target_upload_response_schema}}}},
+                },
+            },
             "/v1/site-policies": {
                 "get": {
                     "operationId": "getPtcliSitePolicies",
@@ -13644,6 +14003,14 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": True, "content": {"application/json": {"schema": target_package_prepare_request_schema}}},
                     "responses": {"200": {"description": "Queued target package preparation job.", "content": {"application/json": {"schema": job_response_schema}}}},
+                }
+            },
+            "/v1/jobs/target/upload": {
+                "post": {
+                    "operationId": "createPtcliTargetUploadJob",
+                    "security": token_security,
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": target_upload_request_schema}}},
+                    "responses": {"200": {"description": "Queued target upload and uploaded-torrent closure job.", "content": {"application/json": {"schema": job_response_schema}}}},
                 }
             },
             "/v1/candidates/daily": {
