@@ -786,6 +786,7 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
     push_summary = _candidate_push_summary(target_summary, review_count, blocked_count, recommendation)
     execution_plan = _candidate_execution_plan(push_items, approval_queue, target_summary, blockers, next_actions, recommendation=recommendation)
     daily_candidate_report = _candidate_daily_report(push_items, approval_queue, execution_plan, target_summary, blockers, recommendation=recommendation)
+    daily_candidate_batch_report = _candidate_batch_report(push_items, approval_queue, execution_plan, daily_candidate_report, target_summary, blockers)
     push_payload = _candidate_push_payload(
         push_summary,
         push_items,
@@ -796,6 +797,7 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
         approval_queue=approval_queue,
         execution_plan=execution_plan,
         daily_candidate_report=daily_candidate_report,
+        daily_candidate_batch_report=daily_candidate_batch_report,
     )
     return {
         "kind": "ptcli.daily_candidates_digest",
@@ -816,6 +818,7 @@ def _candidate_digest(candidates: list[dict[str, Any]], blockers: list[str], nex
         "top_safe_candidates": approval_queue["top_safe_candidates"],
         "execution_plan": execution_plan,
         "daily_candidate_report": daily_candidate_report,
+        "daily_candidate_batch_report": daily_candidate_batch_report,
         "push_count": len(push_items),
         "recommended_action": _candidate_digest_recommended_action(recommendation),
         "top_candidate": _candidate_digest_item(top_candidate, rank=1) if top_candidate else None,
@@ -840,6 +843,7 @@ def _candidate_push_payload(
     approval_queue: dict[str, Any],
     execution_plan: dict[str, Any],
     daily_candidate_report: dict[str, Any],
+    daily_candidate_batch_report: dict[str, Any],
 ) -> dict[str, Any]:
     items = [item for item in push_items if isinstance(item, dict)]
     ready_items = [item for item in items if item.get("can_submit") is True]
@@ -867,6 +871,7 @@ def _candidate_push_payload(
         "top_safe_candidates": approval_queue["top_safe_candidates"],
         "execution_plan": execution_plan,
         "daily_candidate_report": daily_candidate_report,
+        "daily_candidate_batch_report": daily_candidate_batch_report,
         "top_item": ready_items[0] if ready_items else items[0] if items else None,
         "items": items,
         "blockers": blockers,
@@ -936,6 +941,65 @@ def _candidate_daily_report(
         "blockers": report_blockers,
         "next_actions": _candidate_daily_report_next_actions(decision, execution_plan, ready_shortfall_count),
     }
+
+
+def _candidate_batch_report(
+    push_items: list[dict[str, Any] | None],
+    approval_queue: dict[str, Any],
+    execution_plan: dict[str, Any],
+    daily_candidate_report: dict[str, Any],
+    target_summary: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    items = [item for item in push_items if isinstance(item, dict)]
+    safe_items = approval_queue.get("items") if isinstance(approval_queue.get("items"), list) else []
+    first_submit = (execution_plan.get("recommended_submit_requests") or [None])[0] if isinstance(execution_plan.get("recommended_submit_requests"), list) else None
+    report_blockers = list(dict.fromkeys(_string_list(blockers) + _string_list(execution_plan.get("blockers")) + _string_list(daily_candidate_report.get("blockers"))))
+    required_user_inputs = ["approve candidate", "confirm_upload=true", "save_path or path"]
+    return {
+        "kind": "ptcli.daily_candidate_batch_report",
+        "ready": bool(safe_items and not report_blockers),
+        "decision": daily_candidate_report.get("decision"),
+        "target_count": int(target_summary.get("target_count") or DEFAULT_CANDIDATE_LIMIT),
+        "scan_count": int(target_summary.get("scan_count") or 0),
+        "selected_count": int(target_summary.get("selected_count") or len(items)),
+        "ready_count": int(target_summary.get("ready_count") or 0),
+        "safe_to_submit_count": int(approval_queue.get("safe_count") or 0),
+        "guarded_count": int(approval_queue.get("guarded_count") or 0),
+        "blocked_count": int(approval_queue.get("blocked_count") or 0),
+        "selected_shortfall_count": int(execution_plan.get("selected_shortfall_count") or 0),
+        "ready_shortfall_count": int(execution_plan.get("ready_shortfall_count") or 0),
+        "target_met": bool(target_summary.get("target_met")),
+        "ready_target_met": bool(target_summary.get("ready_target_met")),
+        "submission_ready": bool(daily_candidate_report.get("submission_ready")),
+        "push_ready": bool(daily_candidate_report.get("push_ready")),
+        "approval_ready": bool(approval_queue.get("ready")),
+        "first_submit_request": first_submit,
+        "recommended_tool": execution_plan.get("recommended_tool"),
+        "recommended_endpoint": execution_plan.get("recommended_endpoint"),
+        "recommended_method": execution_plan.get("recommended_method"),
+        "recommended_request": execution_plan.get("recommended_request"),
+        "required_user_inputs": required_user_inputs,
+        "safe_to_submit_ids": [item.get("source_id") for item in safe_items if item.get("source_id")],
+        "blocked_source_ids": approval_queue.get("blocked_source_ids") if isinstance(approval_queue.get("blocked_source_ids"), list) else [],
+        "shortfall_recovery": execution_plan.get("shortfall_recovery") if isinstance(execution_plan.get("shortfall_recovery"), dict) else {},
+        "continue_when": "daily_candidate_batch_report.ready=true and user approves first_submit_request with confirm_upload and save_path/path",
+        "stop_when": [
+            "daily_candidate_batch_report.blockers is not empty",
+            "daily_candidate_batch_report.ready=false",
+            "first_submit_request is missing",
+        ],
+        "blockers": report_blockers,
+        "next_actions": _candidate_batch_report_next_actions(safe_items, report_blockers, execution_plan),
+    }
+
+
+def _candidate_batch_report_next_actions(safe_items: list[dict[str, Any]], blockers: list[str], execution_plan: dict[str, Any]) -> list[str]:
+    if safe_items and not blockers:
+        return ["Ask the user to approve daily_candidate_batch_report.first_submit_request, then call submit_daily_candidate_job."]
+    if blockers:
+        return ["Resolve daily_candidate_batch_report.blockers before submitting daily candidates."]
+    return _string_list(execution_plan.get("next_actions"))
 
 
 def _candidate_daily_report_next_actions(decision: str, execution_plan: dict[str, Any], ready_shortfall_count: int) -> list[str]:
