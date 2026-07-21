@@ -9157,7 +9157,17 @@
           "full_live_closure_to_mteam",
           "implemented_roles",
           "extension_notes",
-          "extension_checklist"
+          "extension_checklist",
+          "adapter_contract"
+        ],
+        "adapter_contract_fields": [
+          "reference_adapters",
+          "source_info_contract",
+          "source_download_contract",
+          "target_upload_contract",
+          "policy_contract",
+          "validation_contract",
+          "done_when"
         ],
         "policy_profile_fields": [
           "config_path",
@@ -9190,6 +9200,7 @@
           "full_live_closure_to_mteam",
           "has_reference_flow",
           "implemented_roles",
+          "adapter_contract",
           "missing_components",
           "checklist",
           "blockers",
@@ -9202,6 +9213,7 @@
           "reference_flow",
           "implementation_order",
           "tracker_steps",
+          "adapter_contract",
           "endpoint_sequence",
           "validation_sequence",
           "continue_when",

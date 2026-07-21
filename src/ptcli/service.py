@@ -3193,6 +3193,7 @@ def _site_capability_matrix_item(tracker: str, capability: dict[str, Any], polic
         "extension_notes": _site_extension_notes(tracker, capability),
         "extension_checklist": extension_checklist,
     }
+    adapter_profile["adapter_contract"] = _site_adapter_contract(tracker, capability, roles or ["unknown"], policy_item)
     policy_profile = policy_item.get("policy_profile") if isinstance(policy_item, dict) and isinstance(policy_item.get("policy_profile"), dict) else None
     execution_readiness = policy_item.get("execution_readiness") if isinstance(policy_item, dict) and isinstance(policy_item.get("execution_readiness"), dict) else None
     return {
@@ -3277,6 +3278,103 @@ def _site_extension_checklist(tracker: str, capability: dict[str, Any], roles: l
     return checklist
 
 
+def _site_adapter_contract(tracker: str, capability: dict[str, Any], roles: list[str], policy_item: dict[str, Any] | None) -> dict[str, Any]:
+    return {
+        "kind": "ptcli.site_adapter_contract",
+        "tracker": tracker,
+        "roles": roles,
+        "reference_adapters": _site_adapter_reference_adapters(tracker, capability, roles),
+        "source_info_contract": _site_adapter_source_info_contract(tracker, capability) if "source" in roles or "unknown" in roles else None,
+        "source_download_contract": _site_adapter_source_download_contract(tracker, capability) if "source" in roles or "unknown" in roles else None,
+        "target_upload_contract": _site_adapter_target_upload_contract(tracker, capability) if "target" in roles or "unknown" in roles else None,
+        "policy_contract": _site_adapter_policy_contract(tracker, roles, policy_item),
+        "validation_contract": _site_adapter_validation_contract(tracker, roles),
+        "done_when": [
+            "adapter_profile.extension_checklist all ready for requested roles",
+            "policy_profile.config_audit.ready=true",
+            "readiness_bundle.live_readiness.ready_for_ai=true for a concrete source/target",
+            "source_url_retorrent_preflight.ready_to_create_job=true before live automation",
+        ],
+    }
+
+
+def _site_adapter_reference_adapters(tracker: str, capability: dict[str, Any], roles: list[str]) -> dict[str, Any]:
+    source_reference = "U2 or CHD nexusphp source adapter" if tracker != "MTEAM" else "MTEAM API source adapter"
+    target_reference = "MTEAM API target upload adapter"
+    return {
+        "roles": roles,
+        "source_info": capability.get("source_info_adapter") or source_reference,
+        "source_download": capability.get("source_download_adapter") or source_reference,
+        "target_upload": capability.get("target_upload_adapter") or target_reference,
+        "notes": [
+            "Use MTEAM as the API-style target reference.",
+            "Use U2/CHD as NexusPHP-style source info/download references.",
+            "Keep tracker-specific rule decisions in SITE_POLICIES instead of hard-coding them into flow code.",
+        ],
+    }
+
+
+def _site_adapter_source_info_contract(tracker: str, capability: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ready": bool(capability.get("source_info")),
+        "adapter": capability.get("source_info_adapter"),
+        "required_outputs": ["tracker", "source_id", "title", "details_url", "imdb_id", "tmdb_id", "douban_id", "size", "promotion/free status", "description or metadata evidence"],
+        "ai_safe_evidence": ["source_reference", "source_info", "metadata", "blockers", "next_actions"],
+        "validation": f"source-info for {tracker} returns stable ids and metadata hints without uploading or mutating qBittorrent.",
+    }
+
+
+def _site_adapter_source_download_contract(tracker: str, capability: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ready": bool(capability.get("source_download")),
+        "adapter": capability.get("source_download_adapter"),
+        "credential_requirements": _string_list(capability.get("credential_requirements")),
+        "required_outputs": ["torrent_file", "exists", "size_bytes", "sha1", "torrent_hash/infohash", "download_url or request evidence"],
+        "qbit_followup": ["qbit_inject_torrent", "qbit_wait_complete"],
+        "validation": f"source-download for {tracker} saves a .torrent and reports file/hash evidence before qBittorrent injection.",
+    }
+
+
+def _site_adapter_target_upload_contract(tracker: str, capability: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ready": bool(capability.get("target_upload")),
+        "adapter": "mteam_api" if tracker == "MTEAM" and capability.get("target_upload") else capability.get("target_upload_adapter"),
+        "required_preflight": ["duplicate_check.exists=false", "rule_obligations.ready=true", "confirm_upload=true", "MTEAM-safe or tracker-safe torrent payload"],
+        "required_outputs": ["uploaded_torrent_id", "uploaded_torrent_file", "uploaded_torrent_hash", "injected_torrent_hash", "uploaded_wait", "summary_file"],
+        "qbit_followup": ["download uploaded target torrent", "inject uploaded target torrent", "wait uploaded torrent complete/seeding"],
+        "validation": f"target-upload for {tracker} must return uploaded torrent and seeding evidence; MTEAM is the current reference implementation.",
+    }
+
+
+def _site_adapter_policy_contract(tracker: str, roles: list[str], policy_item: dict[str, Any] | None) -> dict[str, Any]:
+    profile = policy_item.get("policy_profile") if isinstance(policy_item, dict) and isinstance(policy_item.get("policy_profile"), dict) else {}
+    config_audit = profile.get("config_audit") if isinstance(profile.get("config_audit"), dict) else {}
+    return {
+        "ready": config_audit.get("ready") is True,
+        "config_path": profile.get("config_path") or f'config["PTCLI"]["SITE_POLICIES"]["{tracker}"]',
+        "roles": roles,
+        "required_fields": profile.get("required_fields") if isinstance(profile.get("required_fields"), list) else _site_policy_required_fields_for_roles(roles),
+        "config_audit": config_audit,
+        "rule_obligations": policy_item.get("rule_obligations") if isinstance(policy_item, dict) else None,
+    }
+
+
+def _site_adapter_validation_contract(tracker: str, roles: list[str]) -> dict[str, Any]:
+    steps = [
+        {"tool": "site_profiles", "endpoint": "/v1/sites", "continue_when": "adapter_contract.done_when can be satisfied"},
+        {"tool": "site_policies", "endpoint": "/v1/site-policies", "continue_when": "policy_profile.config_audit.ready=true and rule_obligations.ready=true"},
+        {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "continue_when": "live_readiness.ready_for_ai=true"},
+    ]
+    if "source" in roles or "unknown" in roles:
+        steps.append({"tool": "source_url_retorrent_preflight", "endpoint": "/v1/retorrent/source-url/preflight", "continue_when": "ready_to_create_job=true"})
+    return {
+        "tracker": tracker,
+        "steps": steps,
+        "smoke_tests": ["pytest tests/unit/test_ptcli.py -q -k sites_payload", "make smoke PYTHON=.venv/bin/python"],
+        "live_test": "Run readiness_bundle and source_url_retorrent_preflight with a real source URL before any live upload.",
+    }
+
+
 def _apply_policy_profile_to_extension_checklist(checklist: list[dict[str, Any]], policy_item: dict[str, Any] | None) -> None:
     policy_profile = policy_item.get("policy_profile") if isinstance(policy_item, dict) and isinstance(policy_item.get("policy_profile"), dict) else {}
     execution = policy_item.get("execution_readiness") if isinstance(policy_item, dict) and isinstance(policy_item.get("execution_readiness"), dict) else {}
@@ -3343,11 +3441,12 @@ def _sites_extension_handoff(extension_plan: dict[str, Any], flow_matrix: list[d
         "reference_flow": reference_flow,
         "implementation_order": _site_extension_implementation_order(items),
         "tracker_steps": _site_extension_tracker_steps(items),
+        "adapter_contract": next_item.get("adapter_contract") if isinstance(next_item, dict) and isinstance(next_item.get("adapter_contract"), dict) else {},
         "endpoint_sequence": [
             {"tool": "site_profiles", "endpoint": "/v1/sites", "purpose": "inspect adapter/profile gaps for the requested Chinese PT trackers"},
             {"tool": "site_policies", "endpoint": "/v1/site-policies", "purpose": "copy SITE_POLICIES templates and confirm rule obligations"},
             {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "purpose": "validate deployment, qBittorrent, credentials, policy gates, and live handoff"},
-            {"tool": "source_url_retorrent_preflight", "endpoint": "/v1/retorrent/source-url/check", "purpose": "validate a concrete source URL before creating or resuming a live job"},
+            {"tool": "source_url_retorrent_preflight", "endpoint": "/v1/retorrent/source-url/preflight", "purpose": "validate a concrete source URL before creating or resuming a live job"},
         ],
         "validation_sequence": [
             "adapter profile exposes required source_info/source_download/target_upload fields",
@@ -3403,6 +3502,7 @@ def _site_extension_tracker_steps(items: list[Any]) -> dict[str, Any]:
             "ready": not _string_list(item.get("missing_components")),
             "missing_components": _string_list(item.get("missing_components")),
             "checklist": item.get("checklist") if isinstance(item.get("checklist"), list) else [],
+            "adapter_contract": item.get("adapter_contract") if isinstance(item.get("adapter_contract"), dict) else {},
             "next_action": item.get("next_action"),
         }
     return steps
@@ -3424,6 +3524,7 @@ def _site_extension_plan_item(capability_item: dict[str, Any], policy_item: dict
         "full_live_closure_to_mteam": bool(adapter.get("full_live_closure_to_mteam")),
         "has_reference_flow": any(flow.get("source_tracker") == tracker or flow.get("target_tracker") == tracker for flow in flow_matrix),
         "implemented_roles": _string_list(adapter.get("implemented_roles")),
+        "adapter_contract": adapter.get("adapter_contract") if isinstance(adapter.get("adapter_contract"), dict) else {},
         "missing_components": missing,
         "checklist": checklist,
         "blockers": blockers,
@@ -12778,11 +12879,12 @@ def _sites_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "policy_matrix", "policy_execution_summary", "extension_plan", "extension_handoff", "flow_matrix", "agent_summary", "blockers", "next_actions"],
         "capability_fields": ["tracker", "capabilities", "adapter_profile", "policy_profile", "execution_readiness", "ready_for_source", "ready_for_mteam_target_flow", "ready_as_target"],
-        "adapter_profile_fields": ["tracker", "source_info", "source_info_adapter", "source_download", "source_download_adapter", "target_upload", "target_upload_adapter", "credential_requirements", "mteam_source_flow", "full_live_closure_to_mteam", "implemented_roles", "extension_notes", "extension_checklist"],
+        "adapter_profile_fields": ["tracker", "source_info", "source_info_adapter", "source_download", "source_download_adapter", "target_upload", "target_upload_adapter", "credential_requirements", "mteam_source_flow", "full_live_closure_to_mteam", "implemented_roles", "extension_notes", "extension_checklist", "adapter_contract"],
+        "adapter_contract_fields": ["reference_adapters", "source_info_contract", "source_download_contract", "target_upload_contract", "policy_contract", "validation_contract", "done_when"],
         "policy_profile_fields": ["config_path", "required_fields", "optional_fields", "accepted_config_shapes", "missing_fields", "config_audit", "template", "flat_template", "structured_template", "current_values", "next_actions"],
         "extension_plan_fields": ["ready", "trackers", "ready_sources", "ready_targets", "reference_sources_to_mteam", "items", "next_item", "blockers", "next_actions"],
-        "extension_item_fields": ["tracker", "source_ready", "target_ready", "full_live_closure_to_mteam", "has_reference_flow", "implemented_roles", "missing_components", "checklist", "blockers", "next_action"],
-        "extension_handoff_fields": ["ready", "phase", "recommended_next_tracker", "reference_flow", "implementation_order", "tracker_steps", "endpoint_sequence", "validation_sequence", "continue_when", "stop_when", "blockers", "next_actions"],
+        "extension_item_fields": ["tracker", "source_ready", "target_ready", "full_live_closure_to_mteam", "has_reference_flow", "implemented_roles", "adapter_contract", "missing_components", "checklist", "blockers", "next_action"],
+        "extension_handoff_fields": ["ready", "phase", "recommended_next_tracker", "reference_flow", "implementation_order", "tracker_steps", "adapter_contract", "endpoint_sequence", "validation_sequence", "continue_when", "stop_when", "blockers", "next_actions"],
         "agent_summary_fields": ["ready", "site_count", "source_info_count", "source_download_count", "target_upload_count", "full_live_closure_to_mteam_count", "policy_profile_count", "reference_flow_count", "extension_ready", "extension_blocker_count", "recommended_next_tool", "blocker_count"],
         "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_upload"],
     }

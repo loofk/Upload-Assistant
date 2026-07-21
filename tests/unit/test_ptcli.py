@@ -16304,12 +16304,23 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert "TRACKERS.U2.passkey" in u2_profile["credential_requirements"]
     assert "extension_checklist" in u2_profile
     assert next(item for item in u2_profile["extension_checklist"] if item["key"] == "source_info_adapter")["ready"] is True
+    assert u2_profile["adapter_contract"]["reference_adapters"]["source_info"] == "generic_details_cookie"
+    assert u2_profile["adapter_contract"]["source_info_contract"]["ready"] is True
+    assert "source_id" in u2_profile["adapter_contract"]["source_info_contract"]["required_outputs"]
+    assert u2_profile["adapter_contract"]["source_download_contract"]["adapter"] == "nexusphp_passkey"
+    assert "torrent_hash/infohash" in u2_profile["adapter_contract"]["source_download_contract"]["required_outputs"]
+    assert u2_profile["adapter_contract"]["target_upload_contract"] is None
+    assert u2_profile["adapter_contract"]["policy_contract"]["ready"] is True
     mteam_profile = payload["adapter_profiles"]["MTEAM"]
     assert mteam_profile["target_upload"] is True
     assert mteam_profile["target_upload_adapter"] == "mteam_api"
+    assert mteam_profile["adapter_contract"]["target_upload_contract"]["ready"] is True
+    assert "uploaded_torrent_hash" in mteam_profile["adapter_contract"]["target_upload_contract"]["required_outputs"]
+    assert "confirm_upload=true" in mteam_profile["adapter_contract"]["target_upload_contract"]["required_preflight"]
     matrix_by_tracker = {item["tracker"]: item for item in payload["capability_matrix"]}
     assert matrix_by_tracker["U2"]["ready_for_source"] is True
     assert matrix_by_tracker["U2"]["ready_for_mteam_target_flow"] is True
+    assert matrix_by_tracker["U2"]["adapter_profile"]["adapter_contract"]["done_when"][0] == "adapter_profile.extension_checklist all ready for requested roles"
     assert matrix_by_tracker["U2"]["policy_profile"]["template"]["download_rate_limit"] == "20 MiB/s"
     assert matrix_by_tracker["MTEAM"]["ready_as_target"] is True
     assert matrix_by_tracker["MTEAM"]["policy_profile"]["template"]["upload_rate_limit"] == "2 MiB/s"
@@ -16320,10 +16331,12 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert payload["extension_plan"]["items"][0]["tracker"] == "U2"
     assert payload["extension_plan"]["items"][0]["roles"] == ["source"]
     assert payload["extension_plan"]["items"][0]["source_ready"] is True
+    assert payload["extension_plan"]["items"][0]["adapter_contract"]["source_download_contract"]["ready"] is True
     assert payload["extension_plan"]["items"][0]["missing_components"] == []
     assert payload["extension_plan"]["items"][1]["tracker"] == "MTEAM"
     assert payload["extension_plan"]["items"][1]["roles"] == ["target"]
     assert payload["extension_plan"]["items"][1]["target_ready"] is True
+    assert payload["extension_handoff"]["tracker_steps"]["U2"]["adapter_contract"]["validation_contract"]["steps"][0]["tool"] == "site_profiles"
     assert payload["extension_plan"]["items"][1]["missing_components"] == []
     assert payload["extension_plan"]["ready"] is True
     assert payload["extension_handoff"]["ready"] is True
@@ -16332,6 +16345,7 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert payload["extension_handoff"]["reference_flow"]["source_tracker"] == "U2"
     assert payload["extension_handoff"]["tracker_steps"]["U2"]["ready"] is True
     assert payload["extension_handoff"]["endpoint_sequence"][0]["tool"] == "site_profiles"
+    assert payload["extension_handoff"]["endpoint_sequence"][3]["endpoint"] == "/v1/retorrent/source-url/preflight"
     assert payload["extension_handoff"]["continue_when"] == "extension_plan.ready=true and readiness_bundle.live_readiness.ready_for_ai=true"
     assert payload["agent_summary"]["extension_ready"] is True
     assert payload["agent_summary"]["extension_blocker_count"] == 0
@@ -17971,8 +17985,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "extension_plan" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_checklist" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
+        assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
+        assert "adapter_contract_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "source_download_contract" in tools_by_name["site_profiles"]["response_contract"]["adapter_contract_fields"]
         assert "extension_plan_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "extension_handoff_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
         assert "missing_components" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
         assert tools_by_name["site_policies"]["path"] == "/v1/site-policies"
         assert "policy_fields" in tools_by_name["site_policies"]["response_contract"]
