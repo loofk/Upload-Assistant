@@ -17941,6 +17941,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "preflight_checklist" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "execution_plan" in tools_by_name["readiness_bundle"]["response_contract"]["live_test_handoff_fields"]
         assert "seedbox_live_validation_handoff_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "validation_report" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
+        assert "seedbox_live_validation_report_fields" in tools_by_name["readiness_bundle"]["response_contract"]
+        assert "first_blocker" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_report_fields"]
         assert "doctor" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
         assert "manual_job" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
         assert "validation_plan" in tools_by_name["readiness_bundle"]["response_contract"]["seedbox_live_validation_handoff_fields"]
@@ -18645,6 +18648,15 @@ services:
     assert payload["seedbox_live_validation_handoff"]["kind"] == "ptcli.seedbox_live_validation_handoff"
     assert payload["seedbox_live_validation_handoff"]["ready"] is True
     assert payload["seedbox_live_validation_handoff"]["phase"] == "run_doctor"
+    assert payload["seedbox_live_validation_handoff"]["validation_report"]["kind"] == "ptcli.seedbox_live_validation_report"
+    assert payload["seedbox_live_validation_handoff"]["validation_report"]["ready"] is True
+    assert payload["seedbox_live_validation_handoff"]["validation_report"]["blocked_count"] == 0
+    assert payload["seedbox_live_validation_handoff"]["validation_report"]["ready_count"] == payload["seedbox_live_validation_handoff"]["validation_report"]["total_count"]
+    report_components = {item["name"]: item for item in payload["seedbox_live_validation_handoff"]["validation_report"]["components"]}
+    assert report_components["docker_compose_api"]["ready"] is True
+    assert report_components["qbit_config"]["ready"] is True
+    assert report_components["manual_job_request"]["tool"] == "source_url_check_and_submit"
+    assert "doctor_result_handoff.live_safe_to_attempt=true" in payload["seedbox_live_validation_handoff"]["validation_report"]["complete_when"]
     assert payload["seedbox_live_validation_handoff"]["preflight_ready"] is True
     assert payload["seedbox_live_validation_handoff"]["docker_compose"]["api_ready"] is True
     assert payload["seedbox_live_validation_handoff"]["qbit"]["configured"] is True
@@ -18919,6 +18931,9 @@ def test_readiness_bundle_does_not_treat_false_strings_as_confirmations(tmp_path
     assert payload["live_test_handoff"]["next_step"]["reason"] == "site_policy_not_ready"
     assert payload["live_test_handoff"]["next_step"]["tool"] == "edit_config"
     assert payload["live_test_handoff"]["next_step"]["policy_execution_summary"]["recommended_tool"] == "edit_config"
+    assert payload["seedbox_live_validation_handoff"]["validation_report"]["ready"] is False
+    assert payload["seedbox_live_validation_handoff"]["validation_report"]["blocked_count"] > 0
+    assert payload["seedbox_live_validation_handoff"]["validation_report"]["first_blocker"]
 
 
 def test_readiness_bundle_live_test_checklist_reports_blockers(tmp_path, monkeypatch) -> None:

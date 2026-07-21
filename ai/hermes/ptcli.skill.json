@@ -17338,6 +17338,7 @@
         "seedbox_live_validation_handoff_fields": [
           "ready",
           "phase",
+          "validation_report",
           "connectivity_checked",
           "preflight_ready",
           "preflight_checklist",
@@ -17360,6 +17361,18 @@
           "blockers",
           "warnings",
           "next_actions"
+        ],
+        "seedbox_live_validation_report_fields": [
+          "ready",
+          "phase",
+          "ready_count",
+          "blocked_count",
+          "total_count",
+          "components",
+          "first_blocker",
+          "next_step",
+          "complete_when",
+          "stop_when"
         ],
         "seedbox_live_validation_plan_fields": [
           "ready",

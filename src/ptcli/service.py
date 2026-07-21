@@ -2478,10 +2478,24 @@ def _readiness_bundle_seedbox_live_validation_handoff(
     manual_request = manual_job_template.get("request") if isinstance(manual_job_template, dict) else None
     validation_plan = _seedbox_live_validation_plan(ready, next_step, doctor_request, manual_request, live_test_handoff)
     post_submit_handoff = _seedbox_post_submit_handoff(manual_request)
+    validation_report = _seedbox_live_validation_report(
+        ready=ready,
+        phase=phase,
+        deployment=deployment,
+        docker_compose=docker_compose,
+        qbit=qbit,
+        live_readiness=live_readiness,
+        live_verification=live_verification,
+        preflight_checklist=preflight_checklist,
+        doctor_request=doctor_request,
+        manual_request=manual_request,
+        next_step=next_step,
+    )
     return {
         "kind": "ptcli.seedbox_live_validation_handoff",
         "ready": ready,
         "phase": phase,
+        "validation_report": validation_report,
         "connectivity_checked": bool(live_verification.get("connectivity_checked")),
         "preflight_ready": bool(preflight_checklist.get("ready")),
         "preflight_checklist": preflight_checklist,
@@ -2557,6 +2571,72 @@ def _readiness_bundle_seedbox_live_validation_handoff(
         "warnings": _string_list(live_test_handoff.get("warnings")) or _string_list(live_readiness.get("warnings")),
         "next_actions": _string_list(preflight_checklist.get("next_actions")) or _string_list(live_readiness.get("next_actions")),
     }
+
+
+def _seedbox_live_validation_report(
+    *,
+    ready: bool,
+    phase: str,
+    deployment: dict[str, Any],
+    docker_compose: dict[str, Any],
+    qbit: dict[str, Any],
+    live_readiness: dict[str, Any],
+    live_verification: dict[str, Any],
+    preflight_checklist: dict[str, Any],
+    doctor_request: dict[str, Any] | None,
+    manual_request: dict[str, Any] | None,
+    next_step: dict[str, Any],
+) -> dict[str, Any]:
+    components = [
+        _seedbox_validation_component("deployment", bool(deployment.get("ready")), _string_list(deployment.get("blockers")), "deployment_check"),
+        _seedbox_validation_component("docker_compose_api", bool(docker_compose.get("ptcli_api_service_ready")), [], "deployment_check"),
+        _seedbox_validation_component("qbit_config", bool(qbit.get("configured")), ["qBittorrent client config is missing"] if not qbit.get("configured") else [], "deployment_check"),
+        _seedbox_validation_component("site_policy", bool(live_readiness.get("site_policy_ready")), _string_list((live_readiness.get("policy_execution_summary") or {}).get("blockers")) if isinstance(live_readiness.get("policy_execution_summary"), dict) else [], "site_policies"),
+        _seedbox_validation_component("credentials_and_materials", bool(live_verification.get("ready")), _string_list(live_verification.get("blockers")), "readiness_bundle"),
+        _seedbox_validation_component("confirmations", bool(live_readiness.get("accept_rules")) and bool(live_readiness.get("confirm_upload")), _seedbox_confirmation_blockers(live_readiness), "readiness_bundle"),
+        _seedbox_validation_component("doctor_command", bool(doctor_request), ["ptcli doctor request could not be built"] if not doctor_request else [], "ptcli_doctor"),
+        _seedbox_validation_component("manual_job_request", bool(manual_request) and ready, _string_list(live_readiness.get("blockers")) if not ready else [], "source_url_check_and_submit"),
+        _seedbox_validation_component("preflight_checklist", bool(preflight_checklist.get("ready")), _string_list(preflight_checklist.get("blockers")), "readiness_bundle"),
+    ]
+    ready_components = [component for component in components if component.get("ready")]
+    blocked_components = [component for component in components if not component.get("ready")]
+    first_blocker = next((blocker for component in blocked_components for blocker in _string_list(component.get("blockers"))), None)
+    return {
+        "kind": "ptcli.seedbox_live_validation_report",
+        "ready": ready,
+        "phase": phase,
+        "ready_count": len(ready_components),
+        "blocked_count": len(blocked_components),
+        "total_count": len(components),
+        "components": components,
+        "first_blocker": first_blocker,
+        "next_step": {"tool": "ptcli_doctor", "request": doctor_request, "reason": "run_seedbox_live_doctor_before_submission"} if ready else next_step,
+        "complete_when": [
+            "validation_report.ready=true",
+            "doctor_result_handoff.live_safe_to_attempt=true",
+            "source_url_check_and_submit returns job_id",
+            "final get_job_summary reports closure_summary.complete=true and closure_summary.blockers=[]",
+        ],
+        "stop_when": ["any component.ready=false", "duplicate_check.exists=true", "doctor_result_handoff.live_safe_to_attempt=false"],
+    }
+
+
+def _seedbox_validation_component(name: str, ready: bool, blockers: list[str], tool: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "ready": ready,
+        "tool": tool,
+        "blockers": list(dict.fromkeys(blockers)),
+    }
+
+
+def _seedbox_confirmation_blockers(live_readiness: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    if not live_readiness.get("accept_rules"):
+        blockers.append("accept_rules=true is required before live execution.")
+    if not live_readiness.get("confirm_upload"):
+        blockers.append("confirm_upload=true is required before live upload.")
+    return blockers
 
 
 def _seedbox_live_validation_plan(
@@ -12854,7 +12934,8 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "policy_execution_handoff", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
         "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "policy_execution_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
-        "seedbox_live_validation_handoff_fields": ["ready", "phase", "connectivity_checked", "preflight_ready", "preflight_checklist", "execution_plan", "docker_compose", "qbit", "site_policy", "credentials", "doctor", "manual_job", "validation_plan", "post_submit_handoff", "evidence_contract", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
+        "seedbox_live_validation_handoff_fields": ["ready", "phase", "validation_report", "connectivity_checked", "preflight_ready", "preflight_checklist", "execution_plan", "docker_compose", "qbit", "site_policy", "credentials", "doctor", "manual_job", "validation_plan", "post_submit_handoff", "evidence_contract", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
+        "seedbox_live_validation_report_fields": ["ready", "phase", "ready_count", "blocked_count", "total_count", "components", "first_blocker", "next_step", "complete_when", "stop_when"],
         "seedbox_live_validation_plan_fields": ["ready", "first_step", "steps", "required_order", "read_first"],
         "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "complete_when", "stop_when"],
         "seedbox_live_evidence_contract_fields": ["final_read", "complete_when", "required_fields", "audit_notes"],
