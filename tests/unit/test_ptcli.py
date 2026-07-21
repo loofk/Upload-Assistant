@@ -17138,6 +17138,12 @@ def test_site_policies_cli_exposes_policy_gap_summary(monkeypatch, capsys) -> No
     assert payload["policy_readiness_summary"]["blocked_trackers"] == []
     assert payload["policy_readiness_summary"]["missing_counts"] == {"rate_limits": 0, "seeding_requirements": 0, "rule_review": 0, "automation": 0}
     assert payload["policy_readiness_summary"]["recommended_tool"] == "readiness_bundle"
+    assert payload["policy_repair_gate"]["kind"] == "ptcli.site_policy_repair_gate"
+    assert payload["policy_repair_gate"]["ready"] is True
+    assert payload["policy_repair_gate"]["action"] == "ready_for_live_preflight"
+    assert payload["policy_repair_gate"]["recommended_tool"] == "readiness_bundle"
+    assert payload["policy_repair_gate"]["manual_review_required"] is False
+    assert payload["policy_repair_gate"]["blockers"] == []
     assert payload["policy_gap_summary"]["by_role"]["source"]["trackers"] == ["U2"]
     assert payload["policy_gap_summary"]["by_role"]["target"]["trackers"] == ["MTEAM"]
 
@@ -17217,6 +17223,15 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert payload["policy_readiness_summary"]["first_blocker"] == payload["policy_readiness_summary"]["blockers"][0]
     assert payload["policy_readiness_summary"]["recommended_tool"] == "edit_config"
     assert "policy_readiness_summary" in payload["policy_readiness_summary"]["read_order"]
+    assert payload["policy_repair_gate"]["kind"] == "ptcli.site_policy_repair_gate"
+    assert payload["policy_repair_gate"]["ready"] is False
+    assert payload["policy_repair_gate"]["action"] == "review_rules"
+    assert payload["policy_repair_gate"]["manual_review_required"] is True
+    assert payload["policy_repair_gate"]["recommended_tool"] == "edit_config"
+    assert payload["policy_repair_gate"]["next_step"]["after_edit"]["tool"] == "site_policies"
+    assert payload["policy_repair_gate"]["config"]["preferred_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
+    assert payload["policy_repair_gate"]["first_blocker"] == payload["policy_repair_gate"]["blockers"][0]
+    assert any("Review U2 tracker rules manually" in step for step in payload["policy_repair_gate"]["manual_steps"])
     assert payload["config_update_plan"]["kind"] == "ptcli.site_policy_config_update_plan"
     assert payload["config_update_plan"]["ready"] is False
     assert payload["config_update_plan"]["safe_to_auto_apply"] is False
@@ -17744,6 +17759,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_execution_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_setup_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_readiness_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "policy_repair_gate" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
@@ -17758,6 +17774,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "config_update_plan" in tool_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
     assert "policy_readiness_summary_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "missing_rate_limits" in tool_by_name["site_policies"]["response_contract"]["policy_readiness_summary_fields"]
+    assert "policy_repair_gate_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "manual_review_required" in tool_by_name["site_policies"]["response_contract"]["policy_repair_gate_fields"]
     assert "policy_execution_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "qbit" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
@@ -18075,6 +18093,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_execution_summary" in site_policy_schema["properties"]
     assert "policy_setup_summary" in site_policy_schema["properties"]
     assert "policy_readiness_summary" in site_policy_schema["properties"]
+    assert "policy_repair_gate" in site_policy_schema["properties"]
     assert "policy_execution_handoff" in site_policy_schema["properties"]
     assert "config_templates" in site_policy_schema["properties"]
     assert "config_update_plan" in site_policy_schema["properties"]
@@ -18623,6 +18642,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_execution_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_setup_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_readiness_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "policy_repair_gate" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_handoff" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_handoff" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "next_step" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
@@ -18636,6 +18656,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "placeholder_fingerprints" in tools_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
         assert "policy_readiness_summary_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "missing_rate_limits" in tools_by_name["site_policies"]["response_contract"]["policy_readiness_summary_fields"]
+        assert "policy_repair_gate_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "manual_review_required" in tools_by_name["site_policies"]["response_contract"]["policy_repair_gate_fields"]
         assert "policy_execution_handoff_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "qbit" in tools_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
         assert "rule_obligations" in tools_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
