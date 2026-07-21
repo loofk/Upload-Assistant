@@ -2104,6 +2104,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
     live_test_handoff = _readiness_bundle_live_test_handoff(live_readiness, agent_decision, deployment, site_policies, live_verification)
     seedbox_live_validation_handoff = _readiness_bundle_seedbox_live_validation_handoff(deployment, live_readiness, live_test_handoff, site_policies, live_verification)
     live_validation_summary = _seedbox_live_validation_summary(seedbox_live_validation_handoff)
+    seedbox_live_validation_report = _seedbox_live_validation_service_report(seedbox_live_validation_handoff, live_validation_summary)
     return {
         "kind": "ptcli.readiness_bundle",
         "status": "ok" if live_readiness.get("ready_for_ai") else "blocked",
@@ -2118,6 +2119,7 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
         "live_test_handoff": live_test_handoff,
         "seedbox_live_validation_handoff": seedbox_live_validation_handoff,
         "live_validation_summary": live_validation_summary,
+        "seedbox_live_validation_report": seedbox_live_validation_report,
         "next_step": live_test_handoff.get("next_step"),
         "recommended_tool": live_test_handoff.get("recommended_tool"),
         "recommended_endpoint": live_test_handoff.get("recommended_endpoint"),
@@ -2733,6 +2735,104 @@ def _seedbox_live_validation_summary_next_actions(ready: bool, blockers: list[st
     if blockers:
         return ["Resolve live_validation_summary.first_blocker or blockers, then rerun readiness_bundle before any live tracker action."]
     return ["Inspect live_validation_summary and seedbox_live_validation_handoff before attempting live validation."]
+
+
+def _seedbox_live_validation_service_report(handoff: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
+    validation_report = handoff.get("validation_report") if isinstance(handoff.get("validation_report"), dict) else {}
+    validation_plan = handoff.get("validation_plan") if isinstance(handoff.get("validation_plan"), dict) else {}
+    post_submit = handoff.get("post_submit_handoff") if isinstance(handoff.get("post_submit_handoff"), dict) else {}
+    evidence_contract = handoff.get("evidence_contract") if isinstance(handoff.get("evidence_contract"), dict) else {}
+    doctor = handoff.get("doctor") if isinstance(handoff.get("doctor"), dict) else {}
+    manual_job = handoff.get("manual_job") if isinstance(handoff.get("manual_job"), dict) else {}
+    ready = summary.get("ready") is True
+    blockers = _string_list(summary.get("blockers")) or _string_list(handoff.get("blockers"))
+    first_blocker = summary.get("first_blocker") or validation_report.get("first_blocker") or (blockers[0] if blockers else None)
+    return {
+        "kind": "ptcli.seedbox_live_validation_service_report",
+        "ready": ready,
+        "status": "ready_for_doctor" if ready else "blocked",
+        "phase": summary.get("phase") or handoff.get("phase"),
+        "current_step": "doctor" if ready else "preflight",
+        "first_blocker": first_blocker,
+        "read_first": ["seedbox_live_validation_report", "live_validation_summary", "seedbox_live_validation_handoff.validation_report", "seedbox_live_validation_handoff.validation_plan"],
+        "doctor": {
+            "ready": bool(summary.get("can_run_doctor")),
+            "tool": "ptcli_doctor",
+            "request": summary.get("doctor_request") or doctor.get("request"),
+            "summary_check_tool": "summary_check",
+            "summary_check_endpoint": "/v1/summary/check",
+            "summary_check_request_template": {"summary_file": "<ptcli-doctor-summary.json>"},
+            "continue_when": "live_validation_result.ready=true and live_validation_result.can_submit_check_and_submit=true",
+            "stop_when": "live_validation_result.live_safe_to_attempt=false or live_validation_result.blockers is non-empty",
+        },
+        "check_and_submit": {
+            "ready_after_doctor": bool(summary.get("can_submit_after_doctor")),
+            "tool": "source_url_check_and_submit",
+            "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": "POST",
+            "request": summary.get("check_and_submit_request") or manual_job.get("request"),
+            "read": ["duplicate_check", "submit_if_clear_handoff", "job_id", "status_endpoint", "summary_endpoint"],
+            "continue_when": "duplicate_check.exists=false and job_id is returned",
+            "stop_when": "duplicate_check.exists=true or submit_if_clear_handoff.ready=false",
+        },
+        "after_submit": {
+            "read": post_submit.get("after_submit_read") or ["duplicate_check", "job_id", "status_endpoint", "summary_endpoint"],
+            "poll_tool": post_submit.get("poll_tool") or "get_job_status",
+            "poll_endpoint_template": post_submit.get("poll_endpoint_template") or "/v1/jobs/{job_id}",
+            "resume_tool": post_submit.get("resume_tool") or "resume_job",
+            "resume_endpoint_template": post_submit.get("resume_endpoint_template") or "/v1/jobs/{job_id}/resume",
+            "finish_tool": post_submit.get("finish_tool") or "get_job_summary",
+            "finish_endpoint_template": post_submit.get("finish_endpoint_template") or "/v1/jobs/{job_id}/summary",
+            "resume_when": post_submit.get("resume_when"),
+            "complete_when": post_submit.get("complete_when"),
+            "stop_when": _string_list(post_submit.get("stop_when")),
+        },
+        "final_evidence": {
+            "read_tool": evidence_contract.get("final_read") or "get_job_summary",
+            "required_fields": _string_list(evidence_contract.get("required_fields")),
+            "complete_when": _string_list(evidence_contract.get("complete_when")),
+            "audit_notes": _string_list(evidence_contract.get("audit_notes")),
+        },
+        "runbook": _seedbox_live_validation_service_runbook(validation_plan),
+        "components": validation_report.get("components") if isinstance(validation_report.get("components"), list) else [],
+        "component_counts": {
+            "ready": int(validation_report.get("ready_count") or 0),
+            "blocked": int(validation_report.get("blocked_count") or 0),
+            "total": int(validation_report.get("total_count") or 0),
+        },
+        "complete_when": _string_list(summary.get("complete_when")) or _string_list(validation_report.get("complete_when")),
+        "stop_when": _string_list(summary.get("stop_when")) or _string_list(validation_report.get("stop_when")),
+        "blockers": blockers,
+        "warnings": _string_list(summary.get("warnings")) or _string_list(handoff.get("warnings")),
+        "next_actions": _seedbox_live_validation_service_report_next_actions(ready, first_blocker),
+    }
+
+
+def _seedbox_live_validation_service_runbook(validation_plan: dict[str, Any]) -> list[dict[str, Any]]:
+    steps = validation_plan.get("steps") if isinstance(validation_plan.get("steps"), list) else []
+    return [
+        {
+            "index": step.get("index"),
+            "name": step.get("name"),
+            "tool": step.get("tool"),
+            "endpoint": step.get("endpoint"),
+            "method": step.get("method"),
+            "read": step.get("read") if isinstance(step.get("read"), list) else [],
+            "continue_when": step.get("continue_when"),
+            "repeat_when": step.get("repeat_when"),
+            "stop_when": step.get("stop_when"),
+        }
+        for step in steps
+        if isinstance(step, dict)
+    ]
+
+
+def _seedbox_live_validation_service_report_next_actions(ready: bool, first_blocker: Any) -> list[str]:
+    if ready:
+        return ["Run seedbox_live_validation_report.doctor.request.argv, then POST ptcli-doctor-summary.json to /v1/summary/check and follow live_validation_result."]
+    if first_blocker:
+        return [f"Resolve seedbox_live_validation_report.first_blocker: {first_blocker}."]
+    return ["Inspect seedbox_live_validation_report.components before any live tracker action."]
 
 
 def _seedbox_live_validation_report(
@@ -14150,13 +14250,14 @@ def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
 
 def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "seedbox_live_validation_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "policy_execution_handoff", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
         "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "policy_execution_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
         "seedbox_live_validation_handoff_fields": ["ready", "phase", "validation_report", "live_validation_summary", "connectivity_checked", "preflight_ready", "preflight_checklist", "execution_plan", "docker_compose", "qbit", "site_policy", "credentials", "doctor", "manual_job", "validation_plan", "post_submit_handoff", "evidence_contract", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
         "seedbox_live_validation_summary_fields": ["ready", "phase", "status", "can_run_doctor", "can_submit_after_doctor", "ready_count", "blocked_count", "total_count", "first_blocker", "doctor_request", "check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "post_submit_read", "poll_tool", "finish_tool", "required_order", "read_first", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
         "seedbox_live_validation_report_fields": ["ready", "phase", "ready_count", "blocked_count", "total_count", "components", "first_blocker", "next_step", "complete_when", "stop_when"],
+        "seedbox_live_validation_service_report_fields": ["ready", "status", "phase", "current_step", "first_blocker", "read_first", "doctor", "check_and_submit", "after_submit", "final_evidence", "runbook", "components", "component_counts", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
         "seedbox_live_validation_plan_fields": ["ready", "first_step", "steps", "required_order", "read_first"],
         "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "complete_when", "stop_when"],
         "seedbox_live_evidence_contract_fields": ["final_read", "complete_when", "required_fields", "audit_notes"],
@@ -15525,6 +15626,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "live_test_handoff": {"type": "object"},
             "seedbox_live_validation_handoff": {"type": "object"},
             "live_validation_summary": {"type": "object"},
+            "seedbox_live_validation_report": {"type": "object"},
             "next_step": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},
