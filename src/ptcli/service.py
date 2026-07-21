@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, build_daily_candidates
+from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, MAX_CANDIDATE_SCAN, build_daily_candidates
 from src.ptcli.cli import build_parser, build_sites_payload, pipeline_payload, retorrent_payload, summary_check_payload
 from src.ptcli.cli import target_upload_payload as cli_target_upload_payload
 from src.ptcli.config import load_config, resolve_client_config
@@ -243,6 +243,7 @@ class JobStore:
         daily_batch_gate = _daily_candidate_batch_gate(daily_batch_summary)
         daily_submission_plan = _daily_candidate_batch_submission_plan(daily_batch_summary, daily_batch_gate)
         daily_execution_summary = _daily_candidate_batch_execution_summary(daily_batch_summary, daily_batch_gate, daily_submission_plan)
+        daily_refill_plan = _daily_candidate_batch_refill_plan(daily_batch_summary, daily_submission_plan, daily_execution_summary)
         return {
             "status": "ok",
             "ok": True,
@@ -256,6 +257,7 @@ class JobStore:
             "daily_candidate_batch_gate": daily_batch_gate,
             "daily_candidate_submission_plan": daily_submission_plan,
             "daily_candidate_execution_summary": daily_execution_summary,
+            "daily_candidate_refill_plan": daily_refill_plan,
             "jobs": jobs,
             "next_actions": _job_list_next_actions(jobs, total, limit),
         }
@@ -283,6 +285,7 @@ class JobStore:
         gate = _daily_candidate_batch_gate(summary)
         submission_plan = _daily_candidate_batch_submission_plan(summary, gate)
         execution_summary = _daily_candidate_batch_execution_summary(summary, gate, submission_plan)
+        refill_plan = _daily_candidate_batch_refill_plan(summary, submission_plan, execution_summary)
         return {
             "status": "ok" if summary.get("candidate_job_count") else "empty",
             "ok": True,
@@ -292,10 +295,12 @@ class JobStore:
             "daily_candidate_batch_gate": gate,
             "daily_candidate_submission_plan": submission_plan,
             "daily_candidate_execution_summary": execution_summary,
+            "daily_candidate_refill_plan": refill_plan,
             "batch_summary": summary,
             "batch_gate": gate,
             "submission_plan": submission_plan,
             "execution_summary": execution_summary,
+            "refill_plan": refill_plan,
             "blockers": summary.get("blockers") or [],
             "next_actions": summary.get("next_actions") or [],
         }
@@ -9988,6 +9993,143 @@ def _daily_candidate_batch_execution_next_actions(action: str, remaining_submit_
     return ["Inspect daily_candidate_execution_summary.submitted_jobs and daily_candidate_submission_plan before continuing."]
 
 
+def _daily_candidate_batch_refill_plan(summary: dict[str, Any], submission_plan: dict[str, Any], execution_summary: dict[str, Any]) -> dict[str, Any]:
+    items = [item for item in summary.get("items", []) if isinstance(item, dict)]
+    target_count = int(submission_plan.get("target_count") or 0)
+    ready_count = int(submission_plan.get("ready_count") or 0)
+    remaining_submit_count = int(execution_summary.get("remaining_submit_count") or 0)
+    running_count = int(execution_summary.get("running_count") or 0)
+    blocked_count = int(execution_summary.get("blocked_count") or 0)
+    complete_count = int(execution_summary.get("complete_count") or 0)
+    ready_shortfall_count = max(0, target_count - ready_count)
+    scan_count = sum(int((item.get("candidate_counts") or {}).get("scan") or 0) for item in items)
+    shortfall_recovery = submission_plan.get("shortfall_recovery") if isinstance(submission_plan.get("shortfall_recovery"), dict) else {}
+    candidate_request = next((item.get("candidate_request") for item in items if isinstance(item.get("candidate_request"), dict)), {})
+    covered_source_ids = _daily_candidate_batch_covered_source_ids(items)
+    submitted_source_ids = _string_list(execution_summary.get("completed_source_ids")) + _string_list(execution_summary.get("running_source_ids")) + _string_list(execution_summary.get("blocked_source_ids"))
+    hard_blockers = _string_list(submission_plan.get("hard_blockers"))
+    if not items:
+        action = "create_daily_candidates"
+    elif running_count:
+        action = "wait_for_submitted_jobs"
+    elif hard_blockers or blocked_count:
+        action = "resolve_blockers"
+    elif remaining_submit_count:
+        action = "submit_available_first"
+    elif ready_shortfall_count:
+        action = "rerun_for_shortfall"
+    else:
+        action = "none"
+    recommended_request = _daily_candidate_refill_request(candidate_request, shortfall_recovery, target_count)
+    if action == "create_daily_candidates":
+        recommended_tool = "daily_candidates_job"
+        recommended_endpoint = "/v1/jobs/candidates/daily"
+        recommended_method = "POST"
+    elif action == "rerun_for_shortfall":
+        recommended_tool = shortfall_recovery.get("recommended_tool") or "daily_candidates_job"
+        recommended_endpoint = shortfall_recovery.get("recommended_endpoint") or "/v1/jobs/candidates/daily"
+        recommended_method = shortfall_recovery.get("recommended_method") or "POST"
+    elif action == "submit_available_first":
+        recommended_tool = submission_plan.get("recommended_tool")
+        recommended_endpoint = submission_plan.get("recommended_endpoint")
+        recommended_method = submission_plan.get("recommended_method")
+        recommended_request = submission_plan.get("recommended_request")
+    elif action == "wait_for_submitted_jobs":
+        recommended_tool = execution_summary.get("recommended_tool")
+        recommended_endpoint = execution_summary.get("recommended_endpoint")
+        recommended_method = execution_summary.get("recommended_method")
+        recommended_request = execution_summary.get("recommended_request")
+    elif action == "resolve_blockers":
+        recommended_tool = execution_summary.get("recommended_tool") or submission_plan.get("recommended_tool")
+        recommended_endpoint = execution_summary.get("recommended_endpoint") or submission_plan.get("recommended_endpoint")
+        recommended_method = execution_summary.get("recommended_method") or submission_plan.get("recommended_method")
+        recommended_request = execution_summary.get("recommended_request") or submission_plan.get("recommended_request")
+    else:
+        recommended_tool = None
+        recommended_endpoint = None
+        recommended_method = None
+        recommended_request = None
+    return {
+        "kind": "ptcli.daily_candidate_refill_plan",
+        "ready": action in {"create_daily_candidates", "rerun_for_shortfall", "submit_available_first"} and not hard_blockers,
+        "action": action,
+        "target_count": target_count,
+        "ready_count": ready_count,
+        "complete_count": complete_count,
+        "remaining_submit_count": remaining_submit_count,
+        "ready_shortfall_count": ready_shortfall_count,
+        "scan_count": scan_count,
+        "max_scan_count": MAX_CANDIDATE_SCAN,
+        "scan_exhausted": bool(scan_count and scan_count >= MAX_CANDIDATE_SCAN),
+        "candidate_job_count": int(summary.get("candidate_job_count") or 0),
+        "covered_source_ids": covered_source_ids,
+        "submitted_source_ids": list(dict.fromkeys(str(item) for item in submitted_source_ids if item)),
+        "completed_source_ids": _string_list(execution_summary.get("completed_source_ids")),
+        "running_source_ids": _string_list(execution_summary.get("running_source_ids")),
+        "blocked_source_ids": _string_list(execution_summary.get("blocked_source_ids")),
+        "exclude_source_ids_hint": covered_source_ids,
+        "pagination_supported": False,
+        "dedupe_strategy": "Do not submit a source_id already present in covered_source_ids or submitted_source_ids; current discovery reruns the recent list without offset support.",
+        "recommended_tool": recommended_tool,
+        "recommended_endpoint": recommended_endpoint,
+        "recommended_method": recommended_method,
+        "recommended_request": recommended_request,
+        "recommended_overrides": {"limit": target_count or DEFAULT_CANDIDATE_LIMIT, "check_dupes": True},
+        "read_order": ["daily_candidate_refill_plan", "daily_candidate_execution_summary", "daily_candidate_submission_plan", "daily_candidate_batch_summary"],
+        "continue_when": "ready_shortfall_count=0 or daily_candidate_submission_plan.safe_to_submit_count increases after rerun",
+        "stop_when": [
+            "pagination_supported=false and rerun returns no new safe candidates",
+            "scan_exhausted=true and ready_shortfall_count>0",
+            "daily_candidate_refill_plan.blockers is not empty",
+        ],
+        "blockers": hard_blockers,
+        "next_actions": _daily_candidate_refill_next_actions(action, ready_shortfall_count, remaining_submit_count, running_count, blocked_count),
+    }
+
+
+def _daily_candidate_refill_request(candidate_request: dict[str, Any], shortfall_recovery: dict[str, Any], target_count: int) -> dict[str, Any] | None:
+    if isinstance(shortfall_recovery.get("recommended_request"), dict):
+        return shortfall_recovery["recommended_request"]
+    request = {
+        key: value
+        for key, value in {
+            "source_tracker": candidate_request.get("source_tracker"),
+            "target": candidate_request.get("target") or candidate_request.get("target_trackers"),
+            "limit": target_count or DEFAULT_CANDIDATE_LIMIT,
+            "accept_rules": candidate_request.get("accept_rules", True),
+            "check_dupes": candidate_request.get("check_dupes", True),
+            "base_dir": candidate_request.get("base_dir"),
+        }.items()
+        if value is not None and value != ""
+    }
+    return request or None
+
+
+def _daily_candidate_batch_covered_source_ids(items: list[dict[str, Any]]) -> list[str]:
+    source_ids: list[str] = []
+    for item in items:
+        source_ids.extend(_string_list(item.get("safe_source_ids")))
+        submit_requests = item.get("submit_requests", []) if isinstance(item.get("submit_requests"), list) else []
+        source_ids.extend(str(submit_request["source_id"]) for submit_request in submit_requests if isinstance(submit_request, dict) and submit_request.get("source_id"))
+        submitted_jobs = item.get("submitted_jobs", []) if isinstance(item.get("submitted_jobs"), list) else []
+        source_ids.extend(str(submitted["candidate_source_id"]) for submitted in submitted_jobs if isinstance(submitted, dict) and submitted.get("candidate_source_id"))
+    return list(dict.fromkeys(source_ids))
+
+
+def _daily_candidate_refill_next_actions(action: str, ready_shortfall_count: int, remaining_submit_count: int, running_count: int, blocked_count: int) -> list[str]:
+    if action == "create_daily_candidates":
+        return ["Create a daily_candidates_job for this source/target pair before attempting refill."]
+    if action == "submit_available_first":
+        return [f"Submit {remaining_submit_count} available safe candidate(s) before rerunning discovery for the remaining shortfall."]
+    if action == "wait_for_submitted_jobs":
+        return [f"Poll {running_count} submitted retorrent job(s) before deciding whether refill is still needed."]
+    if action == "resolve_blockers":
+        return [f"Resolve {blocked_count} blocked submitted job(s) or policy blockers before rerunning candidate discovery."]
+    if action == "rerun_for_shortfall":
+        return [f"Rerun daily candidate discovery to fill {ready_shortfall_count} missing ready candidate(s); do not resubmit source ids in exclude_source_ids_hint."]
+    return ["No refill is needed for this daily candidate batch."]
+
+
 def _daily_candidate_jobs_batch_item(candidate_job: dict[str, Any], submitted_jobs: list[dict[str, Any]]) -> dict[str, Any]:
     job_id = str(candidate_job.get("job_id") or "")
     candidate_payload = _candidate_payload(candidate_job.get("result")) or {}
@@ -10007,6 +10149,7 @@ def _daily_candidate_jobs_batch_item(candidate_job: dict[str, Any], submitted_jo
         "candidate_request": request,
         "candidate_counts": {
             "target": int(digest.get("target_count") or control.get("target_count") or candidate_payload.get("target_count") or candidate_payload.get("count") or control.get("selected_count") or 0),
+            "scan": int(digest.get("scan_count") or candidate_payload.get("scan_count") or 0),
             "selected": int(digest.get("selected_count") or control.get("selected_count") or candidate_payload.get("selected_count") or candidate_payload.get("count") or 0),
             "ready": int(digest.get("ready_count") or control.get("ready_count") or candidate_payload.get("ready_count") or 0),
             "safe_to_submit": int(batch_handoff.get("submit_count") or control.get("safe_to_submit_count") or 0),
@@ -17098,12 +17241,13 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
 
 def _job_list_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "jobs", "next_actions"],
+        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "daily_candidate_refill_plan", "jobs", "next_actions"],
         "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_control_summary", "candidate_submission", "check_submission", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "source_reference", "duplicate_check", "submit_if_clear_handoff", "policy_handoff", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "policy_execution_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "manual_retorrent_handoff", "agent_decision", "resume_plan", "resume_requirements", "resume_execution_handoff", "recovery_handoff", "job_control_summary", "resume_lineage", "job_lineage", "resume_summary", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "daily_candidate_batch_summary_fields": ["ready", "filters", "list_window", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "retorrent_status_counts", "retorrent_action_counts", "complete_count", "running_count", "blocked_count", "items", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_gate_fields": ["ready", "action", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "complete_count", "running_count", "blocked_count", "retorrent_status_counts", "retorrent_action_counts", "first_submit_request", "first_submit_endpoint", "first_submitted_job", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
         "daily_candidate_submission_plan_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "running_count", "shortfall_count", "target_met", "ready_target_met", "first_submit_request", "submit_requests", "shortfall_recovery", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "read_order", "continue_when", "stop_when", "shortfall_blockers", "hard_blockers", "blockers", "next_actions"],
         "daily_candidate_execution_summary_fields": ["ready", "action", "target_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "terminal_count", "remaining_submit_count", "ready_shortfall_count", "target_met", "ready_target_met", "completion_ratio", "completed_source_ids", "running_source_ids", "blocked_source_ids", "submitted_jobs", "running_jobs", "blocked_jobs", "complete_jobs", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
+        "daily_candidate_refill_plan_fields": ["ready", "action", "target_count", "ready_count", "complete_count", "remaining_submit_count", "ready_shortfall_count", "scan_count", "max_scan_count", "scan_exhausted", "candidate_job_count", "covered_source_ids", "submitted_source_ids", "completed_source_ids", "running_source_ids", "blocked_source_ids", "exclude_source_ids_hint", "pagination_supported", "dedupe_strategy", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_item_fields": ["candidate_job_id", "status", "status_endpoint", "summary_endpoint", "source_tracker", "target_trackers", "candidate_request", "candidate_counts", "candidate_control_summary", "candidate_batch_handoff_ready", "submit_endpoint", "recommended_request", "safe_source_ids", "submit_requests", "submitted_jobs", "blockers"],
         "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "source_url_retorrent_request", "required_overrides", "after_submit"],
         "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "candidate_title", "action", "status_endpoint", "summary_endpoint", "resume_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "closure_complete", "policy_execution_ready", "execution_state", "blockers", "next_actions"],
@@ -17115,11 +17259,12 @@ def _job_list_response_contract() -> dict[str, Any]:
 def _daily_candidate_batch_status_response_contract() -> dict[str, Any]:
     list_contract = _job_list_response_contract()
     return {
-        "required_fields": ["status", "ok", "kind", "filters", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "batch_summary", "batch_gate", "submission_plan", "execution_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "kind", "filters", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "daily_candidate_refill_plan", "batch_summary", "batch_gate", "submission_plan", "execution_summary", "refill_plan", "blockers", "next_actions"],
         "daily_candidate_batch_summary_fields": list_contract["daily_candidate_batch_summary_fields"],
         "daily_candidate_batch_gate_fields": list_contract["daily_candidate_batch_gate_fields"],
         "daily_candidate_submission_plan_fields": list_contract["daily_candidate_submission_plan_fields"],
         "daily_candidate_execution_summary_fields": list_contract["daily_candidate_execution_summary_fields"],
+        "daily_candidate_refill_plan_fields": list_contract["daily_candidate_refill_plan_fields"],
         "daily_candidate_batch_item_fields": list_contract["daily_candidate_batch_item_fields"],
         "daily_candidate_batch_submit_request_fields": list_contract["daily_candidate_batch_submit_request_fields"],
         "daily_candidate_submitted_item_fields": list_contract["daily_candidate_submitted_item_fields"],
@@ -17844,6 +17989,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_batch_gate": {"type": "object"},
             "daily_candidate_submission_plan": {"type": "object"},
             "daily_candidate_execution_summary": {"type": "object"},
+            "daily_candidate_refill_plan": {"type": "object"},
             "jobs": {
                 "type": "array",
                 "items": {
@@ -17880,10 +18026,12 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_batch_gate": {"type": "object"},
             "daily_candidate_submission_plan": {"type": "object"},
             "daily_candidate_execution_summary": {"type": "object"},
+            "daily_candidate_refill_plan": {"type": "object"},
             "batch_summary": {"type": "object"},
             "batch_gate": {"type": "object"},
             "submission_plan": {"type": "object"},
             "execution_summary": {"type": "object"},
+            "refill_plan": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },
