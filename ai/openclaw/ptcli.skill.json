@@ -20496,7 +20496,7 @@
       "name": "deployment_check",
       "method": "GET",
       "path": "/v1/deployment/check",
-      "description": "Check local ptcli deployment readiness: runtime imports, config mount, cookies/tmp/job/download paths, API token warning, and qBittorrent config presence. This does not contact trackers or qBittorrent.",
+      "description": "Check local ptcli deployment readiness: runtime imports, material tools, config mount, cookies/tmp/job/download paths, API token warning, and qBittorrent config presence. This does not contact trackers or qBittorrent.",
       "input_schema": {
         "type": "object",
         "required": [],
@@ -20540,6 +20540,7 @@
           "next_actions",
           "paths",
           "mounts",
+          "runtime_tools",
           "queue",
           "qbit",
           "daily_candidates",
@@ -20567,6 +20568,13 @@
           "daily_candidates_configured",
           "docker_compose_api_ready",
           "docker_compose_daily_ready"
+        ],
+        "runtime_tools_fields": [
+          "ready",
+          "required",
+          "optional",
+          "missing_required",
+          "message"
         ],
         "deployment_runbook_fields": [
           "ready",

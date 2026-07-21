@@ -17739,6 +17739,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["deployment_check"]["method"] == "GET"
     assert "qbit" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "mounts" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "runtime_tools" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "runtime_tools_fields" in tool_by_name["deployment_check"]["response_contract"]
+    assert "missing_required" in tool_by_name["deployment_check"]["response_contract"]["runtime_tools_fields"]
     assert "queue" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "daily_candidates" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "docker_compose" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -18158,6 +18161,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "steps" in preview_schema["properties"]
     deployment_schema = openapi["paths"]["/v1/deployment/check"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "mounts" in deployment_schema["properties"]
+    assert "runtime_tools" in deployment_schema["properties"]
     assert "queue" in deployment_schema["properties"]
     assert "daily_candidates" in deployment_schema["properties"]
     assert "docker_compose" in deployment_schema["properties"]
@@ -18392,6 +18396,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "job_creation_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "runtime_tools" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "runtime_tools_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "missing_required" in tools_by_name["deployment_check"]["response_contract"]["runtime_tools_fields"]
         assert "queue" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "docker_compose" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -18932,9 +18939,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
 
 def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+    dockerfile = Path("Dockerfile.ptcli").read_text(encoding="utf-8")
     env_example = Path(".env.ptcli.example").read_text(encoding="utf-8")
 
     assert "ptcli-api:" in compose
+    assert "ffmpeg" in dockerfile
+    assert "mediainfo" in dockerfile
     assert "ptcli-daily-schedule:" in compose
     assert 'command: ["serve", "--host", "0.0.0.0", "--port", "8080"]' in compose
     assert "healthcheck:" in compose
@@ -18959,6 +18969,7 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
 
 
 def test_deployment_check_reports_ready_seedbox_mounts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
     data_dir = tmp_path / "data"
     cookies_dir = data_dir / "cookies"
     tmp_dir = tmp_path / "tmp"
@@ -19012,6 +19023,9 @@ services:
     assert payload["status"] == "ok"
     assert payload["ready"] is True
     assert payload["mounts"]["ready"] is True
+    assert payload["runtime_tools"]["ready"] is True
+    assert payload["runtime_tools"]["missing_required"] == []
+    assert {item["name"] for item in payload["runtime_tools"]["required"]} == {"ffmpeg", "mediainfo"}
     assert payload["daily_candidates"]["configured"] is True
     assert payload["daily_candidates"]["count"] == 1
     assert payload["docker_compose"]["daily_schedule_service_ready"] is True
@@ -19076,6 +19090,7 @@ services:
 
 
 def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda _name: None)
     (tmp_path / "data" / "cookies").mkdir(parents=True)
     (tmp_path / "tmp").mkdir()
     (tmp_path / "jobs").mkdir()
@@ -19087,6 +19102,8 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert payload["status"] == "blocked"
     assert payload["ready"] is False
     assert payload["daily_candidates"]["configured"] is False
+    assert payload["runtime_tools"]["ready"] is False
+    assert payload["runtime_tools"]["missing_required"] == ["ffmpeg", "mediainfo"]
     assert payload["agent_summary"]["ready_for_ai"] is False
     assert payload["agent_summary"]["manual_workflow_ready"] is False
     assert payload["agent_summary"]["compose_deployable"] is False
@@ -19107,7 +19124,40 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert any("Mount or create data/config.py" in action for action in payload["next_actions"])
 
 
+def test_readiness_bundle_blocks_requested_material_generation_without_runtime_tools(tmp_path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    for directory in (cookies_dir, tmp_path / "tmp", tmp_path / "jobs", tmp_path / "downloads"):
+        directory.mkdir(parents=True)
+    (data_dir / "config.py").write_text("config = {'DEFAULT': {'img_host_1': 'ptpimg'}}", encoding="utf-8")
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp"))
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {"DEFAULT": {"img_host_1": "ptpimg"}})
+
+    payload = ptcli_service.readiness_bundle_payload(
+        {
+            "base_dir": str(tmp_path),
+            "job_dir": str(tmp_path / "jobs"),
+            "downloads_path": str(tmp_path / "downloads"),
+            "source_tracker": "U2",
+            "source_id": "60635",
+            "target": "MTEAM",
+            "generate_mediainfo": True,
+            "generate_screenshots": True,
+        }
+    )
+
+    assert payload["live_verification"]["ready"] is False
+    assert payload["live_verification"]["materials"]["runtime_tools_ready"] is False
+    assert payload["live_verification"]["materials"]["missing_runtime_tools"] == ["ffmpeg", "mediainfo"]
+    material_checks = {check["name"]: check for check in payload["live_verification"]["materials"]["checks"]}
+    assert material_checks["materials.media_info"]["blocking"] is True
+    assert material_checks["materials.media_info"]["missing_requested_tools"] == ["ffmpeg", "mediainfo"]
+    assert any("Requested material generation is missing runtime tools" in blocker for blocker in payload["live_verification"]["blockers"])
+
+
 def test_readiness_bundle_reports_live_handoff_for_seedbox(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
     data_dir = tmp_path / "data"
     cookies_dir = data_dir / "cookies"
     tmp_dir = tmp_path / "tmp"
@@ -19199,6 +19249,7 @@ services:
     assert payload["daily_schedule"]["count"] == 1
     assert payload["live_verification"]["ready"] is True
     assert payload["live_verification"]["materials"]["image_host_ready"] is True
+    assert payload["live_verification"]["materials"]["runtime_tools_ready"] is True
     assert "data/cookies/U2.txt" in ",".join(payload["live_verification"]["credential_requirements"])
     assert payload["live_readiness"]["ready_for_manual_retorrent"] is True
     assert payload["live_readiness"]["live_verification_ready"] is True

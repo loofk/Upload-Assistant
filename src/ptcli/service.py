@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -2330,6 +2331,20 @@ def _readiness_bundle_material_checks(config: dict[str, Any] | None, request: di
     image_hosts = [str(default_config.get(f"img_host_{index}") or "").strip() for index in range(1, 7)]
     configured_image_hosts = [host for host in image_hosts if host]
     upload_screenshots = not _truthy(request.get("no_upload_screenshots"))
+    runtime_tools = _deployment_runtime_tools()
+    generate_mediainfo = _truthy(request.get("generate_mediainfo"))
+    generate_screenshots = _truthy(request.get("generate_screenshots"))
+    requested_tools = []
+    if generate_screenshots:
+        requested_tools.append("ffmpeg")
+    if generate_mediainfo:
+        requested_tools.append("mediainfo")
+    available_required_tools = {
+        str(item.get("name"))
+        for item in runtime_tools.get("required", [])
+        if isinstance(item, dict) and item.get("available")
+    }
+    missing_requested_tools = [tool for tool in requested_tools if tool not in available_required_tools]
     checks = [
         {
             "name": "materials.image_host",
@@ -2350,10 +2365,13 @@ def _readiness_bundle_material_checks(config: dict[str, Any] | None, request: di
         {
             "name": "materials.media_info",
             "category": "materials",
-            "ok": True,
-            "blocking": False,
-            "message": "MediaInfo/BDInfo and screenshot generation are runtime checks; use doctor or the job summary for concrete file evidence.",
+            "ok": not missing_requested_tools,
+            "blocking": bool(missing_requested_tools),
+            "message": "MediaInfo and screenshot runtime tools are available." if not missing_requested_tools else f"Requested material generation is missing runtime tools: {', '.join(missing_requested_tools)}.",
             "runtime_required": True,
+            "runtime_tools": runtime_tools,
+            "requested_tools": requested_tools,
+            "missing_requested_tools": missing_requested_tools,
         },
     ]
     if request.get("path") or request.get("content_path"):
@@ -2383,9 +2401,12 @@ def _readiness_bundle_material_checks(config: dict[str, Any] | None, request: di
 
 def _readiness_bundle_material_summary(checks: list[dict[str, Any]]) -> dict[str, Any]:
     material_checks = [check for check in checks if check.get("category") == "materials"]
+    media_info_check = next((check for check in material_checks if check.get("name") == "materials.media_info"), {})
     return {
         "ready": not any(check.get("ok") is False and check.get("blocking", True) is not False for check in material_checks),
         "image_host_ready": any(check.get("name") == "materials.image_host" and check.get("ok") is True for check in material_checks),
+        "runtime_tools_ready": bool((media_info_check.get("runtime_tools") or {}).get("ready")),
+        "missing_runtime_tools": _string_list(media_info_check.get("missing_requested_tools")),
         "runtime_material_generation_required": any(check.get("runtime_required") for check in material_checks),
         "checks": material_checks,
     }
@@ -13394,12 +13415,20 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     compose_path = _deployment_path(request.get("compose_file") or os.environ.get("PTCLI_COMPOSE_FILE") or "docker-compose.yml", base_dir)
 
     runtime_check = build_runtime_dependency_check()
+    runtime_tools = _deployment_runtime_tools()
     checks: list[dict[str, Any]] = [
         {
             "name": "runtime.ptcli_dependencies",
             "ok": bool(runtime_check.get("ok")),
             "message": runtime_check.get("message"),
             "details": runtime_check,
+        },
+        {
+            "name": "runtime.material_tools",
+            "ok": bool(runtime_tools.get("ready")),
+            "blocking": False,
+            "message": runtime_tools.get("message"),
+            "details": runtime_tools,
         },
         _deployment_file_check("config", config_path, required=True),
         _deployment_dir_check("cookies_dir", cookies_dir, required=True),
@@ -13411,7 +13440,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
 
     config: dict[str, Any] | None = None
     qbit: dict[str, Any] = {"configured": False, "client": client, "connectivity_checked": False}
-    if checks[1]["ok"]:
+    if checks[2]["ok"]:
         try:
             config = load_config(str(config_path))
             checks.append({"name": "config.load", "ok": True, "message": f"Config loaded: {config_path}"})
@@ -13493,6 +13522,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "next_actions": next_actions,
         "paths": paths,
         "mounts": mounts,
+        "runtime_tools": runtime_tools,
         "queue": {"max_concurrent_jobs": max_concurrent_jobs},
         "qbit": qbit,
         "daily_candidates": daily_candidate_plan,
@@ -13552,6 +13582,26 @@ def _deployment_api_token_check() -> dict[str, Any]:
         "configured": configured,
         "message": "PTCLI_API_TOKEN is configured." if configured else "PTCLI_API_TOKEN is not configured; keep the API bound to localhost or set a token before exposing it.",
     }
+
+
+def _deployment_runtime_tools() -> dict[str, Any]:
+    required = [_runtime_binary_status("ffmpeg"), _runtime_binary_status("mediainfo")]
+    optional = [_runtime_binary_status("ffprobe"), _runtime_binary_status("bdinfo"), _runtime_binary_status("BDInfo")]
+    missing_required = [str(item["name"]) for item in required if not item.get("available")]
+    ready = not missing_required
+    return {
+        "kind": "ptcli.runtime_material_tools",
+        "ready": ready,
+        "required": required,
+        "optional": optional,
+        "missing_required": missing_required,
+        "message": "Material runtime tools are available for MediaInfo and screenshots." if ready else f"Material runtime tools are missing: {', '.join(missing_required)}.",
+    }
+
+
+def _runtime_binary_status(name: str) -> dict[str, Any]:
+    path = shutil.which(name)
+    return {"name": name, "available": bool(path), "path": path}
 
 
 def _deployment_daily_candidate_plan(request: dict[str, Any]) -> dict[str, Any]:
@@ -14072,6 +14122,8 @@ def _deployment_next_actions(checks: list[dict[str, Any]]) -> list[str]:
             actions.append("Configure DEFAULT.default_torrent_client and TORRENT_CLIENTS.<client> for qBittorrent in data/config.py.")
         elif name == "runtime.ptcli_dependencies":
             actions.append("Install focused ptcli dependencies from requirements-ptcli.txt or rebuild the ptcli Docker image.")
+        elif name == "runtime.material_tools":
+            actions.append("Install ffmpeg and mediainfo, or rebuild the focused ptcli Docker image.")
         elif name == "security.api_token":
             actions.append("Set PTCLI_API_TOKEN before exposing ptcli-api outside localhost.")
         elif name == "automation.daily_candidates":
@@ -14739,7 +14791,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "name": "deployment_check",
             "method": "GET",
             "path": "/v1/deployment/check",
-            "description": "Check local ptcli deployment readiness: runtime imports, config mount, cookies/tmp/job/download paths, API token warning, and qBittorrent config presence. This does not contact trackers or qBittorrent.",
+            "description": "Check local ptcli deployment readiness: runtime imports, material tools, config mount, cookies/tmp/job/download paths, API token warning, and qBittorrent config presence. This does not contact trackers or qBittorrent.",
             "input_schema": {
                 "type": "object",
                 "required": [],
@@ -14755,9 +14807,10 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "queue", "qbit", "daily_candidates", "docker_compose", "deployment_runbook", "deployment_handoff", "agent_summary", "agent_handoff"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "docker_compose", "deployment_runbook", "deployment_handoff", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
                 "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready"],
+                "runtime_tools_fields": ["ready", "required", "optional", "missing_required", "message"],
                 "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "qbit", "safety", "blockers", "warnings"],
                 "deployment_handoff_fields": ["ready", "compose_deployable", "api", "manual_retorrent", "daily_candidates", "qbit", "next_step", "deployment_runbook", "warnings"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "qbit", "docker_compose", "safety", "next_tools"],
@@ -16863,6 +16916,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "next_actions": {"type": "array", "items": {"type": "string"}},
             "paths": {"type": "object"},
             "mounts": {"type": "object"},
+            "runtime_tools": {"type": "object"},
             "queue": {"type": "object"},
             "qbit": {"type": "object"},
             "daily_candidates": {"type": "object"},
