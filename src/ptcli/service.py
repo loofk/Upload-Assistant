@@ -19652,8 +19652,10 @@ def _goal_progress_live_validation_evidence(request: dict[str, Any]) -> dict[str
             candidates.append(_goal_progress_live_validation_from_job_path(path, source="job_dir"))
     valid_candidates = [candidate for candidate in candidates if candidate.get("valid")]
     complete = next((candidate for candidate in valid_candidates if candidate.get("ready")), None)
-    best = complete or (valid_candidates[0] if valid_candidates else None)
-    blockers = [] if complete else ["No current-state job or summary evidence has live_user_report.report_allowed=true."]
+    submitted = next((candidate for candidate in valid_candidates if str(candidate.get("status") or "").startswith("submitted_")), None)
+    ready_to_submit = next((candidate for candidate in valid_candidates if candidate.get("status") == "ready_to_submit"), None)
+    best = complete or submitted or ready_to_submit or (valid_candidates[0] if valid_candidates else None)
+    blockers = [] if complete or submitted else ["No current-state job or summary evidence has live_user_report.report_allowed=true."]
     if best and best.get("blockers"):
         blockers.extend(_string_list(best.get("blockers")))
     status = "complete" if complete else "missing" if not valid_candidates else str(best.get("status") or "incomplete") if best else "incomplete"
@@ -19671,6 +19673,8 @@ def _goal_progress_live_validation_evidence(request: dict[str, Any]) -> dict[str
         "best": best,
         "completion_evidence": complete,
         "live_submission_package": best.get("live_submission_package") if isinstance(best, dict) and isinstance(best.get("live_submission_package"), dict) else None,
+        "live_validation_submission": best.get("live_validation_submission") if isinstance(best, dict) and isinstance(best.get("live_validation_submission"), dict) else None,
+        "live_validation_followup": best.get("live_validation_followup") if isinstance(best, dict) and isinstance(best.get("live_validation_followup"), dict) else None,
         "next_step": best.get("next_step") if isinstance(best, dict) and isinstance(best.get("next_step"), dict) else None,
         "recommended_tool": best.get("recommended_tool") if isinstance(best, dict) else None,
         "recommended_endpoint": best.get("recommended_endpoint") if isinstance(best, dict) else None,
@@ -19678,7 +19682,7 @@ def _goal_progress_live_validation_evidence(request: dict[str, Any]) -> dict[str
         "recommended_request": best.get("recommended_request") if isinstance(best, dict) else None,
         "required_condition": "live_user_report.report_allowed=true and live_user_report.evidence.missing_evidence=[] and live_user_report.blockers=[]",
         "blockers": list(dict.fromkeys(blocker for blocker in blockers if blocker)),
-        "next_actions": _goal_progress_live_validation_evidence_next_actions(bool(complete), bool(valid_candidates)),
+        "next_actions": _goal_progress_live_validation_evidence_next_actions(str(status), bool(complete), bool(valid_candidates)),
     }
 
 
@@ -19782,18 +19786,25 @@ def _goal_progress_live_validation_from_job(job: dict[str, Any], summary_payload
     validation = _job_seedbox_live_validation_completion_report(job, summary_payload)
     closure = _job_closure_summary(job, summary_payload)
     qbit = _job_qbit_enforcement_summary(job, summary_payload)
+    live_validation_submission = _job_live_validation_submission(job)
+    live_validation_followup = _job_live_validation_followup(job, summary_payload)
     missing_evidence = _string_list((live_user_report.get("evidence") or {}).get("missing_evidence")) if isinstance(live_user_report.get("evidence"), dict) else []
     blockers = list(dict.fromkeys(_string_list(live_user_report.get("blockers")) + _string_list(validation.get("blockers"))))
     ready = live_user_report.get("report_allowed") is True and not missing_evidence and not blockers
+    submitted_status = _goal_progress_submitted_live_validation_status(job, live_validation_followup)
+    status = "complete" if ready else submitted_status or "incomplete"
+    next_step = _goal_progress_submitted_live_validation_next_step(live_validation_followup)
     return {
         "valid": True,
         "ready": ready,
-        "status": "complete" if ready else "incomplete",
+        "status": status,
         "source": source,
         "job_id": job.get("job_id"),
         "job_status": job.get("status"),
         "kind": job.get("kind"),
         "summary_file": live_user_report.get("summary_file") or _job_summary_file(job),
+        "live_validation_submission": live_validation_submission,
+        "live_validation_followup": live_validation_followup,
         "live_user_report": {
             "report_allowed": live_user_report.get("report_allowed"),
             "ready_for_user_report": live_user_report.get("ready_for_user_report"),
@@ -19818,12 +19829,54 @@ def _goal_progress_live_validation_from_job(job: dict[str, Any], summary_payload
         },
         "missing_evidence": missing_evidence,
         "blockers": blockers,
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool") if isinstance(next_step, dict) else None,
+        "recommended_endpoint": next_step.get("endpoint") if isinstance(next_step, dict) else None,
+        "recommended_method": next_step.get("method") if isinstance(next_step, dict) else None,
+        "recommended_request": next_step.get("request") if isinstance(next_step, dict) else None,
     }
 
 
-def _goal_progress_live_validation_evidence_next_actions(ready: bool, has_candidates: bool) -> list[str]:
+def _goal_progress_submitted_live_validation_status(job: dict[str, Any], followup: dict[str, Any] | None) -> str | None:
+    if not isinstance(followup, dict):
+        return None
+    action = str(followup.get("action") or "")
+    job_status = str(job.get("status") or "")
+    if action == "poll" or job_status in {"queued", "running"}:
+        return "submitted_running"
+    if action in {"resume_preview", "resume_execute"}:
+        return "submitted_needs_resume"
+    if action == "report_complete":
+        return "submitted_ready_to_report"
+    if job_status in {"blocked", "failed", "cancelled"}:
+        return f"submitted_{job_status}"
+    if action and action != "inspect":
+        return f"submitted_{action}"
+    return "submitted_incomplete"
+
+
+def _goal_progress_submitted_live_validation_next_step(followup: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(followup, dict):
+        return None
+    tool = followup.get("recommended_tool")
+    endpoint = followup.get("recommended_endpoint")
+    method = followup.get("recommended_method")
+    if not tool or not endpoint:
+        return None
+    return {
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": method or ("GET" if tool in {"get_job_status", "get_job_summary"} else "POST"),
+        "request": followup.get("recommended_request"),
+        "reason": f"live_validation_followup.{followup.get('action') or 'inspect'}",
+    }
+
+
+def _goal_progress_live_validation_evidence_next_actions(status: str, ready: bool, has_candidates: bool) -> list[str]:
     if ready:
         return ["Treat seedbox_live_validation as proven for this goal audit and continue with the next incomplete capability."]
+    if status.startswith("submitted_"):
+        return ["Follow evidence.live_validation.best.live_validation_followup until live_user_report.report_allowed=true, then rerun /v1/goal/progress with the same job_id."]
     if has_candidates:
         return ["Open evidence.live_validation.best, resolve its blockers or missing_evidence, then rerun /v1/goal/progress with the same job_dir/job_id."]
     return ["Run readiness_bundle.live_execution_package on a real U2/CHD -> MTEAM seedbox job, then rerun /v1/goal/progress with job_id or job_dir."]
@@ -19834,7 +19887,9 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
     qbit = deployment.get("qbit") if isinstance(deployment.get("qbit"), dict) else {}
     policy_repair = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
     live_verified = live_validation_evidence.get("ready") is True
-    live_ready_to_submit = live_validation_evidence.get("status") == "ready_to_submit"
+    live_status = str(live_validation_evidence.get("status") or "")
+    live_ready_to_submit = live_status == "ready_to_submit"
+    live_submitted = live_status.startswith("submitted_")
     return [
         _goal_progress_item(
             "docker_compose_deployment",
@@ -19909,7 +19964,7 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
         _goal_progress_item(
             "seedbox_live_validation",
             "Real seedbox end-to-end live validation",
-            "complete" if live_verified else "ready_to_submit" if live_ready_to_submit else "unverified",
+            "complete" if live_verified else live_status if live_submitted else "ready_to_submit" if live_ready_to_submit else "unverified",
             12,
             ["readiness_bundle.live_execution_package", "live_validation_sequence", "live_user_report", "seedbox_live_validation_completion_report"],
             blockers=[] if live_verified else _string_list(live_validation_evidence.get("blockers")) or ["No current-state evidence proves a real seedbox live run completed from source pull through uploaded torrent seeding."],
@@ -19926,7 +19981,21 @@ def _goal_progress_items(deployment: dict[str, Any], site_policies: dict[str, An
 
 
 def _goal_progress_item(identifier: str, name: str, status: str, weight: int, evidence: list[str], *, blockers: list[str] | None = None) -> dict[str, Any]:
-    status_scores = {"complete": 1.0, "partial": 0.55, "ready_to_submit": 0.7, "unverified": 0.35, "missing": 0.0, "not_started": 0.0}
+    status_scores = {
+        "complete": 1.0,
+        "submitted_ready_to_report": 0.9,
+        "submitted_running": 0.78,
+        "submitted_needs_resume": 0.75,
+        "submitted_blocked": 0.6,
+        "submitted_failed": 0.5,
+        "submitted_cancelled": 0.45,
+        "submitted_incomplete": 0.65,
+        "partial": 0.55,
+        "ready_to_submit": 0.7,
+        "unverified": 0.35,
+        "missing": 0.0,
+        "not_started": 0.0,
+    }
     score = status_scores.get(status, 0.0)
     return {
         "id": identifier,
@@ -19961,7 +20030,7 @@ def _goal_progress_estimate(items: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _goal_progress_remaining(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    remaining_statuses = {"partial", "ready_to_submit", "missing", "unverified", "not_started"}
+    remaining_statuses = {"partial", "ready_to_submit", "submitted_ready_to_report", "submitted_running", "submitted_needs_resume", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "missing", "unverified", "not_started"}
     return [
         {
             "id": item.get("id"),
@@ -19995,6 +20064,8 @@ def _goal_progress_next_step(items: list[dict[str, Any]], blockers: list[str], l
     if by_id.get("seedbox_live_validation", {}).get("status") != "complete":
         live_evidence = live_validation_evidence if isinstance(live_validation_evidence, dict) else {}
         next_step = live_evidence.get("next_step") if isinstance(live_evidence.get("next_step"), dict) else {}
+        if str(live_evidence.get("status") or "").startswith("submitted_") and next_step:
+            return next_step
         if live_evidence.get("status") == "ready_to_submit" and next_step:
             return next_step
         return {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "reason": "run_seedbox_live_validation_preflight"}
@@ -20008,6 +20079,8 @@ def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str]
     actions = [f"Call {next_step['tool']} at {next_step['endpoint']} and inspect its blockers/next_actions."]
     if any(item.get("id") == "seedbox_live_validation" and item.get("status") == "ready_to_submit" for item in items):
         actions.append("Submit evidence.live_validation.live_submission_package.submit.request, then poll the returned job until live_user_report.report_allowed=true.")
+    elif any(item.get("id") == "seedbox_live_validation" and str(item.get("status") or "").startswith("submitted_") for item in items):
+        actions.append("Follow evidence.live_validation.best.live_validation_followup, then rerun goal_progress with the same live job id after the job state changes.")
     elif any(item.get("id") == "seedbox_live_validation" and item.get("status") != "complete" for item in items):
         actions.append("Use readiness_bundle.live_execution_package to run one real U2/CHD -> MTEAM seedbox validation until live_user_report.report_allowed=true.")
     if any(item.get("id") == "daily_candidates" and item.get("status") != "complete" for item in items):
@@ -20718,9 +20791,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "required_fields": ["status", "ok", "objective", "completion_estimate", "capabilities", "critical_path_remaining", "evidence", "next_step", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
-                "capability_status_values": ["complete", "partial", "ready_to_submit", "unverified", "missing", "not_started"],
+                "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
                 "evidence_fields": ["deployment", "site_policies", "live_validation", "tool_count"],
-                "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
+                "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_validation_submission", "live_validation_followup", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],
             },
             "workflow_hints": {"read_first": "completion_estimate", "then": "critical_path_remaining", "repair_with": "next_step"},

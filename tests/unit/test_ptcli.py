@@ -19011,9 +19011,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "completion_evidence" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "submission_ready" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_submission_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+    assert "live_validation_followup" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "recommended_request" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "request" in tool_by_name["goal_progress"]["response_contract"]["next_step_fields"]
     assert "ready_to_submit" in tool_by_name["goal_progress"]["response_contract"]["capability_status_values"]
+    assert "submitted_running" in tool_by_name["goal_progress"]["response_contract"]["capability_status_values"]
     assert "unverified" in tool_by_name["goal_progress"]["response_contract"]["capability_status_values"]
     assert "job_id" in tool_by_name["goal_progress"]["input_schema"]["properties"]
     assert "summary_file" in tool_by_name["goal_progress"]["input_schema"]["properties"]
@@ -19744,7 +19746,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "confirm_upload=true" in retorrent_tool["safety"]["requires_confirmation"]
     goal_progress_tool = next(tool for tool in manifest["tools"] if tool["name"] == "goal_progress")
     assert "ready_to_submit" in goal_progress_tool["response_contract"]["capability_status_values"]
+    assert "submitted_needs_resume" in goal_progress_tool["response_contract"]["capability_status_values"]
     assert "live_submission_package" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
+    assert "live_validation_followup" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "request" in goal_progress_tool["response_contract"]["next_step_fields"]
     assert manifest["openclaw"]["manifest_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
     assert manifest["hermes"]["manifest_url"] == "http://ptcli.local:8080/v1/hermes/skill.json"
@@ -19782,7 +19786,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
         assert set(tools_by_name) >= {"agent_run_preview", "source_url_retorrent_preflight", "deployment_check", "readiness_bundle", "summary_check", "materials_prepare", "materials_prepare_job", "metadata_prepare", "metadata_prepare_job", "target_package_prepare", "target_upload_preflight", "target_upload", "target_package_prepare_job", "target_upload_job", "site_policies", "source_url_retorrent_job", "manual_retorrent_job", "retorrent_job", "daily_candidates_job", "submit_daily_candidate_job", "daily_candidates_schedule_job", "list_jobs", "get_job_status", "get_job_summary", "resume_job", "cancel_job"}
         assert "ready_to_submit" in tools_by_name["goal_progress"]["response_contract"]["capability_status_values"]
+        assert "submitted_running" in tools_by_name["goal_progress"]["response_contract"]["capability_status_values"]
         assert "live_submission_package" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+        assert "live_validation_followup" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
@@ -21084,6 +21090,132 @@ services:
     assert payload["next_step"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert payload["next_step"]["request"] == payload["evidence"]["live_validation"]["best"]["recommended_request"]
     assert payload["recommended_tool"] == "source_url_check_and_submit"
+
+
+def test_goal_progress_payload_tracks_submitted_live_validation_job(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    tmp_dir = tmp_path / "tmp"
+    job_dir = tmp_path / "jobs"
+    downloads_dir = tmp_path / "downloads"
+    for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
+        directory.mkdir(parents=True)
+    (data_dir / "config.py").write_text(
+        "config = {'DEFAULT': {'default_torrent_client': 'qbittorrent'}, 'TORRENT_CLIENTS': {'qbittorrent': {'torrent_client': 'qbit', 'qbit_url': 'http://host.docker.internal', 'qbit_port': '8080'}}}",
+        encoding="utf-8",
+    )
+    (tmp_path / "docker-compose.yml").write_text(
+        """
+services:
+  ptcli-api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+      - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+    volumes:
+      - /downloads:/downloads/:rw
+      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
+      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
+      - /app/tmp/:/Upload-Assistant/tmp/:rw
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg"},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit", "qbit_url": "http://host.docker.internal", "qbit_port": "8080"}},
+        "TRACKERS": {"U2": {"passkey": "source-passkey"}, "MTEAM": {"api_key": "mteam-token"}},
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True, "download_rate_limit": "20MiB/s", "min_seed_time_hours": 72, "rule_review_fingerprint": "u2-review"},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True, "upload_rate_limit": "2MiB/s", "min_ratio": 1.0, "rule_review_fingerprint": "mteam-review"},
+            }
+        },
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    monkeypatch.setenv("TMPDIR", str(tmp_dir))
+    job_id = "a" * 32
+    live_validation_submission = {
+        "kind": "ptcli.live_validation_submission",
+        "source": "summary_check.live_submission_package",
+        "summary_file": "/tmp/ptcli-doctor-summary.json",
+        "summary_kind": "ptcli.doctor.live_readiness",
+        "live_safe_to_attempt": True,
+        "doctor_result_ready": True,
+        "complete_when": ["live_user_report.report_allowed=true"],
+        "stop_when": ["duplicate_check.exists=true"],
+    }
+    (job_dir / f"{job_id}.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "job_id": job_id,
+                "kind": "ptcli.source_url_retorrent",
+                "status": "queued",
+                "ok": False,
+                "request": {
+                    "mode": "source_url_retorrent",
+                    "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                    "source_reference": {"tracker": "U2", "source_id": "60635", "source_url": "https://u2.dmhy.org/details.php?id=60635"},
+                    "target": "MTEAM",
+                    "target_trackers": ["MTEAM"],
+                    "execute": True,
+                    "accept_rules": True,
+                    "confirm_upload": True,
+                    "live_validation_submission": live_validation_submission,
+                },
+                "command_argv": ["python3", "ptcli.py", "retorrent", "--json"],
+                "created_at": 1,
+                "updated_at": 1,
+                "started_at": None,
+                "completed_at": None,
+                "blockers": [],
+                "next_actions": [],
+                "summary_file": None,
+                "resume_state": None,
+                "agent_summary": None,
+                "agent_decision": None,
+                "duplicate_check": None,
+                "result": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = ptcli_service.goal_progress_payload(
+        {
+            "base_dir": str(tmp_path),
+            "job_dir": str(job_dir),
+            "downloads_path": str(downloads_dir),
+            "job_id": job_id,
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+        }
+    )
+
+    capabilities = {item["id"]: item for item in payload["capabilities"]}
+    live_validation = payload["evidence"]["live_validation"]
+    assert live_validation["ready"] is False
+    assert live_validation["status"] == "submitted_running"
+    assert live_validation["live_validation_submission"] == live_validation_submission
+    assert live_validation["live_validation_followup"]["action"] == "poll"
+    assert live_validation["live_validation_followup"]["recommended_tool"] == "get_job_status"
+    assert live_validation["best"]["job_id"] == job_id
+    assert live_validation["best"]["status"] == "submitted_running"
+    assert capabilities["seedbox_live_validation"]["status"] == "submitted_running"
+    assert payload["next_step"]["tool"] == "get_job_status"
+    assert payload["next_step"]["endpoint"] == f"/v1/jobs/{job_id}"
+    assert payload["next_step"]["request"] == {"job_id": job_id}
+    assert payload["recommended_tool"] == "get_job_status"
 
 
 def test_readiness_bundle_blocks_requested_material_generation_without_runtime_tools(tmp_path, monkeypatch) -> None:
