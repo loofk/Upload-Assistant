@@ -1952,6 +1952,7 @@ def _candidate_submission_payload(candidate_job_id: str, candidate_item: dict[st
     inherited_keys = ("source", "source_url", "source_tracker", "target", "target_tracker", "target_trackers")
     qbit_keys = ("qbit_category", "qbit_tags", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_category", "uploaded_qbit_tags", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit")
     policy_execution_handoff = _candidate_item_policy_execution_handoff(candidate_item)
+    execution_context = _candidate_execution_context(candidate_job_id, candidate_item, digest, submit_request, effective_request)
     return {
         "candidate_job_id": candidate_job_id,
         "candidate_rank": candidate_item.get("rank"),
@@ -1964,7 +1965,79 @@ def _candidate_submission_payload(candidate_job_id: str, candidate_item: dict[st
         "material_options": _request_material_options(effective_request),
         "qbit_overrides": {key: effective_request.get(key) for key in qbit_keys if effective_request.get(key) is not None},
         "policy_execution_handoff": policy_execution_handoff,
+        "candidate_execution_context": execution_context,
     }
+
+
+def _candidate_execution_context(candidate_job_id: str | None, candidate_item: dict[str, Any], digest: dict[str, Any] | None, submit_request: dict[str, Any], effective_request: dict[str, Any]) -> dict[str, Any]:
+    effective_snapshot = {key: value for key, value in effective_request.items() if key not in {"candidate_submission", "check_submission"}}
+    policy_execution_handoff = _candidate_item_policy_execution_handoff(candidate_item)
+    policy_execution = _daily_candidate_submission_policy_execution({**candidate_item, "submit_request": submit_request})
+    qbit_request = _candidate_qbit_options(effective_snapshot)
+    material_options = _request_material_options(effective_snapshot)
+    missing_user_inputs = _candidate_execution_missing_inputs(effective_snapshot)
+    blockers = list(dict.fromkeys(_string_list(candidate_item.get("blockers")) + _string_list(policy_execution_handoff.get("blockers")) + missing_user_inputs))
+    if policy_execution_handoff and policy_execution_handoff.get("ready") is not True:
+        blockers.append("policy_execution_handoff.ready=false")
+    if policy_execution and policy_execution.get("policy_coverage_ready") is False:
+        blockers.append("policy_execution.ready=false")
+    blockers = list(dict.fromkeys(blockers))
+    source_url = effective_snapshot.get("source_url") or effective_snapshot.get("source") or submit_request.get("source_url") or submit_request.get("source")
+    target = effective_snapshot.get("target") or effective_snapshot.get("target_trackers") or submit_request.get("target") or submit_request.get("target_trackers")
+    return {
+        "kind": "ptcli.daily_candidate_execution_context",
+        "ready": not blockers,
+        "requires_human_approval": True,
+        "candidate_job_id": candidate_job_id,
+        "candidate_rank": candidate_item.get("rank"),
+        "candidate_source_id": candidate_item.get("source_id") or effective_snapshot.get("source_id") or submit_request.get("source_id"),
+        "candidate_title": candidate_item.get("title"),
+        "candidate_digest_kind": (digest or {}).get("kind"),
+        "source_tracker": effective_snapshot.get("source_tracker") or candidate_item.get("source_tracker") or submit_request.get("source_tracker"),
+        "source_url": source_url,
+        "target_trackers": target,
+        "submit_tool": "submit_daily_candidate_job",
+        "submit_endpoint": f"/v1/jobs/candidates/{candidate_job_id}/submit" if candidate_job_id else None,
+        "retorrent_tool": "source_url_retorrent_job",
+        "retorrent_endpoint": "/v1/jobs/retorrent/from-url",
+        "effective_retorrent_request": effective_snapshot,
+        "required_user_inputs": ["explicit approval", "accept_rules=true", "confirm_upload=true", "save_path or path"],
+        "missing_user_inputs": missing_user_inputs,
+        "material_options": material_options,
+        "material_request": material_options,
+        "qbit_request": qbit_request,
+        "policy_execution": policy_execution,
+        "policy_execution_handoff": policy_execution_handoff,
+        "read_before_submit": ["candidate_execution_context", "policy_execution_handoff", "policy_execution.qbit_limits", "policy_execution.seeding_requirements", "effective_retorrent_request"],
+        "continue_when": "user approves this candidate and missing_user_inputs is empty",
+        "stop_when": ["candidate_execution_context.blockers is not empty", "policy_execution_handoff.ready=false", "rule obligations are not ready"],
+        "blockers": blockers,
+        "next_actions": _candidate_execution_context_next_actions(blockers, missing_user_inputs),
+    }
+
+
+def _candidate_qbit_options(request: dict[str, Any]) -> dict[str, Any]:
+    qbit_keys = ("qbit_category", "qbit_tags", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_category", "uploaded_qbit_tags", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit")
+    return {key: request.get(key) for key in qbit_keys if request.get(key) is not None}
+
+
+def _candidate_execution_missing_inputs(request: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    if request.get("accept_rules") is not True:
+        missing.append("accept_rules=true")
+    if request.get("confirm_upload") is not True:
+        missing.append("confirm_upload=true")
+    if not (request.get("save_path") or request.get("path") or request.get("content_path")):
+        missing.append("save_path or path")
+    return missing
+
+
+def _candidate_execution_context_next_actions(blockers: list[str], missing_user_inputs: list[str]) -> list[str]:
+    if missing_user_inputs:
+        return [f"Collect required candidate submit inputs: {', '.join(missing_user_inputs)}."]
+    if blockers:
+        return ["Resolve candidate_execution_context.blockers before submitting this daily candidate."]
+    return ["Submit candidate_execution_context.effective_retorrent_request only through submit_daily_candidate_job after explicit user approval."]
 
 
 def _candidate_item_policy_execution_handoff(candidate_item: dict[str, Any]) -> dict[str, Any]:
@@ -6596,6 +6669,18 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
         "rank": top_candidate.get("rank"),
         "source_id": top_candidate.get("source_id"),
     }
+    request_template = {
+        **({key: value for key, value in selector.items() if value not in {None, ""}}),
+        "confirm_upload": True,
+        "save_path": "/downloads",
+        "overrides": {
+            "uploaded_qbit_category": request.get("target_trackers") or request.get("target"),
+            "uploaded_qbit_tags": "retorrent",
+        },
+    }
+    source_url_retorrent_request = digest_item.get("request") if isinstance(digest_item.get("request"), dict) else digest_item.get("submit_request") if isinstance(digest_item.get("submit_request"), dict) else {}
+    effective_retorrent_request = {**source_url_retorrent_request, **_candidate_submit_overrides(request_template)}
+    execution_context = _candidate_execution_context(job_id or None, {**digest_item, **top_candidate}, None, source_url_retorrent_request, effective_retorrent_request)
     return {
         "schedule_name": job.get("schedule_name"),
         "candidate_job_id": job_id,
@@ -6603,15 +6688,9 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
         "submit_endpoint": f"/v1/jobs/candidates/{job_id}/submit",
         "method": "POST",
         "selector": {key: value for key, value in selector.items() if value not in {None, ""}},
-        "request_template": {
-            **({key: value for key, value in selector.items() if value not in {None, ""}}),
-            "confirm_upload": True,
-            "save_path": "/downloads",
-            "overrides": {
-                "uploaded_qbit_category": request.get("target_trackers") or request.get("target"),
-                "uploaded_qbit_tags": "retorrent",
-            },
-        },
+        "request_template": request_template,
+        "source_url_retorrent_request": source_url_retorrent_request,
+        "candidate_execution_context": execution_context,
         "identity_inherited_from_candidate": {
             "source_tracker": digest_item.get("source_tracker"),
             "target_trackers": digest_item.get("target_trackers"),
@@ -11617,6 +11696,7 @@ def _daily_candidate_approval_items(submission_plan: dict[str, Any]) -> list[dic
                 "endpoint": submit_request.get("endpoint"),
                 "method": submit_request.get("method") or "POST",
                 "submit_request": request,
+                "candidate_execution_context": submit_request.get("candidate_execution_context") if isinstance(submit_request.get("candidate_execution_context"), dict) else None,
                 "required_overrides": submit_request.get("required_overrides") or ["confirm_upload=true", "save_path or path"],
                 "approval_text": _daily_candidate_approval_item_text(index, submit_request, request),
                 "after_submit": submit_request.get("after_submit"),
@@ -11757,6 +11837,7 @@ def _daily_candidate_batch_item_submit_request(candidate_job_id: str, item: dict
         "method": "POST",
         "request": request,
         "source_url_retorrent_request": item.get("source_url_retorrent_request") if isinstance(item.get("source_url_retorrent_request"), dict) else None,
+        "candidate_execution_context": item.get("candidate_execution_context") if isinstance(item.get("candidate_execution_context"), dict) else None,
         "required_overrides": item.get("required_overrides") if isinstance(item.get("required_overrides"), list) else ["confirm_upload=true", "save_path or path"],
         "after_submit": item.get("after_submit") if isinstance(item.get("after_submit"), dict) else None,
     }
@@ -15084,6 +15165,7 @@ def _job_candidate_submission_handoff(job: dict[str, Any], summary_payload: dict
     request = job.get("request") if isinstance(job.get("request"), dict) else {}
     manual_handoff = _job_manual_retorrent_handoff(job, summary_payload)
     policy_execution_handoff = submission.get("policy_execution_handoff") if isinstance(submission.get("policy_execution_handoff"), dict) else {}
+    candidate_execution_context = submission.get("candidate_execution_context") if isinstance(submission.get("candidate_execution_context"), dict) else {}
     policy_execution_plan = _job_policy_execution_plan(job)
     policy_enforcement_bundle = _job_policy_enforcement_bundle(job)
     closure_summary = _job_closure_summary(job, summary_payload)
@@ -15101,6 +15183,7 @@ def _job_candidate_submission_handoff(job: dict[str, Any], summary_payload: dict
         "material_options": submission.get("material_options") if isinstance(submission.get("material_options"), dict) else {},
         "qbit_overrides": submission.get("qbit_overrides") if isinstance(submission.get("qbit_overrides"), dict) else {},
         "policy_execution_handoff": policy_execution_handoff,
+        "candidate_execution_context": candidate_execution_context,
         "policy_execution_plan": policy_execution_plan,
         "policy_enforcement_bundle": policy_enforcement_bundle,
         "retorrent_job_id": job_id,
@@ -15131,6 +15214,7 @@ def _job_candidate_submission_summary(job: dict[str, Any], summary_payload: dict
     material_options = submission.get("material_options") if isinstance(submission.get("material_options"), dict) else {}
     qbit_overrides = submission.get("qbit_overrides") if isinstance(submission.get("qbit_overrides"), dict) else {}
     policy_execution_handoff = submission.get("policy_execution_handoff") if isinstance(submission.get("policy_execution_handoff"), dict) else {}
+    candidate_execution_context = submission.get("candidate_execution_context") if isinstance(submission.get("candidate_execution_context"), dict) else {}
     policy_execution_plan = _job_policy_execution_plan(job)
     policy_enforcement_bundle = _job_policy_enforcement_bundle(job)
     next_step = closure_summary.get("next_step") if isinstance(closure_summary.get("next_step"), dict) else {}
@@ -15157,6 +15241,7 @@ def _job_candidate_submission_summary(job: dict[str, Any], summary_payload: dict
         "material_option_keys": sorted(material_options),
         "qbit_override_keys": sorted(qbit_overrides),
         "policy_execution_handoff": policy_execution_handoff,
+        "candidate_execution_context": candidate_execution_context,
         "policy_execution_plan": policy_execution_plan,
         "policy_enforcement_bundle": policy_enforcement_bundle,
         "policy_enforcement_ready": policy_enforcement_bundle.get("ready") if isinstance(policy_enforcement_bundle, dict) else None,
@@ -16412,6 +16497,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
     candidate_submission_summary = _job_candidate_submission_summary(job)
     candidate_submit_followup = _job_candidate_submit_followup(job)
     candidate_submit_sequence = _job_candidate_submit_sequence(job)
+    candidate_execution_context = candidate_submission_summary.get("candidate_execution_context") if isinstance(candidate_submission_summary, dict) and isinstance(candidate_submission_summary.get("candidate_execution_context"), dict) else None
     candidate_submission_execution = candidate_submission_summary.get("execution_handoff") if isinstance(candidate_submission_summary, dict) and isinstance(candidate_submission_summary.get("execution_handoff"), dict) else None
     resume_plan = _job_resume_plan(job)
     resume_summary = _job_resume_summary(job)
@@ -16556,6 +16642,7 @@ def _agent_decision(job: dict[str, Any]) -> dict[str, Any]:
         "resume_lineage": resume_lineage,
         "resume_context": resume_context,
         "material_resolution": material_resolution,
+        "candidate_execution_context": candidate_execution_context,
         "candidate_submission_execution": candidate_submission_execution,
         "material_input_template": candidate_submission_execution.get("material_input_template") if isinstance(candidate_submission_execution, dict) else None,
         "candidate_submission": _job_candidate_submission(job),
@@ -19461,13 +19548,14 @@ def _job_response_contract() -> dict[str, Any]:
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "policy_enforcement_ready", "policy_enforcement_bundle", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
         "candidate_batch_handoff_fields": ["ready", "candidate_job_id", "status", "submit_count", "submit_tool", "submit_endpoint", "submit_endpoint_template", "required_overrides", "allowed_selector_fields", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "items", "blockers", "next_actions"],
-        "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
-        "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "execution_state", "execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
-        "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_enforcement_ready", "policy_execution_ready", "execution_state", "execution_handoff", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
+        "candidate_batch_item_fields": ["candidate_job_id", "submit_tool", "submit_endpoint", "selector", "request_template", "source_url_retorrent_request", "candidate_execution_context", "identity_inherited_from_candidate", "policy_execution", "required_overrides", "allowed_overrides", "after_submit"],
+        "candidate_submission_handoff_fields": ["candidate_job_id", "candidate_rank", "candidate_source_id", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides", "policy_execution_handoff", "candidate_execution_context", "policy_execution_plan", "policy_enforcement_bundle", "execution_state", "execution_handoff", "retorrent_job_id", "manual_retorrent_handoff", "status_endpoint", "summary_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "next_actions"],
+        "candidate_submission_summary_fields": ["candidate_job_id", "retorrent_job_id", "candidate_rank", "candidate_source_id", "submitted_override_keys", "material_option_keys", "qbit_override_keys", "policy_execution_handoff", "candidate_execution_context", "policy_execution_plan", "policy_enforcement_bundle", "policy_enforcement_ready", "policy_execution_ready", "execution_state", "execution_handoff", "manual_action", "closure_action", "closure_complete", "next_step", "recommended_tool", "blockers", "next_actions"],
         "candidate_submit_followup_fields": ["ready", "action", "candidate_job_id", "candidate_rank", "candidate_source_id", "retorrent_job_id", "retorrent_status", "source_reference", "target_trackers", "status_endpoint", "summary_endpoint", "resume_endpoint", "parent_status_endpoint", "parent_summary_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "job_control_summary_ref", "job_handoff_ref", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_submit_sequence_fields": ["ready", "status", "action", "candidate_job_id", "candidate_rank", "candidate_source_id", "retorrent_job_id", "retorrent_status", "source_reference", "target_trackers", "steps", "next_step", "read_order", "complete_when", "stop_when", "blockers", "next_actions", "safety"],
         "candidate_submit_sequence_step_fields": ["name", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
-        "agent_candidate_submission_fields": ["candidate_submission", "candidate_submission_summary", "candidate_submission_handoff", "candidate_submit_followup", "candidate_submit_sequence", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template"],
+        "agent_candidate_submission_fields": ["candidate_submission", "candidate_execution_context", "candidate_submission_summary", "candidate_submission_handoff", "candidate_submit_followup", "candidate_submit_sequence", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template"],
+        "candidate_execution_context_fields": ["ready", "requires_human_approval", "candidate_job_id", "candidate_rank", "candidate_source_id", "source_tracker", "source_url", "target_trackers", "submit_tool", "submit_endpoint", "retorrent_tool", "retorrent_endpoint", "effective_retorrent_request", "required_user_inputs", "missing_user_inputs", "material_options", "qbit_request", "policy_execution", "policy_execution_handoff", "read_before_submit", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_submission_execution_handoff_fields": ["state", "reason", "status", "ready_for_live", "should_poll", "should_resume", "should_stop", "manual_action", "closure_action", "policy_execution_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "material_input_template", "continue_when", "stop_when", "blockers", "next_actions"],
         "candidate_submission_material_input_template_fields": ["ready", "recommended_input_keys", "recommended_inputs", "missing", "next_item", "accepted_override_keys", "resume_request_template", "dry_run_request", "execute_request", "staged_requests", "examples_by_key", "continue_when", "stop_when"],
         "check_submission_fields": ["check_job_id", "check_status", "check_kind", "check_summary_file", "duplicate_check", "inherited_request", "submitted_overrides", "material_options", "qbit_overrides"],
@@ -19523,10 +19611,10 @@ def _job_list_response_contract() -> dict[str, Any]:
         "daily_candidate_refill_plan_fields": ["ready", "action", "target_count", "ready_count", "complete_count", "remaining_submit_count", "ready_shortfall_count", "scan_count", "max_scan_count", "scan_exhausted", "candidate_job_count", "covered_source_ids", "submitted_source_ids", "completed_source_ids", "running_source_ids", "blocked_source_ids", "exclude_source_ids_hint", "pagination_supported", "dedupe_strategy", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_sequence_fields": ["ready", "action", "target_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "complete_count", "running_count", "ready_shortfall_count", "steps", "next_step", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_approval_sequence_fields": ["ready", "action", "target_count", "ready_count", "approval_count", "submitted_retorrent_job_count", "complete_count", "running_count", "ready_shortfall_count", "approval_items", "approved_submit_requests", "steps", "next_step", "human_prompt", "required_user_inputs", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
-        "daily_candidate_approval_item_fields": ["index", "rank", "candidate_job_id", "source_tracker", "target", "source_id", "title", "endpoint", "method", "submit_request", "required_overrides", "approval_text", "after_submit"],
+        "daily_candidate_approval_item_fields": ["index", "rank", "candidate_job_id", "source_tracker", "target", "source_id", "title", "endpoint", "method", "submit_request", "candidate_execution_context", "required_overrides", "approval_text", "after_submit"],
         "daily_candidate_batch_sequence_step_fields": ["index", "name", "action", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
         "daily_candidate_batch_item_fields": ["candidate_job_id", "status", "status_endpoint", "summary_endpoint", "source_tracker", "target_trackers", "candidate_request", "candidate_counts", "candidate_control_summary", "candidate_batch_handoff_ready", "submit_endpoint", "recommended_request", "safe_source_ids", "submit_requests", "submitted_jobs", "blockers"],
-        "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "source_url_retorrent_request", "required_overrides", "after_submit"],
+        "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "source_url_retorrent_request", "candidate_execution_context", "required_overrides", "after_submit"],
         "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "candidate_title", "action", "status_endpoint", "summary_endpoint", "resume_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "closure_complete", "policy_execution_ready", "execution_state", "blockers", "next_actions"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
