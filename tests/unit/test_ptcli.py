@@ -16223,6 +16223,14 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert payload["policy_setup_summary"]["missing_fingerprints"] == []
     assert payload["policy_setup_summary"]["placeholder_fingerprints"] == []
     assert payload["policy_setup_summary"]["recommended_tool"] == "readiness_bundle"
+    assert payload["config_update_plan"]["ready"] is True
+    assert payload["config_update_plan"]["safe_to_auto_apply"] is False
+    assert payload["config_update_plan"]["structured_patch"]["U2"]["qbit_limits"]["download_limit"] == "20 MiB/s"
+    assert payload["config_update_plan"]["structured_patch"]["MTEAM"]["qbit_limits"]["upload_limit"] == "2 MiB/s"
+    assert payload["config_update_plan"]["items"][0]["requires_manual_review"] is False
+    assert payload["config_update_plan"]["recommended_tool"] == "site_policies"
+    assert payload["policy_setup_summary"]["config_update_plan"] == payload["config_update_plan"]
+    assert payload["policy_handoff"]["config_update_plan"] == payload["config_update_plan"]
     assert payload["policy_execution_handoff"]["kind"] == "ptcli.policy_execution_handoff"
     assert payload["policy_execution_handoff"]["ready"] is True
     assert payload["policy_execution_handoff"]["phase"] == "ready_for_live_preflight"
@@ -16867,6 +16875,21 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert payload["policy_setup_summary"]["placeholder_fingerprint_count"] == 0
     assert payload["policy_setup_summary"]["recommended_tool"] == "edit_config"
     assert payload["policy_setup_summary"]["copyable_templates"]["U2"]["rule_review_fingerprint"] == "manual-review-YYYY-MM-DD"
+    assert payload["config_update_plan"]["kind"] == "ptcli.site_policy_config_update_plan"
+    assert payload["config_update_plan"]["ready"] is False
+    assert payload["config_update_plan"]["safe_to_auto_apply"] is False
+    assert payload["config_update_plan"]["mutates_state"] is False
+    assert payload["config_update_plan"]["preferred_shape"] == "structured"
+    assert payload["config_update_plan"]["apply_order"] == ["U2", "MTEAM"]
+    assert payload["config_update_plan"]["structured_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
+    assert payload["config_update_plan"]["structured_patch"]["MTEAM"]["qbit_limits"]["upload_limit"] == "2MiB/s"
+    assert payload["config_update_plan"]["flat_patch"]["U2"]["download_rate_limit"] == "20MiB/s"
+    assert payload["config_update_plan"]["items"][0]["config_path"] == 'config["PTCLI"]["SITE_POLICIES"]["U2"]'
+    assert payload["config_update_plan"]["items"][0]["requires_manual_review"] is True
+    assert "Review U2 tracker rules manually" in payload["config_update_plan"]["items"][0]["manual_steps"][1]
+    assert "U2: rule_review_fingerprint" in payload["config_update_plan"]["blockers"]
+    assert payload["policy_setup_summary"]["config_update_plan"] == payload["config_update_plan"]
+    assert payload["policy_handoff"]["config_update_plan"] == payload["config_update_plan"]
     assert payload["policy_execution_handoff"]["ready"] is False
     assert payload["policy_execution_handoff"]["phase"] == "configure_site_policy"
     assert payload["policy_execution_handoff"]["recommended_tool"] == "edit_config"
@@ -17269,6 +17292,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["site_policies"]["path"] == "/v1/site-policies"
     assert "policy_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "config_templates" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "config_update_plan" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_coverage" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -17286,6 +17310,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "config_template_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "structured_trackers" in tool_by_name["site_policies"]["response_contract"]["config_template_fields"]
     assert "config_audits" in tool_by_name["site_policies"]["response_contract"]["config_template_fields"]
+    assert "config_update_plan_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "structured_patch" in tool_by_name["site_policies"]["response_contract"]["config_update_plan_fields"]
+    assert "safe_to_auto_apply" in tool_by_name["site_policies"]["response_contract"]["config_update_plan_fields"]
+    assert "config_update_item_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "manual_steps" in tool_by_name["site_policies"]["response_contract"]["config_update_item_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_setup_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
@@ -17300,12 +17329,14 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_setup_summary_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "missing_fingerprints" in tool_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
     assert "placeholder_fingerprints" in tool_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
+    assert "config_update_plan" in tool_by_name["site_policies"]["response_contract"]["policy_setup_summary_fields"]
     assert "policy_execution_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "qbit" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
     assert "policy_gap_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "missing_by_category" in tool_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
+    assert "config_update_plan" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
     assert "recommended_tool" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
     assert tool_by_name["daily_candidates_schedule"]["method"] == "POST"
@@ -17564,6 +17595,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_setup_summary" in site_policy_schema["properties"]
     assert "policy_execution_handoff" in site_policy_schema["properties"]
     assert "config_templates" in site_policy_schema["properties"]
+    assert "config_update_plan" in site_policy_schema["properties"]
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "capability_matrix" in site_profiles_schema["properties"]
     assert "adapter_profiles" in site_profiles_schema["properties"]
