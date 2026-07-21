@@ -2997,7 +2997,7 @@ def _readiness_bundle_seedbox_live_validation_handoff(
             "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
             "method": "POST",
             "request": manual_request,
-            "continue_when": "job_id is returned; poll get_job_status then read get_job_summary.closure_handoff",
+            "continue_when": "job_id is returned; poll get_job_status then read get_job_summary.live_completion_gate",
         },
         "validation_plan": validation_plan,
         "post_submit_handoff": post_submit_handoff,
@@ -3013,7 +3013,7 @@ def _readiness_bundle_seedbox_live_validation_handoff(
         }
         if ready
         else next_step,
-        "continue_when": "doctor_result_handoff.live_safe_to_attempt=true, then submit manual_job.request through source_url_check_and_submit",
+        "continue_when": "doctor_result_handoff.live_safe_to_attempt=true, then submit manual_job.request through source_url_check_and_submit and finish when live_completion_gate.ready_for_user_report=true",
         "stop_when": "any blocker is present, duplicate_check.exists=true, or doctor_result_handoff.live_safe_to_attempt=false",
         "blockers": _string_list(live_test_handoff.get("blockers")) or _string_list(live_readiness.get("blockers")),
         "warnings": _string_list(live_test_handoff.get("warnings")) or _string_list(live_readiness.get("warnings")),
@@ -3419,7 +3419,8 @@ def _seedbox_live_validation_report(
             "validation_report.ready=true",
             "doctor_result_handoff.live_safe_to_attempt=true",
             "source_url_check_and_submit returns job_id",
-            "final get_job_summary reports seedbox_live_validation_completion_report.ready_for_user_report=true",
+            "final get_job_summary reports live_completion_gate.ready_for_user_report=true",
+            "seedbox_live_validation_completion_report.ready_for_user_report=true",
         ],
         "stop_when": ["any component.ready=false", "duplicate_check.exists=true", "doctor_result_handoff.live_safe_to_attempt=false"],
     }
@@ -3508,9 +3509,10 @@ def _seedbox_live_validation_plan(
             "endpoint": "/v1/jobs/{job_id}/resume or /v1/jobs/{job_id}/summary",
             "method": "POST or GET",
             "request": "recovery_handoff.dry_run_request, recovery_handoff.execute_request, or null for summary",
-            "read": ["seedbox_live_validation_completion_report", "recovery_handoff", "closure_summary", "closure_handoff", "qbit_execution_gate", "qbit_enforcement_summary", "evidence"],
-            "continue_when": "seedbox_live_validation_completion_report.ready_for_user_report=true",
-            "stop_when": "seedbox_live_validation_completion_report.status=duplicate_stopped or recovery_handoff.blockers remain after allowed resume or seedbox_live_validation_completion_report.blockers is non-empty",
+            "read": ["live_completion_gate", "seedbox_live_validation_completion_report", "recovery_handoff", "closure_summary", "closure_handoff", "qbit_execution_gate", "qbit_enforcement_summary", "evidence"],
+            "continue_when": "live_completion_gate.ready_for_user_report=true",
+            "repeat_when": "live_completion_gate.action in poll_job,resume_job",
+            "stop_when": "live_completion_gate.action=stop_duplicate or seedbox_live_validation_completion_report.status=duplicate_stopped or recovery_handoff.blockers remain after allowed resume or live_completion_gate.blockers is non-empty",
         },
     ]
     return {
@@ -3541,10 +3543,11 @@ def _seedbox_post_submit_handoff(manual_request: dict[str, Any] | None) -> dict[
         "resume_order": ["call dry_run_request", "review command_argv and ignored_overrides", "call execute_request only after user approval", "poll child job"],
         "finish_tool": "get_job_summary",
         "finish_endpoint_template": "/v1/jobs/{job_id}/summary",
-        "final_report_field": "seedbox_live_validation_completion_report",
-        "final_report_ready_when": "seedbox_live_validation_completion_report.ready_for_user_report=true",
-        "complete_when": "seedbox_live_validation_completion_report.ready_for_user_report=true and seedbox_live_validation_completion_report.missing_evidence=[] and seedbox_live_validation_completion_report.blockers=[]",
-        "stop_when": ["duplicate_check.exists=true", "seedbox_live_validation_completion_report.status=duplicate_stopped", "recovery_handoff.action=stop", "seedbox_live_validation_completion_report.blockers is non-empty"],
+        "final_report_field": "live_completion_gate",
+        "final_report_ready_when": "live_completion_gate.ready_for_user_report=true",
+        "complete_when": "live_completion_gate.ready_for_user_report=true and live_completion_gate.missing_evidence=[] and live_completion_gate.blockers=[]",
+        "audit_report_field": "seedbox_live_validation_completion_report",
+        "stop_when": ["duplicate_check.exists=true", "live_completion_gate.action=stop_duplicate", "seedbox_live_validation_completion_report.status=duplicate_stopped", "recovery_handoff.action=stop", "live_completion_gate.blockers is non-empty"],
     }
 
 
@@ -3552,9 +3555,15 @@ def _seedbox_live_evidence_contract() -> dict[str, Any]:
     return {
         "kind": "ptcli.seedbox_live_evidence_contract",
         "final_read": "get_job_summary",
-        "final_report_field": "seedbox_live_validation_completion_report",
-        "complete_when": ["seedbox_live_validation_completion_report.ready_for_user_report=true", "seedbox_live_validation_completion_report.missing_evidence=[]", "seedbox_live_validation_completion_report.blockers=[]", "qbit_enforcement_summary.ready=true when rate limits are configured"],
+        "final_report_field": "live_completion_gate",
+        "audit_report_field": "seedbox_live_validation_completion_report",
+        "complete_when": ["live_completion_gate.ready_for_user_report=true", "live_completion_gate.missing_evidence=[]", "live_completion_gate.blockers=[]", "seedbox_live_validation_completion_report.ready_for_user_report=true", "qbit_enforcement_summary.ready=true when rate limits are configured"],
         "required_fields": [
+            "live_completion_gate.ready_for_user_report",
+            "live_completion_gate.status",
+            "live_completion_gate.action",
+            "live_completion_gate.missing_evidence",
+            "live_completion_gate.evidence_status",
             "seedbox_live_validation_completion_report.ready_for_user_report",
             "seedbox_live_validation_completion_report.status",
             "seedbox_live_validation_completion_report.checks",
@@ -17392,8 +17401,8 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "live_validation_repair_plan_fields": ["ready", "status", "phase", "first_blocker", "blocked_categories", "ready_categories", "categories", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "ordered_steps", "read_after_repair", "complete_when", "stop_when", "blockers", "next_actions"],
         "live_validation_repair_category_fields": ["category", "ready", "tool", "endpoint", "method", "request", "read", "continue_when", "stop_when", "blockers", "next_actions"],
         "seedbox_live_validation_plan_fields": ["ready", "first_step", "steps", "required_order", "read_first"],
-        "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "finish_endpoint_template", "final_report_field", "final_report_ready_when", "complete_when", "stop_when"],
-        "seedbox_live_evidence_contract_fields": ["final_read", "final_report_field", "complete_when", "required_fields", "audit_notes"],
+        "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "finish_endpoint_template", "final_report_field", "final_report_ready_when", "complete_when", "audit_report_field", "stop_when"],
+        "seedbox_live_evidence_contract_fields": ["final_read", "final_report_field", "audit_report_field", "complete_when", "required_fields", "audit_notes"],
         "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
     }

@@ -22668,11 +22668,13 @@
           "final_report_field",
           "final_report_ready_when",
           "complete_when",
+          "audit_report_field",
           "stop_when"
         ],
         "seedbox_live_evidence_contract_fields": [
           "final_read",
           "final_report_field",
+          "audit_report_field",
           "complete_when",
           "required_fields",
           "audit_notes"

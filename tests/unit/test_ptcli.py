@@ -19879,7 +19879,11 @@ services:
     assert payload["seedbox_live_validation_report"]["check_and_submit"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert payload["seedbox_live_validation_report"]["check_and_submit"]["request"] == payload["live_readiness"]["manual_job_template"]["request"]
     assert payload["seedbox_live_validation_report"]["after_submit"]["finish_tool"] == "get_job_summary"
+    assert payload["seedbox_live_validation_report"]["after_submit"]["final_report_field"] == "live_completion_gate"
+    assert payload["seedbox_live_validation_report"]["after_submit"]["final_report_ready_when"] == "live_completion_gate.ready_for_user_report=true"
     assert "closure_summary.target.uploaded_torrent_hash" in payload["seedbox_live_validation_report"]["final_evidence"]["required_fields"]
+    assert payload["seedbox_live_validation_report"]["final_evidence"]["final_report_field"] == "live_completion_gate"
+    assert "live_completion_gate.ready_for_user_report" in payload["seedbox_live_validation_report"]["final_evidence"]["required_fields"]
     assert [step["name"] for step in payload["seedbox_live_validation_report"]["runbook"]] == ["preflight", "doctor", "check_and_submit", "poll_job", "recover_or_finish"]
     assert payload["live_validation_repair_plan"]["kind"] == "ptcli.live_validation_repair_plan"
     assert payload["live_validation_repair_plan"]["ready"] is True
@@ -19930,16 +19934,21 @@ services:
     assert validation_steps["check_and_submit"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert validation_steps["check_and_submit"]["request"] == payload["live_readiness"]["manual_job_template"]["request"]
     assert validation_steps["poll_job"]["read"] == ["status", "recovery_handoff", "job_handoff", "blockers", "next_actions"]
-    assert validation_steps["recover_or_finish"]["read"] == ["seedbox_live_validation_completion_report", "recovery_handoff", "closure_summary", "closure_handoff", "qbit_execution_gate", "qbit_enforcement_summary", "evidence"]
+    assert validation_steps["recover_or_finish"]["read"] == ["live_completion_gate", "seedbox_live_validation_completion_report", "recovery_handoff", "closure_summary", "closure_handoff", "qbit_execution_gate", "qbit_enforcement_summary", "evidence"]
+    assert validation_steps["recover_or_finish"]["continue_when"] == "live_completion_gate.ready_for_user_report=true"
     assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["kind"] == "ptcli.seedbox_post_submit_handoff"
     assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["submit_tool"] == "source_url_check_and_submit"
     assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["resume_when"] == "recovery_handoff.should_resume=true and recovery_handoff.dry_run_request is present"
-    assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["final_report_field"] == "seedbox_live_validation_completion_report"
-    assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["complete_when"] == "seedbox_live_validation_completion_report.ready_for_user_report=true and seedbox_live_validation_completion_report.missing_evidence=[] and seedbox_live_validation_completion_report.blockers=[]"
+    assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["final_report_field"] == "live_completion_gate"
+    assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["audit_report_field"] == "seedbox_live_validation_completion_report"
+    assert payload["seedbox_live_validation_handoff"]["post_submit_handoff"]["complete_when"] == "live_completion_gate.ready_for_user_report=true and live_completion_gate.missing_evidence=[] and live_completion_gate.blockers=[]"
     assert payload["seedbox_live_validation_handoff"]["evidence_contract"]["kind"] == "ptcli.seedbox_live_evidence_contract"
-    assert payload["seedbox_live_validation_handoff"]["evidence_contract"]["final_report_field"] == "seedbox_live_validation_completion_report"
+    assert payload["seedbox_live_validation_handoff"]["evidence_contract"]["final_report_field"] == "live_completion_gate"
+    assert payload["seedbox_live_validation_handoff"]["evidence_contract"]["audit_report_field"] == "seedbox_live_validation_completion_report"
+    assert "live_completion_gate.ready_for_user_report" in payload["seedbox_live_validation_handoff"]["evidence_contract"]["required_fields"]
     assert "seedbox_live_validation_completion_report.ready_for_user_report" in payload["seedbox_live_validation_handoff"]["evidence_contract"]["required_fields"]
     assert "closure_summary.target.uploaded_torrent_hash" in payload["seedbox_live_validation_handoff"]["evidence_contract"]["required_fields"]
+    assert "live_completion_gate.ready_for_user_report=true" in payload["seedbox_live_validation_handoff"]["evidence_contract"]["complete_when"]
     assert "qbit_enforcement_summary.ready=true when rate limits are configured" in payload["seedbox_live_validation_handoff"]["evidence_contract"]["complete_when"]
     assert payload["seedbox_live_validation_handoff"]["recommended_tool"] == "ptcli_doctor"
     assert payload["seedbox_live_validation_handoff"]["recommended_request"]["argv"] == payload["live_readiness"]["doctor_template"]["argv"]
