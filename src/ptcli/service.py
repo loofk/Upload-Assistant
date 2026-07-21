@@ -827,8 +827,8 @@ def _summary_check_live_validation_result(payload: dict[str, Any], summary_file:
         "recommended_endpoint": recommended_endpoint,
         "recommended_request": recommended_request,
         "post_submit_read": ["duplicate_check", "submit_if_clear_handoff", "job_id", "status_endpoint", "summary_endpoint"],
-        "final_evidence_read": ["get_job_summary.closure_summary", "get_job_summary.closure_handoff", "get_job_summary.qbit_enforcement_summary", "get_job_summary.policy_execution_report"],
-        "complete_when": ["doctor_result_handoff.live_safe_to_attempt=true", "source_url_check_and_submit returns job_id", "closure_summary.complete=true", "closure_summary.blockers=[]"],
+        "final_evidence_read": ["get_job_summary.seedbox_live_validation_completion_report", "get_job_summary.closure_summary", "get_job_summary.closure_handoff", "get_job_summary.qbit_enforcement_summary", "get_job_summary.policy_execution_report"],
+        "complete_when": ["doctor_result_handoff.live_safe_to_attempt=true", "source_url_check_and_submit returns job_id", "seedbox_live_validation_completion_report.ready_for_user_report=true", "seedbox_live_validation_completion_report.missing_evidence=[]", "seedbox_live_validation_completion_report.blockers=[]"],
         "stop_when": ["doctor_result_handoff.live_safe_to_attempt=false", "duplicate_check.exists=true", "summary_check blockers are non-empty"],
         "blockers": blockers,
         "next_actions": _summary_check_live_validation_result_next_actions(live_safe, bool(submit_request), blockers),
@@ -837,7 +837,7 @@ def _summary_check_live_validation_result(payload: dict[str, Any], summary_file:
 
 def _summary_check_live_validation_result_next_actions(live_safe: bool, has_submit_request: bool, blockers: list[str]) -> list[str]:
     if live_safe and has_submit_request and not blockers:
-        return ["Submit live_validation_result.check_and_submit_request to source_url_check_and_submit, then poll the returned job_id until closure_summary.complete=true."]
+        return ["Submit live_validation_result.check_and_submit_request to source_url_check_and_submit, then poll the returned job_id until seedbox_live_validation_completion_report.ready_for_user_report=true."]
     if live_safe and not has_submit_request:
         return ["Doctor is live-safe, but no check-and-submit request was found; rerun readiness_bundle with source and target to rebuild the manual request."]
     if blockers:
@@ -2787,9 +2787,12 @@ def _seedbox_live_validation_service_report(handoff: dict[str, Any], summary: di
             "resume_when": post_submit.get("resume_when"),
             "complete_when": post_submit.get("complete_when"),
             "stop_when": _string_list(post_submit.get("stop_when")),
+            "final_report_field": post_submit.get("final_report_field"),
+            "final_report_ready_when": post_submit.get("final_report_ready_when"),
         },
         "final_evidence": {
             "read_tool": evidence_contract.get("final_read") or "get_job_summary",
+            "final_report_field": evidence_contract.get("final_report_field"),
             "required_fields": _string_list(evidence_contract.get("required_fields")),
             "complete_when": _string_list(evidence_contract.get("complete_when")),
             "audit_notes": _string_list(evidence_contract.get("audit_notes")),
@@ -2878,7 +2881,7 @@ def _seedbox_live_validation_report(
             "validation_report.ready=true",
             "doctor_result_handoff.live_safe_to_attempt=true",
             "source_url_check_and_submit returns job_id",
-            "final get_job_summary reports closure_summary.complete=true and closure_summary.blockers=[]",
+            "final get_job_summary reports seedbox_live_validation_completion_report.ready_for_user_report=true",
         ],
         "stop_when": ["any component.ready=false", "duplicate_check.exists=true", "doctor_result_handoff.live_safe_to_attempt=false"],
     }
@@ -2967,9 +2970,9 @@ def _seedbox_live_validation_plan(
             "endpoint": "/v1/jobs/{job_id}/resume or /v1/jobs/{job_id}/summary",
             "method": "POST or GET",
             "request": "recovery_handoff.dry_run_request, recovery_handoff.execute_request, or null for summary",
-            "read": ["recovery_handoff", "closure_summary", "closure_handoff", "qbit_enforcement_summary", "evidence"],
-            "continue_when": "closure_summary.complete=true and closure_summary.blockers=[]",
-            "stop_when": "recovery_handoff.blockers remain after allowed resume or closure_summary.blockers is non-empty",
+            "read": ["seedbox_live_validation_completion_report", "recovery_handoff", "closure_summary", "closure_handoff", "qbit_enforcement_summary", "evidence"],
+            "continue_when": "seedbox_live_validation_completion_report.ready_for_user_report=true",
+            "stop_when": "seedbox_live_validation_completion_report.status=duplicate_stopped or recovery_handoff.blockers remain after allowed resume or seedbox_live_validation_completion_report.blockers is non-empty",
         },
     ]
     return {
@@ -3000,8 +3003,10 @@ def _seedbox_post_submit_handoff(manual_request: dict[str, Any] | None) -> dict[
         "resume_order": ["call dry_run_request", "review command_argv and ignored_overrides", "call execute_request only after user approval", "poll child job"],
         "finish_tool": "get_job_summary",
         "finish_endpoint_template": "/v1/jobs/{job_id}/summary",
-        "complete_when": "closure_summary.complete=true and closure_summary.blockers=[]",
-        "stop_when": ["duplicate_check.exists=true", "recovery_handoff.action=stop", "closure_summary.blockers is non-empty"],
+        "final_report_field": "seedbox_live_validation_completion_report",
+        "final_report_ready_when": "seedbox_live_validation_completion_report.ready_for_user_report=true",
+        "complete_when": "seedbox_live_validation_completion_report.ready_for_user_report=true and seedbox_live_validation_completion_report.missing_evidence=[] and seedbox_live_validation_completion_report.blockers=[]",
+        "stop_when": ["duplicate_check.exists=true", "seedbox_live_validation_completion_report.status=duplicate_stopped", "recovery_handoff.action=stop", "seedbox_live_validation_completion_report.blockers is non-empty"],
     }
 
 
@@ -3009,8 +3014,13 @@ def _seedbox_live_evidence_contract() -> dict[str, Any]:
     return {
         "kind": "ptcli.seedbox_live_evidence_contract",
         "final_read": "get_job_summary",
-        "complete_when": ["closure_summary.complete=true", "closure_summary.blockers=[]", "qbit_enforcement_summary.ready=true when rate limits are configured"],
+        "final_report_field": "seedbox_live_validation_completion_report",
+        "complete_when": ["seedbox_live_validation_completion_report.ready_for_user_report=true", "seedbox_live_validation_completion_report.missing_evidence=[]", "seedbox_live_validation_completion_report.blockers=[]", "qbit_enforcement_summary.ready=true when rate limits are configured"],
         "required_fields": [
+            "seedbox_live_validation_completion_report.ready_for_user_report",
+            "seedbox_live_validation_completion_report.status",
+            "seedbox_live_validation_completion_report.checks",
+            "seedbox_live_validation_completion_report.missing_evidence",
             "source_reference",
             "duplicate_check.searched",
             "duplicate_check.exists",
@@ -14496,8 +14506,8 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "seedbox_live_validation_report_fields": ["ready", "phase", "ready_count", "blocked_count", "total_count", "components", "first_blocker", "next_step", "complete_when", "stop_when"],
         "seedbox_live_validation_service_report_fields": ["ready", "status", "phase", "current_step", "first_blocker", "read_first", "doctor", "check_and_submit", "after_submit", "final_evidence", "runbook", "components", "component_counts", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
         "seedbox_live_validation_plan_fields": ["ready", "first_step", "steps", "required_order", "read_first"],
-        "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "complete_when", "stop_when"],
-        "seedbox_live_evidence_contract_fields": ["final_read", "complete_when", "required_fields", "audit_notes"],
+        "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "finish_endpoint_template", "final_report_field", "final_report_ready_when", "complete_when", "stop_when"],
+        "seedbox_live_evidence_contract_fields": ["final_read", "final_report_field", "complete_when", "required_fields", "audit_notes"],
         "agent_decision_fields": ["decision", "recommended_action", "runbook_ref", "next_tool", "can_create_manual_job", "can_run_daily_candidates", "should_fix_deployment", "next_actions"],
         "safety": ["non_live", "does_not_contact_trackers", "does_not_contact_qbittorrent", "live_upload_still_requires_accept_rules_and_confirm_upload"],
     }
@@ -14958,7 +14968,7 @@ def _agent_skill_contract(public_base_url: str) -> dict[str, Any]:
             },
         },
         "mandatory_preflight": ["deployment_check", "readiness_bundle", "site_policies", "target duplicate check"],
-        "completion_evidence": ["job_handoff.action=done", "closure_summary.complete=true", "closure_summary.blockers=[]", "target_upload_handoff.uploaded_seeding_ready=true", "qBittorrent hash/path/size evidence present"],
+        "completion_evidence": ["seedbox_live_validation_completion_report.ready_for_user_report=true", "seedbox_live_validation_completion_report.missing_evidence=[]", "seedbox_live_validation_completion_report.blockers=[]", "job_handoff.action=done", "closure_summary.complete=true", "target_upload_handoff.uploaded_seeding_ready=true", "qBittorrent hash/path/size evidence present"],
     }
 
 
@@ -14968,7 +14978,7 @@ def _agent_instructions() -> dict[str, Any]:
         "role": "Operate ptcli as a cautious local Chinese PT retorrent assistant. Prefer structured JSON APIs and never infer success without reading the relevant handoff fields.",
         "must": [
             "Use source_url_check_and_submit for a user-provided source link plus target unless the user explicitly wants a dry run or split audit.",
-            "Read blockers, next_actions, next_step, job_handoff, closure_handoff, and closure_summary before choosing the next call.",
+            "Read blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call.",
             "Ask for explicit user confirmation before setting accept_rules=true or confirm_upload=true when it was not already supplied by the user.",
             "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes.",
             "Treat status=blocked as recoverable only when next_step or job_handoff.recommended_request names a safe tool.",
@@ -14978,7 +14988,7 @@ def _agent_instructions() -> dict[str, Any]:
             "Do not upload or submit a daily candidate without confirm_upload=true.",
             "Do not bypass site_policies, rule_obligations, policy_execution_handoff, or duplicate_check.",
             "Do not assume rule_review_fingerprint placeholders satisfy manual review.",
-            "Do not mark a job complete from status alone; verify closure_summary and target uploaded seeding evidence.",
+            "Do not mark a job complete from status alone; verify seedbox_live_validation_completion_report.ready_for_user_report=true and target uploaded seeding evidence.",
             "Do not retry live upload after a duplicate, rule blocker, or missing uploaded torrent evidence unless the next_step explicitly allows recovery.",
         ],
         "ask_user_when": [
@@ -14990,7 +15000,7 @@ def _agent_instructions() -> dict[str, Any]:
         "reporting": {
             "blocked": ["status", "blockers", "next_actions", "next_step", "recommended_tool", "recommended_request"],
             "running": ["job_id", "status_endpoint", "poll_after_seconds", "job_handoff"],
-            "complete": ["job_id", "summary_file", "closure_summary", "qbit evidence", "uploaded_torrent_hash", "content_path"],
+            "complete": ["job_id", "summary_file", "seedbox_live_validation_completion_report", "closure_summary", "qbit evidence", "uploaded_torrent_hash", "content_path"],
         },
     }
 
@@ -15076,7 +15086,7 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "poll",
                     "tool": "get_job_status",
-                    "read": ["status", "job_handoff.action", "job_handoff.should_poll", "job_handoff.poll_after_seconds", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "runtime.should_poll", "agent_decision", "closure_summary", "closure_handoff", "blockers", "next_actions"],
+                    "read": ["status", "job_handoff.action", "job_handoff.should_poll", "job_handoff.poll_after_seconds", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "runtime.should_poll", "agent_decision", "seedbox_live_validation_completion_report", "closure_summary", "closure_handoff", "blockers", "next_actions"],
                     "continue_when": "job_handoff.action!=wait and status not in queued,running",
                     "repeat_when": "job_handoff.action=wait and job_handoff.should_poll=true",
                     "stop_when": ["job_handoff.action=stop", "status=blocked", "status=failed", "status=cancelled"],
@@ -15120,10 +15130,10 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
                 {
                     "step": "closure_decision",
                     "tool": "get_job_summary",
-                    "read": ["job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "job_handoff.blockers", "closure_summary.complete", "closure_summary.action", "closure_summary.next_step", "closure_summary.recommended_tool", "closure_summary.blockers", "closure_summary.gates", "closure_summary.source", "closure_summary.target", "closure_handoff", "summary", "evidence", "resume_plan", "resume_requirements", "candidate_submission"],
-                    "complete_when": "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]",
+                    "read": ["seedbox_live_validation_completion_report.status", "seedbox_live_validation_completion_report.ready_for_user_report", "seedbox_live_validation_completion_report.recommended_call", "seedbox_live_validation_completion_report.missing_evidence", "job_handoff.action", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "job_handoff.blockers", "closure_summary.complete", "closure_summary.action", "closure_summary.next_step", "closure_summary.recommended_tool", "closure_summary.blockers", "closure_summary.gates", "closure_summary.source", "closure_summary.target", "closure_handoff", "summary", "evidence", "resume_plan", "resume_requirements", "candidate_submission"],
+                    "complete_when": "seedbox_live_validation_completion_report.ready_for_user_report=true",
                     "resume_with": "job_handoff when job_handoff.action=resume; pass only job_handoff.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
-                    "stop_when": ["job_handoff.action=stop", "closure_summary.action=stop_duplicate", "closure_summary.action=collect_confirmations without explicit user confirmation", "closure_summary.action=configure_policy", "closure_summary.action=resolve_blockers and recommended_tool is null"],
+                    "stop_when": ["seedbox_live_validation_completion_report.status=duplicate_stopped", "seedbox_live_validation_completion_report.status=blocked and recommended_tool is null", "job_handoff.action=stop", "closure_summary.action=stop_duplicate", "closure_summary.action=collect_confirmations without explicit user confirmation", "closure_summary.action=configure_policy", "closure_summary.action=resolve_blockers and recommended_tool is null"],
                 },
             ],
         },
@@ -15193,11 +15203,12 @@ def _agent_default_workflows() -> list[dict[str, Any]]:
 def _agent_closure_contract() -> dict[str, Any]:
     return {
         "primary_field": "closure_handoff",
+        "live_validation_report_field": "seedbox_live_validation_completion_report",
         "control_field": "job_handoff",
-        "complete_when": "closure_handoff.complete=true",
-        "never_treat_complete_when": ["closure_handoff.action!=done", "closure_handoff.target.uploaded_seeding_ready=false", "closure_handoff.blockers is not empty"],
+        "complete_when": "seedbox_live_validation_completion_report.ready_for_user_report=true",
+        "never_treat_complete_when": ["seedbox_live_validation_completion_report.ready_for_user_report!=true", "seedbox_live_validation_completion_report.missing_evidence is not empty", "seedbox_live_validation_completion_report.blockers is not empty", "closure_handoff.action!=done", "closure_handoff.target.uploaded_seeding_ready=false", "closure_handoff.blockers is not empty"],
         "next_step_source": "job_handoff when present, otherwise closure_handoff.next_step",
-        "recommended_call_fields": ["job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "recommended_tool", "recommended_endpoint", "recommended_request"],
+        "recommended_call_fields": ["seedbox_live_validation_completion_report.recommended_call", "job_handoff.recommended_tool", "job_handoff.recommended_endpoint", "job_handoff.recommended_request", "recommended_tool", "recommended_endpoint", "recommended_request"],
         "actions": {
             "done": "Read get_job_summary and report the completed source/target/qBittorrent evidence.",
             "wait": "Poll get_job_status after runtime.poll_after_seconds.",

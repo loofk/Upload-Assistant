@@ -100,9 +100,11 @@
       "target duplicate check"
     ],
     "completion_evidence": [
+      "seedbox_live_validation_completion_report.ready_for_user_report=true",
+      "seedbox_live_validation_completion_report.missing_evidence=[]",
+      "seedbox_live_validation_completion_report.blockers=[]",
       "job_handoff.action=done",
       "closure_summary.complete=true",
-      "closure_summary.blockers=[]",
       "target_upload_handoff.uploaded_seeding_ready=true",
       "qBittorrent hash/path/size evidence present"
     ]
@@ -112,7 +114,7 @@
     "role": "Operate ptcli as a cautious local Chinese PT retorrent assistant. Prefer structured JSON APIs and never infer success without reading the relevant handoff fields.",
     "must": [
       "Use source_url_check_and_submit for a user-provided source link plus target unless the user explicitly wants a dry run or split audit.",
-      "Read blockers, next_actions, next_step, job_handoff, closure_handoff, and closure_summary before choosing the next call.",
+      "Read blockers, next_actions, next_step, job_handoff, seedbox_live_validation_completion_report, closure_handoff, and closure_summary before choosing the next call.",
       "Ask for explicit user confirmation before setting accept_rules=true or confirm_upload=true when it was not already supplied by the user.",
       "Stop immediately when duplicate_check.exists=true and report duplicate_check.dupes.",
       "Treat status=blocked as recoverable only when next_step or job_handoff.recommended_request names a safe tool.",
@@ -122,7 +124,7 @@
       "Do not upload or submit a daily candidate without confirm_upload=true.",
       "Do not bypass site_policies, rule_obligations, policy_execution_handoff, or duplicate_check.",
       "Do not assume rule_review_fingerprint placeholders satisfy manual review.",
-      "Do not mark a job complete from status alone; verify closure_summary and target uploaded seeding evidence.",
+      "Do not mark a job complete from status alone; verify seedbox_live_validation_completion_report.ready_for_user_report=true and target uploaded seeding evidence.",
       "Do not retry live upload after a duplicate, rule blocker, or missing uploaded torrent evidence unless the next_step explicitly allows recovery."
     ],
     "ask_user_when": [
@@ -149,6 +151,7 @@
       "complete": [
         "job_id",
         "summary_file",
+        "seedbox_live_validation_completion_report",
         "closure_summary",
         "qbit evidence",
         "uploaded_torrent_hash",
@@ -183,15 +186,20 @@
   },
   "closure_contract": {
     "primary_field": "closure_handoff",
+    "live_validation_report_field": "seedbox_live_validation_completion_report",
     "control_field": "job_handoff",
-    "complete_when": "closure_handoff.complete=true",
+    "complete_when": "seedbox_live_validation_completion_report.ready_for_user_report=true",
     "never_treat_complete_when": [
+      "seedbox_live_validation_completion_report.ready_for_user_report!=true",
+      "seedbox_live_validation_completion_report.missing_evidence is not empty",
+      "seedbox_live_validation_completion_report.blockers is not empty",
       "closure_handoff.action!=done",
       "closure_handoff.target.uploaded_seeding_ready=false",
       "closure_handoff.blockers is not empty"
     ],
     "next_step_source": "job_handoff when present, otherwise closure_handoff.next_step",
     "recommended_call_fields": [
+      "seedbox_live_validation_completion_report.recommended_call",
       "job_handoff.recommended_tool",
       "job_handoff.recommended_endpoint",
       "job_handoff.recommended_request",
@@ -363,6 +371,7 @@
             "job_handoff.recommended_request",
             "runtime.should_poll",
             "agent_decision",
+            "seedbox_live_validation_completion_report",
             "closure_summary",
             "closure_handoff",
             "blockers",
@@ -476,6 +485,10 @@
           "step": "closure_decision",
           "tool": "get_job_summary",
           "read": [
+            "seedbox_live_validation_completion_report.status",
+            "seedbox_live_validation_completion_report.ready_for_user_report",
+            "seedbox_live_validation_completion_report.recommended_call",
+            "seedbox_live_validation_completion_report.missing_evidence",
             "job_handoff.action",
             "job_handoff.recommended_tool",
             "job_handoff.recommended_endpoint",
@@ -496,9 +509,11 @@
             "resume_requirements",
             "candidate_submission"
           ],
-          "complete_when": "job_handoff.action=done and closure_summary.complete=true and closure_summary.blockers=[]",
+          "complete_when": "seedbox_live_validation_completion_report.ready_for_user_report=true",
           "resume_with": "job_handoff when job_handoff.action=resume; pass only job_handoff.recommended_request plus allowlisted overrides for confirmations, paths, qBittorrent limits, or material files",
           "stop_when": [
+            "seedbox_live_validation_completion_report.status=duplicate_stopped",
+            "seedbox_live_validation_completion_report.status=blocked and recommended_tool is null",
             "job_handoff.action=stop",
             "closure_summary.action=stop_duplicate",
             "closure_summary.action=collect_confirmations without explicit user confirmation",
@@ -19847,11 +19862,15 @@
           "resume_tool",
           "resume_when",
           "finish_tool",
+          "finish_endpoint_template",
+          "final_report_field",
+          "final_report_ready_when",
           "complete_when",
           "stop_when"
         ],
         "seedbox_live_evidence_contract_fields": [
           "final_read",
+          "final_report_field",
           "complete_when",
           "required_fields",
           "audit_notes"
