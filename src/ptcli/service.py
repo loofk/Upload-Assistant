@@ -4935,6 +4935,13 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
     live_execution_package = _seedbox_live_execution_package(seedbox_live_validation_report, live_validation_summary, live_validation_sequence, live_validation_repair_plan)
     first_live_validation_handoff = _seedbox_first_live_validation_handoff(seedbox_live_validation_report, live_validation_summary, live_validation_repair_plan, live_validation_sequence, live_execution_package)
     seedbox_live_runbook_final_report = _seedbox_live_runbook_final_report(first_live_validation_handoff, live_execution_package, live_validation_sequence, seedbox_live_validation_report, live_validation_repair_plan)
+    next_call = _readiness_bundle_next_call(
+        live_readiness,
+        live_test_handoff,
+        live_validation_repair_plan,
+        first_live_validation_handoff,
+        seedbox_live_runbook_final_report,
+    )
     return {
         "kind": "ptcli.readiness_bundle",
         "status": "ok" if live_readiness.get("ready_for_ai") else "blocked",
@@ -4959,11 +4966,111 @@ def readiness_bundle_payload(request: dict[str, Any] | None = None) -> dict[str,
         "recommended_tool": live_test_handoff.get("recommended_tool"),
         "recommended_endpoint": live_test_handoff.get("recommended_endpoint"),
         "recommended_request": live_test_handoff.get("recommended_request"),
+        "next_call": next_call,
         "agent_decision": agent_decision,
         "blockers": _string_list(live_readiness.get("blockers")),
         "warnings": _string_list(live_readiness.get("warnings")),
         "next_actions": _string_list(agent_decision.get("next_actions")),
     }
+
+
+def _readiness_bundle_next_call(
+    live_readiness: dict[str, Any],
+    live_test_handoff: dict[str, Any],
+    live_validation_repair_plan: dict[str, Any],
+    first_live_validation_handoff: dict[str, Any],
+    seedbox_live_runbook_final_report: dict[str, Any],
+) -> dict[str, Any]:
+    """Expose the first safe handoff step from the aggregate readiness bundle."""
+    blockers = _string_list(seedbox_live_runbook_final_report.get("blockers")) or _string_list(live_readiness.get("blockers"))
+    if first_live_validation_handoff.get("ready") is True:
+        action = str(first_live_validation_handoff.get("action") or "run_doctor")
+        tool = first_live_validation_handoff.get("recommended_tool")
+        endpoint = first_live_validation_handoff.get("recommended_endpoint")
+        method = first_live_validation_handoff.get("recommended_method") or "CLI"
+        request = first_live_validation_handoff.get("recommended_request")
+        reason = "ready_for_seedbox_live_doctor_before_submission"
+        read_before_call = ["next_call", "first_live_validation_handoff", "live_execution_package", "seedbox_live_runbook_final_report"]
+        after_call = {
+            "read": ["summary_check", "doctor_result_handoff", "live_validation_result", "live_submission_package", "blockers"],
+            "continue_when": "summary_check.live_validation_result.can_submit_check_and_submit=true",
+            "then": {"tool": "source_url_check_and_submit", "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit"},
+            "stop_when": ["doctor_result_handoff.live_safe_to_attempt=false", "summary_check.blockers is non-empty"],
+        }
+    else:
+        next_step = live_validation_repair_plan.get("next_step") if isinstance(live_validation_repair_plan.get("next_step"), dict) else live_test_handoff.get("next_step") if isinstance(live_test_handoff.get("next_step"), dict) else {}
+        action = "repair_readiness" if next_step else "inspect_readiness"
+        tool = next_step.get("tool") or live_validation_repair_plan.get("recommended_tool") or "readiness_bundle"
+        endpoint = next_step.get("endpoint") or live_validation_repair_plan.get("recommended_endpoint") or "/v1/readiness/bundle"
+        method = next_step.get("method") or live_validation_repair_plan.get("recommended_method") or "POST"
+        request = next_step.get("request") if "request" in next_step else live_validation_repair_plan.get("recommended_request")
+        reason = str(next_step.get("reason") or live_validation_repair_plan.get("phase") or "readiness_blocked")
+        read_before_call = ["next_call", "live_validation_repair_plan", "seedbox_live_validation_report", "blockers"]
+        after_call = {
+            "read": ["status", "ready", "blockers", "next_actions", "next_call"],
+            "continue_when": "readiness_bundle.next_call.action=run_doctor or repaired endpoint reports ready=true",
+            "stop_when": ["same blocker repeats after repair", "next_call.requires_user_review=true and user has not approved"],
+        }
+    safe_to_call_now = _readiness_bundle_next_call_safe(action, tool, endpoint, method, blockers)
+    requires_user_review = not safe_to_call_now or action == "run_doctor"
+    return {
+        "kind": "ptcli.readiness_bundle_next_call",
+        "ready": bool(tool and (endpoint or method == "CLI")),
+        "action": action,
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": method,
+        "request": request,
+        "safe_to_call_now": safe_to_call_now,
+        "requires_user_review": requires_user_review,
+        "mutates_state": False,
+        "uploads": False,
+        "contacts_trackers": action == "run_doctor",
+        "contacts_qbittorrent": action == "run_doctor",
+        "reason": reason,
+        "read_before_call": read_before_call,
+        "after_call": after_call,
+        "progress": {
+            "ready_for_ai": live_readiness.get("ready_for_ai") is True,
+            "ready_for_manual_retorrent": live_readiness.get("ready_for_manual_retorrent") is True,
+            "live_test_ready": live_test_handoff.get("ready") is True,
+            "repair_plan_ready": live_validation_repair_plan.get("ready") is True,
+            "blocker_count": len(blockers),
+        },
+        "approval": {
+            "required": requires_user_review,
+            "requires_accept_rules": action == "run_doctor",
+            "requires_confirm_upload": action == "run_doctor",
+            "reason": "doctor contacts live services before upload submission" if action == "run_doctor" else "repair or inspect readiness before live automation",
+        },
+        "safety": {
+            "readiness_bundle_is_read_only": True,
+            "next_call_mutates_state": False,
+            "next_call_uploads": False,
+            "live_upload_still_requires_check_and_submit": True,
+            "safe_to_call_now": safe_to_call_now,
+        },
+        "blockers": blockers,
+        "next_actions": _readiness_bundle_next_call_next_actions(action, blockers),
+    }
+
+
+def _readiness_bundle_next_call_safe(action: str, tool: Any, endpoint: Any, method: Any, blockers: list[str]) -> bool:
+    if blockers:
+        return False
+    if action == "run_doctor":
+        return False
+    return tool == "deployment_check" and endpoint == "/v1/deployment/check" and method == "GET"
+
+
+def _readiness_bundle_next_call_next_actions(action: str, blockers: list[str]) -> list[str]:
+    if action == "run_doctor":
+        return ["After explicit user approval, run next_call.request.argv, then call summary_check on ptcli-doctor-summary.json before submitting any job."]
+    if blockers:
+        return ["Resolve readiness_bundle.next_call.blockers, rerun readiness_bundle, and only continue when next_call.action=run_doctor."]
+    if action == "repair_readiness":
+        return ["Call the recommended read-only repair/inspection endpoint, apply any required config changes manually, then rerun readiness_bundle."]
+    return ["Inspect readiness_bundle.next_call and live_validation_repair_plan before continuing."]
 
 
 def _readiness_bundle_source(request: dict[str, Any]) -> dict[str, Any] | None:
@@ -33212,7 +33319,7 @@ def _source_url_check_and_submit_response_contract() -> dict[str, Any]:
 
 def _readiness_bundle_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "seedbox_live_validation_report", "live_validation_repair_plan", "live_validation_sequence", "live_execution_package", "first_live_validation_handoff", "seedbox_live_runbook_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "request", "deployment", "site_policies", "daily_schedule", "live_verification", "live_readiness", "live_test_handoff", "seedbox_live_validation_handoff", "live_validation_summary", "seedbox_live_validation_report", "live_validation_repair_plan", "live_validation_sequence", "live_execution_package", "first_live_validation_handoff", "seedbox_live_runbook_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_call", "agent_decision", "blockers", "warnings", "next_actions"],
         "live_verification_fields": ["ready", "connectivity_checked", "checks", "credential_requirements", "flow_check", "materials", "blockers", "warnings", "next_actions"],
         "live_readiness_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "source", "target_trackers", "site_policy_ready", "policy_execution_summary", "policy_setup_summary", "policy_execution_handoff", "live_verification_ready", "credential_requirements", "doctor_template", "manual_job_template", "blockers", "warnings", "next_actions"],
         "live_test_handoff_fields": ["ready", "doctor_ready", "manual_job_ready", "preflight_checklist", "execution_plan", "doctor_template", "manual_job_template", "policy_execution_summary", "policy_execution_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "after_doctor", "blockers", "warnings"],
@@ -33228,6 +33335,7 @@ def _readiness_bundle_response_contract() -> dict[str, Any]:
         "live_execution_report_contract_fields": ["final_report_field", "audit_report_fields", "read_tool", "complete_when", "stop_when", "required_fields", "report_allowed_when"],
         "first_live_validation_handoff_fields": ["ready", "status", "action", "phase", "first_blocker", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "doctor", "submit", "after_submit", "run_order", "read_first", "complete_when", "stop_when", "blockers", "next_actions"],
         "seedbox_live_runbook_final_report_fields": ["ready", "report_allowed", "status", "verdict", "current_action", "first_blocker", "recommended_call", "doctor", "submit", "after_submit", "run_order", "steps", "read_order", "complete_when", "stop_when", "must_not_report_complete_until", "final_report_field", "audit_report_fields", "evidence_required", "evidence_matrix", "evidence_required_by_phase", "blockers", "next_actions"],
+        "next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "progress", "approval", "safety", "blockers", "next_actions"],
         "seedbox_live_evidence_matrix_fields": ["name", "phase", "produced_by", "required_fields", "description", "read_from", "required_for_completion", "stop_when_missing"],
         "seedbox_live_validation_plan_fields": ["ready", "first_step", "steps", "required_order", "read_first"],
         "seedbox_post_submit_handoff_fields": ["ready", "submit_tool", "submit_endpoint", "submit_request", "poll_tool", "poll_until", "resume_tool", "resume_when", "finish_tool", "finish_endpoint_template", "final_report_field", "final_report_ready_when", "complete_when", "audit_report_field", "stop_when"],
@@ -35223,6 +35331,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},
             "recommended_request": {"type": ["object", "null"]},
+            "next_call": {"type": "object"},
             "agent_decision": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "warnings": {"type": "array", "items": {"type": "string"}},
