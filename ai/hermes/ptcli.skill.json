@@ -29292,6 +29292,7 @@
           "deployment_runbook",
           "deployment_handoff",
           "seedbox_bootstrap_handoff",
+          "seedbox_live_trial_handoff",
           "deployment_final_report",
           "agent_summary",
           "agent_handoff"
@@ -29364,6 +29365,7 @@
           "qbit",
           "next_step",
           "deployment_runbook",
+          "seedbox_live_trial",
           "warnings"
         ],
         "seedbox_bootstrap_handoff_fields": [
@@ -29385,6 +29387,24 @@
           "recommended_request",
           "continue_when",
           "stop_when",
+          "blockers",
+          "warnings",
+          "next_actions"
+        ],
+        "seedbox_live_trial_handoff_fields": [
+          "ready",
+          "status",
+          "action",
+          "read_only",
+          "compose",
+          "api",
+          "readiness",
+          "live_order",
+          "report_contract",
+          "safety",
+          "required_confirmations",
+          "qbit",
+          "next_step",
           "blockers",
           "warnings",
           "next_actions"
@@ -29415,6 +29435,7 @@
           "recommended_first_step",
           "manual_retorrent",
           "daily_candidates",
+          "seedbox_live_trial",
           "qbit",
           "docker_compose",
           "env",

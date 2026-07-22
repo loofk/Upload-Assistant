@@ -19485,6 +19485,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "docker_compose" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "deployment_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "seedbox_bootstrap_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "seedbox_live_trial_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "deployment_final_report" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_summary" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
     assert "agent_handoff" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -19502,6 +19503,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_bootstrap_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "mkdir_commands" in tool_by_name["deployment_check"]["response_contract"]["seedbox_bootstrap_handoff_fields"]
     assert "verification_requests" in tool_by_name["deployment_check"]["response_contract"]["seedbox_bootstrap_handoff_fields"]
+    assert "seedbox_live_trial_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
+    assert "readiness" in tool_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
+    assert "report_contract" in tool_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
+    assert "seedbox_live_trial" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
     assert "docker_compose_api_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "docker_compose_daily_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "docker_compose_fields" in tool_by_name["deployment_check"]["response_contract"]
@@ -20119,6 +20124,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "deployment_runbook" in deployment_schema["properties"]
     assert "deployment_handoff" in deployment_schema["properties"]
     assert "seedbox_bootstrap_handoff" in deployment_schema["properties"]
+    assert "seedbox_live_trial_handoff" in deployment_schema["properties"]
     assert "deployment_final_report" in deployment_schema["properties"]
     assert "agent_summary" in deployment_schema["properties"]
     assert "agent_handoff" in deployment_schema["properties"]
@@ -20443,6 +20449,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "docker_compose" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "deployment_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "seedbox_bootstrap_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "seedbox_live_trial_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "deployment_final_report" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_summary" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
         assert "agent_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -20460,6 +20467,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "seedbox_bootstrap_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "mkdir_commands" in tools_by_name["deployment_check"]["response_contract"]["seedbox_bootstrap_handoff_fields"]
         assert "verification_requests" in tools_by_name["deployment_check"]["response_contract"]["seedbox_bootstrap_handoff_fields"]
+        assert "seedbox_live_trial_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "readiness" in tools_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
+        assert "report_contract" in tools_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
+        assert "seedbox_live_trial" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
         assert "docker_compose_api_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "docker_compose_daily_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "docker_compose_fields" in tools_by_name["deployment_check"]["response_contract"]
@@ -21462,6 +21473,32 @@ services:
     assert bootstrap["recommended_tool"] == "readiness_bundle"
     assert bootstrap["recommended_endpoint"] == "/v1/readiness/bundle"
     assert bootstrap["next_step"]["request"]["target"] == "MTEAM"
+    live_trial = payload["seedbox_live_trial_handoff"]
+    assert live_trial["kind"] == "ptcli.seedbox_live_trial_handoff"
+    assert live_trial["ready"] is True
+    assert live_trial["status"] == "ready"
+    assert live_trial["action"] == "run_readiness_bundle"
+    assert live_trial["read_only"] is True
+    assert live_trial["compose"]["start_api"].endswith("up -d --build ptcli-api")
+    assert live_trial["compose"]["check_health"] == "curl -fsS http://127.0.0.1:8080/health"
+    assert live_trial["api"]["health"] == "http://127.0.0.1:8080/health"
+    assert live_trial["api"]["deployment_check"] == "http://127.0.0.1:8080/v1/deployment/check"
+    assert live_trial["api"]["readiness_bundle"] == "http://127.0.0.1:8080/v1/readiness/bundle"
+    assert live_trial["readiness"]["tool"] == "readiness_bundle"
+    assert live_trial["readiness"]["endpoint"] == "/v1/readiness/bundle"
+    assert live_trial["readiness"]["request_template"]["target"] == "MTEAM"
+    assert live_trial["readiness"]["request_template"]["save_path"] == str(downloads_dir)
+    assert live_trial["readiness"]["request_template"]["connect_qbit"] is True
+    assert [step["name"] for step in live_trial["live_order"]] == ["deployment_check", "readiness_bundle", "doctor", "check_and_submit", "poll_or_resume", "read_summary"]
+    assert live_trial["report_contract"]["final_report_field"] == "live_user_report"
+    assert "uploaded_seeding" in live_trial["report_contract"]["audit_report_fields"]
+    assert "doctor_result_handoff.live_safe_to_attempt=true" in live_trial["safety"]["live_upload_requires"]
+    assert live_trial["safety"]["live_upload"] is False
+    assert live_trial["safety"]["contacts_trackers"] is False
+    assert live_trial["required_confirmations"] == ["accept_rules=true", "confirm_upload=true", "source and target rules reviewed", "target duplicate check is clean"]
+    assert live_trial["next_step"]["tool"] == "readiness_bundle"
+    assert live_trial["next_step"]["request"]["target"] == "MTEAM"
+    assert payload["deployment_handoff"]["seedbox_live_trial"] == live_trial
     assert payload["agent_handoff"]["ready"] is True
     assert payload["agent_handoff"]["recommended_first_step"] == "site_policies"
     assert payload["agent_handoff"]["manual_retorrent"]["ready"] is True
@@ -21471,6 +21508,7 @@ services:
     assert payload["agent_handoff"]["daily_candidates"]["ready"] is True
     assert payload["agent_handoff"]["daily_candidates"]["tool"] == "daily_candidates_schedule_job"
     assert payload["agent_handoff"]["daily_candidates"]["configured_schedule_count"] == 1
+    assert payload["agent_handoff"]["seedbox_live_trial"] == live_trial
     assert payload["agent_handoff"]["docker_compose"]["daily_scheduler_ready"] is True
     assert payload["agent_handoff"]["docker_compose"]["api_ready"] is True
     assert payload["agent_handoff"]["docker_compose"]["api_service"]["healthcheck"] is True
@@ -21529,10 +21567,21 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert bootstrap["next_step"]["tool"] in {"shell", "deployment_check"}
     assert bootstrap["blockers"]
     assert any("config file is missing" in blocker for blocker in bootstrap["blockers"])
+    live_trial = payload["seedbox_live_trial_handoff"]
+    assert live_trial["kind"] == "ptcli.seedbox_live_trial_handoff"
+    assert live_trial["ready"] is False
+    assert live_trial["status"] == "blocked"
+    assert live_trial["action"] == "repair_deployment"
+    assert live_trial["read_only"] is True
+    assert live_trial["next_step"]["tool"] == "deployment_check"
+    assert live_trial["safety"]["live_upload"] is False
+    assert live_trial["blockers"]
+    assert payload["deployment_handoff"]["seedbox_live_trial"] == live_trial
     assert payload["agent_handoff"]["ready"] is False
     assert payload["agent_handoff"]["recommended_first_step"] == "fix_deployment"
     assert payload["agent_handoff"]["manual_retorrent"]["ready"] is False
     assert payload["agent_handoff"]["manual_retorrent"]["blocked_by"]
+    assert payload["agent_handoff"]["seedbox_live_trial"] == live_trial
     assert payload["agent_handoff"]["daily_candidates"]["ready"] is False
     assert any("No daily candidate schedules configured" in blocker for blocker in payload["agent_handoff"]["daily_candidates"]["blocked_by"])
     assert any("config file is missing" in blocker for blocker in payload["blockers"])

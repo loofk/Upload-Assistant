@@ -21128,6 +21128,20 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         blockers=blockers,
         warnings=warnings,
     )
+    seedbox_live_trial_handoff = _deployment_seedbox_live_trial_handoff(
+        ready=ready,
+        paths=paths,
+        qbit=qbit,
+        docker_compose=docker_compose,
+        deployment_handoff=deployment_handoff,
+        seedbox_bootstrap_handoff=seedbox_bootstrap_handoff,
+        deployment_final_report=deployment_final_report,
+        agent_summary=agent_summary,
+        blockers=blockers,
+        warnings=warnings,
+    )
+    deployment_handoff["seedbox_live_trial"] = seedbox_live_trial_handoff
+    agent_handoff["seedbox_live_trial"] = seedbox_live_trial_handoff
     return {
         "kind": "ptcli.deployment_check",
         "status": "ok" if ready else "blocked",
@@ -21148,6 +21162,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "deployment_runbook": deployment_runbook,
         "deployment_handoff": deployment_handoff,
         "seedbox_bootstrap_handoff": seedbox_bootstrap_handoff,
+        "seedbox_live_trial_handoff": seedbox_live_trial_handoff,
         "deployment_final_report": deployment_final_report,
         "agent_summary": agent_summary,
         "agent_handoff": agent_handoff,
@@ -21758,6 +21773,153 @@ def _deployment_final_report_next_actions(compose_ready: bool, blockers: list[st
     if warnings:
         return ["Review deployment_final_report.warnings, then run readiness_bundle before any live retorrent job."]
     return ["Rerun deployment_check and inspect deployment_final_report.recommended_call."]
+
+
+def _deployment_seedbox_live_trial_handoff(
+    *,
+    ready: bool,
+    paths: dict[str, str],
+    qbit: dict[str, Any],
+    docker_compose: dict[str, Any],
+    deployment_handoff: dict[str, Any],
+    seedbox_bootstrap_handoff: dict[str, Any],
+    deployment_final_report: dict[str, Any],
+    agent_summary: dict[str, Any],
+    blockers: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    api = deployment_handoff.get("api") if isinstance(deployment_handoff.get("api"), dict) else {}
+    api_base_url = str(api.get("base_url") or os.environ.get("PTCLI_PUBLIC_BASE_URL") or "http://127.0.0.1:8080").rstrip("/")
+    compose = seedbox_bootstrap_handoff.get("compose") if isinstance(seedbox_bootstrap_handoff.get("compose"), dict) else {}
+    compose_file = str(paths.get("compose_file") or docker_compose.get("path") or "docker-compose.yml")
+    final_ready = bool(ready and deployment_final_report.get("ready") and agent_summary.get("manual_workflow_ready") and docker_compose.get("ptcli_api_service_ready"))
+    readiness_request = {
+        "source_tracker": "U2",
+        "source_id": "60635",
+        "target": "MTEAM",
+        "accept_rules": True,
+        "confirm_upload": True,
+        "save_path": paths.get("downloads_path") or "/downloads",
+        "connect_qbit": True,
+    }
+    return {
+        "kind": "ptcli.seedbox_live_trial_handoff",
+        "ready": final_ready,
+        "status": "ready" if final_ready else "blocked",
+        "action": "run_readiness_bundle" if final_ready else "repair_deployment",
+        "read_only": True,
+        "compose": {
+            "file": compose_file,
+            "start_api": compose.get("start_api") or f"docker compose -f {compose_file} up -d --build ptcli-api",
+            "check_health": f"curl -fsS {api_base_url}/health",
+            "logs": f"docker compose -f {compose_file} logs -f ptcli-api",
+            "start_daily_scheduler_after_trial": compose.get("start_daily_scheduler") or f"docker compose -f {compose_file} --profile daily up -d ptcli-daily-scheduler",
+        },
+        "api": {
+            "base_url": api_base_url,
+            "health": api.get("health") or f"{api_base_url}/health",
+            "openapi": api.get("openapi") or f"{api_base_url}/openapi.json",
+            "tools": api.get("tools") or f"{api_base_url}/v1/tools",
+            "deployment_check": f"{api_base_url}/v1/deployment/check",
+            "readiness_bundle": f"{api_base_url}/v1/readiness/bundle",
+            "jobs": f"{api_base_url}/v1/jobs",
+            "auth_header": "Authorization: Bearer <PTCLI_API_TOKEN>",
+            "token_configured": bool(api.get("token_configured")),
+            "auth_recommended": bool(api.get("auth_recommended")),
+        },
+        "readiness": {
+            "tool": "readiness_bundle",
+            "endpoint": "/v1/readiness/bundle",
+            "method": "POST",
+            "request_template": readiness_request,
+            "read": ["live_readiness", "seedbox_live_validation_handoff", "first_live_validation_handoff", "live_execution_package"],
+            "continue_when": "seedbox_live_validation_handoff.validation_report.ready=true and first_live_validation_handoff.ready=true",
+            "stop_when": "validation_report.first_blocker is present or duplicate_check.exists=true",
+        },
+        "live_order": [
+            {
+                "index": 1,
+                "name": "deployment_check",
+                "tool": "deployment_check",
+                "endpoint": "/v1/deployment/check",
+                "continue_when": "ready=true and seedbox_live_trial_handoff.ready=true",
+            },
+            {
+                "index": 2,
+                "name": "readiness_bundle",
+                "tool": "readiness_bundle",
+                "endpoint": "/v1/readiness/bundle",
+                "request": readiness_request,
+                "continue_when": "first_live_validation_handoff.ready=true",
+            },
+            {
+                "index": 3,
+                "name": "doctor",
+                "tool": "retorrent_doctor",
+                "source": "first_live_validation_handoff.doctor",
+                "continue_when": "doctor_result_handoff.live_safe_to_attempt=true",
+            },
+            {
+                "index": 4,
+                "name": "check_and_submit",
+                "tool": "source_url_check_and_submit",
+                "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+                "continue_when": "job_id is present and status in queued/running/blocked/complete",
+            },
+            {
+                "index": 5,
+                "name": "poll_or_resume",
+                "tool": "get_job_status",
+                "endpoint": "/v1/jobs/{job_id}",
+                "continue_when": "job status complete or blocked with resume_state/next_actions",
+            },
+            {
+                "index": 6,
+                "name": "read_summary",
+                "tool": "get_job_summary",
+                "endpoint": "/v1/jobs/{job_id}/summary",
+                "continue_when": "live_user_report or completion_report proves uploaded torrent was injected and seeding evidence exists",
+            },
+        ],
+        "report_contract": {
+            "final_report_field": "live_user_report",
+            "audit_report_fields": ["seedbox_live_validation_completion_report", "live_validation_final_report", "uploaded_seeding"],
+            "complete_when": [
+                "job.status=complete",
+                "duplicate_check.exists=false",
+                "target_upload.uploaded_torrent_hash is present",
+                "uploaded_seeding.injected_torrent_hash is present",
+                "uploaded_seeding.injection_verified=true",
+            ],
+            "blocked_when": ["blockers is non-empty", "doctor_result_handoff.live_safe_to_attempt=false", "rules or confirmations missing"],
+        },
+        "safety": {
+            "mutates_state": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "live_upload": False,
+            "live_upload_requires": ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "site policy ready", "doctor_result_handoff.live_safe_to_attempt=true"],
+            "first_mutating_call": "source_url_check_and_submit only after readiness and doctor pass",
+        },
+        "required_confirmations": ["accept_rules=true", "confirm_upload=true", "source and target rules reviewed", "target duplicate check is clean"],
+        "qbit": {
+            "configured": bool(qbit.get("configured")),
+            "client": qbit.get("client"),
+            "url": qbit.get("qbit_url"),
+            "connectivity_checked": bool(qbit.get("connectivity_checked")),
+        },
+        "next_step": {
+            "tool": "readiness_bundle" if final_ready else "deployment_check",
+            "endpoint": "/v1/readiness/bundle" if final_ready else "/v1/deployment/check",
+            "method": "POST" if final_ready else "GET",
+            "request": readiness_request if final_ready else None,
+            "safe_to_call_now": True,
+            "reason": "first_seedbox_live_trial" if final_ready else "repair_deployment_before_live_trial",
+        },
+        "blockers": [] if final_ready else blockers or ["Deployment is not ready for a seedbox live trial."],
+        "warnings": warnings,
+        "next_actions": ["Run seedbox_live_trial_handoff.readiness, then follow live_order in order."] if final_ready else ["Resolve seedbox_live_trial_handoff.blockers, then rerun deployment_check."],
+    }
 
 
 def _deployment_seedbox_bootstrap_handoff(
@@ -23948,16 +24110,17 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "seedbox_bootstrap_handoff", "deployment_final_report", "agent_summary", "agent_handoff"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "deployment_final_report", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
                 "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "env_template_ready", "env_template_present"],
                 "runtime_tools_fields": ["ready", "required", "optional", "missing_required", "message"],
                 "deployment_env_fields": ["ready", "template_present", "template_readable", "template_path", "env_path", "env_present", "required_keys", "daily_keys", "optional_keys", "missing_keys", "copy_command", "edit_after_copy", "security", "next_actions"],
                 "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "env", "qbit", "safety", "blockers", "warnings"],
-                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "env", "manual_retorrent", "daily_candidates", "qbit", "next_step", "deployment_runbook", "warnings"],
+                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "env", "manual_retorrent", "daily_candidates", "qbit", "next_step", "deployment_runbook", "seedbox_live_trial", "warnings"],
                 "seedbox_bootstrap_handoff_fields": ["ready", "action", "read_only", "configured_paths", "missing_mounts", "mkdir_commands", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_requests", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
+                "seedbox_live_trial_handoff_fields": ["ready", "status", "action", "read_only", "compose", "api", "readiness", "live_order", "report_contract", "safety", "required_confirmations", "qbit", "next_step", "blockers", "warnings", "next_actions"],
                 "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
-                "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "qbit", "docker_compose", "env", "safety", "next_tools"],
+                "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
                 "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
@@ -26378,6 +26541,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "deployment_runbook": {"type": "object"},
             "deployment_handoff": {"type": "object"},
             "seedbox_bootstrap_handoff": {"type": "object"},
+            "seedbox_live_trial_handoff": {"type": "object"},
             "deployment_final_report": {"type": "object"},
             "agent_summary": {"type": "object"},
             "agent_handoff": {"type": "object"},
