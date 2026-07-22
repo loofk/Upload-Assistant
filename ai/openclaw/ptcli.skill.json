@@ -21003,6 +21003,9 @@
           "uploaded_seeding_evidence",
           "job_final_report",
           "manual_retorrent_final_report",
+          "manual_retorrent_remaining_sequence",
+          "remaining_action",
+          "remaining_next_step",
           "read_order"
         ],
         "daily_candidate_tracking_report_fields": [
@@ -21441,6 +21444,9 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "manual_retorrent_remaining_sequence",
+          "remaining_action",
+          "remaining_next_step",
           "job_final_verdict",
           "job_report_allowed",
           "job_final_report",
@@ -32923,6 +32929,9 @@
           "uploaded_seeding_evidence",
           "job_final_report",
           "manual_retorrent_final_report",
+          "manual_retorrent_remaining_sequence",
+          "remaining_action",
+          "remaining_next_step",
           "read_order"
         ],
         "daily_candidate_tracking_report_fields": [
@@ -33361,6 +33370,9 @@
           "recommended_endpoint",
           "recommended_method",
           "recommended_request",
+          "manual_retorrent_remaining_sequence",
+          "remaining_action",
+          "remaining_next_step",
           "job_final_verdict",
           "job_report_allowed",
           "job_final_report",
