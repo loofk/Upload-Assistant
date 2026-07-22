@@ -16349,6 +16349,53 @@ def test_daily_candidate_refill_plan_reruns_for_ready_shortfall(monkeypatch, tmp
     assert "rerun returns no new safe candidates" in refill_plan["stop_when"][0]
 
 
+def test_daily_candidate_final_report_exposes_completion_evidence() -> None:
+    complete_job = {
+        "retorrent_job_id": "job-retorrent-1",
+        "status": "complete",
+        "candidate_source_id": "60635",
+        "candidate_title": "Example.Release",
+        "action": "complete",
+        "status_endpoint": "/v1/jobs/job-retorrent-1",
+        "summary_endpoint": "/v1/jobs/job-retorrent-1/summary",
+        "job_final_verdict": "ready_to_report",
+        "job_report_allowed": True,
+        "job_final_report": {
+            "kind": "ptcli.job_final_report",
+            "verdict": "ready_to_report",
+            "report_allowed": True,
+            "duplicate_check": {"exists": False},
+        },
+        "manual_retorrent_verdict": "ready_to_report",
+        "manual_report_allowed": True,
+        "manual_retorrent_final_report": {"kind": "ptcli.manual_retorrent_final_report", "verdict": "ready_to_report", "report_allowed": True},
+        "closure_complete": True,
+        "policy_execution_ready": True,
+    }
+    report = ptcli_service._daily_candidate_final_report(
+        {"blockers": []},
+        {"blockers": []},
+        {"target_count": 1, "selected_count": 1, "ready_count": 1, "safe_to_submit_count": 0, "blockers": []},
+        {"action": "complete", "complete_jobs": [complete_job], "running_jobs": [], "blocked_jobs": [], "running_count": 0, "blockers": []},
+        {"ready_shortfall_count": 0},
+        {"approval_items": []},
+        {"action": "report_complete", "target_count": 1, "ready_count": 1, "complete_jobs": [complete_job], "running_jobs": [], "blocked_jobs": [], "blockers": []},
+    )
+
+    assert report["kind"] == "ptcli.daily_candidate_final_report"
+    assert report["verdict"] == "ready_to_report"
+    assert report["completion_report"]["kind"] == "ptcli.daily_candidate_completion_report"
+    assert report["completion_report"]["ready"] is True
+    assert report["completion_report"]["complete_count"] == 1
+    assert report["completion_report"]["completed_source_ids"] == ["60635"]
+    assert report["completion_report"]["summary_endpoints"] == ["/v1/jobs/job-retorrent-1/summary"]
+    assert report["completion_report"]["completed_jobs"][0]["retorrent_job_id"] == "job-retorrent-1"
+    assert report["completion_report"]["completed_jobs"][0]["report_allowed"] is True
+    assert report["completion_report"]["completed_jobs"][0]["duplicate_exists"] is False
+    assert "completed_jobs[].summary_endpoint.live_completion_gate" in report["completion_report"]["evidence_refs"]
+    assert report["next_actions"] == ["Report daily_candidate_final_report.completion_report with completed job evidence."]
+
+
 def test_candidate_retorrent_handoff_prefers_material_resume_request(tmp_path) -> None:
     result = {
         "kind": "ptcli.service.retorrent",
@@ -18939,6 +18986,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "approval_items" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_approval_sequence_fields"]
     assert "daily_candidate_batch_execution_context_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "first_submitted_job" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_execution_context_fields"]
+    assert "completion_report" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_final_report_fields"]
+    assert "daily_candidate_completion_report_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "completed_jobs" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_completion_report_fields"]
+    assert "daily_candidate_completed_job_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "summary_endpoint" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_completed_job_fields"]
     assert "daily_candidate_tracking_report_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "can_submit_now" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
     assert "recommended_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
@@ -19366,6 +19418,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_final_report" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_final_report_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "counts" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_final_report_fields"]
+    assert "completion_report" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_final_report_fields"]
+    assert "daily_candidate_completion_report_fields" in tool_by_name["list_jobs"]["response_contract"]
+    assert "daily_candidate_completed_job_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_tracking_report" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_tracking_report_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "should_refill" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_tracking_report_fields"]
@@ -21327,9 +21382,14 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_tracking_report" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
         assert "daily_candidate_tracking_report_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "can_submit_now" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_tracking_report_fields"]
+        assert "completion_report" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_final_report_fields"]
+        assert "daily_candidate_completion_report_fields" in tools_by_name["list_jobs"]["response_contract"]
+        assert "daily_candidate_completed_job_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "daily_candidate_tracking_report" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
         assert "daily_candidate_tracking_report_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "recommended_call" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
+        assert "completion_report" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_final_report_fields"]
+        assert "completed_jobs" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_completion_report_fields"]
         assert "loop_control" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_tracking_report_fields"]
         assert "refill_request_contract" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_plan_fields"]
         assert "daily_candidate_refill_request_contract_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
