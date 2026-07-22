@@ -7966,14 +7966,20 @@ def _daily_candidate_completion_report(execution_summary: dict[str, Any], execut
         "summary_endpoints": [item["summary_endpoint"] for item in completed if item.get("summary_endpoint")],
         "evidence_refs": [
             "completed_jobs[].policy_application_handoff",
+            "completed_jobs[].qbit_enforcement_summary",
+            "completed_jobs[].qbit_execution_gate",
+            "completed_jobs[].uploaded_seeding_evidence",
             "completed_jobs[].job_final_report",
             "completed_jobs[].manual_retorrent_final_report",
             "completed_jobs[].summary_endpoint.policy_application_handoff",
+            "completed_jobs[].summary_endpoint.qbit_enforcement_summary",
+            "completed_jobs[].summary_endpoint.qbit_execution_gate",
+            "completed_jobs[].summary_endpoint.target_upload_handoff.uploaded_seeding_evidence",
             "completed_jobs[].summary_endpoint.live_completion_gate",
             "completed_jobs[].summary_endpoint.closure_summary",
             "completed_jobs[].summary_endpoint.seedbox_live_validation_completion_report",
         ],
-        "read_order": ["daily_candidate_final_report.completion_report", "completed_jobs[].summary_endpoint", "completed_jobs[].policy_application_handoff", "completed_jobs[].job_final_report", "completed_jobs[].manual_retorrent_final_report"],
+        "read_order": ["daily_candidate_final_report.completion_report", "completed_jobs[].summary_endpoint", "completed_jobs[].policy_application_handoff", "completed_jobs[].qbit_enforcement_summary", "completed_jobs[].qbit_execution_gate", "completed_jobs[].uploaded_seeding_evidence", "completed_jobs[].job_final_report", "completed_jobs[].manual_retorrent_final_report"],
         "complete_when": ["complete_count>0", "running_count=0", "blocked_count=0", "completed_jobs[].report_allowed=true"],
         "stop_when": ["running_count>0", "blocked_count>0", "blockers is non-empty", "completed_jobs[].duplicate_exists=true"],
         "blockers": blockers,
@@ -7985,6 +7991,9 @@ def _daily_candidate_completed_job_report(job: dict[str, Any]) -> dict[str, Any]
     job_final_report = job.get("job_final_report") if isinstance(job.get("job_final_report"), dict) else {}
     manual_report = job.get("manual_retorrent_final_report") if isinstance(job.get("manual_retorrent_final_report"), dict) else {}
     duplicate_check = job_final_report.get("duplicate_check") if isinstance(job_final_report.get("duplicate_check"), dict) else {}
+    qbit_enforcement_summary = job.get("qbit_enforcement_summary") if isinstance(job.get("qbit_enforcement_summary"), dict) else None
+    qbit_execution_gate = job.get("qbit_execution_gate") if isinstance(job.get("qbit_execution_gate"), dict) else None
+    uploaded_seeding_evidence = job.get("uploaded_seeding_evidence") if isinstance(job.get("uploaded_seeding_evidence"), dict) else None
     return {
         "retorrent_job_id": job.get("retorrent_job_id"),
         "source_id": job.get("candidate_source_id"),
@@ -8001,9 +8010,15 @@ def _daily_candidate_completed_job_report(job: dict[str, Any]) -> dict[str, Any]
         "policy_execution_ready": job.get("policy_execution_ready"),
         "policy_application_ready": job.get("policy_application_ready"),
         "policy_application_handoff": job.get("policy_application_handoff") if isinstance(job.get("policy_application_handoff"), dict) else None,
+        "qbit_enforcement_ready": qbit_enforcement_summary.get("ready") if isinstance(qbit_enforcement_summary, dict) else job.get("qbit_enforcement_ready"),
+        "qbit_enforcement_summary": qbit_enforcement_summary,
+        "qbit_execution_ready": qbit_execution_gate.get("ready") if isinstance(qbit_execution_gate, dict) else job.get("qbit_execution_ready"),
+        "qbit_execution_gate": qbit_execution_gate,
+        "uploaded_seeding_ready": uploaded_seeding_evidence.get("ready") if isinstance(uploaded_seeding_evidence, dict) else job.get("uploaded_seeding_ready"),
+        "uploaded_seeding_evidence": uploaded_seeding_evidence,
         "job_final_report": job_final_report,
         "manual_retorrent_final_report": manual_report,
-        "read_order": ["summary_endpoint", "policy_application_handoff", "job_final_report", "manual_retorrent_final_report", "live_completion_gate", "closure_summary"],
+        "read_order": ["summary_endpoint", "policy_application_handoff", "qbit_enforcement_summary", "qbit_execution_gate", "uploaded_seeding_evidence", "job_final_report", "manual_retorrent_final_report", "live_completion_gate", "closure_summary"],
     }
 
 
@@ -15633,6 +15648,9 @@ def _daily_candidate_publish_approval_card(item: dict[str, Any]) -> dict[str, An
 
 
 def _daily_candidate_publish_completion_card(job: dict[str, Any]) -> dict[str, Any]:
+    qbit_enforcement_summary = job.get("qbit_enforcement_summary") if isinstance(job.get("qbit_enforcement_summary"), dict) else None
+    qbit_execution_gate = job.get("qbit_execution_gate") if isinstance(job.get("qbit_execution_gate"), dict) else None
+    uploaded_seeding_evidence = job.get("uploaded_seeding_evidence") if isinstance(job.get("uploaded_seeding_evidence"), dict) else None
     return {
         "kind": "ptcli.daily_candidate_publish_card",
         "type": "completion",
@@ -15646,7 +15664,18 @@ def _daily_candidate_publish_completion_card(job: dict[str, Any]) -> dict[str, A
         "report_allowed": job.get("report_allowed"),
         "duplicate_exists": job.get("duplicate_exists"),
         "closure_complete": job.get("closure_complete"),
-        "evidence_refs": ["summary_endpoint.policy_application_handoff", "summary_endpoint.live_completion_gate", "summary_endpoint.closure_summary", "summary_endpoint.seedbox_live_validation_completion_report"],
+        "qbit_enforcement_ready": qbit_enforcement_summary.get("ready") if isinstance(qbit_enforcement_summary, dict) else job.get("qbit_enforcement_ready"),
+        "qbit_execution_ready": qbit_execution_gate.get("ready") if isinstance(qbit_execution_gate, dict) else job.get("qbit_execution_ready"),
+        "uploaded_seeding_ready": uploaded_seeding_evidence.get("ready") if isinstance(uploaded_seeding_evidence, dict) else job.get("uploaded_seeding_ready"),
+        "evidence_refs": [
+            "summary_endpoint.policy_application_handoff",
+            "summary_endpoint.qbit_enforcement_summary",
+            "summary_endpoint.qbit_execution_gate",
+            "summary_endpoint.target_upload_handoff.uploaded_seeding_evidence",
+            "summary_endpoint.live_completion_gate",
+            "summary_endpoint.closure_summary",
+            "summary_endpoint.seedbox_live_validation_completion_report",
+        ],
     }
 
 
@@ -15950,6 +15979,10 @@ def _daily_candidate_submitted_item(job: dict[str, Any]) -> dict[str, Any]:
     summary = followup.get("candidate_submission_summary") if isinstance(followup.get("candidate_submission_summary"), dict) else {}
     execution = summary.get("execution_handoff") if isinstance(summary.get("execution_handoff"), dict) else {}
     policy_application_handoff = _job_policy_application_handoff(job)
+    qbit_enforcement_summary = _job_qbit_enforcement_summary(job)
+    qbit_execution_gate = _job_qbit_execution_gate(job)
+    target_upload_handoff = _job_target_upload_handoff(job)
+    uploaded_seeding_evidence = target_upload_handoff.get("uploaded_seeding_evidence") if isinstance(target_upload_handoff, dict) and isinstance(target_upload_handoff.get("uploaded_seeding_evidence"), dict) else None
     return {
         "retorrent_job_id": job.get("job_id"),
         "status": job.get("status"),
@@ -15974,6 +16007,12 @@ def _daily_candidate_submitted_item(job: dict[str, Any]) -> dict[str, Any]:
         "policy_execution_ready": summary.get("policy_execution_ready"),
         "policy_application_ready": policy_application_handoff.get("ready") if isinstance(policy_application_handoff, dict) else None,
         "policy_application_handoff": policy_application_handoff,
+        "qbit_enforcement_ready": qbit_enforcement_summary.get("ready") if isinstance(qbit_enforcement_summary, dict) else None,
+        "qbit_enforcement_summary": qbit_enforcement_summary,
+        "qbit_execution_ready": qbit_execution_gate.get("ready") if isinstance(qbit_execution_gate, dict) else None,
+        "qbit_execution_gate": qbit_execution_gate,
+        "uploaded_seeding_ready": uploaded_seeding_evidence.get("ready") if isinstance(uploaded_seeding_evidence, dict) else None,
+        "uploaded_seeding_evidence": uploaded_seeding_evidence,
         "execution_state": execution.get("state") or summary.get("execution_state"),
         "blockers": _string_list(followup.get("blockers")),
         "next_actions": _string_list(followup.get("next_actions")),
@@ -26887,17 +26926,17 @@ def _job_list_response_contract() -> dict[str, Any]:
         "daily_candidate_batch_execution_context_fields": ["ready", "action", "candidate_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "remaining_submit_count", "ready_shortfall_count", "target_met", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "first_submit_request", "first_submitted_job", "running_jobs", "blocked_jobs", "complete_jobs", "completed_source_ids", "running_source_ids", "blocked_source_ids", "approval_items", "shortfall_recovery", "next_step", "read_before_action", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
         "daily_candidate_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "notification", "approval", "submission", "completion_report", "shortfall_recovery", "audit", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_completion_report_fields": ["ready", "report_allowed", "complete_count", "running_count", "blocked_count", "completed_source_ids", "completed_jobs", "summary_endpoints", "evidence_refs", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
-        "daily_candidate_completed_job_fields": ["retorrent_job_id", "source_id", "title", "status", "action", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "job_final_report", "manual_retorrent_final_report", "read_order"],
+        "daily_candidate_completed_job_fields": ["retorrent_job_id", "source_id", "title", "status", "action", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "qbit_enforcement_ready", "qbit_enforcement_summary", "qbit_execution_ready", "qbit_execution_gate", "uploaded_seeding_ready", "uploaded_seeding_evidence", "job_final_report", "manual_retorrent_final_report", "read_order"],
         "daily_candidate_tracking_report_fields": ["ready", "status", "action", "verdict", "target_count", "candidate_job_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "remaining_submit_count", "ready_shortfall_count", "target_met", "ready_target_met", "can_submit_now", "should_poll", "should_refill", "should_report", "approval_required", "completed_source_ids", "running_source_ids", "blocked_source_ids", "covered_source_ids", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "refill_request_contract", "loop_control", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_refill_request_contract_fields": ["ready", "action", "target_count", "ready_count", "ready_shortfall_count", "scan_count", "scan_exhausted", "excluded_source_ids", "submitted_source_ids", "dedupe_key", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "read_before_call", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "ready_shortfall_count", "remaining_submit_count", "running_count", "blocked_count", "should_submit", "should_poll", "should_refill", "should_report", "refill_request_contract", "next_step", "after_step", "repeat_until", "read_order", "blockers", "next_actions"],
         "daily_candidate_batch_publish_payload_fields": ["ready", "status", "format", "title", "summary", "message", "counts", "items", "top_item", "completion_items", "top_completion", "approval_queue", "tracking", "completion_report", "daily_candidate_final_report", "daily_candidate_tracking_report", "publish_contract", "read_order", "blockers", "next_actions"],
-        "daily_candidate_publish_card_fields": ["kind", "type", "rank", "source_tracker", "target", "source_id", "title", "summary_text", "endpoint", "method", "request", "requires_user_approval", "required_overrides", "retorrent_job_id", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "evidence_refs"],
+        "daily_candidate_publish_card_fields": ["kind", "type", "rank", "source_tracker", "target", "source_id", "title", "summary_text", "endpoint", "method", "request", "requires_user_approval", "required_overrides", "retorrent_job_id", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "qbit_enforcement_ready", "qbit_execution_ready", "uploaded_seeding_ready", "evidence_refs"],
         "daily_candidate_approval_item_fields": ["index", "rank", "candidate_job_id", "source_tracker", "target", "source_id", "title", "endpoint", "method", "submit_request", "candidate_execution_context", "required_overrides", "approval_text", "after_submit"],
         "daily_candidate_batch_sequence_step_fields": ["index", "name", "action", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
         "daily_candidate_batch_item_fields": ["candidate_job_id", "status", "status_endpoint", "summary_endpoint", "source_tracker", "target_trackers", "candidate_request", "candidate_counts", "candidate_control_summary", "candidate_batch_handoff_ready", "submit_endpoint", "recommended_request", "safe_source_ids", "submit_requests", "submitted_jobs", "blockers"],
         "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "source_url_retorrent_request", "candidate_execution_context", "required_overrides", "after_submit"],
-        "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "candidate_title", "action", "status_endpoint", "summary_endpoint", "resume_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "job_final_verdict", "job_report_allowed", "job_final_report", "manual_retorrent_verdict", "manual_report_allowed", "manual_retorrent_final_report", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "execution_state", "blockers", "next_actions"],
+        "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "candidate_title", "action", "status_endpoint", "summary_endpoint", "resume_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "job_final_verdict", "job_report_allowed", "job_final_report", "manual_retorrent_verdict", "manual_report_allowed", "manual_retorrent_final_report", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "qbit_enforcement_ready", "qbit_enforcement_summary", "qbit_execution_ready", "qbit_execution_gate", "uploaded_seeding_ready", "uploaded_seeding_evidence", "execution_state", "blockers", "next_actions"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
     }

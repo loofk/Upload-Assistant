@@ -16194,6 +16194,12 @@
           "policy_execution_ready",
           "policy_application_ready",
           "policy_application_handoff",
+          "qbit_enforcement_ready",
+          "qbit_enforcement_summary",
+          "qbit_execution_ready",
+          "qbit_execution_gate",
+          "uploaded_seeding_ready",
+          "uploaded_seeding_evidence",
           "job_final_report",
           "manual_retorrent_final_report",
           "read_order"
@@ -16326,6 +16332,9 @@
           "report_allowed",
           "duplicate_exists",
           "closure_complete",
+          "qbit_enforcement_ready",
+          "qbit_execution_ready",
+          "uploaded_seeding_ready",
           "evidence_refs"
         ],
         "daily_candidate_approval_item_fields": [
@@ -16412,6 +16421,12 @@
           "policy_execution_ready",
           "policy_application_ready",
           "policy_application_handoff",
+          "qbit_enforcement_ready",
+          "qbit_enforcement_summary",
+          "qbit_execution_ready",
+          "qbit_execution_gate",
+          "uploaded_seeding_ready",
+          "uploaded_seeding_evidence",
           "execution_state",
           "blockers",
           "next_actions"
@@ -25705,6 +25720,12 @@
           "policy_execution_ready",
           "policy_application_ready",
           "policy_application_handoff",
+          "qbit_enforcement_ready",
+          "qbit_enforcement_summary",
+          "qbit_execution_ready",
+          "qbit_execution_gate",
+          "uploaded_seeding_ready",
+          "uploaded_seeding_evidence",
           "job_final_report",
           "manual_retorrent_final_report",
           "read_order"
@@ -25837,6 +25858,9 @@
           "report_allowed",
           "duplicate_exists",
           "closure_complete",
+          "qbit_enforcement_ready",
+          "qbit_execution_ready",
+          "uploaded_seeding_ready",
           "evidence_refs"
         ],
         "daily_candidate_approval_item_fields": [
@@ -25923,6 +25947,12 @@
           "policy_execution_ready",
           "policy_application_ready",
           "policy_application_handoff",
+          "qbit_enforcement_ready",
+          "qbit_enforcement_summary",
+          "qbit_execution_ready",
+          "qbit_execution_gate",
+          "uploaded_seeding_ready",
+          "uploaded_seeding_evidence",
           "execution_state",
           "blockers",
           "next_actions"
