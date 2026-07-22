@@ -16205,6 +16205,16 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert batch_summary["items"][0]["submit_requests"][0]["candidate_executability"]["source_id"] == "60635"
     assert batch_summary["items"][0]["submit_requests"][0]["can_submit_after_approval"] is True
     assert batch_summary["items"][0]["submit_requests"][0]["site_policy_profile_handoff"]["ready"] is True
+    submit_action = batch_summary["items"][0]["submit_requests"][0]["action_handoff"]
+    assert submit_action["kind"] == "ptcli.daily_candidate_submit_action_handoff"
+    assert submit_action["ready"] is True
+    assert submit_action["submit_call"]["tool"] == "submit_daily_candidate_job"
+    assert submit_action["submit_call"]["endpoint"] == f"/v1/jobs/candidates/{job['job_id']}/submit"
+    assert submit_action["submit_call"]["request"]["source_id"] == "60635"
+    assert submit_action["submit_call"]["requires_user_approval"] is True
+    assert submit_action["tracking_call"]["endpoint"] == "/v1/jobs/{retorrent_job_id}"
+    assert submit_action["summary_call"]["endpoint"] == "/v1/jobs/{retorrent_job_id}/summary"
+    assert submit_action["resume_call"]["endpoint"] == "/v1/jobs/{retorrent_job_id}/resume"
     submission_plan = list_payload["daily_candidate_submission_plan"]
     assert submission_plan["kind"] == "ptcli.daily_candidate_submission_plan"
     assert submission_plan["ready"] is True
@@ -16258,6 +16268,9 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert approval_sequence["approval_items"][0]["candidate_execution_context"] == execution_context
     assert approval_sequence["approval_items"][0]["candidate_executability"]["ready"] is True
     assert approval_sequence["approval_items"][0]["can_submit_after_approval"] is True
+    assert approval_sequence["approval_items"][0]["action_handoff"] == submit_action
+    assert approval_sequence["approval_items"][0]["submit_call"] == submit_action["submit_call"]
+    assert approval_sequence["approval_items"][0]["after_submit_calls"] == submit_action["after_submit_calls"]
     assert approval_sequence["steps"][0]["action"] == "ask_user"
     assert approval_sequence["steps"][1]["tool"] == "submit_daily_candidate_job"
     assert approval_sequence["steps"][1]["request"]["source_id"] == "60635"
@@ -16317,6 +16330,10 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert publish_payload["ready"] is True
     assert publish_payload["items"][0]["source_id"] == "60635"
     assert publish_payload["items"][0]["requires_user_approval"] is True
+    assert publish_payload["items"][0]["action_handoff"] == submit_action
+    assert publish_payload["items"][0]["submit_call"] == submit_action["submit_call"]
+    assert publish_payload["items"][0]["tracking_call"] == submit_action["tracking_call"]
+    assert publish_payload["items"][0]["after_submit_calls"] == submit_action["after_submit_calls"]
     assert publish_payload["items"][0]["candidate_executability"]["can_submit_after_approval"] is True
     assert publish_payload["candidate_executability_matrix"]["ready"] is True
     assert publish_payload["candidate_executability_matrix"]["safe_to_submit_count"] == 1
@@ -20351,6 +20368,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "excluded_source_ids" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
     assert "safe_to_call_now" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_refill_request_contract_fields"]
     assert "daily_candidate_batch_sequence_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "daily_candidate_submit_action_handoff_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "action_handoff" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_submit_request_fields"]
+    assert "submit_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_approval_item_fields"]
+    assert "tracking_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
+    assert "after_submit_calls" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
     assert "steps" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_sequence_fields"]
     assert "loop_control" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_sequence_fields"]
     assert "daily_candidate_batch_loop_control_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]

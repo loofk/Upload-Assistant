@@ -10252,14 +10252,26 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
     execution_context = _candidate_execution_context(job_id or None, {**digest_item, **top_candidate}, None, source_url_retorrent_request, effective_retorrent_request)
     site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff({**digest_item, **top_candidate, "candidate_execution_context": execution_context})
     site_policy_summary = _candidate_item_site_policy_summary({**digest_item, **top_candidate}, site_policy_profile_handoff)
+    submit_endpoint = f"/v1/jobs/candidates/{job_id}/submit"
+    action_handoff = _daily_candidate_submit_action_handoff(
+        candidate_job_id=job_id or None,
+        rank=top_candidate.get("rank"),
+        source_id=top_candidate.get("source_id"),
+        endpoint=submit_endpoint,
+        request_template=request_template,
+    )
     return {
         "schedule_name": job.get("schedule_name"),
         "candidate_job_id": job_id,
         "submit_tool": "submit_daily_candidate_job",
-        "submit_endpoint": f"/v1/jobs/candidates/{job_id}/submit",
+        "submit_endpoint": submit_endpoint,
         "method": "POST",
         "selector": {key: value for key, value in selector.items() if value not in {None, ""}},
         "request_template": request_template,
+        "action_handoff": action_handoff,
+        "submit_call": action_handoff["submit_call"],
+        "tracking_call": action_handoff["tracking_call"],
+        "after_submit_calls": action_handoff["after_submit_calls"],
         "source_url_retorrent_request": source_url_retorrent_request,
         "candidate_execution_context": execution_context,
         "candidate_executability": candidate_executability or None,
@@ -10305,6 +10317,75 @@ def _daily_candidate_schedule_submission_item(job: dict[str, Any], request: dict
         },
         "status_endpoint": job.get("status_endpoint"),
         "summary_endpoint": job.get("summary_endpoint"),
+    }
+
+
+def _daily_candidate_submit_action_handoff(
+    *,
+    candidate_job_id: str | None,
+    rank: Any,
+    source_id: Any,
+    endpoint: str | None,
+    request_template: dict[str, Any],
+) -> dict[str, Any]:
+    submit_call = {
+        "tool": "submit_daily_candidate_job",
+        "endpoint": endpoint or (f"/v1/jobs/candidates/{candidate_job_id}/submit" if candidate_job_id else "/v1/jobs/candidates/{candidate_job_id}/submit"),
+        "method": "POST",
+        "request": request_template,
+        "safe_to_call_now": bool(candidate_job_id and request_template),
+        "requires_user_review": True,
+        "requires_user_approval": True,
+        "mutates_state": True,
+        "reason": "daily_candidate_user_approved_submit",
+    }
+    status_call = {
+        "tool": "get_job_status",
+        "endpoint": "/v1/jobs/{retorrent_job_id}",
+        "method": "GET",
+        "request": {"job_id": "<retorrent_job_id from submit_call response>"},
+        "safe_to_call_now": False,
+        "requires_user_review": False,
+        "mutates_state": False,
+    }
+    summary_call = {
+        "tool": "get_job_summary",
+        "endpoint": "/v1/jobs/{retorrent_job_id}/summary",
+        "method": "GET",
+        "request": {"job_id": "<retorrent_job_id from submit_call response>"},
+        "safe_to_call_now": False,
+        "requires_user_review": False,
+        "mutates_state": False,
+    }
+    resume_call = {
+        "tool": "resume_job",
+        "endpoint": "/v1/jobs/{retorrent_job_id}/resume",
+        "method": "POST",
+        "request_from": "candidate_submit_followup.recommended_request or job_handoff.recommended_request after reading status/summary",
+        "safe_to_call_now": False,
+        "requires_user_review": True,
+        "mutates_state": True,
+    }
+    return {
+        "kind": "ptcli.daily_candidate_submit_action_handoff",
+        "ready": bool(candidate_job_id and request_template),
+        "candidate_job_id": candidate_job_id,
+        "rank": rank,
+        "source_id": source_id,
+        "submit_call": submit_call,
+        "tracking_call": status_call,
+        "summary_call": summary_call,
+        "resume_call": resume_call,
+        "after_submit_calls": [status_call, summary_call, resume_call],
+        "read_after_submit": ["retorrent_job_id", "status_endpoint", "summary_endpoint", "resume_endpoint", "candidate_submit_followup", "candidate_submit_sequence", "job_handoff"],
+        "complete_when": ["submitted retorrent job reaches complete", "manual_retorrent_final_report.report_allowed=true", "closure_summary.complete=true"],
+        "stop_when": ["duplicate_check.exists=true", "policy_application_handoff.ready=false", "qbit_execution_gate.mismatch_roles is non-empty", "live_completion_gate.action starts with stop"],
+        "safety": {
+            "submit_requires_explicit_user_approval": True,
+            "live_upload_requires_confirm_upload": True,
+            "does_not_bypass_site_rules": True,
+            "submit_mutates_state": True,
+        },
     }
 
 
@@ -18554,6 +18635,13 @@ def _daily_candidate_publish_approval_card(item: dict[str, Any]) -> dict[str, An
     site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff(item)
     site_policy_summary = _candidate_item_site_policy_summary(item, site_policy_profile_handoff)
     action = source_card.get("action") if isinstance(source_card.get("action"), dict) else {}
+    action_handoff = item.get("action_handoff") if isinstance(item.get("action_handoff"), dict) else _daily_candidate_submit_action_handoff(
+        candidate_job_id=str(item.get("candidate_job_id") or "") or None,
+        rank=item.get("rank") or item.get("index"),
+        source_id=source_card.get("source_id") or item.get("source_id"),
+        endpoint=item.get("endpoint"),
+        request_template=request,
+    )
     return {
         "kind": "ptcli.daily_candidate_publish_card",
         "type": "approval",
@@ -18576,6 +18664,10 @@ def _daily_candidate_publish_approval_card(item: dict[str, Any]) -> dict[str, An
         "endpoint": item.get("endpoint"),
         "method": item.get("method") or "POST",
         "request": request,
+        "action_handoff": action_handoff,
+        "submit_call": action_handoff["submit_call"],
+        "tracking_call": action_handoff["tracking_call"],
+        "after_submit_calls": action_handoff["after_submit_calls"],
         "candidate_executability": item.get("candidate_executability") if isinstance(item.get("candidate_executability"), dict) else None,
         "action": {
             "decision": action.get("decision") or "submit_when_confirmed",
@@ -18920,6 +19012,13 @@ def _daily_candidate_approval_items(submission_plan: dict[str, Any]) -> list[dic
         source_reference = _approval_source_reference(source_request)
         site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff(submit_request)
         site_policy_summary = _candidate_item_site_policy_summary(submit_request, site_policy_profile_handoff)
+        action_handoff = submit_request.get("action_handoff") if isinstance(submit_request.get("action_handoff"), dict) else _daily_candidate_submit_action_handoff(
+            candidate_job_id=str(submit_request.get("candidate_job_id") or "") or None,
+            rank=submit_request.get("rank"),
+            source_id=submit_request.get("source_id") or source_request.get("source_id") or source_reference.get("source_id"),
+            endpoint=submit_request.get("endpoint"),
+            request_template=request,
+        )
         items.append(
             {
                 "index": index,
@@ -18932,6 +19031,10 @@ def _daily_candidate_approval_items(submission_plan: dict[str, Any]) -> list[dic
                 "endpoint": submit_request.get("endpoint"),
                 "method": submit_request.get("method") or "POST",
                 "submit_request": request,
+                "action_handoff": action_handoff,
+                "submit_call": action_handoff["submit_call"],
+                "tracking_call": action_handoff["tracking_call"],
+                "after_submit_calls": action_handoff["after_submit_calls"],
                 "candidate_execution_context": submit_request.get("candidate_execution_context") if isinstance(submit_request.get("candidate_execution_context"), dict) else None,
                 "candidate_executability": submit_request.get("candidate_executability") if isinstance(submit_request.get("candidate_executability"), dict) else None,
                 "can_submit_after_approval": submit_request.get("can_submit_after_approval"),
@@ -19075,6 +19178,13 @@ def _daily_candidate_batch_item_submit_request(candidate_job_id: str, item: dict
     request = item.get("request_template") if isinstance(item.get("request_template"), dict) else {}
     site_policy_profile_handoff = _candidate_item_site_policy_profile_handoff(item)
     site_policy_summary = _candidate_item_site_policy_summary(item, site_policy_profile_handoff)
+    action_handoff = item.get("action_handoff") if isinstance(item.get("action_handoff"), dict) else _daily_candidate_submit_action_handoff(
+        candidate_job_id=candidate_job_id or None,
+        rank=selector.get("rank"),
+        source_id=selector.get("source_id"),
+        endpoint=item.get("submit_endpoint") or (f"/v1/jobs/candidates/{candidate_job_id}/submit" if candidate_job_id else None),
+        request_template=request,
+    )
     return {
         "candidate_job_id": candidate_job_id or None,
         "rank": selector.get("rank"),
@@ -19083,6 +19193,10 @@ def _daily_candidate_batch_item_submit_request(candidate_job_id: str, item: dict
         "endpoint": item.get("submit_endpoint") or (f"/v1/jobs/candidates/{candidate_job_id}/submit" if candidate_job_id else None),
         "method": "POST",
         "request": request,
+        "action_handoff": action_handoff,
+        "submit_call": action_handoff["submit_call"],
+        "tracking_call": action_handoff["tracking_call"],
+        "after_submit_calls": action_handoff["after_submit_calls"],
         "source_url_retorrent_request": item.get("source_url_retorrent_request") if isinstance(item.get("source_url_retorrent_request"), dict) else None,
         "candidate_execution_context": item.get("candidate_execution_context") if isinstance(item.get("candidate_execution_context"), dict) else None,
         "candidate_executability": item.get("candidate_executability") if isinstance(item.get("candidate_executability"), dict) else None,
@@ -31285,15 +31399,16 @@ def _job_list_response_contract() -> dict[str, Any]:
         "daily_candidate_refill_request_contract_fields": ["ready", "action", "target_count", "ready_count", "ready_shortfall_count", "scan_count", "scan_exhausted", "excluded_source_ids", "submitted_source_ids", "dedupe_key", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "read_before_call", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "ready_shortfall_count", "remaining_submit_count", "running_count", "blocked_count", "should_submit", "should_poll", "should_refill", "should_report", "refill_request_contract", "next_step", "after_step", "repeat_until", "read_order", "blockers", "next_actions"],
         "daily_candidate_batch_publish_payload_fields": ["ready", "status", "format", "title", "summary", "message", "counts", "items", "top_item", "candidate_field_completeness", "candidate_executability_matrix", "completion_items", "top_completion", "approval_queue", "tracking", "completion_gate", "completion_report", "daily_candidate_final_report", "daily_candidate_tracking_report", "daily_candidate_completion_gate", "publish_contract", "read_order", "blockers", "next_actions"],
-        "daily_candidate_publish_card_fields": ["kind", "type", "rank", "source_tracker", "target", "source_id", "source_url", "title", "size", "published_at", "promotion", "freeleech_like", "metadata", "duplicate_check", "downloadability", "recommendation", "risk", "action", "summary_text", "endpoint", "method", "request", "candidate_executability", "requires_user_approval", "required_overrides", "site_policy_profile_handoff", "site_policy_summary", "retorrent_job_id", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "qbit_enforcement_ready", "qbit_execution_ready", "uploaded_seeding_ready", "evidence_refs"],
+        "daily_candidate_publish_card_fields": ["kind", "type", "rank", "source_tracker", "target", "source_id", "source_url", "title", "size", "published_at", "promotion", "freeleech_like", "metadata", "duplicate_check", "downloadability", "recommendation", "risk", "action", "summary_text", "endpoint", "method", "request", "action_handoff", "submit_call", "tracking_call", "after_submit_calls", "candidate_executability", "requires_user_approval", "required_overrides", "site_policy_profile_handoff", "site_policy_summary", "retorrent_job_id", "summary_endpoint", "status_endpoint", "job_final_verdict", "manual_retorrent_verdict", "report_allowed", "duplicate_exists", "closure_complete", "qbit_enforcement_ready", "qbit_execution_ready", "uploaded_seeding_ready", "evidence_refs"],
         "daily_candidate_field_completeness_fields": ["ready", "required_fields", "item_count", "ready_count", "missing_count", "missing_by_source_id", "items", "continue_when", "stop_when"],
         "daily_candidate_executability_matrix_fields": ["ready", "status", "item_count", "safe_to_submit_count", "blocked_count", "ready_count", "next_source_id", "next_phase", "next_evidence", "items", "phase_summary", "blockers", "continue_when", "stop_when", "next_actions"],
         "daily_candidate_executability_item_fields": ["rank", "source_tracker", "source_id", "source_url", "target", "title", "ready", "can_submit_after_approval", "requires_human_approval", "status", "first_blocked_phase", "first_blocked_check", "checks", "missing_checks", "submit_tool", "submit_endpoint", "submit_request", "required_user_inputs", "blockers"],
         "daily_candidate_executability_check_fields": ["name", "phase", "ready", "status", "required_fields", "blocking"],
-        "daily_candidate_approval_item_fields": ["index", "rank", "candidate_job_id", "source_tracker", "target", "source_id", "title", "endpoint", "method", "submit_request", "candidate_execution_context", "candidate_executability", "can_submit_after_approval", "first_blocked_phase", "first_blocked_check", "missing_checks", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "approval_text", "after_submit"],
+        "daily_candidate_approval_item_fields": ["index", "rank", "candidate_job_id", "source_tracker", "target", "source_id", "title", "endpoint", "method", "submit_request", "action_handoff", "submit_call", "tracking_call", "after_submit_calls", "candidate_execution_context", "candidate_executability", "can_submit_after_approval", "first_blocked_phase", "first_blocked_check", "missing_checks", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "approval_text", "after_submit"],
         "daily_candidate_batch_sequence_step_fields": ["index", "name", "action", "tool", "endpoint", "method", "request", "read", "continue_when", "repeat_when", "stop_when"],
         "daily_candidate_batch_item_fields": ["candidate_job_id", "status", "status_endpoint", "summary_endpoint", "source_tracker", "target_trackers", "candidate_request", "candidate_counts", "candidate_control_summary", "candidate_executability_matrix", "candidate_batch_handoff_ready", "submit_endpoint", "recommended_request", "safe_source_ids", "submit_requests", "submitted_jobs", "blockers"],
-        "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "source_url_retorrent_request", "candidate_execution_context", "candidate_executability", "can_submit_after_approval", "first_blocked_phase", "first_blocked_check", "missing_checks", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "after_submit"],
+        "daily_candidate_batch_submit_request_fields": ["candidate_job_id", "rank", "source_id", "title", "endpoint", "method", "request", "action_handoff", "submit_call", "tracking_call", "after_submit_calls", "source_url_retorrent_request", "candidate_execution_context", "candidate_executability", "can_submit_after_approval", "first_blocked_phase", "first_blocked_check", "missing_checks", "site_policy_profile_handoff", "site_policy_summary", "required_overrides", "after_submit"],
+        "daily_candidate_submit_action_handoff_fields": ["ready", "candidate_job_id", "rank", "source_id", "submit_call", "tracking_call", "summary_call", "resume_call", "after_submit_calls", "read_after_submit", "complete_when", "stop_when", "safety"],
         "daily_candidate_submitted_item_fields": ["retorrent_job_id", "status", "candidate_rank", "candidate_source_id", "candidate_title", "action", "status_endpoint", "summary_endpoint", "resume_endpoint", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "job_final_verdict", "job_report_allowed", "job_final_report", "manual_retorrent_verdict", "manual_report_allowed", "manual_retorrent_final_report", "closure_complete", "policy_execution_ready", "policy_application_ready", "policy_application_handoff", "qbit_enforcement_ready", "qbit_enforcement_summary", "qbit_execution_ready", "qbit_execution_gate", "uploaded_seeding_ready", "uploaded_seeding_evidence", "execution_state", "blockers", "next_actions"],
         "filters": ["status", "kind", "limit"],
         "queue_fields": ["max_concurrent_jobs", "running_count", "queued_count", "available_slots", "backlog_count"],
@@ -31331,6 +31446,7 @@ def _daily_candidate_batch_status_response_contract() -> dict[str, Any]:
         "daily_candidate_batch_sequence_step_fields": list_contract["daily_candidate_batch_sequence_step_fields"],
         "daily_candidate_batch_item_fields": list_contract["daily_candidate_batch_item_fields"],
         "daily_candidate_batch_submit_request_fields": list_contract["daily_candidate_batch_submit_request_fields"],
+        "daily_candidate_submit_action_handoff_fields": list_contract["daily_candidate_submit_action_handoff_fields"],
         "daily_candidate_submitted_item_fields": list_contract["daily_candidate_submitted_item_fields"],
         "filters": ["source_tracker", "target_trackers", "kind", "status"],
     }
