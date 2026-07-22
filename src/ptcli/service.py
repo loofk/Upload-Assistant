@@ -23398,6 +23398,17 @@ def _deployment_daily_candidate_trigger_handoff(
             or {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "request": {"schedules": daily_candidate_plan.get("schedules") or _daily_candidate_schedule_env_example()}},
             "batch_status": {"tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": batch_request},
             "publish_payload_field": "daily_candidate_batch_publish_payload",
+            "deliver_digest": {
+                "tool": "daily_candidate_delivery",
+                "endpoint": "/v1/candidates/daily/deliver",
+                "method": "POST",
+                "request": {
+                    "daily_candidate_batch_publish_payload": "<daily_candidate_batch_publish_payload>",
+                    "delivery_handoff": "<daily_candidate_delivery_handoff>",
+                    "write_files": True,
+                    "use_env_webhook": True,
+                },
+            },
             "poll_jobs": {"tool": "get_job_status", "endpoint": "/v1/jobs/{job_id}", "method": "GET"},
             "submit_candidate": {"tool": "submit_daily_candidate_job", "endpoint": "/v1/jobs/candidates/{candidate_job_id}/submit", "method": "POST"},
         },
@@ -23411,7 +23422,7 @@ def _deployment_daily_candidate_trigger_handoff(
             {"index": 1, "name": "inspect_schedule", "tool": "daily_candidates_schedule", "endpoint": "/v1/candidates/daily/schedule", "method": "POST", "read": ["schedule_handoff", "daily_schedule_gate"], "continue_when": "schedule_handoff.ready=true", "stop_when": "schedule_handoff.blockers is non-empty"},
             {"index": 2, "name": "create_daily_candidate_jobs", "tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "read": ["schedule_digest", "notification_payload", "delivery_handoff"], "continue_when": "candidate jobs are queued or complete", "stop_when": "daily_schedule_gate.blockers is non-empty"},
             {"index": 3, "name": "read_batch_publish_payload", "tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": batch_request, "read": ["daily_candidate_batch_publish_payload", "daily_candidate_tracking_report", "daily_candidate_batch_sequence"], "continue_when": "daily_candidate_batch_publish_payload.ready=true or status=shortfall", "stop_when": "daily_candidate_batch_publish_payload.blockers is non-empty"},
-            {"index": 4, "name": "publish_candidate_digest", "tool": "external_delivery", "endpoint": None, "method": None, "read": ["daily_candidate_batch_publish_payload.message", "daily_candidate_batch_publish_payload.items", "daily_candidate_batch_publish_payload.top_item"], "continue_when": "user receives candidate digest", "stop_when": "delivery channel is not configured"},
+            {"index": 4, "name": "deliver_candidate_digest", "tool": "daily_candidate_delivery", "endpoint": "/v1/candidates/daily/deliver", "method": "POST", "request": {"daily_candidate_batch_publish_payload": "<daily_candidate_batch_publish_payload>", "delivery_handoff": "<daily_candidate_delivery_handoff>", "write_files": True, "use_env_webhook": True}, "read": ["daily_candidate_delivery_result.file_delivery", "daily_candidate_delivery_result.webhook_delivery", "daily_candidate_delivery_result.payload_fingerprint"], "continue_when": "daily_candidate_delivery_result.ok=true and user receives candidate digest", "stop_when": "daily_candidate_delivery_result.blockers is non-empty"},
             {"index": 5, "name": "submit_only_after_approval", "tool": "submit_daily_candidate_job", "endpoint": "/v1/jobs/candidates/{candidate_job_id}/submit", "method": "POST", "read": ["daily_candidate_approval_sequence.approval_items[].submit_request"], "continue_when": "user explicitly approves selected candidates with confirm_upload=true", "stop_when": "approval is missing or duplicate/policy blocker appears"},
         ],
         "read_order": ["daily_candidate_trigger_handoff", "daily_candidates.schedule_handoff", "daily_candidates.daily_schedule_gate", "daily_candidate_batch_publish_payload", "daily_candidate_tracking_report"],
@@ -23441,7 +23452,7 @@ def _first_target_value(value: Any) -> str:
 
 def _deployment_daily_candidate_trigger_next_actions(ready: bool, schedule_ready: bool, api_ready: bool, compose_daily_ready: bool, blockers: list[str]) -> list[str]:
     if ready:
-        return ["Start ptcli-daily-scheduler or call daily_candidates_schedule_job, then publish daily_candidate_batch_publish_payload from daily_candidate_batch_status."]
+        return ["Start ptcli-daily-scheduler or call daily_candidates_schedule_job, read daily_candidate_batch_publish_payload, then deliver it through daily_candidate_delivery."]
     if blockers:
         return ["Resolve daily_candidate_trigger_handoff.blockers, then rerun deployment_check."]
     if not schedule_ready:
@@ -23472,6 +23483,7 @@ def _deployment_daily_candidate_delivery_handoff(
     status = "ready" if ready else "blocked" if delivery_blockers else "configure_delivery"
     publish_payload_sources = [
         "daily_candidate_batch_status.daily_candidate_batch_publish_payload",
+        "daily_candidate_delivery.request.daily_candidate_batch_publish_payload",
         "daily_candidate_trigger_handoff.api.batch_status",
         "ptcli-daily-candidates-notification.json.notification_payload",
         "ptcli-daily-schedule-summary.json.notification_payload",
@@ -23528,6 +23540,20 @@ def _deployment_daily_candidate_delivery_handoff(
                 "payload_field": "daily_candidate_batch_publish_payload",
                 "safe_to_retry": True,
             },
+            "delivery_api": {
+                "ready": api_ready,
+                "tool": "daily_candidate_delivery",
+                "endpoint": "/v1/candidates/daily/deliver",
+                "method": "POST",
+                "request": {
+                    "daily_candidate_batch_publish_payload": "<daily_candidate_batch_publish_payload>",
+                    "delivery_handoff": "<daily_candidate_delivery_handoff>",
+                    "write_files": True,
+                    "use_env_webhook": True,
+                },
+                "result_fields": ["file_delivery", "webhook_delivery", "payload_fingerprint", "evidence_contract"],
+                "safe_to_retry": True,
+            },
             "local_files": {
                 "ready": file_ready,
                 "enabled_by_compose": True,
@@ -23555,7 +23581,7 @@ def _deployment_daily_candidate_delivery_handoff(
         "workflow": [
             {"index": 1, "name": "trigger_daily_candidates", "tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "request": api.get("create_jobs", {}).get("request") if isinstance(api.get("create_jobs"), dict) else None, "continue_when": "candidate jobs are queued or complete", "stop_when": "daily_candidate_trigger_handoff.blockers is non-empty"},
             {"index": 2, "name": "read_publish_payload", "tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": batch_status.get("request"), "read": ["daily_candidate_batch_publish_payload", "daily_candidate_tracking_report", "daily_candidate_batch_publish_payload.completion_report", "daily_candidate_batch_publish_payload.completion_items"], "continue_when": "daily_candidate_batch_publish_payload is present", "stop_when": "daily_candidate_batch_publish_payload.blockers is non-empty"},
-            {"index": 3, "name": "deliver_digest", "tool": "ai_pull_or_file_or_webhook", "endpoint": None, "method": None, "read": publish_payload_sources + digest_evidence_refs, "continue_when": "digest is visible to the AI/IM/webhook consumer", "stop_when": "no delivery channel can read notification_payload or daily_candidate_batch_publish_payload"},
+            {"index": 3, "name": "deliver_digest", "tool": "daily_candidate_delivery", "endpoint": "/v1/candidates/daily/deliver", "method": "POST", "request": {"daily_candidate_batch_publish_payload": "<daily_candidate_batch_publish_payload>", "delivery_handoff": "<daily_candidate_delivery_handoff>", "write_files": True, "use_env_webhook": True}, "read": publish_payload_sources + digest_evidence_refs + ["daily_candidate_delivery_result.file_delivery", "daily_candidate_delivery_result.webhook_delivery", "daily_candidate_delivery_result.payload_fingerprint"], "continue_when": "daily_candidate_delivery_result.ok=true and digest is visible to the AI/IM/webhook consumer", "stop_when": "daily_candidate_delivery_result.blockers is non-empty or no delivery channel can read notification_payload or daily_candidate_batch_publish_payload"},
             {"index": 4, "name": "wait_for_user_approval", "tool": "ask_user", "endpoint": None, "method": None, "read": ["approval_queue", "first_approval_prompt", "submit_request"], "continue_when": "user explicitly approves a candidate", "stop_when": "user does not approve or candidate blockers are present"},
             {"index": 5, "name": "report_completed_retorrents", "tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": batch_status.get("request"), "read": completion_evidence_refs, "continue_when": "all completed jobs have uploaded_seeding_ready=true or blockers explain why not", "stop_when": "completion evidence is missing"},
         ],
@@ -23581,7 +23607,7 @@ def _deployment_daily_candidate_delivery_next_actions(ready: bool, api_ready: bo
     if blockers:
         return ["Resolve daily_candidate_delivery_handoff.blockers, then rerun deployment_check."]
     if ready:
-        actions = ["Publish daily_candidate_batch_publish_payload via AI pull, local notification files, or webhook; this does not submit or upload torrents."]
+        actions = ["Call daily_candidate_delivery with daily_candidate_batch_publish_payload, or consume local notification files/webhook output; this does not submit or upload torrents."]
         if not webhook_configured:
             actions.append("Optionally set PTCLI_DAILY_CANDIDATE_WEBHOOK_URL to push the digest to an external consumer.")
         return actions

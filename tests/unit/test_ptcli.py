@@ -21940,7 +21940,10 @@ services:
     assert trigger["api"]["batch_status"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
     assert trigger["api"]["batch_status"]["request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10}
     assert trigger["api"]["publish_payload_field"] == "daily_candidate_batch_publish_payload"
+    assert trigger["api"]["deliver_digest"]["tool"] == "daily_candidate_delivery"
+    assert trigger["api"]["deliver_digest"]["endpoint"] == "/v1/candidates/daily/deliver"
     assert trigger["workflow"][2]["name"] == "read_batch_publish_payload"
+    assert trigger["workflow"][3]["tool"] == "daily_candidate_delivery"
     assert trigger["safety"]["submit_requires_user_approval"] is True
     assert trigger["safety"]["live_upload_requires_confirm_upload"] is True
     assert payload["deployment_handoff"]["daily_candidate_trigger_handoff"] == trigger
@@ -21958,10 +21961,15 @@ services:
     assert "daily_candidate_batch_publish_payload.completion_items[].uploaded_seeding_ready" in delivery["workflow"][4]["read"]
     assert delivery["channels"]["ai_pull"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
     assert delivery["channels"]["ai_pull"]["payload_field"] == "daily_candidate_batch_publish_payload"
+    assert delivery["channels"]["delivery_api"]["tool"] == "daily_candidate_delivery"
+    assert delivery["channels"]["delivery_api"]["endpoint"] == "/v1/candidates/daily/deliver"
+    assert "payload_fingerprint" in delivery["channels"]["delivery_api"]["result_fields"]
     assert delivery["channels"]["local_files"]["ready"] is True
     assert delivery["channels"]["local_files"]["payload_field"] == "notification_payload"
     assert delivery["channels"]["webhook"]["env"] == "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL"
     assert delivery["workflow"][2]["name"] == "deliver_digest"
+    assert delivery["workflow"][2]["tool"] == "daily_candidate_delivery"
+    assert delivery["workflow"][2]["endpoint"] == "/v1/candidates/daily/deliver"
     assert delivery["safety"]["publishing_uploads"] is False
     assert delivery["safety"]["submit_requires_user_approval"] is True
     assert payload["deployment_handoff"]["daily_candidate_delivery_handoff"] == delivery
@@ -22102,6 +22110,7 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert trigger["status"] in {"blocked", "configure_schedule", "repair_compose_or_api"}
     assert trigger["api"]["batch_status"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
     assert trigger["api"]["publish_payload_field"] == "daily_candidate_batch_publish_payload"
+    assert trigger["api"]["deliver_digest"]["endpoint"] == "/v1/candidates/daily/deliver"
     assert trigger["safety"]["uploads"] is False
     assert trigger["blockers"]
     assert payload["deployment_handoff"]["daily_candidate_trigger_handoff"] == trigger
@@ -22111,6 +22120,7 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert "daily_candidate_batch_publish_payload.completion_items[].qbit_execution_ready" in delivery["completion_evidence_refs"]
     assert "completion_items[].uploaded_seeding_ready=false" in delivery["evidence_contract"]["stop_when"]
     assert delivery["channels"]["ai_pull"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
+    assert delivery["channels"]["delivery_api"]["endpoint"] == "/v1/candidates/daily/deliver"
     assert delivery["channels"]["local_files"]["payload_field"] == "notification_payload"
     assert delivery["safety"]["publishing_mutates_tracker"] is False
     assert delivery["blockers"]
