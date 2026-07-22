@@ -13095,6 +13095,18 @@ def test_service_execute_applies_policy_qbit_defaults(monkeypatch) -> None:
     assert normalized["policy_qbit_defaults"]["applied"] == {"qbit_download_limit": 20 * 1024 * 1024}
     assert normalized["policy_qbit_defaults"]["sources"] == {"qbit_download_limit": "site_policy:U2"}
     assert normalized["policy_qbit_defaults"]["request_overrides"] == {"uploaded_qbit_upload_limit": "1MiB/s"}
+    application_report = normalized["policy_qbit_defaults"]["application_report"]
+    assert application_report["kind"] == "ptcli.policy_qbit_defaults_application_report"
+    assert application_report["ready"] is True
+    assert application_report["request_patch"] == {"qbit_download_limit": 20 * 1024 * 1024}
+    assert application_report["request_overrides"] == {"uploaded_qbit_upload_limit": "1MiB/s"}
+    assert application_report["role_reports"][0]["role"] == "source"
+    assert application_report["role_reports"][0]["required_request_fields"] == ["qbit_download_limit"]
+    assert application_report["role_reports"][0]["applied_fields"] == {"qbit_download_limit": 20 * 1024 * 1024}
+    assert application_report["role_reports"][1]["role"] == "uploaded"
+    assert application_report["role_reports"][1]["override_fields"] == {"uploaded_qbit_upload_limit": "1MiB/s"}
+    assert application_report["missing_policy_fields"] == []
+    assert application_report["protected_fields"][0]["field"] == "qbit_download_limit"
     assert "--qbit-download-limit" in argv
     assert "--uploaded-qbit-upload-limit" in argv
 
@@ -14479,6 +14491,17 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
         "qbit_download_limit": 20 * 1024 * 1024,
         "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
     }
+    defaults_application = job["policy_qbit_defaults"]["application_report"]
+    assert defaults_application["kind"] == "ptcli.policy_qbit_defaults_application_report"
+    assert defaults_application["ready"] is True
+    assert defaults_application["request_patch"] == {
+        "qbit_download_limit": 20 * 1024 * 1024,
+        "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+    }
+    assert defaults_application["applied_fields"] == ["qbit_download_limit", "uploaded_qbit_upload_limit"]
+    assert defaults_application["missing_policy_fields"] == []
+    assert defaults_application["role_reports"][0]["required_request_fields"] == ["qbit_download_limit"]
+    assert defaults_application["role_reports"][1]["required_request_fields"] == ["uploaded_qbit_upload_limit"]
     assert job["policy_execution_plan"]["kind"] == "ptcli.policy_execution_plan"
     assert job["policy_execution_plan"]["ready"] is True
     assert job["policy_execution_plan"]["request_defaults"] == {
@@ -14510,11 +14533,13 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_application_handoff"]["kind"] == "ptcli.job_policy_application_handoff"
     assert job["policy_application_handoff"]["application_ready"] is True
     assert job["policy_application_handoff"]["request_patch"] == job["policy_execution_plan"]["request_defaults"]
+    assert job["policy_application_handoff"]["qbit_defaults_application_report"] == defaults_application
     assert job["policy_application_handoff"]["applied_request_fields"] == job["policy_execution_plan"]["request_defaults"]
     assert job["policy_application_handoff"]["missing_request_fields"] == []
     assert job["policy_application_handoff"]["missing_confirmations"] == []
     assert job["policy_application_report"]["kind"] == "ptcli.policy_application_report"
     assert job["policy_application_report"]["ready_for_live_audit"] is True
+    assert job["policy_application_report"]["qbit_defaults_application_report"] == defaults_application
     assert job["policy_application_report"]["request_patch_applied"] is True
     assert job["policy_application_report"]["protected_fields_ok"] is True
     assert job["policy_application_report"]["confirmations_ok"] is True
@@ -20278,6 +20303,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_handoff_fields"]
     assert "policy_qbit_defaults" in tool_by_name["retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_qbit_defaults" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "policy_qbit_defaults_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "application_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_fields"]
+    assert "policy_qbit_defaults_application_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "role_reports" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_application_report_fields"]
+    assert "policy_qbit_defaults_role_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "policy_execution_plan" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_execution_plan" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_execution_plan" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -20341,10 +20371,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_application_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
     assert "request_patch" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+    assert "qbit_defaults_application_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "applied_request_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "policy_application_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "request_patch" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
+    assert "qbit_defaults_application_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
     assert "request_patch_applied" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
     assert "qbit_evidence_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
     assert "repair_policy_application" in tool_by_name["manual_retorrent_job"]["response_contract"]["recovery_actions"]
@@ -22606,6 +22638,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_handoff" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
         assert "policy_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "policy_qbit_defaults" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+        assert "policy_qbit_defaults_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "application_report" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_qbit_defaults_fields"]
+        assert "qbit_defaults_application_report" in tools_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
         assert "policy_execution_plan" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "policy_execution_plan" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
         assert "policy_execution_plan" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]

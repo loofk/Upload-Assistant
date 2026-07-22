@@ -13708,10 +13708,10 @@ def _request_with_policy_qbit_defaults(request: dict[str, Any], source: dict[str
     if isinstance(enriched.get("policy_qbit_defaults"), dict):
         return enriched
     defaults: dict[str, Any] = {"applied": {}, "sources": {}, "request_overrides": {}, "errors": []}
+    source_tracker = str(source.get("tracker") or "")
+    targets = parse_tracker_list(target_trackers)
     try:
         config = load_config(enriched.get("config"))
-        source_tracker = str(source.get("tracker") or "")
-        targets = parse_tracker_list(target_trackers)
         source_limits = qbit_limits_for_tracker(config, source_tracker, role="source") if source_tracker else {}
         _apply_policy_qbit_default(enriched, defaults, "qbit_upload_limit", source_limits.get("upload_limit"), source_tracker)
         _apply_policy_qbit_default(enriched, defaults, "qbit_download_limit", source_limits.get("download_limit"), source_tracker)
@@ -13722,6 +13722,7 @@ def _request_with_policy_qbit_defaults(request: dict[str, Any], source: dict[str
             _apply_policy_qbit_default(enriched, defaults, "uploaded_qbit_download_limit", target_limits.get("download_limit"), target)
     except Exception as exc:
         defaults["errors"].append(str(exc))
+    defaults["application_report"] = _policy_qbit_defaults_application_report(enriched, defaults, source_tracker, targets)
     enriched["policy_qbit_defaults"] = defaults
     return enriched
 
@@ -14071,6 +14072,94 @@ def _apply_policy_qbit_default(enriched: dict[str, Any], defaults: dict[str, Any
     enriched[key] = value
     defaults["applied"][key] = value
     defaults["sources"][key] = f"site_policy:{tracker}"
+
+
+def _policy_qbit_defaults_application_report(enriched: dict[str, Any], defaults: dict[str, Any], source_tracker: str, targets: list[str]) -> dict[str, Any]:
+    role_reports = [
+        _policy_qbit_defaults_role_report(
+            role="source",
+            tracker=source_tracker,
+            required_fields={"qbit_download_limit": "download_rate_limit"},
+            optional_fields={"qbit_upload_limit": "upload_rate_limit"},
+            enriched=enriched,
+            defaults=defaults,
+        )
+    ]
+    if targets:
+        role_reports.append(
+            _policy_qbit_defaults_role_report(
+                role="uploaded",
+                tracker=targets[0],
+                required_fields={"uploaded_qbit_upload_limit": "upload_rate_limit"},
+                optional_fields={"uploaded_qbit_download_limit": "download_rate_limit"},
+                enriched=enriched,
+                defaults=defaults,
+            )
+        )
+    missing_policy_fields = [missing for report in role_reports for missing in report.get("missing_policy_fields", []) if isinstance(report, dict)]
+    request_patch = dict(defaults.get("applied") if isinstance(defaults.get("applied"), dict) else {})
+    request_overrides = dict(defaults.get("request_overrides") if isinstance(defaults.get("request_overrides"), dict) else {})
+    errors = _string_list(defaults.get("errors"))
+    ready = not missing_policy_fields and not errors
+    return {
+        "kind": "ptcli.policy_qbit_defaults_application_report",
+        "ready": ready,
+        "status": "ready" if ready else "blocked",
+        "source_tracker": source_tracker or None,
+        "target_trackers": targets,
+        "target_scope": "first_target_uploaded_torrent" if targets else None,
+        "request_patch": request_patch,
+        "request_overrides": request_overrides,
+        "applied_fields": sorted(request_patch),
+        "override_fields": sorted(request_overrides),
+        "missing_policy_fields": missing_policy_fields,
+        "role_reports": role_reports,
+        "protected_fields": _site_policy_runtime_protected_fields(request_patch, defaults.get("sources") if isinstance(defaults.get("sources"), dict) else {}),
+        "continue_when": "all role_reports.required_request_fields are present in the live request before qBittorrent injection",
+        "stop_when": ["missing_policy_fields is non-empty", "policy_qbit_defaults.errors is non-empty", "request overrides are looser than reviewed site policy"],
+        "blockers": [f"{item.get('tracker')}: {item.get('policy_field')}" for item in missing_policy_fields] + errors,
+        "next_actions": _policy_qbit_defaults_application_next_actions(ready, missing_policy_fields, request_overrides, errors),
+    }
+
+
+def _policy_qbit_defaults_role_report(
+    *,
+    role: str,
+    tracker: str,
+    required_fields: dict[str, str],
+    optional_fields: dict[str, str],
+    enriched: dict[str, Any],
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    applied = defaults.get("applied") if isinstance(defaults.get("applied"), dict) else {}
+    sources = defaults.get("sources") if isinstance(defaults.get("sources"), dict) else {}
+    overrides = defaults.get("request_overrides") if isinstance(defaults.get("request_overrides"), dict) else {}
+    request_fields = {**required_fields, **optional_fields}
+    missing = [{"tracker": tracker, "role": role, "request_field": request_field, "policy_field": policy_field} for request_field, policy_field in required_fields.items() if enriched.get(request_field) in (None, "")]
+    return {
+        "role": role,
+        "tracker": tracker or None,
+        "ready": not missing,
+        "required_request_fields": list(required_fields),
+        "optional_request_fields": list(optional_fields),
+        "request_values": {field: enriched.get(field) for field in request_fields if enriched.get(field) is not None},
+        "applied_fields": {field: applied[field] for field in request_fields if field in applied},
+        "override_fields": {field: overrides[field] for field in request_fields if field in overrides},
+        "sources": {field: sources[field] for field in request_fields if field in sources},
+        "missing_policy_fields": missing,
+    }
+
+
+def _policy_qbit_defaults_application_next_actions(ready: bool, missing_policy_fields: list[dict[str, Any]], request_overrides: dict[str, Any], errors: list[str]) -> list[str]:
+    if ready and request_overrides:
+        return ["Review policy_qbit_defaults.application_report.request_overrides; continue only if each override is at least as strict as the reviewed site policy."]
+    if ready:
+        return ["Policy qBittorrent defaults are present in the live request; verify qbit_enforcement_summary after injection."]
+    if errors:
+        return ["Resolve policy_qbit_defaults.application_report.blockers, then rerun the request preflight or job creation."]
+    if missing_policy_fields:
+        return ["Add the missing qBittorrent rate-limit fields to PTCLI.SITE_POLICIES, then rerun site_policies and recreate the request."]
+    return ["Inspect policy_qbit_defaults.application_report before live qBittorrent injection."]
 
 
 def _request_policy_coverage(request: dict[str, Any], source: dict[str, Any], target_trackers: str) -> dict[str, Any]:
@@ -19582,6 +19671,8 @@ def _job_policy_application_handoff(job: dict[str, Any], summary_payload: dict[s
     request_patch = application.get("request_patch") if isinstance(application.get("request_patch"), dict) else {}
     applied_request_fields = {key: request.get(key) for key, value in request_patch.items() if request.get(key) == value}
     missing_request_fields = [key for key, value in request_patch.items() if request.get(key) != value]
+    policy_qbit_defaults = _job_policy_qbit_defaults(job)
+    qbit_defaults_application_report = policy_qbit_defaults.get("application_report") if isinstance(policy_qbit_defaults, dict) and isinstance(policy_qbit_defaults.get("application_report"), dict) else {}
     protected_fields = application.get("protected_fields") if isinstance(application.get("protected_fields"), list) else []
     protected_field_status = [_job_policy_application_protected_field_status(item, request) for item in protected_fields if isinstance(item, dict)]
     missing_protected_fields = [str(item["field"]) for item in protected_field_status if item.get("status") != "present"]
@@ -19602,6 +19693,8 @@ def _job_policy_application_handoff(job: dict[str, Any], summary_payload: dict[s
         "target_trackers": _string_list(application.get("target_trackers")),
         "request_patch": request_patch,
         "request_patch_sources": application.get("request_patch_sources") if isinstance(application.get("request_patch_sources"), dict) else {},
+        "policy_qbit_defaults": policy_qbit_defaults,
+        "qbit_defaults_application_report": qbit_defaults_application_report or None,
         "applied_request_fields": applied_request_fields,
         "missing_request_fields": missing_request_fields,
         "protected_fields": protected_fields,
@@ -19636,6 +19729,7 @@ def _job_policy_application_report(job: dict[str, Any], summary_payload: dict[st
     qbit_evidence = handoff.get("qbit_evidence") if isinstance(handoff.get("qbit_evidence"), dict) else {}
     completion = handoff.get("completion") if isinstance(handoff.get("completion"), dict) else {}
     request_patch = handoff.get("request_patch") if isinstance(handoff.get("request_patch"), dict) else {}
+    qbit_defaults_application_report = handoff.get("qbit_defaults_application_report") if isinstance(handoff.get("qbit_defaults_application_report"), dict) else {}
     applied_request_fields = handoff.get("applied_request_fields") if isinstance(handoff.get("applied_request_fields"), dict) else {}
     missing_request_fields = _string_list(handoff.get("missing_request_fields"))
     missing_protected_fields = _string_list(handoff.get("missing_protected_fields"))
@@ -19668,6 +19762,7 @@ def _job_policy_application_report(job: dict[str, Any], summary_payload: dict[st
         "job_id": job.get("job_id"),
         "job_status": job.get("status"),
         "request_patch": request_patch,
+        "qbit_defaults_application_report": qbit_defaults_application_report or None,
         "request_patch_applied": request_patch_applied,
         "request_patch_count": len(request_patch),
         "applied_request_fields": applied_request_fields,
@@ -30915,8 +31010,11 @@ def _job_response_contract() -> dict[str, Any]:
         "qbit_rate_limit_repair_role_fields": ["role", "ready", "status", "needs_repair", "category", "tags", "expected_limits", "observed_limits", "request_patch", "upload_limit_source", "download_limit_source", "requires_injection_evidence", "requires_rate_limit_repair", "blockers"],
         "qbit_enforcement_role_fields": ["role", "ready", "status", "category", "tags", "expected_limits", "observed_limits", "upload_limit_source", "download_limit_source", "evidence_present", "requires_injection_evidence", "requires_rate_limit_repair", "blockers", "requested_options"],
         "uploaded_seeding_evidence_fields": ["ready", "status", "uploaded_torrent_id", "uploaded_torrent_hash", "injected_torrent_hash", "uploaded_torrent_path", "uploaded_wait_complete", "injection_verified", "qbit", "required", "missing", "read_fields", "complete_when", "stop_when"],
-        "policy_application_handoff_fields": ["ready", "status", "application_ready", "accepted_rules", "confirmed_upload", "source_trackers", "target_trackers", "request_patch", "request_patch_sources", "applied_request_fields", "missing_request_fields", "protected_fields", "protected_field_status", "missing_protected_fields", "missing_confirmations", "qbit", "qbit_evidence", "seeding", "rules", "completion", "live_request_template", "submit_overrides_template", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "site_policy_application_handoff", "policy_config_apply_handoff", "safety"],
-        "policy_application_report_fields": ["ready", "ready_for_live_audit", "ready_for_completion_report", "verdict", "status", "job_id", "job_status", "request_patch", "request_patch_applied", "request_patch_count", "applied_request_fields", "missing_request_fields", "protected_fields_ok", "protected_field_status", "missing_protected_fields", "confirmations_ok", "accepted_rules", "confirmed_upload", "missing_confirmations", "rules_ready", "seeding_ready", "qbit_evidence_ready", "qbit_evidence_status", "qbit_pending_roles", "qbit_mismatch_roles", "completion_required_evidence", "completion_summary_fields", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
+        "policy_qbit_defaults_fields": ["applied", "sources", "request_overrides", "application_report", "errors"],
+        "policy_qbit_defaults_application_report_fields": ["ready", "status", "source_tracker", "target_trackers", "target_scope", "request_patch", "request_overrides", "applied_fields", "override_fields", "missing_policy_fields", "role_reports", "protected_fields", "continue_when", "stop_when", "blockers", "next_actions"],
+        "policy_qbit_defaults_role_report_fields": ["role", "tracker", "ready", "required_request_fields", "optional_request_fields", "request_values", "applied_fields", "override_fields", "sources", "missing_policy_fields"],
+        "policy_application_handoff_fields": ["ready", "status", "application_ready", "accepted_rules", "confirmed_upload", "source_trackers", "target_trackers", "request_patch", "request_patch_sources", "policy_qbit_defaults", "qbit_defaults_application_report", "applied_request_fields", "missing_request_fields", "protected_fields", "protected_field_status", "missing_protected_fields", "missing_confirmations", "qbit", "qbit_evidence", "seeding", "rules", "completion", "live_request_template", "submit_overrides_template", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "site_policy_application_handoff", "policy_config_apply_handoff", "safety"],
+        "policy_application_report_fields": ["ready", "ready_for_live_audit", "ready_for_completion_report", "verdict", "status", "job_id", "job_status", "request_patch", "qbit_defaults_application_report", "request_patch_applied", "request_patch_count", "applied_request_fields", "missing_request_fields", "protected_fields_ok", "protected_field_status", "missing_protected_fields", "confirmations_ok", "accepted_rules", "confirmed_upload", "missing_confirmations", "rules_ready", "seeding_ready", "qbit_evidence_ready", "qbit_evidence_status", "qbit_pending_roles", "qbit_mismatch_roles", "completion_required_evidence", "completion_summary_fields", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "policy_config_apply_handoff_fields": ["ready", "status", "action", "job_id", "job_status", "preferred_patch", "patch_paths", "manual_review", "edit_config", "verification", "next_step", "read_order", "blockers", "next_actions"],
         "policy_execution_report_fields": ["ready", "status", "source", "targets", "site_policy_ready", "accepted_rules", "seeding_requirements", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_application_report", "policy_config_apply_handoff", "policy_enforcement_gate", "request_overrides", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_ready", "expected_qbit_roles", "applied_qbit_roles", "pending_qbit_roles", "mismatch_qbit_roles", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_execution_final_report_fields": ["ready", "ready_for_live", "verdict", "status", "site_policy", "rate_limits", "seeding", "runtime_contract", "policy_gate", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
