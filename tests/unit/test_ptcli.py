@@ -14646,6 +14646,61 @@ def test_manual_retorrent_job_recovery_prioritizes_policy_config_handoff(monkeyp
     assert summary["blocked_recovery_report"] == job["blocked_recovery_report"]
 
 
+def test_blocked_recovery_repairs_missing_policy_application_patch(tmp_path) -> None:
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+    job = store.create(
+        "ptcli.manual_retorrent",
+        {
+            "mode": "manual_retorrent",
+            "source_url": "https://u2.dmhy.org/details.php?id=60635",
+            "source_reference": {"tracker": "U2", "source_id": "60635", "source_url": "https://u2.dmhy.org/details.php?id=60635"},
+            "target": "MTEAM",
+            "target_trackers": ["MTEAM"],
+            "execute": True,
+            "accept_rules": True,
+            "confirm_upload": True,
+            "policy_application_handoff": {
+                "kind": "ptcli.policy_application_handoff",
+                "ready": True,
+                "request_patch": {"qbit_download_limit": 20 * 1024 * 1024, "uploaded_qbit_upload_limit": 2 * 1024 * 1024},
+                "request_patch_sources": {"qbit_download_limit": "site_policy:U2", "uploaded_qbit_upload_limit": "site_policy:MTEAM"},
+                "protected_fields": [
+                    {"field": "qbit_download_limit", "value": 20 * 1024 * 1024, "source": "site_policy:U2"},
+                    {"field": "uploaded_qbit_upload_limit", "value": 2 * 1024 * 1024, "source": "site_policy:MTEAM"},
+                ],
+                "rules": {"ready": True},
+                "seeding": {"ready": True},
+                "qbit": {"ready": True},
+                "completion": {"summary_fields": ["qbit_enforcement_summary"], "required_evidence": ["qbit_execution_gate.ready=true"]},
+            },
+        },
+        ["ptcli", "retorrent", "--json"],
+        lambda: {"status": "blocked", "blockers": ["policy defaults were not applied"], "next_actions": ["resume with policy defaults"]},
+    )
+
+    assert job["policy_application_report"]["verdict"] == "request_patch_missing"
+    assert job["policy_application_report"]["request_patch_applied"] is False
+    assert job["policy_application_report"]["missing_request_fields"] == ["qbit_download_limit", "uploaded_qbit_upload_limit"]
+    assert job["policy_application_report"]["recommended_tool"] == "resume_job"
+    assert job["policy_application_report"]["recommended_request"] == {
+        "dry_run": True,
+        "qbit_download_limit": 20 * 1024 * 1024,
+        "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+    }
+    assert job["recovery_handoff"]["action"] == "repair_policy_application"
+    assert job["recovery_handoff"]["phase"] == "policy_application"
+    assert job["recovery_handoff"]["recommended_tool"] == "resume_job"
+    assert job["recovery_handoff"]["dry_run_request"] == job["policy_application_report"]["recommended_request"]
+    assert job["recovery_handoff"]["gates"]["policy_application_live_audit_ready"] is False
+    assert "policy_application_report" in job["recovery_handoff"]["read_fields"]
+    assert job["blocked_recovery_report"]["action"] == "repair_policy_application"
+    assert job["blocked_recovery_report"]["recommended_tool"] == "resume_job"
+    assert job["blocked_recovery_report"]["recommended_request"] == job["policy_application_report"]["recommended_request"]
+    assert "policy_application" in job["blocked_recovery_report"]["blocked_domains"]
+    assert "policy_application_report" in job["blocked_recovery_report"]["read_order"]
+    assert store.summary(job["job_id"])["blocked_recovery_report"] == job["blocked_recovery_report"]
+
+
 def test_retorrent_execute_runs_live_payload_when_policy_enforcement_ready(monkeypatch) -> None:
     config = {
         "PTCLI": {
@@ -19701,6 +19756,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_application_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "policy_application_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "policy_application_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "policy_enforcement_gate" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "policy_enforcement_gate" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "policy_enforcement_gate" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -19739,8 +19795,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "applied_request_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "policy_application_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "request_patch" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
     assert "request_patch_applied" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
     assert "qbit_evidence_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
+    assert "repair_policy_application" in tool_by_name["manual_retorrent_job"]["response_contract"]["recovery_actions"]
+    assert "policy_application_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]
+    assert "policy_application_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["blocked_recovery_report_fields"]
     assert "policy_config_apply_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "verification" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_config_apply_handoff_fields"]
     assert "policy_runtime_ready" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
@@ -20790,6 +20850,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "submit_if_clear_handoff" in summary_schema["properties"]
     assert "policy_handoff" in summary_schema["properties"]
     status_schema = openapi["paths"]["/v1/jobs/{job_id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "policy_application_report" in status_schema["properties"]
+    assert "policy_application_report" in summary_schema["properties"]
     assert "material_evidence_summary" in status_schema["properties"]
     assert "material_gap_summary" in status_schema["properties"]
     assert "metadata_prepare_handoff" in summary_schema["properties"]
