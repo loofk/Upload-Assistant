@@ -20799,6 +20799,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_submission_final_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_followup" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "resume_final_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+    assert "job_lifecycle_final_report" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_preflight_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "live_execution_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
     assert "recommended_request" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
@@ -21670,6 +21671,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "live_submission_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_followup" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "resume_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
+    assert "job_lifecycle_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "rule_review_request" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "config_update_plan" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "policy_config_apply_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
@@ -21737,6 +21739,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_submission_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "live_validation_followup" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "resume_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+        assert "job_lifecycle_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "rule_review_request" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "config_update_plan" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "policy_config_apply_handoff" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
@@ -23877,8 +23880,11 @@ services:
     assert live_validation["live_validation_submission"] == live_validation_submission
     assert live_validation["live_validation_followup"]["action"] == "poll"
     assert live_validation["live_validation_followup"]["recommended_tool"] == "get_job_status"
+    assert live_validation["job_lifecycle_final_report"]["verdict"] == "poll"
+    assert live_validation["job_lifecycle_final_report"]["recommended_tool"] == "get_job_status"
     assert live_validation["best"]["job_id"] == job_id
     assert live_validation["best"]["status"] == "submitted_running"
+    assert live_validation["best"]["job_lifecycle_final_report"] == live_validation["job_lifecycle_final_report"]
     assert capabilities["seedbox_live_validation"]["status"] == "submitted_running"
     assert payload["next_step"]["tool"] == "get_job_status"
     assert payload["next_step"]["endpoint"] == f"/v1/jobs/{job_id}"
@@ -24000,6 +24006,7 @@ services:
     capabilities = {item["id"]: item for item in payload["capabilities"]}
     live_validation = payload["evidence"]["live_validation"]
     resume_report = live_validation["resume_final_report"]
+    lifecycle_report = live_validation["job_lifecycle_final_report"]
     assert live_validation["ready"] is False
     assert live_validation["status"] == "submitted_needs_resume"
     assert live_validation["live_validation_followup"]["action"] == "resume_preview"
@@ -24007,15 +24014,20 @@ services:
     assert resume_report["verdict"] == "preview_resume"
     assert resume_report["recommended_call"]["tool"] == "resume_job"
     assert resume_report["recommended_call"]["request"] == {"job_id": job_id, "dry_run": True}
+    assert lifecycle_report["kind"] == "ptcli.job_lifecycle_final_report"
+    assert lifecycle_report["verdict"] == "preview_resume"
+    assert lifecycle_report["recommended_call"]["tool"] == "resume_job"
+    assert lifecycle_report["recommended_call"]["request"] == {"job_id": job_id, "dry_run": True}
     assert live_validation["best"]["resume_final_report"] == resume_report
+    assert live_validation["best"]["job_lifecycle_final_report"] == lifecycle_report
     assert capabilities["seedbox_live_validation"]["status"] == "submitted_needs_resume"
     assert payload["next_step"]["tool"] == "resume_job"
     assert payload["next_step"]["endpoint"] == f"/v1/jobs/{job_id}/resume"
-    assert payload["next_step"]["request"] == resume_report["recommended_call"]["request"]
-    assert payload["next_step"]["reason"] == "resume_final_report.preview_resume"
+    assert payload["next_step"]["request"] == lifecycle_report["recommended_call"]["request"]
+    assert payload["next_step"]["reason"] == "job_lifecycle_final_report.preview_resume"
     assert payload["recommended_tool"] == "resume_job"
-    assert any("resume_final_report" in action for action in live_validation["next_actions"])
-    assert any("resume_final_report" in action for action in payload["next_actions"])
+    assert any("job_lifecycle_final_report" in action for action in live_validation["next_actions"])
+    assert any("job_lifecycle_final_report" in action for action in payload["next_actions"])
 
 
 def test_readiness_bundle_blocks_requested_material_generation_without_runtime_tools(tmp_path, monkeypatch) -> None:

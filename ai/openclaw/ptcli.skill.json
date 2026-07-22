@@ -34769,6 +34769,7 @@
           "live_validation_submission",
           "live_validation_followup",
           "resume_final_report",
+          "job_lifecycle_final_report",
           "next_step",
           "recommended_tool",
           "recommended_endpoint",
