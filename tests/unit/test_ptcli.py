@@ -19513,8 +19513,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
     assert "ready_to_create_job" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "policy_execution_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+    assert "one_call_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "policy_execution_handoff_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
     assert "duplicate_check_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
+    assert "one_call_handoff_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
+    assert "does_check_duplicates_before_submit" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["one_call_handoff_fields"]
     assert "submit_if_clear_handoff" in tool_by_name["retorrent_check"]["response_contract"]["required_fields"]
     assert "submit_if_clear_handoff_fields" in tool_by_name["retorrent_check"]["response_contract"]
     assert "submit_if_clear_handoff" in tool_by_name["retorrent_check_job"]["response_contract"]["required_fields"]
@@ -19969,6 +19972,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "agent_handoff" in deployment_schema["properties"]
     source_url_preflight_schema = openapi["paths"]["/v1/retorrent/source-url/preflight"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "policy_execution_handoff" in source_url_preflight_schema["properties"]
+    assert "one_call_handoff" in source_url_preflight_schema["properties"]
     readiness_schema = openapi["paths"]["/v1/readiness/bundle"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "live_readiness" in readiness_schema["properties"]
     assert "seedbox_live_validation_handoff" in readiness_schema["properties"]
@@ -20111,6 +20115,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert source_url_workflow["one_call"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert [step["tool"] for step in source_url_workflow["runbook"]] == ["source_url_retorrent_preflight", "readiness_bundle", "site_policies", "retorrent_check", "source_url_retorrent_job", "get_job_status", "metadata_prepare_job", "materials_prepare_job", "target_package_prepare_job", "target_upload_job", "get_job_summary"]
     assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
+    assert "one_call_handoff" in source_url_workflow["runbook"][0]["read"]
     assert "policy_execution_summary" in source_url_workflow["runbook"][0]["read"]
     assert "policy_execution_handoff" in source_url_workflow["runbook"][0]["read"]
     assert source_url_workflow["runbook"][1]["continue_when"] == "live_readiness.ready_for_manual_retorrent=true"
@@ -20267,9 +20272,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
         assert "ready_to_create_job" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "policy_execution_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+        assert "one_call_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "policy_execution_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "duplicate_check_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert "duplicate_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
+        assert "one_call_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
+        assert "does_check_duplicates_before_submit" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["one_call_handoff_fields"]
         assert "job_creation_handoff_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
         assert tools_by_name["deployment_check"]["path"] == "/v1/deployment/check"
         assert "mounts" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -20397,6 +20405,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         source_url_workflow = next(workflow for workflow in payload["default_workflows"] if workflow["name"] == "source_url_retorrent")
         assert source_url_workflow["runbook"][0]["tool"] == "source_url_retorrent_preflight"
         assert source_url_workflow["runbook"][0]["continue_when"] == "ready_to_create_job=true"
+        assert "one_call_handoff" in source_url_workflow["runbook"][0]["read"]
         assert source_url_workflow["runbook"][3]["tool"] == "retorrent_check"
         assert source_url_workflow["runbook"][5]["repeat_when"] == "job_handoff.action=wait and job_handoff.should_poll=true"
         assert source_url_workflow["runbook"][6]["tool"] == "metadata_prepare_job"
@@ -22517,6 +22526,12 @@ def test_source_url_preflight_ready_points_to_source_url_job(tmp_path, monkeypat
     assert payload["duplicate_check_handoff"]["tool"] == "retorrent_check"
     assert payload["duplicate_check_handoff"]["continue_when"] == "duplicate_check.searched=true and duplicate_check.exists=false"
     assert payload["duplicate_check_handoff"]["then_tool"] == "source_url_retorrent_job"
+    assert payload["one_call_handoff"]["ready"] is True
+    assert payload["one_call_handoff"]["tool"] == "source_url_check_and_submit"
+    assert payload["one_call_handoff"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert payload["one_call_handoff"]["does_check_duplicates_before_submit"] is True
+    assert payload["one_call_handoff"]["creates_job_only_when_duplicate_clear"] is True
+    assert payload["one_call_handoff"]["request"] == payload["job_template"]["request"]
     assert payload["policy_execution_summary"]["ready"] is True
     assert payload["policy_execution_handoff"]["ready"] is True
     assert payload["policy_execution_handoff"]["recommended_tool"] == "readiness_bundle"
@@ -22524,10 +22539,12 @@ def test_source_url_preflight_ready_points_to_source_url_job(tmp_path, monkeypat
     assert payload["job_template"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert payload["job_template"]["request"]["target"] == "MTEAM"
     assert payload["job_creation_handoff"]["request"] == payload["job_template"]["request"]
-    assert payload["recommended_tool"] == "retorrent_check"
-    assert payload["recommended_endpoint"] == "/v1/retorrent/check"
-    assert payload["recommended_request"] == payload["duplicate_check"]["next_request"]
-    assert payload["agent_decision"]["decision"] == "check_duplicates_before_job"
+    assert payload["recommended_tool"] == "source_url_check_and_submit"
+    assert payload["recommended_endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert payload["recommended_request"] == payload["one_call_handoff"]["request"]
+    assert payload["agent_decision"]["decision"] == "call_check_and_submit"
+    assert payload["agent_decision"]["can_check_and_submit"] is True
+    assert payload["agent_decision"]["preferred_tool"] == "source_url_check_and_submit"
 
 
 def test_source_url_preflight_blocks_on_policy_config(tmp_path, monkeypatch) -> None:
@@ -22563,6 +22580,8 @@ def test_source_url_preflight_blocks_on_policy_config(tmp_path, monkeypatch) -> 
     assert payload["policy_execution_summary"]["ready"] is False
     assert payload["policy_execution_handoff"]["ready"] is False
     assert payload["policy_execution_handoff"]["recommended_tool"] == "edit_config"
+    assert payload["one_call_handoff"]["ready"] is False
+    assert payload["one_call_handoff"]["tool"] == "source_url_check_and_submit"
     assert payload["recommended_tool"] == "edit_config"
     assert payload["next_step"]["reason"] == "site_policy_not_ready"
     assert payload["next_step"]["policy_execution_summary"]["recommended_tool"] == "edit_config"

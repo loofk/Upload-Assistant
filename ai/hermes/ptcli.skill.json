@@ -285,6 +285,7 @@
             "policy_execution_handoff",
             "duplicate_check",
             "duplicate_check_handoff",
+            "one_call_handoff",
             "job_creation_handoff.request",
             "next_step",
             "blockers"
@@ -1138,6 +1139,7 @@
           "ready_for_live_upload",
           "duplicate_check",
           "duplicate_check_handoff",
+          "one_call_handoff",
           "readiness_bundle",
           "policy_execution_summary",
           "policy_execution_handoff",
@@ -1199,6 +1201,21 @@
           "then_tool",
           "then_endpoint",
           "then_request"
+        ],
+        "one_call_handoff_fields": [
+          "ready",
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "preferred_for_ai",
+          "does_check_duplicates_before_submit",
+          "creates_job_only_when_duplicate_clear",
+          "requires_before_call",
+          "read",
+          "continue_when",
+          "stop_when",
+          "after_submit"
         ],
         "job_template_fields": [
           "tool",
