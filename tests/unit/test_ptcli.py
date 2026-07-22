@@ -21446,6 +21446,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_batch_publish_payload_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "publish_contract" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
         assert "daily_candidate_publish_card_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
+        assert "daily_candidate_trigger_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "daily_candidate_trigger_handoff" in tools_by_name["deployment_check"]["response_contract"]["deployment_handoff_fields"]
+        assert "daily_candidate_trigger_handoff" in tools_by_name["deployment_check"]["response_contract"]["deployment_runbook_fields"]
+        assert "daily_candidate_trigger_handoff" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
+        assert "daily_candidate_trigger_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "publish_payload_field" in tools_by_name["deployment_check"]["response_contract"]["daily_candidate_trigger_handoff_fields"]
         assert "max_concurrent_jobs" in tools_by_name["list_jobs"]["response_contract"]["queue_fields"]
         assert "interruption" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "cancellation" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
@@ -21720,6 +21726,21 @@ services:
     assert payload["deployment_handoff"]["manual_retorrent"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert payload["deployment_handoff"]["daily_candidates"]["ready"] is True
     assert payload["deployment_handoff"]["daily_candidates"]["tool"] == "daily_candidates_schedule_job"
+    trigger = payload["daily_candidate_trigger_handoff"]
+    assert trigger["kind"] == "ptcli.daily_candidate_trigger_handoff"
+    assert trigger["ready"] is True
+    assert trigger["status"] == "ready"
+    assert trigger["configured_schedule_count"] == 1
+    assert trigger["compose"]["one_shot_command"].endswith("--profile daily run --rm ptcli-daily-schedule")
+    assert trigger["compose"]["daemon_command"].endswith("--profile daily up -d ptcli-daily-scheduler")
+    assert trigger["api"]["create_jobs"]["tool"] == "daily_candidates_schedule_job"
+    assert trigger["api"]["batch_status"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
+    assert trigger["api"]["batch_status"]["request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10}
+    assert trigger["api"]["publish_payload_field"] == "daily_candidate_batch_publish_payload"
+    assert trigger["workflow"][2]["name"] == "read_batch_publish_payload"
+    assert trigger["safety"]["submit_requires_user_approval"] is True
+    assert trigger["safety"]["live_upload_requires_confirm_upload"] is True
+    assert payload["deployment_handoff"]["daily_candidate_trigger_handoff"] == trigger
     assert payload["deployment_handoff"]["next_step"]["action"] == "run_manual_preflight"
     final_report = payload["deployment_final_report"]
     assert final_report["kind"] == "ptcli.deployment_final_report"
@@ -21750,6 +21771,7 @@ services:
     assert payload["deployment_runbook"]["ready"] is True
     assert payload["deployment_runbook"]["service"] == "ptcli-api"
     assert payload["deployment_runbook"]["first_step"] == "build_and_start_api"
+    assert payload["deployment_runbook"]["daily_candidate_trigger_handoff"] == trigger
     assert payload["deployment_runbook"]["env"]["template_ready"] is True
     runbook_steps = {step["name"]: step for step in payload["deployment_runbook"]["steps"]}
     assert runbook_steps["prepare_env"]["env_template"]["ready"] is True
@@ -21808,6 +21830,7 @@ services:
     assert payload["agent_handoff"]["daily_candidates"]["ready"] is True
     assert payload["agent_handoff"]["daily_candidates"]["tool"] == "daily_candidates_schedule_job"
     assert payload["agent_handoff"]["daily_candidates"]["configured_schedule_count"] == 1
+    assert payload["agent_handoff"]["daily_candidate_trigger_handoff"] == trigger
     assert payload["agent_handoff"]["seedbox_live_trial"] == live_trial
     assert payload["agent_handoff"]["docker_compose"]["daily_scheduler_ready"] is True
     assert payload["agent_handoff"]["docker_compose"]["api_ready"] is True
@@ -21847,6 +21870,15 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert payload["deployment_runbook"]["blockers"]
     assert payload["deployment_handoff"]["manual_retorrent"]["tool"] == "readiness_bundle"
     assert payload["deployment_handoff"]["daily_candidates"]["tool"] == "deployment_check"
+    trigger = payload["daily_candidate_trigger_handoff"]
+    assert trigger["kind"] == "ptcli.daily_candidate_trigger_handoff"
+    assert trigger["ready"] is False
+    assert trigger["status"] in {"blocked", "configure_schedule", "repair_compose_or_api"}
+    assert trigger["api"]["batch_status"]["endpoint"] == "/v1/jobs/candidates/daily/batch"
+    assert trigger["api"]["publish_payload_field"] == "daily_candidate_batch_publish_payload"
+    assert trigger["safety"]["uploads"] is False
+    assert trigger["blockers"]
+    assert payload["deployment_handoff"]["daily_candidate_trigger_handoff"] == trigger
     final_report = payload["deployment_final_report"]
     assert final_report["kind"] == "ptcli.deployment_final_report"
     assert final_report["ready"] is False
@@ -21885,6 +21917,7 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert payload["agent_handoff"]["seedbox_live_trial"] == live_trial
     assert payload["agent_handoff"]["daily_candidates"]["ready"] is False
     assert any("No daily candidate schedules configured" in blocker for blocker in payload["agent_handoff"]["daily_candidates"]["blocked_by"])
+    assert payload["agent_handoff"]["daily_candidate_trigger_handoff"] == trigger
     assert any("config file is missing" in blocker for blocker in payload["blockers"])
     assert any("Mount or create data/config.py" in action for action in payload["next_actions"])
 
