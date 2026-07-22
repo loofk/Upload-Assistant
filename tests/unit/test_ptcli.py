@@ -20045,6 +20045,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
         assert key in source_url_properties
     assert "agent_decision" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "candidate_digest" in tool_by_name["daily_candidates_job"]["response_contract"]["required_fields"]
+    assert "candidate_executability_matrix" in tool_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+    assert "candidate_executability_matrix" in tool_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
+    assert "candidate_executability_matrix_fields" in tool_by_name["daily_candidates_job"]["response_contract"]
+    assert "candidate_executability_item_fields" in tool_by_name["daily_candidates_job"]["response_contract"]
     assert "exclude_source_ids" in tool_by_name["daily_candidates_job"]["input_schema"]["properties"]
     assert tool_by_name["daily_candidate_refill_job"]["path"] == "/v1/jobs/candidates/daily/refill"
     assert tool_by_name["daily_candidate_refill_job"]["method"] == "POST"
@@ -20098,7 +20102,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_batch_publish_payload_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "publish_contract" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
     assert "candidate_field_completeness" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
+    assert "candidate_executability_matrix" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
     assert "daily_candidate_field_completeness_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "daily_candidate_executability_matrix_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "next_phase" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_executability_matrix_fields"]
+    assert "daily_candidate_executability_item_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "can_submit_after_approval" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_executability_item_fields"]
+    assert "daily_candidate_executability_check_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "daily_candidate_publish_card_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "source_url" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
     assert "metadata" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
@@ -25168,6 +25178,18 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["push_payload"]["target_met"] is True
     assert result["digest"]["push_payload"]["ready_count"] == 1
     assert result["digest"]["push_payload"]["top_item"]["source_id"] == "60635"
+    executability = result["digest"]["candidate_executability_matrix"]
+    assert executability["kind"] == "ptcli.daily_candidate_executability_matrix"
+    assert executability["ready"] is True
+    assert executability["status"] == "ready_for_approval"
+    assert executability["safe_to_submit_count"] == 1
+    assert executability["items"][0]["source_id"] == "60635"
+    assert executability["items"][0]["can_submit_after_approval"] is True
+    assert executability["items"][0]["requires_human_approval"] is True
+    assert executability["items"][0]["first_blocked_phase"] is None
+    assert {check["name"]: check["ready"] for check in executability["items"][0]["checks"]}["duplicate_clear"] is True
+    assert executability["phase_summary"]["duplicate"]["ready"] is True
+    assert result["digest"]["push_payload"]["candidate_executability_matrix"] == executability
     candidate_report = result["digest"]["daily_candidate_report"]
     assert candidate_report["kind"] == "ptcli.daily_candidate_report"
     assert candidate_report["scope"] == "single_schedule"
@@ -25551,6 +25573,15 @@ async def test_daily_candidates_ranks_ready_candidates_before_duplicate_blockers
     assert result["digest"]["push_payload"]["decision_summary"]["risk_counts"]["high"] == 1
     assert result["digest"]["push_payload"]["decision_summary"]["policy_risk_counts"]["low"] == 1
     assert result["digest"]["push_payload"]["decision_summary"]["safe_to_submit_count"] == 1
+    executability = result["digest"]["candidate_executability_matrix"]
+    assert executability["safe_to_submit_count"] == 1
+    blocked_item = {item["source_id"]: item for item in executability["items"]}["60635"]
+    assert blocked_item["ready"] is False
+    assert blocked_item["first_blocked_phase"] == "duplicate"
+    assert blocked_item["first_blocked_check"] == "duplicate_clear"
+    assert "duplicate_clear" in blocked_item["missing_checks"]
+    assert executability["phase_summary"]["duplicate"]["ready"] is False
+    assert "60635" in executability["phase_summary"]["duplicate"]["blocked_source_ids"]
     assert [item["source_id"] for item in result["digest"]["approval_queue"]["top_safe_candidates"]] == ["60636"]
     assert result["digest"]["approval_queue"]["safe_count"] == 1
     assert result["digest"]["approval_queue"]["blocked_source_ids"] == ["60635"]

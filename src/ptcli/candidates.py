@@ -961,6 +961,7 @@ def _candidate_digest(
     daily_candidate_report = _candidate_daily_report(push_items, approval_queue, execution_plan, target_summary, blockers, recommendation=recommendation)
     daily_candidate_batch_report = _candidate_batch_report(push_items, approval_queue, execution_plan, daily_candidate_report, target_summary, blockers)
     candidate_control_summary = _candidate_control_summary(daily_candidate_report, daily_candidate_batch_report, approval_queue, execution_plan, blockers, scope="daily_candidates")
+    candidate_executability_matrix = _candidate_executability_matrix(push_items, blockers)
     push_payload = _candidate_push_payload(
         push_summary,
         push_items,
@@ -973,6 +974,7 @@ def _candidate_digest(
         daily_candidate_report=daily_candidate_report,
         daily_candidate_batch_report=daily_candidate_batch_report,
         candidate_control_summary=candidate_control_summary,
+        candidate_executability_matrix=candidate_executability_matrix,
     )
     return {
         "kind": "ptcli.daily_candidates_digest",
@@ -998,6 +1000,7 @@ def _candidate_digest(
         "daily_candidate_report": daily_candidate_report,
         "daily_candidate_batch_report": daily_candidate_batch_report,
         "candidate_control_summary": candidate_control_summary,
+        "candidate_executability_matrix": candidate_executability_matrix,
         "push_count": len(push_items),
         "recommended_action": _candidate_digest_recommended_action(recommendation),
         "top_candidate": _candidate_digest_item(top_candidate, rank=1) if top_candidate else None,
@@ -1024,6 +1027,7 @@ def _candidate_push_payload(
     daily_candidate_report: dict[str, Any],
     daily_candidate_batch_report: dict[str, Any],
     candidate_control_summary: dict[str, Any],
+    candidate_executability_matrix: dict[str, Any],
 ) -> dict[str, Any]:
     items = [item for item in push_items if isinstance(item, dict)]
     ready_items = [item for item in items if item.get("can_submit") is True]
@@ -1059,11 +1063,131 @@ def _candidate_push_payload(
         "daily_candidate_report": daily_candidate_report,
         "daily_candidate_batch_report": daily_candidate_batch_report,
         "candidate_control_summary": candidate_control_summary,
+        "candidate_executability_matrix": candidate_executability_matrix,
         "top_item": ready_items[0] if ready_items else items[0] if items else None,
         "items": items,
         "blockers": blockers,
         "next_actions": next_actions,
     }
+
+
+def _candidate_executability_matrix(items: list[dict[str, Any] | None], blockers: list[str]) -> dict[str, Any]:
+    reports = [_candidate_executability_item(item) for item in items if isinstance(item, dict)]
+    ready_items = [item for item in reports if item.get("ready")]
+    blocked_items = [item for item in reports if not item.get("ready")]
+    phase_summary = _candidate_executability_phase_summary(reports)
+    next_item = blocked_items[0] if blocked_items else ready_items[0] if ready_items else None
+    safe_items = [item for item in reports if item.get("can_submit_after_approval")]
+    return {
+        "kind": "ptcli.daily_candidate_executability_matrix",
+        "ready": bool(safe_items) and not blockers,
+        "status": "ready_for_approval" if safe_items and not blockers else "blocked" if blocked_items or blockers else "empty",
+        "item_count": len(reports),
+        "safe_to_submit_count": len(safe_items),
+        "blocked_count": len(blocked_items),
+        "ready_count": len(ready_items),
+        "next_source_id": next_item.get("source_id") if isinstance(next_item, dict) else None,
+        "next_phase": next_item.get("first_blocked_phase") if isinstance(next_item, dict) else None,
+        "next_evidence": next_item.get("first_blocked_check") if isinstance(next_item, dict) else None,
+        "items": reports,
+        "phase_summary": phase_summary,
+        "blockers": blockers,
+        "continue_when": "candidate_executability_matrix.safe_to_submit_count>0 and user explicitly approves one candidate with confirm_upload=true",
+        "stop_when": ["candidate_executability_matrix.blockers is non-empty", "candidate_executability_matrix.safe_to_submit_count=0"],
+        "next_actions": _candidate_executability_next_actions(safe_items, next_item, blockers),
+    }
+
+
+def _candidate_executability_item(item: dict[str, Any]) -> dict[str, Any]:
+    publish_card = item.get("publish_card") if isinstance(item.get("publish_card"), dict) else {}
+    decision_summary = item.get("decision_summary") if isinstance(item.get("decision_summary"), dict) else {}
+    policy_risk_summary = item.get("policy_risk_summary") if isinstance(item.get("policy_risk_summary"), dict) else {}
+    site_policy_summary = item.get("site_policy_summary") if isinstance(item.get("site_policy_summary"), dict) else {}
+    site_policy_profile_handoff = item.get("site_policy_profile_handoff") if isinstance(item.get("site_policy_profile_handoff"), dict) else {}
+    policy_execution_handoff = item.get("policy_execution_handoff") if isinstance(item.get("policy_execution_handoff"), dict) else {}
+    submit_request = item.get("submit_request") if isinstance(item.get("submit_request"), dict) else {}
+    metadata = publish_card.get("metadata") if isinstance(publish_card.get("metadata"), dict) else item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    duplicate = publish_card.get("duplicate_check") if isinstance(publish_card.get("duplicate_check"), dict) else {}
+    downloadability = item.get("downloadability_summary") if isinstance(item.get("downloadability_summary"), dict) else publish_card.get("downloadability") if isinstance(publish_card.get("downloadability"), dict) else {}
+    item_blockers = _string_list(item.get("blockers"))
+    checks = [
+        _candidate_executability_check("source_identity", "source", bool(item.get("source_tracker") and item.get("source_id") and item.get("source_url")), ["source_tracker", "source_id", "source_url"]),
+        _candidate_executability_check("metadata", "metadata", _candidate_metadata_ready(metadata), ["imdb_id or tmdb_id or douban_id or douban_url"]),
+        _candidate_executability_check("duplicate_clear", "duplicate", duplicate.get("clear") is True or decision_summary.get("duplicate_clear") is True or item.get("duplicate_status") == "not_found", ["duplicate_check.clear=true"]),
+        _candidate_executability_check("downloadability", "source_pull", downloadability.get("ready") is True or downloadability.get("downloadable") is True, ["downloadability_summary.ready=true"]),
+        _candidate_executability_check("site_policy", "policy", site_policy_summary.get("ready") is True and site_policy_profile_handoff.get("ready") is True, ["site_policy_summary.ready=true", "site_policy_profile_handoff.ready=true"]),
+        _candidate_executability_check("policy_execution", "policy", policy_execution_handoff.get("ready") is True, ["policy_execution_handoff.ready=true"]),
+        _candidate_executability_check("risk_low", "risk", decision_summary.get("risk_level") == "low" and policy_risk_summary.get("risk_level") == "low" and not item_blockers, ["decision_summary.risk_level=low", "policy_risk_summary.risk_level=low", "blockers=[]"]),
+        _candidate_executability_check("submit_request", "submit", bool(submit_request and submit_request.get("target") and (item.get("submit_tool") or item.get("action_endpoint"))), ["submit_request", "target", "submit_tool or action_endpoint"]),
+    ]
+    blocked_checks = [check for check in checks if check.get("ready") is not True]
+    first_blocked = blocked_checks[0] if blocked_checks else None
+    requires_human_approval = True
+    ready = not blocked_checks
+    can_submit_after_approval = ready and item.get("can_submit") is True
+    return {
+        "rank": item.get("rank"),
+        "source_tracker": item.get("source_tracker"),
+        "source_id": item.get("source_id"),
+        "source_url": item.get("source_url"),
+        "target": item.get("target"),
+        "title": item.get("title"),
+        "ready": ready,
+        "can_submit_after_approval": can_submit_after_approval,
+        "requires_human_approval": requires_human_approval,
+        "status": "ready_for_approval" if can_submit_after_approval else "blocked",
+        "first_blocked_phase": first_blocked.get("phase") if isinstance(first_blocked, dict) else None,
+        "first_blocked_check": first_blocked.get("name") if isinstance(first_blocked, dict) else None,
+        "checks": checks,
+        "missing_checks": [check.get("name") for check in blocked_checks],
+        "submit_tool": item.get("submit_tool") or "source_url_retorrent_job",
+        "submit_endpoint": item.get("submit_job_endpoint") or item.get("action_endpoint"),
+        "submit_request": submit_request if can_submit_after_approval else None,
+        "required_user_inputs": ["explicit user approval", "accept_rules=true", "confirm_upload=true", "save_path or path"],
+        "blockers": list(dict.fromkeys(item_blockers + [str(check.get("name")) for check in blocked_checks])),
+    }
+
+
+def _candidate_executability_check(name: str, phase: str, ready: bool, required_fields: list[str]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "phase": phase,
+        "ready": bool(ready),
+        "status": "ready" if ready else "blocked",
+        "required_fields": required_fields,
+        "blocking": True,
+    }
+
+
+def _candidate_executability_phase_summary(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    summary: dict[str, dict[str, Any]] = {}
+    for item in items:
+        for check in item.get("checks", []) if isinstance(item.get("checks"), list) else []:
+            if not isinstance(check, dict):
+                continue
+            phase = str(check.get("phase") or "unknown")
+            phase_summary = summary.setdefault(phase, {"ready": True, "ready_count": 0, "blocked_count": 0, "blocked_source_ids": [], "missing_checks": []})
+            if check.get("ready") is True:
+                phase_summary["ready_count"] += 1
+            else:
+                phase_summary["ready"] = False
+                phase_summary["blocked_count"] += 1
+                if item.get("source_id"):
+                    phase_summary["blocked_source_ids"].append(item.get("source_id"))
+                phase_summary["missing_checks"].append(check.get("name"))
+            phase_summary["blocked_source_ids"] = list(dict.fromkeys(phase_summary["blocked_source_ids"]))
+            phase_summary["missing_checks"] = list(dict.fromkeys(phase_summary["missing_checks"]))
+    return summary
+
+
+def _candidate_executability_next_actions(safe_items: list[dict[str, Any]], next_item: dict[str, Any] | None, blockers: list[str]) -> list[str]:
+    if safe_items and not blockers:
+        return ["Ask the user to approve candidate_executability_matrix.items[0].submit_request with confirm_upload=true, then call submit_daily_candidate_job."]
+    if isinstance(next_item, dict) and next_item.get("first_blocked_check"):
+        return [f"Resolve candidate {next_item.get('source_id')} phase {next_item.get('first_blocked_phase')} check {next_item.get('first_blocked_check')} before approval."]
+    if blockers:
+        return ["Resolve candidate_executability_matrix.blockers before submitting daily candidates."]
+    return ["Rerun daily candidate discovery after source cookies and site policies are configured."]
 
 
 def _candidate_field_completeness(items: list[dict[str, Any]]) -> dict[str, Any]:
