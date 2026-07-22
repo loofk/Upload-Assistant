@@ -51,6 +51,8 @@ JOB_SCHEMA_VERSION = 1
 DEFAULT_JOB_POLL_AFTER_SECONDS = 5
 DEFAULT_MAX_CONCURRENT_JOBS = 1
 DAILY_CANDIDATE_SCHEDULE_ENV = "PTCLI_DAILY_CANDIDATE_SCHEDULES"
+DAILY_CANDIDATE_DELIVERY_TOOL = "daily_candidate_delivery"
+DAILY_CANDIDATE_DELIVERY_ENDPOINT = "/v1/candidates/daily/deliver"
 JOB_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 RESUME_COMMAND_ALLOWLIST = {"pipeline", "target-upload", "doctor", "summary-check", "retorrent"}
 JOB_STATUS_VALUES = ["queued", "running", "blocked", "failed", "complete", "cancelled"]
@@ -3091,6 +3093,29 @@ def _daily_candidate_delivery_payload_next_actions(ok: bool, dry_run: bool, file
     if ok and (file_attempted or webhook_attempted):
         return ["Read file_delivery or webhook_delivery evidence, then ask the user before submitting any candidate."]
     return ["Provide write_files=true or webhook_url so the daily candidate digest is delivered to an AI/IM/webhook consumer."]
+
+
+def _daily_candidate_delivery_request(notification_payload: dict[str, Any], publish_payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    if not notification_payload and not publish_payload:
+        return None
+    request: dict[str, Any] = {
+        "write_files": True,
+        "use_env_webhook": True,
+        "dry_run": False,
+    }
+    if notification_payload:
+        request["notification_payload"] = _daily_candidate_delivery_payload_snapshot(notification_payload)
+    if publish_payload:
+        request["daily_candidate_batch_publish_payload"] = _daily_candidate_delivery_payload_snapshot(publish_payload)
+    return request
+
+
+def _daily_candidate_delivery_payload_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        snapshot = json.loads(json.dumps(payload, ensure_ascii=False))
+    except (TypeError, ValueError):
+        return dict(payload)
+    return snapshot if isinstance(snapshot, dict) else {}
 
 
 def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -7790,6 +7815,7 @@ def _daily_candidate_schedule_delivery_handoff(schedule_digest: dict[str, Any], 
     target_met = bool(schedule_digest.get("target_met"))
     submission_ready = bool(submission_handoff.get("ready"))
     publish_ready = bool(notification_payload.get("ready")) and pending_count == 0
+    delivery_request = _daily_candidate_delivery_request(notification_payload)
     return {
         "kind": "ptcli.daily_candidate_delivery_handoff",
         "ready": publish_ready,
@@ -7800,6 +7826,10 @@ def _daily_candidate_schedule_delivery_handoff(schedule_digest: dict[str, Any], 
         "recommended_tool": submission_handoff.get("recommended_tool") if submission_ready else "get_job_status" if pending_count else "daily_candidates_schedule_job",
         "recommended_endpoint": submission_handoff.get("recommended_endpoint") if submission_ready else None,
         "recommended_request": submission_handoff.get("recommended_request") if submission_ready else None,
+        "delivery_tool": DAILY_CANDIDATE_DELIVERY_TOOL,
+        "delivery_endpoint": DAILY_CANDIDATE_DELIVERY_ENDPOINT,
+        "delivery_method": "POST",
+        "delivery_request": delivery_request,
         "counts": {
             "target_candidates": target_count,
             "selected_candidates": selected_count,
@@ -7821,6 +7851,10 @@ def _daily_candidate_schedule_delivery_handoff(schedule_digest: dict[str, Any], 
         "execution_summary": execution_summary,
         "top_submit_requests": schedule_digest.get("top_submit_requests", []),
         "publish_contract": {
+            "tool": DAILY_CANDIDATE_DELIVERY_TOOL,
+            "endpoint": DAILY_CANDIDATE_DELIVERY_ENDPOINT,
+            "method": "POST",
+            "request_field": "delivery_handoff.delivery_request",
             "payload_field": "delivery_handoff.notification_payload",
             "format": notification_payload.get("format") or "text/plain",
             "target": "external webhook, IM bridge, OpenClaw/Hermes message, or local file",
@@ -7866,9 +7900,9 @@ def _daily_candidate_schedule_gate_summary(
         recommended_request = submission_handoff.get("recommended_request")
     elif publish_ready:
         action = "publish_notification"
-        recommended_tool = "publish_notification"
-        recommended_endpoint = None
-        recommended_request = {"notification_payload": notification_payload}
+        recommended_tool = DAILY_CANDIDATE_DELIVERY_TOOL
+        recommended_endpoint = DAILY_CANDIDATE_DELIVERY_ENDPOINT
+        recommended_request = _daily_candidate_delivery_request(notification_payload)
     elif shortfall_count:
         action = "rerun_for_shortfall"
         recommended_tool = shortfall_recovery.get("recommended_tool") or "daily_candidates_schedule_job"
@@ -7915,7 +7949,7 @@ def _daily_candidate_schedule_gate_next_actions(action: str, shortfall_count: in
     if action == "submit_candidate":
         return ["Ask the user to approve daily_schedule_gate.first_submit_request, then call submit_daily_candidate_job with its request_template."]
     if action == "publish_notification":
-        return ["Publish daily_schedule_gate.recommended_request.notification_payload to the configured daily candidate channel."]
+        return ["POST daily_schedule_gate.recommended_request to daily_candidate_delivery; this writes/dispatches the digest without uploading torrents."]
     if action == "poll_jobs":
         return [f"Poll {pending_count} pending daily candidate job(s), then read daily_schedule_gate again."]
     if action == "rerun_for_shortfall":
@@ -7942,6 +7976,7 @@ def _daily_candidate_schedule_delivery_plan(
     submission_ready = bool(daily_schedule_gate.get("submission_ready")) and not all_blockers
     notification_ready = bool(notification_payload.get("ready")) and not all_blockers
     requires_confirmation = ["confirm_upload=true", "accept_rules=true"] if action == "submit_candidate" else []
+    delivery_request = _daily_candidate_delivery_request(notification_payload)
     return {
         "kind": "ptcli.daily_candidate_delivery_plan",
         "ready": action in {"submit_candidate", "publish_notification"} and not all_blockers,
@@ -7960,7 +7995,11 @@ def _daily_candidate_schedule_delivery_plan(
         "recommended_tool": recommended_tool,
         "recommended_endpoint": recommended_endpoint,
         "recommended_request": recommended_request,
-        "publish_request": {"notification_payload": notification_payload} if notification_ready else None,
+        "delivery_tool": DAILY_CANDIDATE_DELIVERY_TOOL,
+        "delivery_endpoint": DAILY_CANDIDATE_DELIVERY_ENDPOINT,
+        "delivery_method": "POST",
+        "delivery_request": delivery_request,
+        "publish_request": delivery_request if notification_ready else None,
         "first_submit_request": daily_schedule_gate.get("first_submit_request"),
         "safe_to_publish": notification_ready,
         "recommended_action_safety": {
@@ -8023,7 +8062,7 @@ def _daily_candidate_schedule_execution_context(
         "approval_queue": approval_queue,
         "submission_handoff_ref": "schedule_digest.submission_handoff",
         "notification_payload_ref": "notification_payload",
-        "publish_request": {"notification_payload_ref": "notification_payload"} if daily_candidate_delivery_plan.get("publish_request") else None,
+        "publish_request": daily_candidate_delivery_plan.get("publish_request") if isinstance(daily_candidate_delivery_plan.get("publish_request"), dict) else None,
         "shortfall_recovery": shortfall_recovery,
         "required_user_inputs": ["explicit candidate approval", "accept_rules=true", "confirm_upload=true", "save_path or path"] if action == "submit_candidate" else [],
         "missing_user_inputs": missing_user_inputs,
@@ -8056,7 +8095,7 @@ def _daily_candidate_schedule_execution_continue_when(action: str) -> str | None
     if action == "submit_candidate":
         return "first_candidate_execution_context.ready=true and the user explicitly approves the candidate before calling submit_daily_candidate_job"
     if action == "publish_notification":
-        return "notification_payload.ready=true and publish_request is delivered without live upload"
+        return "notification_payload.ready=true and publish_request is POSTed to daily_candidate_delivery without live upload"
     if action == "poll_jobs":
         return "pending_job_count becomes 0 after polling candidate jobs"
     if action == "rerun_for_shortfall":
@@ -8084,7 +8123,7 @@ def _daily_candidate_schedule_execution_next_actions(action: str, pending_count:
     if action == "submit_candidate":
         return ["Ask the user to approve first_submit_request, then call recommended_tool with recommended_request."]
     if action == "publish_notification":
-        return ["Publish publish_request.notification_payload; do not start live upload from this action."]
+        return ["POST publish_request to daily_candidate_delivery; do not start live upload from this action."]
     if action == "poll_jobs":
         return [f"Poll {pending_count} pending daily candidate job(s), then refresh daily_candidate_schedule_execution_context."]
     if action == "rerun_for_shortfall":
@@ -8365,7 +8404,9 @@ def _daily_candidate_delivery_final_report(
     recommended_endpoint = delivery_plan.get("recommended_endpoint") or execution_context.get("recommended_endpoint") or schedule_gate.get("recommended_endpoint")
     recommended_request = delivery_plan.get("recommended_request") or execution_context.get("recommended_request") or schedule_gate.get("recommended_request")
     if action == "publish_notification":
-        recommended_request = {"notification_payload_ref": "notification_payload"}
+        recommended_tool = DAILY_CANDIDATE_DELIVERY_TOOL
+        recommended_endpoint = DAILY_CANDIDATE_DELIVERY_ENDPOINT
+        recommended_request = delivery_plan.get("publish_request") if isinstance(delivery_plan.get("publish_request"), dict) else _daily_candidate_delivery_request(notification_payload)
     return {
         "kind": "ptcli.daily_candidate_delivery_final_report",
         "ready": ready and not blockers,
@@ -8386,7 +8427,10 @@ def _daily_candidate_delivery_final_report(
             "submission_ready": submission_ready,
             "notification_ready": notification_ready,
             "safe_to_publish": bool(delivery_plan.get("safe_to_publish") or publish_ready),
-            "publish_request": {"notification_payload_ref": "notification_payload"} if publish_ready else None,
+            "publish_tool": DAILY_CANDIDATE_DELIVERY_TOOL,
+            "publish_endpoint": DAILY_CANDIDATE_DELIVERY_ENDPOINT,
+            "publish_method": "POST",
+            "publish_request": (delivery_plan.get("publish_request") if isinstance(delivery_plan.get("publish_request"), dict) else _daily_candidate_delivery_request(notification_payload)) if publish_ready else None,
             "publish_contract": delivery_handoff.get("publish_contract") if isinstance(delivery_handoff.get("publish_contract"), dict) else {},
         },
         "notification": {
@@ -8458,7 +8502,7 @@ def _daily_candidate_delivery_final_next_actions(action: str, pending_count: int
     if action == "submit_candidate" and submission_ready:
         return ["Report daily_candidate_delivery_final_report to the user and ask for explicit approval before submitting the candidate."]
     if publish_ready:
-        return ["Publish daily_candidate_delivery_final_report.delivery.publish_request; this does not upload or submit a torrent."]
+        return ["POST daily_candidate_delivery_final_report.delivery.publish_request to daily_candidate_delivery; this does not upload or submit a torrent."]
     if shortfall_count:
         return [f"Daily candidate delivery is short by {shortfall_count}; rerun the recommended shortfall request if available."]
     return ["Inspect daily_candidate_delivery_final_report.read_order before choosing the next daily candidate action."]
@@ -8539,14 +8583,15 @@ def _daily_candidate_run_handoff(
 
 def _daily_candidate_run_publish_step(notification_payload: dict[str, Any], delivery_handoff: dict[str, Any], delivery_plan: dict[str, Any]) -> dict[str, Any]:
     ready = bool(notification_payload.get("ready") or delivery_handoff.get("publish_ready") or delivery_plan.get("publish_ready"))
+    request = delivery_plan.get("publish_request") if isinstance(delivery_plan.get("publish_request"), dict) else delivery_handoff.get("delivery_request") if isinstance(delivery_handoff.get("delivery_request"), dict) else _daily_candidate_delivery_request(notification_payload)
     return {
         "ready": ready,
-        "tool": "publish_notification",
-        "endpoint": None,
-        "method": None,
-        "request": {"notification_payload_ref": "notification_payload"} if ready else None,
+        "tool": DAILY_CANDIDATE_DELIVERY_TOOL,
+        "endpoint": DAILY_CANDIDATE_DELIVERY_ENDPOINT,
+        "method": "POST",
+        "request": request if ready else None,
         "payload_ref": "notification_payload" if notification_payload else None,
-        "continue_when": "notification_payload.ready=true",
+        "continue_when": "notification_payload.ready=true and request is POSTed to daily_candidate_delivery",
         "stop_when": ["publishing this payload must not call submit_daily_candidate_job"],
     }
 
@@ -8628,7 +8673,7 @@ def _daily_candidate_run_next_actions(action: str, pending_count: int, shortfall
     if action == "submit_candidate" and submission_ready:
         return ["Report daily_candidate_run_handoff.submit.first_submit_request to the user and call recommended_tool only after explicit approval."]
     if action == "publish_notification" and publish_ready:
-        return ["Publish daily_candidate_run_handoff.publish.request; this does not upload or submit torrents."]
+        return ["POST daily_candidate_run_handoff.publish.request to daily_candidate_delivery; this does not upload or submit torrents."]
     if shortfall_count:
         return [f"Use daily_candidate_run_handoff.shortfall_recovery to try filling {shortfall_count} missing ready candidate(s)."]
     return ["Inspect daily_candidate_run_handoff.read_order before choosing the next daily candidate action."]
@@ -8638,7 +8683,7 @@ def _daily_candidate_schedule_delivery_plan_next_actions(action: str, shortfall_
     if action == "submit_candidate":
         return ["Publish daily_candidate_delivery_plan.publish_request if a daily digest is desired, then ask the user to approve confirm_upload=true before calling submit_daily_candidate_job."]
     if action == "publish_notification":
-        return ["Publish daily_candidate_delivery_plan.publish_request.notification_payload to the configured daily candidate channel."]
+        return ["POST daily_candidate_delivery_plan.publish_request to daily_candidate_delivery; this does not submit or upload torrents."]
     if action == "poll_jobs":
         return [f"Poll {pending_count} pending daily candidate job(s), then refresh daily_candidate_delivery_plan."]
     if action == "rerun_for_shortfall":
@@ -26624,9 +26669,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "candidate_control_summary_fields": _candidate_response_contract()["candidate_control_summary_fields"],
                 "daily_candidate_shortfall_recovery_fields": ["action", "reason", "source_tracker", "target_trackers", "target_count", "selected_shortfall_count", "ready_shortfall_count", "scan_count", "max_scan_count", "shortfall_items", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_overrides", "continue_when", "stop_when"],
                 "notification_fields": ["title", "summary", "message", "status", "ready", "submission_ready", "counts", "top_item", "items", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_run_handoff", "daily_candidate_schedule_execution_context", "submit_items", "submission_handoff", "execution_summary", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_actions"],
-                "delivery_handoff_fields": ["ready", "publish_ready", "submission_ready", "target_met", "status", "recommended_tool", "recommended_endpoint", "recommended_request", "counts", "notification_payload", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_run_handoff", "daily_candidate_schedule_execution_context", "submission_handoff", "execution_summary", "top_submit_requests", "publish_contract", "continue_when", "stop_when", "blockers", "next_actions"],
+                "delivery_handoff_fields": ["ready", "publish_ready", "submission_ready", "target_met", "status", "recommended_tool", "recommended_endpoint", "recommended_request", "delivery_tool", "delivery_endpoint", "delivery_method", "delivery_request", "counts", "notification_payload", "approval_queue", "approval_prompts", "first_approval_prompt", "top_safe_candidates", "daily_candidate_report", "daily_candidate_batch_report", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_run_handoff", "daily_candidate_schedule_execution_context", "submission_handoff", "execution_summary", "top_submit_requests", "publish_contract", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_schedule_gate_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "target_met", "pending_job_count", "publish_ready", "submission_ready", "notification_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
-                "daily_candidate_delivery_plan_fields": ["ready", "action", "status", "publish_ready", "submission_ready", "notification_ready", "target_met", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "recommended_tool", "recommended_endpoint", "recommended_request", "publish_request", "first_submit_request", "safe_to_publish", "recommended_action_safety", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
+                "daily_candidate_delivery_plan_fields": ["ready", "action", "status", "publish_ready", "submission_ready", "notification_ready", "target_met", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "recommended_tool", "recommended_endpoint", "recommended_request", "delivery_tool", "delivery_endpoint", "delivery_method", "delivery_request", "publish_request", "first_submit_request", "safe_to_publish", "recommended_action_safety", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_schedule_execution_context_fields": ["ready", "action", "schedule_job_count", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "target_met", "approval_queue_ready", "publish_ready", "submission_ready", "notification_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "first_submit_request", "first_candidate_execution_context", "approval_queue", "submission_handoff_ref", "notification_payload_ref", "publish_request", "shortfall_recovery", "required_user_inputs", "missing_user_inputs", "read_before_action", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_run_handoff_fields": ["ready", "status", "action", "verdict", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "publish", "submit", "poll", "shortfall_recovery", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "notification", "approval", "submission", "shortfall_recovery", "audit", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
