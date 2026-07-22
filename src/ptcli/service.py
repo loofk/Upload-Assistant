@@ -379,6 +379,7 @@ class JobStore:
             "daily_candidate_batch_target_report": daily_candidate_batch_target_report,
             "daily_candidate_batch_publish_payload": daily_candidate_batch_publish_payload,
             "daily_candidate_batch_next_call": daily_candidate_batch_next_call,
+            "next_call": daily_candidate_batch_next_call,
             "jobs": jobs,
             "next_actions": _job_list_next_actions(jobs, total, limit),
         }
@@ -20596,6 +20597,9 @@ def _daily_candidate_batch_next_call(
     safe_to_call_now = bool(tool) and not blockers and not requires_user_review
     if action == "ask_user_approval":
         safe_to_call_now = bool(tool) and not blockers
+    after_call = {"tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": _daily_candidate_batch_next_call_refresh_request(summary), "reason": "refresh_after_daily_candidate_next_call"}
+    candidate_next_calls = _daily_candidate_batch_candidate_next_calls(approval_sequence, after_call)
+    selected_candidate_next_call = candidate_next_calls[0] if candidate_next_calls else None
     return {
         "kind": "ptcli.daily_candidate_batch_next_call",
         "ready": bool(tool) and not blockers,
@@ -20613,7 +20617,9 @@ def _daily_candidate_batch_next_call(
         "contacts_qbittorrent": tool in {"resume_job", "manual_retorrent_job", "source_url_retorrent_job", "qbit_inject_torrent", "qbit_wait_complete", "qbit_inspect"},
         "reason": next_step.get("reason") or action,
         "read_before_call": _daily_candidate_batch_next_call_read_before(action, source),
-        "after_call": {"tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": _daily_candidate_batch_next_call_refresh_request(summary), "reason": "refresh_after_daily_candidate_next_call"},
+        "after_call": after_call,
+        "candidate_next_calls": candidate_next_calls,
+        "selected_candidate_next_call": selected_candidate_next_call,
         "approval": {
             "approval_count": int(approval_sequence.get("approval_count") or 0),
             "required_user_inputs": _string_list(approval_sequence.get("required_user_inputs")) if requires_user_review else [],
@@ -20637,6 +20643,54 @@ def _daily_candidate_batch_next_call(
         "blockers": blockers,
         "next_actions": _daily_candidate_batch_next_call_next_actions(action, safe_to_call_now, requires_user_review, blockers),
     }
+
+
+def _daily_candidate_batch_candidate_next_calls(approval_sequence: dict[str, Any], after_call: dict[str, Any]) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    approval_items = approval_sequence.get("approval_items") if isinstance(approval_sequence.get("approval_items"), list) else []
+    for item in approval_items:
+        if not isinstance(item, dict):
+            continue
+        submit_call = item.get("submit_call") if isinstance(item.get("submit_call"), dict) else {}
+        request = submit_call.get("request") if isinstance(submit_call.get("request"), dict) else item.get("submit_request") if isinstance(item.get("submit_request"), dict) else None
+        tool = submit_call.get("tool") or "submit_daily_candidate_job"
+        endpoint = submit_call.get("endpoint") or item.get("endpoint")
+        method = submit_call.get("method") or item.get("method") or "POST"
+        calls.append(
+            {
+                "kind": "ptcli.daily_candidate_candidate_next_call",
+                "ready": bool(request and endpoint),
+                "candidate_job_id": item.get("candidate_job_id"),
+                "rank": item.get("rank"),
+                "source_tracker": item.get("source_tracker"),
+                "target": item.get("target"),
+                "source_id": item.get("source_id"),
+                "title": item.get("title"),
+                "tool": tool,
+                "endpoint": endpoint,
+                "method": method,
+                "request": request,
+                "safe_to_call_now": False,
+                "requires_user_review": True,
+                "mutates_state": True,
+                "uploads": True,
+                "contacts_trackers": True,
+                "contacts_qbittorrent": True,
+                "reason": "submit_this_candidate_after_explicit_user_approval",
+                "read_before_call": ["daily_candidate_approval_sequence.approval_items", "daily_candidate_batch_publish_payload.items", "site_policy_profile_handoff", "candidate_execution_context"],
+                "after_call": after_call,
+                "approval_text": item.get("approval_text"),
+                "required_user_inputs": _string_list(item.get("required_overrides")) or ["confirm_upload=true", "save_path or path"],
+                "safety": {
+                    "does_not_bypass_site_rules": True,
+                    "live_upload_requires_confirm_upload": True,
+                    "submit_requires_explicit_approval": True,
+                },
+                "blockers": _string_list(item.get("missing_checks")),
+                "next_actions": ["Use this candidate_next_call only after the user explicitly approves the matching source_id/rank and confirm_upload=true."],
+            }
+        )
+    return calls
 
 
 def _daily_candidate_batch_next_call_requires_review(tool: Any, request: Any) -> bool:
@@ -33863,7 +33917,7 @@ def _daily_candidate_delivery_response_contract() -> dict[str, Any]:
 
 def _job_list_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "daily_candidate_refill_plan", "daily_candidate_batch_sequence", "daily_candidate_approval_sequence", "daily_candidate_batch_execution_context", "daily_candidate_final_report", "daily_candidate_tracking_report", "daily_candidate_completion_gate", "daily_candidate_batch_target_report", "daily_candidate_batch_publish_payload", "daily_candidate_batch_next_call", "jobs", "next_actions"],
+        "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "daily_candidate_refill_plan", "daily_candidate_batch_sequence", "daily_candidate_approval_sequence", "daily_candidate_batch_execution_context", "daily_candidate_final_report", "daily_candidate_tracking_report", "daily_candidate_completion_gate", "daily_candidate_batch_target_report", "daily_candidate_batch_publish_payload", "daily_candidate_batch_next_call", "next_call", "jobs", "next_actions"],
         "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_control_summary", "candidate_submission", "check_submission", "live_validation_submission", "live_validation_followup", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "source_reference", "duplicate_check", "submit_if_clear_handoff", "site_policy_profiles", "site_policy_execution_profiles", "site_policy_profile_handoff", "policy_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_application_report", "policy_config_apply_handoff", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_rate_limit_repair_plan", "policy_execution_report", "policy_execution_final_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "material_preparation_final_report", "material_chain_handoff", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_service_gate", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_user_report", "live_validation_final_report", "live_validation_completion_audit", "live_action_sequence", "manual_retorrent_handoff", "manual_retorrent_final_report", "manual_retorrent_remaining_sequence", "agent_decision", "job_progress_handoff", "resume_plan", "resume_requirements", "resume_execution_handoff", "job_resume_handoff", "resume_final_report", "job_lifecycle_final_report", "job_lifecycle_control", "job_summary_final_report", "recovery_handoff", "job_control_summary", "blocked_recovery_report", "job_final_report", "next_call", "resume_lineage", "job_lineage", "resume_summary", "resume_followup_handoff", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "job_lifecycle_control_fields": _job_response_contract()["job_lifecycle_control_fields"],
         "job_lifecycle_transition_fields": _job_response_contract()["job_lifecycle_transition_fields"],
@@ -33885,7 +33939,8 @@ def _job_list_response_contract() -> dict[str, Any]:
         "daily_candidate_refill_request_contract_fields": ["ready", "action", "target_count", "ready_count", "ready_shortfall_count", "scan_count", "scan_limit", "next_scan_limit", "max_scan_limit", "scan_exhausted", "pagination_supported", "excluded_source_ids", "submitted_source_ids", "dedupe_key", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "safe_to_call_now", "requires_user_review", "read_before_call", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_loop_control_fields": ["ready", "action", "complete", "target_count", "ready_count", "ready_shortfall_count", "remaining_submit_count", "running_count", "blocked_count", "should_submit", "should_poll", "should_refill", "should_report", "refill_request_contract", "next_step", "after_step", "repeat_until", "read_order", "blockers", "next_actions"],
         "daily_candidate_batch_publish_payload_fields": ["ready", "status", "format", "title", "summary", "message", "counts", "items", "top_item", "candidate_field_completeness", "candidate_executability_matrix", "completion_items", "top_completion", "approval_queue", "tracking", "completion_gate", "target_report", "completion_report", "daily_candidate_final_report", "daily_candidate_tracking_report", "daily_candidate_completion_gate", "daily_candidate_batch_target_report", "publish_contract", "read_order", "blockers", "next_actions"],
-        "daily_candidate_batch_next_call_fields": ["ready", "action", "source", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval", "progress", "safety", "blockers", "next_actions"],
+        "daily_candidate_batch_next_call_fields": ["ready", "action", "source", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "candidate_next_calls", "selected_candidate_next_call", "approval", "progress", "safety", "blockers", "next_actions"],
+        "daily_candidate_candidate_next_call_fields": ["ready", "candidate_job_id", "rank", "source_tracker", "target", "source_id", "title", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval_text", "required_user_inputs", "safety", "blockers", "next_actions"],
         "daily_candidate_batch_target_report_fields": ["ready", "status", "action", "target", "loop", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "refill_handoff", "submission", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
         "daily_candidate_batch_target_counts_fields": ["target_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "complete_count", "running_count", "blocked_count", "remaining_submit_count", "ready_shortfall_count", "ready_target_met", "completion_target_met"],
         "daily_candidate_batch_target_loop_fields": ["should_submit", "should_poll", "should_refill", "should_report", "loop_control", "after_step", "repeat_until"],
@@ -33931,6 +33986,7 @@ def _daily_candidate_batch_status_response_contract() -> dict[str, Any]:
         "daily_candidate_batch_loop_control_fields": list_contract["daily_candidate_batch_loop_control_fields"],
         "daily_candidate_batch_publish_payload_fields": list_contract["daily_candidate_batch_publish_payload_fields"],
         "daily_candidate_batch_next_call_fields": list_contract["daily_candidate_batch_next_call_fields"],
+        "daily_candidate_candidate_next_call_fields": list_contract["daily_candidate_candidate_next_call_fields"],
         "daily_candidate_publish_card_fields": list_contract["daily_candidate_publish_card_fields"],
         "daily_candidate_field_completeness_fields": list_contract["daily_candidate_field_completeness_fields"],
         "daily_candidate_executability_matrix_fields": list_contract["daily_candidate_executability_matrix_fields"],
@@ -34809,6 +34865,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_batch_target_report": {"type": "object"},
             "daily_candidate_batch_publish_payload": {"type": "object"},
             "daily_candidate_batch_next_call": {"type": "object"},
+            "next_call": {"type": "object"},
             "jobs": {
                 "type": "array",
                 "items": {
@@ -34882,6 +34939,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "daily_candidate_batch_target_report": {"type": "object"},
             "daily_candidate_batch_publish_payload": {"type": "object"},
             "daily_candidate_batch_next_call": {"type": "object"},
+            "next_call": {"type": "object"},
             "batch_summary": {"type": "object"},
             "batch_gate": {"type": "object"},
             "submission_plan": {"type": "object"},
@@ -34892,7 +34950,6 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "batch_execution_context": {"type": "object"},
             "completion_gate": {"type": "object"},
             "target_report": {"type": "object"},
-            "next_call": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
         },

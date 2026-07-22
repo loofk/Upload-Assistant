@@ -16458,6 +16458,7 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert publish_payload["publish_contract"]["does_not_upload"] is True
     next_call = list_payload["daily_candidate_batch_next_call"]
     assert next_call["kind"] == "ptcli.daily_candidate_batch_next_call"
+    assert list_payload["next_call"] == next_call
     assert next_call["action"] == "ask_user_approval"
     assert next_call["tool"] == "daily_candidate_batch_status"
     assert next_call["safe_to_call_now"] is True
@@ -16467,6 +16468,17 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert next_call["approval"]["approval_count"] == 1
     assert "daily_candidate_approval_sequence.approval_items" in next_call["read_before_call"]
     assert next_call["after_call"]["tool"] == "daily_candidate_batch_status"
+    candidate_next_call = next_call["candidate_next_calls"][0]
+    assert next_call["selected_candidate_next_call"] == candidate_next_call
+    assert candidate_next_call["kind"] == "ptcli.daily_candidate_candidate_next_call"
+    assert candidate_next_call["tool"] == "submit_daily_candidate_job"
+    assert candidate_next_call["source_id"] == "60635"
+    assert candidate_next_call["request"] == approval_sequence["approval_items"][0]["submit_request"]
+    assert candidate_next_call["safe_to_call_now"] is False
+    assert candidate_next_call["requires_user_review"] is True
+    assert candidate_next_call["mutates_state"] is True
+    assert candidate_next_call["uploads"] is True
+    assert candidate_next_call["after_call"] == next_call["after_call"]
 
 
 def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(monkeypatch, tmp_path) -> None:
@@ -16902,11 +16914,14 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_publish["blockers"][0].startswith("submitted_job.")
     blocked_next_call = list_payload["daily_candidate_batch_next_call"]
     assert blocked_next_call["kind"] == "ptcli.daily_candidate_batch_next_call"
+    assert list_payload["next_call"] == blocked_next_call
     assert blocked_next_call["action"] == "resolve_blockers"
     assert blocked_next_call["tool"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["tool"]
     assert blocked_next_call["request"] == retorrent_job["manual_retorrent_remaining_sequence"]["next_step"]["request"]
     assert blocked_next_call["requires_user_review"] is False
     assert blocked_next_call["uploads"] is False
+    assert blocked_next_call["candidate_next_calls"] == []
+    assert blocked_next_call["selected_candidate_next_call"] is None
     assert "jobs[].manual_retorrent_remaining_sequence" in blocked_next_call["read_before_call"]
     batch_status = store.daily_candidate_batch({"source_tracker": "U2", "target": "MTEAM"})
     assert batch_status["kind"] == "ptcli.daily_candidate_batch_status"
@@ -20844,9 +20859,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "candidate_field_completeness" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
     assert "candidate_executability_matrix" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
     assert "daily_candidate_batch_next_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+    assert "next_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
     assert "daily_candidate_batch_next_call_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "safe_to_call_now" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_next_call_fields"]
     assert "requires_user_review" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_next_call_fields"]
+    assert "candidate_next_calls" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_next_call_fields"]
+    assert "selected_candidate_next_call" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_next_call_fields"]
+    assert "daily_candidate_candidate_next_call_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "safe_to_call_now" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_candidate_next_call_fields"]
+    assert "requires_user_review" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_candidate_next_call_fields"]
     assert "daily_candidate_field_completeness_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "daily_candidate_executability_matrix_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "next_phase" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_executability_matrix_fields"]
@@ -20889,7 +20910,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_tracking_report_fields" in tool_by_name["list_jobs"]["response_contract"]
     assert "daily_candidate_batch_publish_payload" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_batch_next_call" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
+    assert "next_call" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
     assert "daily_candidate_batch_next_call_fields" in tool_by_name["list_jobs"]["response_contract"]
+    assert "candidate_next_calls" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_next_call_fields"]
     assert "daily_candidate_approval_item_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "approval_text" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_approval_item_fields"]
     assert "daily_candidate_batch_sequence_step_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
