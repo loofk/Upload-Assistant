@@ -16914,7 +16914,9 @@ def test_daily_candidate_completion_report_blocks_when_submitted_job_is_blocked(
         "job_final_report": {"kind": "ptcli.job_final_report", "verdict": "ready_to_report", "report_allowed": True, "duplicate_check": {"exists": False}},
         "manual_retorrent_final_report": {"kind": "ptcli.manual_retorrent_final_report", "verdict": "ready_to_report", "report_allowed": True},
         "closure_complete": True,
+        "policy_execution_ready": True,
         "policy_application_ready": True,
+        "qbit_enforcement_summary": {"kind": "ptcli.qbit_enforcement_summary", "ready": True},
         "qbit_execution_gate": {"kind": "ptcli.qbit_execution_gate", "ready": True},
         "uploaded_seeding_evidence": {"kind": "ptcli.uploaded_seeding_evidence", "ready": True},
     }
@@ -16955,7 +16957,9 @@ def test_daily_candidate_completed_job_requires_uploaded_seeding_evidence() -> N
         "job_final_report": {"kind": "ptcli.job_final_report", "verdict": "ready_to_report", "report_allowed": True, "duplicate_check": {"exists": False}},
         "manual_retorrent_final_report": {"kind": "ptcli.manual_retorrent_final_report", "verdict": "ready_to_report", "report_allowed": True},
         "closure_complete": True,
+        "policy_execution_ready": True,
         "policy_application_ready": True,
+        "qbit_enforcement_summary": {"kind": "ptcli.qbit_enforcement_summary", "ready": True},
         "qbit_execution_gate": {"kind": "ptcli.qbit_execution_gate", "ready": True},
         "uploaded_seeding_evidence": {"kind": "ptcli.uploaded_seeding_evidence", "ready": False},
     }
@@ -16974,6 +16978,38 @@ def test_daily_candidate_completed_job_requires_uploaded_seeding_evidence() -> N
     assert report["report_allowed"] is False
     assert report["blockers"] == ["completed_job.job-retorrent-1.report_not_allowed"]
     assert report["next_actions"] == ["Resolve blocked submitted jobs before reporting daily candidate completion."]
+
+
+def test_daily_candidate_completed_job_requires_explicit_duplicate_clear() -> None:
+    complete_job = {
+        "retorrent_job_id": "job-retorrent-1",
+        "status": "complete",
+        "candidate_source_id": "60635",
+        "candidate_title": "Example.Release",
+        "action": "complete",
+        "summary_endpoint": "/v1/jobs/job-retorrent-1/summary",
+        "job_final_report": {"kind": "ptcli.job_final_report", "verdict": "ready_to_report", "report_allowed": True},
+        "manual_retorrent_final_report": {"kind": "ptcli.manual_retorrent_final_report", "verdict": "ready_to_report", "report_allowed": True},
+        "closure_complete": True,
+        "policy_execution_ready": True,
+        "policy_application_ready": True,
+        "qbit_enforcement_summary": {"kind": "ptcli.qbit_enforcement_summary", "ready": True},
+        "qbit_execution_gate": {"kind": "ptcli.qbit_execution_gate", "ready": True},
+        "uploaded_seeding_evidence": {"kind": "ptcli.uploaded_seeding_evidence", "ready": True},
+    }
+
+    item = ptcli_service._daily_candidate_completed_job_report(complete_job)
+    report = ptcli_service._daily_candidate_completion_report(
+        {"complete_jobs": [complete_job], "running_jobs": [], "blocked_jobs": []},
+        {},
+        [],
+    )
+
+    assert item["duplicate_exists"] is None
+    assert item["report_allowed"] is False
+    assert report["ready"] is False
+    assert report["report_allowed"] is False
+    assert report["blockers"] == ["completed_job.job-retorrent-1.report_not_allowed"]
 
 
 def test_candidate_retorrent_handoff_prefers_material_resume_request(tmp_path) -> None:

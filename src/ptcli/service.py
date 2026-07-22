@@ -8641,10 +8641,12 @@ def _daily_candidate_completed_job_report(job: dict[str, Any]) -> dict[str, Any]
     duplicate_exists = duplicate_check.get("exists")
     upstream_report_allowed = bool(job.get("job_report_allowed") or job_final_report.get("report_allowed") or job.get("manual_report_allowed") or manual_report.get("report_allowed"))
     closure_complete = job.get("closure_complete") is True
+    policy_execution_ready = job.get("policy_execution_ready") is True
     policy_application_ready = job.get("policy_application_ready") is True
+    qbit_enforcement_ready = (qbit_enforcement_summary.get("ready") if isinstance(qbit_enforcement_summary, dict) else job.get("qbit_enforcement_ready")) is True
     qbit_execution_ready = (qbit_execution_gate.get("ready") if isinstance(qbit_execution_gate, dict) else job.get("qbit_execution_ready")) is True
     uploaded_seeding_ready = (uploaded_seeding_evidence.get("ready") if isinstance(uploaded_seeding_evidence, dict) else job.get("uploaded_seeding_ready")) is True
-    report_allowed = upstream_report_allowed and duplicate_exists is not True and closure_complete and policy_application_ready and qbit_execution_ready and uploaded_seeding_ready
+    report_allowed = upstream_report_allowed and duplicate_exists is False and closure_complete and policy_execution_ready and policy_application_ready and qbit_enforcement_ready and qbit_execution_ready and uploaded_seeding_ready
     return {
         "retorrent_job_id": job.get("retorrent_job_id"),
         "source_id": job.get("candidate_source_id"),
@@ -8658,10 +8660,10 @@ def _daily_candidate_completed_job_report(job: dict[str, Any]) -> dict[str, Any]
         "report_allowed": report_allowed,
         "duplicate_exists": duplicate_exists,
         "closure_complete": job.get("closure_complete"),
-        "policy_execution_ready": job.get("policy_execution_ready"),
+        "policy_execution_ready": policy_execution_ready,
         "policy_application_ready": job.get("policy_application_ready"),
         "policy_application_handoff": job.get("policy_application_handoff") if isinstance(job.get("policy_application_handoff"), dict) else None,
-        "qbit_enforcement_ready": qbit_enforcement_summary.get("ready") if isinstance(qbit_enforcement_summary, dict) else job.get("qbit_enforcement_ready"),
+        "qbit_enforcement_ready": qbit_enforcement_ready,
         "qbit_enforcement_summary": qbit_enforcement_summary,
         "qbit_execution_ready": qbit_execution_ready,
         "qbit_execution_gate": qbit_execution_gate,
