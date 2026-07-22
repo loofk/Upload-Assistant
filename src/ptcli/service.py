@@ -21616,6 +21616,7 @@ def _goal_progress_live_validation_evidence(request: dict[str, Any]) -> dict[str
         "live_submission_final_report": best.get("live_submission_final_report") if isinstance(best, dict) and isinstance(best.get("live_submission_final_report"), dict) else None,
         "live_validation_submission": best.get("live_validation_submission") if isinstance(best, dict) and isinstance(best.get("live_validation_submission"), dict) else None,
         "live_validation_followup": best.get("live_validation_followup") if isinstance(best, dict) and isinstance(best.get("live_validation_followup"), dict) else None,
+        "resume_final_report": best.get("resume_final_report") if isinstance(best, dict) and isinstance(best.get("resume_final_report"), dict) else None,
         "next_step": best.get("next_step") if isinstance(best, dict) and isinstance(best.get("next_step"), dict) else None,
         "recommended_tool": best.get("recommended_tool") if isinstance(best, dict) else None,
         "recommended_endpoint": best.get("recommended_endpoint") if isinstance(best, dict) else None,
@@ -21739,12 +21740,15 @@ def _goal_progress_live_validation_from_job(job: dict[str, Any], summary_payload
     qbit = _job_qbit_enforcement_summary(job, summary_payload)
     live_validation_submission = _job_live_validation_submission(job)
     live_validation_followup = _job_live_validation_followup(job, summary_payload)
+    resume_final_report = _job_resume_final_report(job, summary_payload)
     missing_evidence = _string_list((live_user_report.get("evidence") or {}).get("missing_evidence")) if isinstance(live_user_report.get("evidence"), dict) else []
     blockers = list(dict.fromkeys(_string_list(live_user_report.get("blockers")) + _string_list(validation.get("blockers"))))
     ready = live_user_report.get("report_allowed") is True and not missing_evidence and not blockers
     submitted_status = _goal_progress_submitted_live_validation_status(job, live_validation_followup)
     status = "complete" if ready else submitted_status or "incomplete"
-    next_step = _goal_progress_submitted_live_validation_next_step(live_validation_followup)
+    followup_next_step = _goal_progress_submitted_live_validation_next_step(live_validation_followup)
+    resume_next_step = _goal_progress_resume_final_report_next_step(resume_final_report)
+    next_step = resume_next_step if status == "submitted_needs_resume" and resume_next_step else followup_next_step
     return {
         "valid": True,
         "ready": ready,
@@ -21756,6 +21760,7 @@ def _goal_progress_live_validation_from_job(job: dict[str, Any], summary_payload
         "summary_file": live_user_report.get("summary_file") or _job_summary_file(job),
         "live_validation_submission": live_validation_submission,
         "live_validation_followup": live_validation_followup,
+        "resume_final_report": resume_final_report,
         "live_user_report": {
             "report_allowed": live_user_report.get("report_allowed"),
             "ready_for_user_report": live_user_report.get("ready_for_user_report"),
@@ -21823,9 +21828,30 @@ def _goal_progress_submitted_live_validation_next_step(followup: dict[str, Any] 
     }
 
 
+def _goal_progress_resume_final_report_next_step(report: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(report, dict):
+        return None
+    call = report.get("recommended_call") if isinstance(report.get("recommended_call"), dict) else {}
+    tool = call.get("tool") or report.get("recommended_tool")
+    endpoint = call.get("endpoint") or report.get("recommended_endpoint")
+    method = call.get("method") or report.get("recommended_method")
+    request = call.get("request") if "request" in call else report.get("recommended_request")
+    if not tool or not endpoint:
+        return None
+    return {
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": method or ("GET" if tool in {"get_job_status", "get_job_summary"} else "POST"),
+        "request": request,
+        "reason": f"resume_final_report.{report.get('verdict') or report.get('action') or 'inspect'}",
+    }
+
+
 def _goal_progress_live_validation_evidence_next_actions(status: str, ready: bool, has_candidates: bool) -> list[str]:
     if ready:
         return ["Treat seedbox_live_validation as proven for this goal audit and continue with the next incomplete capability."]
+    if status == "submitted_needs_resume":
+        return ["Read evidence.live_validation.resume_final_report, call its recommended_call when safe, then rerun /v1/goal/progress with the same job_id."]
     if status.startswith("submitted_"):
         return ["Follow evidence.live_validation.best.live_validation_followup until live_user_report.report_allowed=true, then rerun /v1/goal/progress with the same job_id."]
     if has_candidates:
@@ -22034,6 +22060,8 @@ def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str]
     actions = [f"Call {next_step['tool']} at {next_step['endpoint']} and inspect its blockers/next_actions."]
     if any(item.get("id") == "seedbox_live_validation" and item.get("status") == "ready_to_submit" for item in items):
         actions.append("Submit evidence.live_validation.live_submission_final_report.submission.request, then poll the returned job until live_user_report.report_allowed=true.")
+    elif any(item.get("id") == "seedbox_live_validation" and item.get("status") == "submitted_needs_resume" for item in items):
+        actions.append("Read evidence.live_validation.resume_final_report and call its recommended_call before reporting live validation complete.")
     elif any(item.get("id") == "seedbox_live_validation" and str(item.get("status") or "").startswith("submitted_") for item in items):
         actions.append("Follow evidence.live_validation.best.live_validation_followup, then rerun goal_progress with the same live job id after the job state changes.")
     elif any(item.get("id") == "seedbox_live_validation" and item.get("status") != "complete" for item in items):
@@ -22751,7 +22779,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
                 "evidence_fields": ["deployment", "site_policies", "live_validation", "live_validation_preflight", "tool_count"],
-                "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
+                "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "resume_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],
             },
