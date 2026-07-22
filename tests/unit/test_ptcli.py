@@ -19890,7 +19890,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "after_step" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_loop_control_fields"]
     assert "daily_candidate_batch_publish_payload_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "publish_contract" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
+    assert "candidate_field_completeness" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
+    assert "daily_candidate_field_completeness_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
     assert "daily_candidate_publish_card_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "source_url" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
+    assert "metadata" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
     assert "requires_user_approval" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
     assert "qbit_enforcement_ready" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
     assert "qbit_execution_ready" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
@@ -20947,6 +20951,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "downloadability_summary" in tool_by_name["daily_candidates"]["response_contract"]["candidate_fields"]
     assert "downloadability_summary" in tool_by_name["daily_candidates"]["response_contract"]["push_item_fields"]
     assert "downloadability" in tool_by_name["daily_candidates"]["response_contract"]["publish_card_fields"]
+    assert "target" in tool_by_name["daily_candidates"]["response_contract"]["publish_card_fields"]
+    assert "candidate_field_completeness" in tool_by_name["daily_candidates"]["response_contract"]["push_payload_fields"]
+    assert "candidate_field_completeness_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "downloadability_summary_fields" in tool_by_name["daily_candidates"]["response_contract"]
     assert "source_pull" in tool_by_name["daily_candidates"]["response_contract"]["downloadability_summary_fields"]
     assert "downloadability_cookie_fields" in tool_by_name["daily_candidates"]["response_contract"]
@@ -22501,6 +22508,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_batch_publish_payload" in tools_by_name["list_jobs"]["response_contract"]["required_fields"]
         assert "daily_candidate_batch_publish_payload_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "daily_candidate_publish_card_fields" in tools_by_name["list_jobs"]["response_contract"]
+        assert "candidate_field_completeness" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
+        assert "daily_candidate_field_completeness_fields" in tools_by_name["list_jobs"]["response_contract"]
         assert "qbit_enforcement_ready" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_publish_card_fields"]
         assert "qbit_execution_ready" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_publish_card_fields"]
         assert "uploaded_seeding_ready" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_publish_card_fields"]
@@ -22531,7 +22540,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "repeat_until" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_loop_control_fields"]
         assert "daily_candidate_batch_publish_payload_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "publish_contract" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
+        assert "candidate_field_completeness" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
+        assert "daily_candidate_field_completeness_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
         assert "daily_candidate_publish_card_fields" in tools_by_name["daily_candidate_batch_status"]["response_contract"]
+        assert "source_url" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
+        assert "metadata" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
         assert "uploaded_seeding_ready" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_publish_card_fields"]
         assert "site_policy_summary" in tools_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_approval_item_fields"]
         assert "daily_candidate_trigger_handoff" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
@@ -22634,6 +22647,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "downloadability_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "downloadability_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "downloadability" in tools_by_name["daily_candidates_job"]["response_contract"]["publish_card_fields"]
+        assert "target" in tools_by_name["daily_candidates_job"]["response_contract"]["publish_card_fields"]
+        assert "candidate_field_completeness" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
+        assert "candidate_field_completeness_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "downloadability_summary_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "source_pull" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_summary_fields"]
         assert "downloadability_cookie_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
@@ -24671,7 +24687,7 @@ async def test_daily_candidates_reports_missing_cookie_blocker(tmp_path) -> None
 
 
 async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
-    seed = ptcli_candidates.CandidateSeed("U2", "60635", "Example.Release", "https://u2.dmhy.org/details.php?id=60635", size="42 GiB", promotion="free")
+    seed = ptcli_candidates.CandidateSeed("U2", "60635", "Example.Release", "https://u2.dmhy.org/details.php?id=60635", size="42 GiB", published_at="2026-07-02 10:00", promotion="free")
 
     async def fake_fetch_recent_candidate_seeds(*_args, **_kwargs):
         return [seed]
@@ -24768,9 +24784,11 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     publish_card = result["digest"]["push_items"][0]["publish_card"]
     assert publish_card["kind"] == "ptcli.daily_candidate_publish_card"
     assert publish_card["source_tracker"] == "U2"
+    assert publish_card["target"] == "MTEAM"
     assert publish_card["source_id"] == "60635"
     assert publish_card["title"] == "Example.Release"
     assert publish_card["size"] == "42 GiB"
+    assert publish_card["published_at"] == "2026-07-02 10:00"
     assert publish_card["promotion"] == "free"
     assert publish_card["freeleech_like"] is True
     assert publish_card["metadata"]["ready"] is True
@@ -24798,6 +24816,28 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert publish_card["action"]["approval_prompt"]["submit_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert "confirm_upload=true" in publish_card["action"]["required_user_inputs"]
     assert result["digest"]["push_payload"]["publish_cards"][0] == publish_card
+    field_completeness = result["digest"]["push_payload"]["candidate_field_completeness"]
+    assert field_completeness["kind"] == "ptcli.daily_candidate_field_completeness"
+    assert field_completeness["ready"] is True
+    assert field_completeness["required_fields"] == [
+        "source_tracker",
+        "target",
+        "source_id",
+        "source_url",
+        "title",
+        "size",
+        "published_at",
+        "promotion",
+        "metadata",
+        "duplicate_check",
+        "downloadability",
+        "recommendation",
+        "risk",
+        "action",
+    ]
+    assert field_completeness["missing_by_source_id"] == {}
+    assert field_completeness["items"][0]["source_id"] == "60635"
+    assert field_completeness["items"][0]["target"] == "MTEAM"
     approval_queue = result["digest"]["approval_queue"]
     assert approval_queue["kind"] == "ptcli.daily_candidate_approval_queue"
     assert approval_queue["ready"] is True
@@ -24847,6 +24887,7 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["top_submit_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["push_items"][0]["source_id"] == "60635"
+    assert result["digest"]["push_items"][0]["target"] == "MTEAM"
     assert result["digest"]["push_items"][0]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["push_items"][0]["summary_text"].startswith("#1 [ready] U2-60635")
     assert result["digest"]["push_items"][0]["metadata"]["imdb_id"] == 1234567

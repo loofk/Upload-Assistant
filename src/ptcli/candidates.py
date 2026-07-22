@@ -1031,6 +1031,7 @@ def _candidate_push_payload(
     lines = [push_summary, *[str(item.get("summary_text")) for item in items if item.get("summary_text")]]
     decision_summary = _push_decision_summary(items, ready_items, blocked_items, recommendation)
     publish_cards = [item["publish_card"] for item in items if isinstance(item.get("publish_card"), dict)]
+    candidate_field_completeness = _candidate_field_completeness(items)
     return {
         "kind": "ptcli.daily_candidates_push_payload",
         "title": "Daily PT retorrent candidates",
@@ -1048,6 +1049,7 @@ def _candidate_push_payload(
         "recommendation": recommendation,
         "recommended_action": _candidate_digest_recommended_action(recommendation),
         "decision_summary": decision_summary,
+        "candidate_field_completeness": candidate_field_completeness,
         "publish_cards": publish_cards,
         "approval_queue": approval_queue,
         "approval_prompts": approval_queue["approval_prompts"],
@@ -1062,6 +1064,94 @@ def _candidate_push_payload(
         "blockers": blockers,
         "next_actions": next_actions,
     }
+
+
+def _candidate_field_completeness(items: list[dict[str, Any]]) -> dict[str, Any]:
+    required_fields = [
+        "source_tracker",
+        "target",
+        "source_id",
+        "source_url",
+        "title",
+        "size",
+        "published_at",
+        "promotion",
+        "metadata",
+        "duplicate_check",
+        "downloadability",
+        "recommendation",
+        "risk",
+        "action",
+    ]
+    reports = [_candidate_field_completeness_item(item, required_fields) for item in items]
+    missing_by_source_id = {str(report["source_id"] or report["rank"]): report["missing_fields"] for report in reports if report["missing_fields"]}
+    return {
+        "kind": "ptcli.daily_candidate_field_completeness",
+        "ready": not missing_by_source_id,
+        "required_fields": required_fields,
+        "item_count": len(reports),
+        "ready_count": sum(1 for report in reports if report["ready"]),
+        "missing_count": len(missing_by_source_id),
+        "missing_by_source_id": missing_by_source_id,
+        "items": reports,
+        "continue_when": "candidate_field_completeness.ready=true before publishing the daily candidate digest as complete.",
+        "stop_when": ["candidate_field_completeness.missing_by_source_id is non-empty"],
+    }
+
+
+def _candidate_field_completeness_item(item: dict[str, Any], required_fields: list[str]) -> dict[str, Any]:
+    card = item.get("publish_card") if isinstance(item.get("publish_card"), dict) else {}
+    target = card.get("target") or item.get("target") or _nested_value(item, "submit_request", "target")
+    values = {
+        "source_tracker": card.get("source_tracker") or item.get("source_tracker"),
+        "target": target,
+        "source_id": card.get("source_id") or item.get("source_id"),
+        "source_url": card.get("source_url") or item.get("source_url"),
+        "title": card.get("title") or item.get("title"),
+        "size": card.get("size") or item.get("size"),
+        "published_at": card.get("published_at") or item.get("published_at"),
+        "promotion": card.get("promotion") or item.get("promotion"),
+        "metadata": _candidate_metadata_ready(card.get("metadata") if isinstance(card.get("metadata"), dict) else item.get("metadata")),
+        "duplicate_check": _nested_bool(card, "duplicate_check", "clear") is True or item.get("duplicate_status") == "not_found",
+        "downloadability": _nested_bool(card, "downloadability", "ready") is True or _nested_bool(item, "downloadability_summary", "ready") is True,
+        "recommendation": bool(_nested_value(card, "recommendation", "reason") or _nested_value(item, "recommendation", "reason") or item.get("recommended_action")),
+        "risk": bool(card.get("risk") if isinstance(card.get("risk"), dict) else item.get("policy_risk_summary") or item.get("decision_summary")),
+        "action": bool(card.get("action") if isinstance(card.get("action"), dict) else item.get("submit_request") or item.get("action_endpoint")),
+    }
+    missing = [field for field in required_fields if not values.get(field)]
+    return {
+        "rank": item.get("rank"),
+        "source_tracker": values["source_tracker"],
+        "target": target,
+        "source_id": values["source_id"],
+        "title": values["title"],
+        "ready": not missing,
+        "missing_fields": missing,
+        "can_submit": item.get("can_submit") is True,
+    }
+
+
+def _candidate_metadata_ready(value: Any) -> bool:
+    metadata = value if isinstance(value, dict) else {}
+    return bool(metadata.get("ready") or metadata.get("imdb_id") or metadata.get("tmdb_id") or metadata.get("douban_id") or metadata.get("douban_url") or metadata.get("name"))
+
+
+def _nested_bool(payload: dict[str, Any], *keys: str) -> bool | None:
+    value: Any = payload
+    for key in keys:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value if isinstance(value, bool) else None
+
+
+def _nested_value(payload: dict[str, Any], *keys: str) -> Any:
+    value: Any = payload
+    for key in keys:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value
 
 
 def _candidate_daily_report(
@@ -1669,6 +1759,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         rank=rank,
         status=status,
         can_submit=can_submit,
+        title=title,
         source=source,
         metadata=metadata,
         duplicate_check=duplicate_check,
@@ -1692,6 +1783,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "score": ranking.get("score"),
         "tier": ranking.get("tier"),
         "source_tracker": source.get("tracker"),
+        "target": submit_request.get("target") if isinstance(submit_request, dict) else None,
         "source_id": source.get("torrent_id"),
         "source_url": source.get("details_url"),
         "title": title,
@@ -1748,6 +1840,7 @@ def _candidate_publish_card(
     rank: int,
     status: str,
     can_submit: bool,
+    title: Any,
     source: dict[str, Any],
     metadata: dict[str, Any],
     duplicate_check: dict[str, Any],
@@ -1773,9 +1866,10 @@ def _candidate_publish_card(
         "rank": rank,
         "status": status,
         "source_tracker": source.get("tracker"),
+        "target": submit_request.get("target") if isinstance(submit_request, dict) else None,
         "source_id": source.get("torrent_id"),
         "source_url": source.get("details_url"),
-        "title": source.get("title"),
+        "title": title,
         "size": source.get("size"),
         "published_at": source.get("published_at"),
         "promotion": promotion,
