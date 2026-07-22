@@ -74,7 +74,8 @@ async def build_daily_candidates(
 
     rule_check = build_rule_check(source, targets, accept_rules=accept_rules)
     site_policy = build_site_policy_report(config, [source, *targets], accept_rules=accept_rules)
-    source_capability = _source_candidate_capability(source)
+    source_capability = _source_candidate_capability(source, base_dir=base_dir, limit=limit)
+    discovery_handoff = _candidate_discovery_handoff(source_capability, targets, limit=limit)
     scored_candidates: list[dict[str, Any]] = []
     blockers: list[str] = []
     next_actions: list[str] = []
@@ -115,6 +116,7 @@ async def build_daily_candidates(
         accept_rules=accept_rules,
         check_dupes=check_dupes,
         base_dir=base_dir,
+        discovery_handoff=discovery_handoff,
     )
     target_summary = _candidate_target_summary(limit, scan_count=len(seeds), selected_count=len(candidates), ready_count=ready_count)
     return {
@@ -132,6 +134,7 @@ async def build_daily_candidates(
         "target_met": target_summary["target_met"],
         "target_summary": target_summary,
         "source_capability": source_capability,
+        "candidate_discovery_handoff": discovery_handoff,
         "rule_check": rule_check,
         "site_policy": site_policy,
         "ranking": {
@@ -214,6 +217,7 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
     blockers = _candidate_blockers(seed, source_info_payload, source_info_error, duplicate_check, source_policy, target_policies, accept_rules=accept_rules)
     execute_request = _candidate_execute_request(config, seed, targets, accept_rules=accept_rules)
     downloadability_summary = await _candidate_downloadability_summary(seed, source_policy, execute_request, accept_rules=accept_rules, base_dir=base_dir)
+    discovery_profile = _source_candidate_capability(seed.tracker, base_dir=base_dir, limit=MAX_CANDIDATE_SCAN)
     policy_summary = _candidate_policy_summary(source_policy, target_policies, execute_request, accept_rules=accept_rules)
     policy_risk_summary = _candidate_policy_risk_summary(policy_summary, blockers=blockers)
     policy_summary["policy_risk_summary"] = policy_risk_summary
@@ -227,6 +231,7 @@ async def _candidate_from_seed(config: dict[str, Any], seed: CandidateSeed, targ
         "source_info": source_info_payload,
         "source_info_error": source_info_error,
         "duplicate_check": duplicate_check,
+        "candidate_discovery_profile": discovery_profile,
         "downloadability_summary": downloadability_summary,
         "source_policy": source_policy,
         "target_policies": target_policies,
@@ -278,6 +283,7 @@ async def _candidate_downloadability_summary(seed: CandidateSeed, source_policy:
         "source_download_adapter": adapter,
         "source_info_adapter": source_info_adapter(seed.tracker),
         "candidate_discovery_adapter": "generic_recent_cookie" if seed.tracker in GENERIC_DETAILS_BASE_URLS and seed.tracker not in MTEAM_API_TRACKERS else None,
+        "candidate_discovery_profile": _source_candidate_capability(seed.tracker, base_dir=base_dir, limit=MAX_CANDIDATE_SCAN),
         "policy_allows_download": policy_allows_download,
         "policy_allows_retorrent": policy_allows_retorrent,
         "rules_accepted": bool(accept_rules),
@@ -941,6 +947,7 @@ def _candidate_digest(
     accept_rules: bool = False,
     check_dupes: bool = True,
     base_dir: str | None = None,
+    discovery_handoff: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ready_candidates = [candidate for candidate in candidates if candidate.get("status") == "ready"]
     review_count = sum(1 for candidate in candidates if _candidate_tier(candidate) == "review")
@@ -957,6 +964,7 @@ def _candidate_digest(
     target_summary = _candidate_target_summary(limit, scan_count=scan_count, selected_count=len(candidates), ready_count=len(ready_candidates))
     push_summary = _candidate_push_summary(target_summary, review_count, blocked_count, recommendation)
     request_context = _candidate_discovery_request_context(source_tracker, target_trackers, limit, accept_rules=accept_rules, check_dupes=check_dupes, base_dir=base_dir)
+    discovery_handoff = discovery_handoff or _candidate_discovery_handoff(_source_candidate_capability(str(source_tracker or ""), base_dir=base_dir, limit=limit), target_trackers or [], limit=limit)
     execution_plan = _candidate_execution_plan(push_items, approval_queue, target_summary, blockers, next_actions, recommendation=recommendation, request_context=request_context)
     daily_candidate_report = _candidate_daily_report(push_items, approval_queue, execution_plan, target_summary, blockers, recommendation=recommendation)
     daily_candidate_batch_report = _candidate_batch_report(push_items, approval_queue, execution_plan, daily_candidate_report, target_summary, blockers)
@@ -975,6 +983,7 @@ def _candidate_digest(
         daily_candidate_batch_report=daily_candidate_batch_report,
         candidate_control_summary=candidate_control_summary,
         candidate_executability_matrix=candidate_executability_matrix,
+        candidate_discovery_handoff=discovery_handoff,
     )
     return {
         "kind": "ptcli.daily_candidates_digest",
@@ -989,6 +998,7 @@ def _candidate_digest(
         "target_met": target_summary["target_met"],
         "target_summary": target_summary,
         "request_context": request_context,
+        "candidate_discovery_handoff": discovery_handoff,
         "push_title": "Daily PT retorrent candidates",
         "push_summary": push_summary,
         "push_payload": push_payload,
@@ -1028,6 +1038,7 @@ def _candidate_push_payload(
     daily_candidate_batch_report: dict[str, Any],
     candidate_control_summary: dict[str, Any],
     candidate_executability_matrix: dict[str, Any],
+    candidate_discovery_handoff: dict[str, Any],
 ) -> dict[str, Any]:
     items = [item for item in push_items if isinstance(item, dict)]
     ready_items = [item for item in items if item.get("can_submit") is True]
@@ -1064,6 +1075,7 @@ def _candidate_push_payload(
         "daily_candidate_batch_report": daily_candidate_batch_report,
         "candidate_control_summary": candidate_control_summary,
         "candidate_executability_matrix": candidate_executability_matrix,
+        "candidate_discovery_handoff": candidate_discovery_handoff,
         "top_item": ready_items[0] if ready_items else items[0] if items else None,
         "items": items,
         "blockers": blockers,
@@ -1906,6 +1918,7 @@ def _candidate_digest_item(candidate: dict[str, Any] | None, *, rank: int) -> di
         "status": status,
         "score": ranking.get("score"),
         "tier": ranking.get("tier"),
+        "candidate_discovery_profile": candidate.get("candidate_discovery_profile") if isinstance(candidate.get("candidate_discovery_profile"), dict) else {},
         "source_tracker": source.get("tracker"),
         "target": submit_request.get("target") if isinstance(submit_request, dict) else None,
         "source_id": source.get("torrent_id"),
@@ -2307,6 +2320,8 @@ def _candidate_tier(candidate: dict[str, Any]) -> str:
 
 
 def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list[str]) -> dict[str, Any]:
+    source_capability = _source_candidate_capability(source, limit=limit)
+    discovery_handoff = _candidate_discovery_handoff(source_capability, targets, limit=limit)
     return {
         "kind": "ptcli.daily_candidates",
         "status": "blocked",
@@ -2327,20 +2342,106 @@ def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list
         "shortfall_count": limit,
         "target_met": False,
         "target_summary": _candidate_target_summary(limit, scan_count=0, selected_count=0, ready_count=0),
-        "digest": _candidate_digest([], blockers, [], limit=limit, scan_count=0),
+        "source_capability": source_capability,
+        "candidate_discovery_handoff": discovery_handoff,
+        "digest": _candidate_digest([], blockers, [], limit=limit, scan_count=0, source_tracker=source, target_trackers=targets, discovery_handoff=discovery_handoff),
         "candidates": [],
         "blockers": blockers,
         "next_actions": [],
     }
 
 
-def _source_candidate_capability(source: str) -> dict[str, Any]:
+def _source_candidate_capability(source: str, *, base_dir: str | None = None, limit: int = MAX_CANDIDATE_SCAN) -> dict[str, Any]:
+    normalized = normalize_tracker(source) if source else source
+    adapter = _candidate_discovery_adapter(normalized)
+    info_adapter = source_info_adapter(normalized)
+    download_adapter = source_download_adapter(normalized)
+    cookie_path = _cookie_path(normalized, base_dir) if normalized in GENERIC_DETAILS_BASE_URLS else None
+    blockers: list[str] = []
+    if not adapter:
+        blockers.append(f"{normalized} candidate discovery adapter is not enabled.")
+    if not info_adapter:
+        blockers.append(f"{normalized} source info adapter is not enabled.")
+    if not download_adapter:
+        blockers.append(f"{normalized} source download adapter is not enabled.")
     return {
         "source_tracker": source,
-        "source_info_adapter": source_info_adapter(source),
-        "source_download_adapter": source_download_adapter(source),
-        "candidate_discovery_adapter": "generic_recent_cookie" if source in GENERIC_DETAILS_BASE_URLS and source not in MTEAM_API_TRACKERS else None,
+        "ready": not blockers,
+        "source_info_adapter": info_adapter,
+        "source_download_adapter": download_adapter,
+        "candidate_discovery_adapter": adapter,
+        "implementation": "generic_recent_cookie" if adapter == "nexusphp_recent_or_search_html" else adapter,
+        "network_mode": "live_recent_listing_with_cookie" if adapter == "nexusphp_recent_or_search_html" else "not_enabled",
+        "scan": {
+            "limit": max(1, min(int(limit or MAX_CANDIDATE_SCAN), MAX_CANDIDATE_SCAN)),
+            "max_limit": MAX_CANDIDATE_SCAN,
+            "recent_url": _recent_url(normalized) if normalized in GENERIC_DETAILS_BASE_URLS else None,
+            "pagination": "first_recent_page",
+        },
+        "credentials": {
+            "cookie_required": normalized in GENERIC_DETAILS_BASE_URLS and normalized not in MTEAM_API_TRACKERS,
+            "cookie_path": cookie_path,
+        },
+        "required_seed_outputs": ["source_id", "title", "details_url", "size", "published_at", "promotion", "seeders", "leechers"],
+        "required_enrichment_outputs": ["imdb_id", "tmdb_id", "douban_id", "name", "description"],
+        "safety": {
+            "does_not_upload": True,
+            "does_not_download_torrent": True,
+            "duplicate_check_required_before_submit": True,
+            "rules_not_inferred": True,
+            "live_submit_requires_confirm_upload": True,
+        },
+        "blockers": blockers,
     }
+
+
+def _candidate_discovery_adapter(source: str) -> str | None:
+    if source in MTEAM_API_TRACKERS:
+        return None
+    if source in GENERIC_DETAILS_BASE_URLS:
+        return "nexusphp_recent_or_search_html"
+    return None
+
+
+def _candidate_discovery_handoff(source_capability: dict[str, Any], targets: list[str], *, limit: int) -> dict[str, Any]:
+    ready = bool(source_capability.get("ready"))
+    blockers = _string_list(source_capability.get("blockers"))
+    return {
+        "kind": "ptcli.daily_candidate_discovery_handoff",
+        "ready": ready,
+        "source_tracker": source_capability.get("source_tracker"),
+        "target_trackers": targets,
+        "target_count": max(1, min(int(limit or DEFAULT_CANDIDATE_LIMIT), DEFAULT_CANDIDATE_LIMIT)),
+        "adapter": source_capability.get("candidate_discovery_adapter"),
+        "implementation": source_capability.get("implementation"),
+        "network_mode": source_capability.get("network_mode"),
+        "scan": source_capability.get("scan"),
+        "credentials": source_capability.get("credentials"),
+        "required_seed_outputs": source_capability.get("required_seed_outputs"),
+        "required_enrichment_outputs": source_capability.get("required_enrichment_outputs"),
+        "candidate_filters": ["source policy gate", "target duplicate check", "downloadability gate", "metadata availability", "ranking score"],
+        "safe_to_push_when": "candidate_discovery_handoff.ready=true and digest.push_payload.candidate_field_completeness.ready=true",
+        "safe_to_submit_when": "candidate.status=ready and candidate.submit_request is reviewed with confirm_upload=true",
+        "extension_contract": {
+            "api_tracker": "implement recent/search API discovery that returns CandidateSeed-compatible fields",
+            "nexusphp_tracker": "provide details base URL, recent/search path, cookie auth, and parser coverage for torrent id/title/size/promotion/date",
+            "target_tracker": "provide duplicate check before any upload submission",
+        },
+        "safety": source_capability.get("safety"),
+        "blockers": blockers,
+        "next_actions": _candidate_discovery_next_actions(ready, blockers, source_capability),
+    }
+
+
+def _candidate_discovery_next_actions(ready: bool, blockers: list[str], source_capability: dict[str, Any]) -> list[str]:
+    if ready:
+        return ["Run daily candidate discovery, then review digest.candidate_executability_matrix before submitting any candidate."]
+    actions = [f"Resolve candidate_discovery_handoff.blockers before relying on daily candidate automation ({len(blockers)} blocker(s))."]
+    credentials = source_capability.get("credentials") if isinstance(source_capability.get("credentials"), dict) else {}
+    cookie_path = credentials.get("cookie_path")
+    if cookie_path:
+        actions.append(f"Refresh the source cookie at {cookie_path}.")
+    return actions
 
 
 def _source_fetch_next_actions(source: str, base_dir: str | None) -> list[str]:

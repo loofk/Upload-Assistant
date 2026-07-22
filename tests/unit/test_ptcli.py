@@ -23366,6 +23366,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_coverage" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "policy_execution_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
         assert "site_policy_profile_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "candidate_discovery_profile" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_fields"]
+        assert "candidate_discovery_profile" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
+        assert "candidate_discovery_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["digest_fields"]
+        assert "candidate_discovery_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["push_payload_fields"]
+        assert "candidate_discovery_handoff_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "candidate_discovery_profile_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "site_policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "site_policy_profile_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["approval_prompt_fields"]
         assert "site_policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
@@ -23380,6 +23386,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_field_completeness_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "downloadability_summary_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "source_pull" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_summary_fields"]
+        assert "candidate_discovery_profile" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_summary_fields"]
+        assert "safe_to_submit_when" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_handoff_fields"]
+        assert "required_seed_outputs" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_profile_fields"]
         assert "downloadability_cookie_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "status" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_cookie_fields"]
         assert "downloadability_source_pull_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
@@ -25574,6 +25583,11 @@ async def test_daily_candidates_reports_missing_cookie_blocker(tmp_path) -> None
 
     assert result["status"] == "blocked"
     assert result["count"] == 0
+    assert result["source_capability"]["candidate_discovery_adapter"] == "nexusphp_recent_or_search_html"
+    assert result["candidate_discovery_handoff"]["ready"] is True
+    assert result["candidate_discovery_handoff"]["adapter"] == "nexusphp_recent_or_search_html"
+    assert result["candidate_discovery_handoff"]["credentials"]["cookie_required"] is True
+    assert result["digest"]["candidate_discovery_handoff"] == result["candidate_discovery_handoff"]
     assert any("cookie file is required" in blocker for blocker in result["blockers"])
     assert any("rules" in blocker.lower() or "acknowledge" in blocker.lower() for blocker in result["blockers"])
 
@@ -25615,7 +25629,27 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["target_summary"]["ready_target_met"] is True
     assert result["ranking"]["scan_count"] == 1
     assert result["ranking"]["selected_count"] == 1
+    assert result["source_capability"]["ready"] is True
+    assert result["source_capability"]["candidate_discovery_adapter"] == "nexusphp_recent_or_search_html"
+    assert result["source_capability"]["implementation"] == "generic_recent_cookie"
+    assert result["source_capability"]["scan"]["recent_url"] == "https://u2.dmhy.org/torrents.php?incldead=0"
+    assert result["source_capability"]["credentials"]["cookie_required"] is True
+    discovery = result["candidate_discovery_handoff"]
+    assert discovery["kind"] == "ptcli.daily_candidate_discovery_handoff"
+    assert discovery["ready"] is True
+    assert discovery["source_tracker"] == "U2"
+    assert discovery["target_trackers"] == ["MTEAM"]
+    assert discovery["target_count"] == 1
+    assert discovery["adapter"] == "nexusphp_recent_or_search_html"
+    assert discovery["implementation"] == "generic_recent_cookie"
+    assert "source_id" in discovery["required_seed_outputs"]
+    assert "imdb_id" in discovery["required_enrichment_outputs"]
+    assert "duplicate check" in discovery["candidate_filters"][1]
+    assert discovery["safety"]["does_not_upload"] is True
+    assert discovery["safety"]["duplicate_check_required_before_submit"] is True
+    assert discovery["extension_contract"]["nexusphp_tracker"].startswith("provide details base URL")
     assert result["digest"]["recommendation"] == "submit_top_candidate_when_confirmed"
+    assert result["digest"]["candidate_discovery_handoff"] == discovery
     assert result["digest"]["target_count"] == 1
     assert result["digest"]["target_met"] is True
     assert result["digest"]["shortfall_count"] == 0
@@ -25638,6 +25672,7 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert {check["name"]: check["ready"] for check in executability["items"][0]["checks"]}["duplicate_clear"] is True
     assert executability["phase_summary"]["duplicate"]["ready"] is True
     assert result["digest"]["push_payload"]["candidate_executability_matrix"] == executability
+    assert result["digest"]["push_payload"]["candidate_discovery_handoff"] == discovery
     candidate_report = result["digest"]["daily_candidate_report"]
     assert candidate_report["kind"] == "ptcli.daily_candidate_report"
     assert candidate_report["scope"] == "single_schedule"
@@ -25791,12 +25826,14 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["digest"]["top_submit_request"]["source"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["top_submit_request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["push_items"][0]["source_id"] == "60635"
+    assert result["digest"]["push_items"][0]["candidate_discovery_profile"]["candidate_discovery_adapter"] == "nexusphp_recent_or_search_html"
     assert result["digest"]["push_items"][0]["target"] == "MTEAM"
     assert result["digest"]["push_items"][0]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["push_items"][0]["summary_text"].startswith("#1 [ready] U2-60635")
     assert result["digest"]["push_items"][0]["metadata"]["imdb_id"] == 1234567
     assert result["digest"]["push_items"][0]["metadata"]["tmdb_id"] == 999
     assert result["digest"]["push_items"][0]["downloadability_summary"]["ready"] is True
+    assert result["digest"]["push_items"][0]["downloadability_summary"]["candidate_discovery_profile"]["ready"] is True
     assert result["digest"]["push_items"][0]["downloadability_summary"]["source_pull"]["tool"] == "source_url_retorrent_job"
     assert result["digest"]["push_items"][0]["downloadability_summary"]["source_pull"]["request"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert result["digest"]["push_items"][0]["audit_summary"]["rank"] == 1
@@ -25871,6 +25908,8 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert candidate["downloadability_summary"]["ready"] is True
     assert candidate["downloadability_summary"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
     assert candidate["downloadability_summary"]["source_pull"]["direct_cli_tool"] == "source-download"
+    assert candidate["candidate_discovery_profile"]["candidate_discovery_adapter"] == "nexusphp_recent_or_search_html"
+    assert candidate["candidate_discovery_profile"]["required_seed_outputs"][:3] == ["source_id", "title", "details_url"]
     assert candidate["source_policy"]["tracker"] == "U2"
     assert candidate["target_policies"][0]["tracker"] == "MTEAM"
     assert candidate["policy_summary"]["manual_review_ready"] is True
