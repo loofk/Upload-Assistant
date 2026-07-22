@@ -14028,6 +14028,13 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["resume_final_report"] == job["resume_final_report"]
     assert summary["job_lifecycle_final_report"] == job["job_lifecycle_final_report"]
     assert summary["job_progress_handoff"] == job["job_progress_handoff"]
+    assert summary["runtime"]["summary_endpoint"] == f"/v1/jobs/{job['job_id']}/summary"
+    assert summary["status_endpoint"] == f"/v1/jobs/{job['job_id']}"
+    assert summary["summary_endpoint"] == f"/v1/jobs/{job['job_id']}/summary"
+    assert summary["resume_endpoint"] == f"/v1/jobs/{job['job_id']}/resume"
+    assert summary["resume_state"]["next_stage"] == "resume-target-package"
+    assert summary["next_stage"] == "resume-target-package"
+    assert summary["next_command_argv"] == ["python3", "ptcli.py", "pipeline", "--json"]
     assert summary["resume_summary"] == job["resume_summary"]
     assert summary["job_handoff"] == job["job_handoff"]
     assert summary["recovery_handoff"] == job["recovery_handoff"]
@@ -20314,6 +20321,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_validation_completion_audit" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_validation_completion_audit" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "live_validation_completion_audit" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "runtime" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "status_endpoint" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "summary_endpoint" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "resume_endpoint" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "resume_state" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "next_stage" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "next_command_argv" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "live_action_sequence" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_action_sequence" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "live_action_sequence" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
@@ -21406,6 +21420,16 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "live_submission_final_report" in summary_check_schema["properties"]
     assert "delivery_audit" in summary_check_schema["properties"]
     assert "service" in summary_check_schema["properties"]
+    assert "runtime" in summary_schema["properties"]
+    assert "status_endpoint" in summary_schema["properties"]
+    assert "summary_endpoint" in summary_schema["properties"]
+    assert "resume_endpoint" in summary_schema["properties"]
+    assert "resume_state" in summary_schema["properties"]
+    assert "next_stage" in summary_schema["properties"]
+    assert "next_command" in summary_schema["properties"]
+    assert "next_command_argv" in summary_schema["properties"]
+    assert "should_execute_next_command" in summary_schema["properties"]
+    assert "automation_action" in summary_schema["properties"]
     assert "policy_qbit_defaults" in summary_schema["properties"]
     assert "qbit_plan" in summary_schema["properties"]
     assert "qbit_limit_audit" in summary_schema["properties"]
