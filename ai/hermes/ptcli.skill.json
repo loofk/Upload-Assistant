@@ -32047,6 +32047,7 @@
           "ptcli_api_localhost_port",
           "ptcli_api_token_env",
           "ptcli_job_dir_env",
+          "daily_candidate_output_dir_env",
           "host_gateway",
           "host_path_envs",
           "downloads_mount",

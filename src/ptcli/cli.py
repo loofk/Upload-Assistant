@@ -11871,7 +11871,7 @@ def _daily_scheduler_next_run(schedule: dict[str, Any], *, now: datetime) -> dic
 
 
 def _write_daily_schedule_summary(payload: dict[str, Any], args: argparse.Namespace, job_dir: Path) -> str:
-    destination_dir = Path(args.summary_output_dir or job_dir).expanduser()
+    destination_dir = _daily_candidate_output_dir(getattr(args, "summary_output_dir", None), job_dir)
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / "ptcli-daily-schedule-summary.json"
     summary_payload = {
@@ -11902,7 +11902,7 @@ def _write_daily_schedule_summary(payload: dict[str, Any], args: argparse.Namesp
 
 
 def _write_daily_schedule_notification_files(payload: dict[str, Any], args: argparse.Namespace, job_dir: Path) -> dict[str, str]:
-    destination_dir = Path(getattr(args, "notification_output_dir", None) or getattr(args, "summary_output_dir", None) or job_dir).expanduser()
+    destination_dir = _daily_candidate_output_dir(getattr(args, "notification_output_dir", None) or getattr(args, "summary_output_dir", None), job_dir)
     destination_dir.mkdir(parents=True, exist_ok=True)
     notification = payload.get("notification_payload") if isinstance(payload.get("notification_payload"), dict) else {}
     json_path = destination_dir / "ptcli-daily-candidates-notification.json"
@@ -11934,6 +11934,10 @@ def _write_daily_schedule_notification_files(payload: dict[str, Any], args: argp
         "json": str(json_path),
         "text": str(text_path),
     }
+
+
+def _daily_candidate_output_dir(explicit: str | None, job_dir: Path) -> Path:
+    return Path(explicit or os.environ.get("PTCLI_DAILY_CANDIDATE_OUTPUT_DIR") or job_dir).expanduser()
 
 
 def _post_daily_schedule_notification_webhook(payload: dict[str, Any], url: str, *, timeout: float = 10.0) -> dict[str, Any]:

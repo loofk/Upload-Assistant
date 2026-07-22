@@ -23163,7 +23163,7 @@ def _deployment_env_template_summary(template_path: Path, env_path: Path) -> dic
         "PTCLI_COOKIES_HOST_PATH",
         "PTCLI_TMP_HOST_PATH",
     ]
-    daily_keys = ["PTCLI_DAILY_CANDIDATE_SCHEDULES", "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL"]
+    daily_keys = ["PTCLI_DAILY_CANDIDATE_SCHEDULES", "PTCLI_DAILY_CANDIDATE_OUTPUT_DIR", "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL"]
     optional_keys = ["PTCLI_DOCKER_NETWORK"]
     present = template_path.is_file()
     text = ""
@@ -23206,6 +23206,7 @@ def _deployment_env_template_summary(template_path: Path, env_path: Path) -> dic
             "Adjust PTCLI_PUBLIC_BASE_URL if OpenClaw/Hermes reaches ptcli through a reverse proxy.",
             "Set PTCLI_DOWNLOADS_HOST_PATH, PTCLI_CONFIG_HOST_PATH, PTCLI_COOKIES_HOST_PATH, and PTCLI_TMP_HOST_PATH to real seedbox paths.",
             "Set PTCLI_DAILY_CANDIDATE_SCHEDULES when daily candidate jobs are needed.",
+            "Keep PTCLI_DAILY_CANDIDATE_OUTPUT_DIR mounted under PTCLI_TMP_HOST_PATH so AI/IM consumers can read local digest files.",
         ],
         "security": {
             "api_token_default": "change-me",
@@ -23300,6 +23301,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
     scheduler_command = 'command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
     schedule_command = 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
     host_path_envs = all(key in text for key in ("PTCLI_DOWNLOADS_HOST_PATH", "PTCLI_CONFIG_HOST_PATH", "PTCLI_COOKIES_HOST_PATH", "PTCLI_TMP_HOST_PATH"))
+    daily_output_env = "PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}" in text
     return {
         "present": exists,
         "readable": exists,
@@ -23311,6 +23313,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
         "ptcli_api_token_env": "PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}" in text,
         "ptcli_public_base_url_env": "PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-" in text,
         "ptcli_job_dir_env": "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in text,
+        "daily_candidate_output_dir_env": daily_output_env,
         "host_gateway": "host.docker.internal:host-gateway" in text,
         "downloads_mount": ":/downloads/" in text or ":/downloads:" in text,
         "config_mount": ":/Upload-Assistant/data/config.py:" in text,
@@ -23347,6 +23350,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
                 "ptcli-daily-schedule:" in text,
                 "- daily" in text,
                 schedule_command in text,
+                daily_output_env,
             )
         ),
         "daily_scheduler_service_ready": all(
@@ -23356,6 +23360,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
                 "ptcli-daily-scheduler:" in text,
                 "- daily" in text,
                 scheduler_command in text,
+                daily_output_env,
             )
         ),
     }
@@ -26355,7 +26360,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "seedbox_live_trial_handoff_fields": ["ready", "status", "action", "read_only", "compose", "api", "readiness", "live_order", "report_contract", "safety", "required_confirmations", "qbit", "next_step", "blockers", "warnings", "next_actions"],
                 "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
-                "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
+                "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "daily_candidate_output_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },

@@ -17567,6 +17567,50 @@ def test_daily_schedule_webhook_error_is_reported(monkeypatch, tmp_path, capsys)
     assert summary["delivery_audit"] == payload["delivery_audit"]
 
 
+def test_daily_schedule_uses_env_output_dir_for_handoff_files(monkeypatch, tmp_path, capsys) -> None:
+    async def fake_daily_candidates(_request):
+        return {
+            "kind": "ptcli.service.daily_candidates",
+            "status": "ok",
+            "ok": True,
+            "digest": {
+                "kind": "ptcli.daily_candidates_digest",
+                "ready_count": 1,
+                "top_candidate": {"source_tracker": "CHD", "source_id": "12345"},
+                "push_items": [{"rank": 1, "source_id": "12345", "title": "Example"}],
+            },
+            "candidates": [{"status": "ready"}],
+            "blockers": [],
+            "next_actions": [],
+        }
+
+    monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
+    output_dir = tmp_path / "handoff"
+    monkeypatch.setenv("PTCLI_DAILY_CANDIDATE_OUTPUT_DIR", str(output_dir))
+    schedules_file = tmp_path / "schedules.json"
+    schedules_file.write_text(json.dumps([{"name": "chd-to-mteam", "source_tracker": "CHD", "target": "MTEAM", "accept_rules": True}]), encoding="utf-8")
+
+    code = main(
+        [
+            "daily-schedule",
+            "--job-dir",
+            str(tmp_path / "jobs"),
+            "--schedules-file",
+            str(schedules_file),
+            "--write-summary",
+            "--write-notification",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert Path(payload["summary_file"]) == output_dir / "ptcli-daily-schedule-summary.json"
+    assert Path(payload["notification_files"]["json"]) == output_dir / "ptcli-daily-candidates-notification.json"
+    assert Path(payload["notification_files"]["text"]) == output_dir / "ptcli-daily-candidates-notification.txt"
+    assert payload["delivery_result"]["file_delivery"]["ok"] is True
+
+
 def test_daily_scheduler_once_runs_schedule_and_writes_summary(monkeypatch, tmp_path, capsys) -> None:
     digest = {
         "kind": "ptcli.daily_candidates_digest",
@@ -21917,6 +21961,7 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     assert "PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs" in compose
     assert "PTCLI_MAX_CONCURRENT_JOBS=${PTCLI_MAX_CONCURRENT_JOBS:-1}" in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}" in compose
+    assert "PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}" in compose
     assert "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}" in compose
     assert "${PTCLI_DOWNLOADS_HOST_PATH:-/path/to/torrents/}:/downloads/:rw" in compose
     assert "${PTCLI_CONFIG_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/config.py}:/Upload-Assistant/data/config.py:rw" in compose
@@ -21925,6 +21970,7 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     assert "- daily" in compose
     assert 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]' in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=" in env_example
+    assert "PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=/Upload-Assistant/tmp/daily-candidates" in env_example
     assert '"confirm_upload":false' in env_example
     assert "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=" in env_example
     assert "PTCLI_MAX_CONCURRENT_JOBS=1" in env_example
@@ -21964,6 +22010,7 @@ services:
       - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
     volumes:
       - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
       - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
@@ -21975,10 +22022,14 @@ services:
   ptcli-daily-schedule:
     profiles:
       - daily
+    environment:
+      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
     command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
   ptcli-daily-scheduler:
     profiles:
       - daily
+    environment:
+      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
     command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
 """,
         encoding="utf-8",
@@ -22457,6 +22508,8 @@ services:
   ptcli-daily-scheduler:
     profiles:
       - daily
+    environment:
+      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
     command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
 """,
         encoding="utf-8",
@@ -23178,10 +23231,14 @@ services:
   ptcli-daily-schedule:
     profiles:
       - daily
+    environment:
+      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
     command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
   ptcli-daily-scheduler:
     profiles:
       - daily
+    environment:
+      - PTCLI_DAILY_CANDIDATE_OUTPUT_DIR=${PTCLI_DAILY_CANDIDATE_OUTPUT_DIR:-/Upload-Assistant/tmp/daily-candidates}
     command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
 """,
         encoding="utf-8",
