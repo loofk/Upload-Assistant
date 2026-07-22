@@ -30803,6 +30803,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     config_update_plan = site_policies.get("config_update_plan") if isinstance(site_policies.get("config_update_plan"), dict) else {}
     daily_candidate_plan = deployment.get("daily_candidates") if isinstance(deployment.get("daily_candidates"), dict) else {}
     next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight, daily_candidate_plan)
+    critical_path_plan = _goal_progress_critical_path_plan(progress_items, estimate, next_step, blockers)
     return {
         "kind": "ptcli.goal_progress",
         "status": "ok" if estimate["critical_path_ready"] else "blocked",
@@ -30811,6 +30812,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
         "completion_estimate": estimate,
         "capabilities": progress_items,
         "critical_path_remaining": _goal_progress_remaining(progress_items),
+        "critical_path_plan": critical_path_plan,
         "blockers": blockers,
         "next_step": next_step,
         "recommended_tool": next_step.get("tool"),
@@ -30900,7 +30902,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
             "live_validation_preflight": live_validation_preflight,
             "tool_count": len(tools),
         },
-        "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence.site_policies", "evidence.live_validation", "evidence.live_validation_preflight", "evidence.qbittorrent", "evidence", "next_step", "blockers"],
+        "read_order": ["completion_estimate", "critical_path_plan", "critical_path_remaining", "capabilities", "evidence.site_policies", "evidence.live_validation", "evidence.live_validation_preflight", "evidence.qbittorrent", "evidence", "next_step", "blockers"],
         "next_actions": _goal_progress_next_actions(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight),
     }
 
@@ -31927,6 +31929,97 @@ def _goal_progress_remaining(items: list[dict[str, Any]]) -> list[dict[str, Any]
     ]
 
 
+def _goal_progress_critical_path_plan(items: list[dict[str, Any]], estimate: dict[str, Any], next_step: dict[str, Any], blockers: list[str]) -> dict[str, Any]:
+    by_id = {str(item.get("id")): item for item in items}
+    phases = [
+        {
+            "id": "service_control_plane",
+            "name": "Docker/API/AI control plane",
+            "priority": 1,
+            "capability_ids": ["docker_compose_deployment", "ai_tool_contracts", "task_api"],
+            "complete_when": "docker-compose ptcli-api, /openapi.json, /v1/tools, and job status/summary/resume endpoints are present and covered by tests.",
+        },
+        {
+            "id": "manual_live_retorrent_closure",
+            "name": "Manual source-link retorrent live closure",
+            "priority": 2,
+            "capability_ids": ["site_policy_config", "qbittorrent_execution", "metadata_and_materials", "manual_source_url_retorrent", "seedbox_live_validation"],
+            "complete_when": "A real U2/CHD -> MTEAM seedbox job proves source pull, qBittorrent completion, materials, upload, uploaded torrent injection, seeding evidence, and live_validation_completion_audit.report_allowed=true.",
+        },
+        {
+            "id": "daily_candidate_workflow",
+            "name": "Daily 10 candidate discovery and approved submission",
+            "priority": 3,
+            "capability_ids": ["daily_candidates"],
+            "complete_when": "A configured schedule produces 10 safe candidates or a refill loop, publishes a digest, and can submit approved candidates into tracked retorrent jobs.",
+        },
+        {
+            "id": "tracker_adapter_rollout",
+            "name": "More Chinese PT tracker adapter rollout",
+            "priority": 4,
+            "capability_ids": ["tracker_adapters"],
+            "complete_when": "Additional allowlisted Chinese PT sites have adapter/profile coverage and validation evidence matching the U2/CHD/MTEAM reference contracts.",
+        },
+        {
+            "id": "legacy_cleanup",
+            "name": "Legacy UI/Discord/overseas tracker cleanup",
+            "priority": 5,
+            "capability_ids": ["legacy_cleanup"],
+            "complete_when": "Legacy surfaces are trimmed only after the Docker AI service workflows are live-proven and protected by regression tests.",
+        },
+    ]
+    enriched: list[dict[str, Any]] = []
+    current_phase: dict[str, Any] | None = None
+    for phase in phases:
+        phase_items = [by_id[capability_id] for capability_id in phase["capability_ids"] if capability_id in by_id]
+        incomplete = [item for item in phase_items if item.get("status") != "complete"]
+        ready = not incomplete and bool(phase_items)
+        phase_payload = {
+            **phase,
+            "ready": ready,
+            "status": "complete" if ready else "in_progress" if any(item.get("status") != "missing" and item.get("status") != "not_started" for item in phase_items) else "not_started",
+            "capabilities": [
+                {
+                    "id": item.get("id"),
+                    "status": item.get("status"),
+                    "score": item.get("score"),
+                    "blockers": item.get("blockers", []),
+                }
+                for item in phase_items
+            ],
+            "remaining_capability_ids": [str(item.get("id")) for item in incomplete],
+            "blockers": list(dict.fromkeys(blocker for item in incomplete for blocker in _string_list(item.get("blockers")) if blocker)),
+        }
+        if current_phase is None and not ready:
+            current_phase = phase_payload
+        enriched.append(phase_payload)
+    current_phase = current_phase or (enriched[-1] if enriched else None)
+    deferred = [phase for phase in enriched if current_phase and int(phase.get("priority") or 0) > int(current_phase.get("priority") or 0)]
+    return {
+        "kind": "ptcli.goal_critical_path_plan",
+        "strategy": "Finish service-critical manual live closure before optimizing daily recommendations, tracker breadth, or legacy cleanup.",
+        "estimated_percent": estimate.get("estimated_percent"),
+        "critical_path_ready": estimate.get("critical_path_ready"),
+        "current_phase": current_phase,
+        "priority_order": enriched,
+        "focus_now": {
+            "phase_id": current_phase.get("id") if current_phase else None,
+            "phase_name": current_phase.get("name") if current_phase else None,
+            "recommended_step": next_step,
+            "blockers": blockers,
+        },
+        "defer_until_after_current_phase": [{"id": phase.get("id"), "name": phase.get("name")} for phase in deferred],
+        "must_not_mark_complete_until": [
+            "critical_path_ready=true",
+            "manual_source_url_retorrent.status=complete",
+            "daily_candidates.status=complete",
+            "seedbox_live_validation.status=complete",
+            "legacy_cleanup.status=complete",
+        ],
+        "read_order": ["critical_path_plan.current_phase", "focus_now.recommended_step", "priority_order", "must_not_mark_complete_until"],
+    }
+
+
 def _goal_progress_blockers(items: list[dict[str, Any]], deployment: dict[str, Any], site_policies: dict[str, Any], live_validation_evidence: dict[str, Any]) -> list[str]:
     blockers: list[str] = []
     blockers.extend(_string_list(deployment.get("blockers")))
@@ -32850,10 +32943,13 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return a no-network progress audit against the final Chinese PT AI-service objective, including completed, partial, unverified, and remaining critical-path capabilities.",
             "input_schema": readiness_bundle_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "objective", "completion_estimate", "capabilities", "critical_path_remaining", "evidence", "next_step", "blockers", "next_actions"],
+                "required_fields": ["status", "ok", "objective", "completion_estimate", "capabilities", "critical_path_remaining", "critical_path_plan", "evidence", "next_step", "blockers", "next_actions"],
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
+                "critical_path_plan_fields": ["strategy", "estimated_percent", "critical_path_ready", "current_phase", "priority_order", "focus_now", "defer_until_after_current_phase", "must_not_mark_complete_until", "read_order"],
+                "critical_path_phase_fields": ["id", "name", "priority", "ready", "status", "capability_ids", "capabilities", "remaining_capability_ids", "complete_when", "blockers"],
+                "critical_path_focus_fields": ["phase_id", "phase_name", "recommended_step", "blockers"],
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "summary_file", "summary_evidence", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "daily_scheduler_final_report", "refill_loop_report", "delivery_result", "delivery_audit", "daily_candidate_schedule_final_report", "goal_handoff", "next_step", "blockers", "next_actions"],
                 "daily_candidate_goal_handoff_fields": ["ready", "status", "action", "target_count", "configured", "configured_count", "enabled_count", "schedule", "delivery", "refill", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
@@ -35648,6 +35744,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "completion_estimate": {"type": "object"},
             "capabilities": {"type": "array", "items": {"type": "object"}},
             "critical_path_remaining": {"type": "array", "items": {"type": "object"}},
+            "critical_path_plan": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_step": {"type": "object"},
             "recommended_tool": {"type": ["string", "null"]},

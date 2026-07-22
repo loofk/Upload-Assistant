@@ -21871,7 +21871,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["goal_progress"]["method"] == "GET"
     assert "completion_estimate" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_remaining" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
+    assert "critical_path_plan" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_ready" in tool_by_name["goal_progress"]["response_contract"]["estimate_fields"]
+    assert "current_phase" in tool_by_name["goal_progress"]["response_contract"]["critical_path_plan_fields"]
+    assert "recommended_step" in tool_by_name["goal_progress"]["response_contract"]["critical_path_focus_fields"]
+    assert "remaining_capability_ids" in tool_by_name["goal_progress"]["response_contract"]["critical_path_phase_fields"]
     assert "daily_candidates" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "daily_candidate_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "schedule_handoff" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
@@ -22223,6 +22227,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     goal_progress_schema = openapi["paths"]["/v1/goal/progress"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "completion_estimate" in goal_progress_schema["properties"]
     assert "critical_path_remaining" in goal_progress_schema["properties"]
+    assert "critical_path_plan" in goal_progress_schema["properties"]
     assert "evidence" in goal_progress_schema["properties"]
     resume_schema = openapi["paths"]["/v1/jobs/{job_id}/resume"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert "confirm_upload" in resume_schema["properties"]
@@ -24559,6 +24564,18 @@ services:
     assert payload["status"] == "blocked"
     assert payload["completion_estimate"]["estimated_percent"] > 50
     assert payload["completion_estimate"]["critical_path_ready"] is False
+    plan = payload["critical_path_plan"]
+    assert plan["kind"] == "ptcli.goal_critical_path_plan"
+    assert plan["critical_path_ready"] is False
+    assert plan["current_phase"]["id"] == "manual_live_retorrent_closure"
+    assert "site_policy_config" in plan["current_phase"]["remaining_capability_ids"]
+    assert "seedbox_live_validation" in plan["current_phase"]["remaining_capability_ids"]
+    assert plan["focus_now"]["phase_id"] == "manual_live_retorrent_closure"
+    assert plan["focus_now"]["recommended_step"]["tool"] == "site_policy_rule_review"
+    deferred_phase_ids = [phase["id"] for phase in plan["defer_until_after_current_phase"]]
+    assert "daily_candidate_workflow" in deferred_phase_ids
+    assert "legacy_cleanup" in deferred_phase_ids
+    assert "critical_path_ready=true" in plan["must_not_mark_complete_until"]
     capabilities = {item["id"]: item for item in payload["capabilities"]}
     assert capabilities["docker_compose_deployment"]["status"] == "complete"
     assert capabilities["ai_tool_contracts"]["status"] == "complete"

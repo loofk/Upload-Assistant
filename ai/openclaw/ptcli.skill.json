@@ -41914,6 +41914,7 @@
           "completion_estimate",
           "capabilities",
           "critical_path_remaining",
+          "critical_path_plan",
           "evidence",
           "next_step",
           "blockers",
@@ -41952,6 +41953,35 @@
           "unverified",
           "missing",
           "not_started"
+        ],
+        "critical_path_plan_fields": [
+          "strategy",
+          "estimated_percent",
+          "critical_path_ready",
+          "current_phase",
+          "priority_order",
+          "focus_now",
+          "defer_until_after_current_phase",
+          "must_not_mark_complete_until",
+          "read_order"
+        ],
+        "critical_path_phase_fields": [
+          "id",
+          "name",
+          "priority",
+          "ready",
+          "status",
+          "capability_ids",
+          "capabilities",
+          "remaining_capability_ids",
+          "complete_when",
+          "blockers"
+        ],
+        "critical_path_focus_fields": [
+          "phase_id",
+          "phase_name",
+          "recommended_step",
+          "blockers"
         ],
         "evidence_fields": [
           "deployment",
