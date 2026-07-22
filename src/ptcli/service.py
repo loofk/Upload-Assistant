@@ -2813,6 +2813,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
     policy_enforcement_bundle = _site_policy_enforcement_bundle(policy_execution_plan, policy_execution_sequence, policy_execution_handoff, policy_repair_gate, config_update_plan, context)
     policy_runtime_contract = _site_policy_runtime_contract(policy_execution_plan, policy_execution_sequence, policy_enforcement_bundle)
     policy_enforcement_bundle["runtime_contract"] = policy_runtime_contract
+    policy_execution_contract = _site_policy_execution_contract(policy_execution_plan, policy_execution_sequence, policy_enforcement_bundle, policy_runtime_contract, context)
     policy_config_handoff = _site_policy_config_handoff(policy_readiness_summary, policy_repair_gate, config_update_plan, context)
     overall_ready = bool(report.get("ready")) and bool(policy_setup_summary.get("ready"))
     rule_obligations = {str(item.get("tracker")): item.get("rule_obligations") for item in matrix if item.get("tracker")}
@@ -2841,6 +2842,7 @@ def site_policies_payload(request: dict[str, Any]) -> dict[str, Any]:
         "policy_execution_sequence": policy_execution_sequence,
         "policy_enforcement_bundle": policy_enforcement_bundle,
         "policy_runtime_contract": policy_runtime_contract,
+        "policy_execution_contract": policy_execution_contract,
         "policy_config_handoff": policy_config_handoff,
         "policy_handoff": policy_handoff,
         "next_step": policy_handoff.get("next_step"),
@@ -8462,7 +8464,7 @@ def _site_policy_execution_plan(
         "recommended_endpoint": next_step.get("endpoint"),
         "recommended_request": next_step.get("request"),
         "next_step": next_step,
-        "read_order": ["policy_execution_plan", "policy_execution_handoff", "policy_execution_summary", "policy_repair_gate"],
+        "read_order": ["policy_execution_plan", "policy_execution_contract", "policy_execution_handoff", "policy_execution_summary", "policy_repair_gate"],
         "continue_when": "policy_execution_plan.ready=true; copy request_defaults into live retorrent job requests, then run readiness_bundle/source_url_retorrent_preflight before live upload",
         "stop_when": [
             "policy_execution_plan.ready=false",
@@ -8578,7 +8580,7 @@ def _site_policy_execution_sequence(
         "config_update_plan": config_update_plan,
         "steps": steps,
         "next_step": steps[0] if steps else None,
-        "read_order": ["policy_execution_sequence", "policy_execution_plan", "policy_execution_handoff", "policy_repair_gate", "config_update_plan"],
+        "read_order": ["policy_execution_sequence", "policy_execution_contract", "policy_execution_plan", "policy_execution_handoff", "policy_repair_gate", "config_update_plan"],
         "complete_when": [
             "live job request includes policy_execution_sequence.request_defaults",
             "policy_execution_final_report.ready_for_live=true",
@@ -8913,6 +8915,120 @@ def _site_policy_runtime_required_evidence(qbit_roles: list[Any]) -> list[str]:
         if isinstance(role, dict):
             evidence.extend(_string_list(role.get("evidence_required")))
     return list(dict.fromkeys(evidence))
+
+
+def _site_policy_execution_contract(
+    policy_execution_plan: dict[str, Any],
+    policy_execution_sequence: dict[str, Any],
+    policy_enforcement_bundle: dict[str, Any],
+    policy_runtime_contract: dict[str, Any],
+    request_context: dict[str, Any],
+) -> dict[str, Any]:
+    qbit_roles = policy_execution_plan.get("qbit_roles") if isinstance(policy_execution_plan.get("qbit_roles"), list) else []
+    request_defaults = policy_runtime_contract.get("request_defaults") if isinstance(policy_runtime_contract.get("request_defaults"), dict) else {}
+    request_default_sources = policy_runtime_contract.get("request_default_sources") if isinstance(policy_runtime_contract.get("request_default_sources"), dict) else {}
+    protected_fields = policy_runtime_contract.get("protected_fields") if isinstance(policy_runtime_contract.get("protected_fields"), list) else []
+    rule_contract = policy_runtime_contract.get("rule_contract") if isinstance(policy_runtime_contract.get("rule_contract"), dict) else {}
+    qbit_contract = policy_runtime_contract.get("qbit_contract") if isinstance(policy_runtime_contract.get("qbit_contract"), dict) else {}
+    seeding_contract = policy_runtime_contract.get("seeding_contract") if isinstance(policy_runtime_contract.get("seeding_contract"), dict) else {}
+    completion_contract = policy_runtime_contract.get("completion_contract") if isinstance(policy_runtime_contract.get("completion_contract"), dict) else {}
+    blockers = list(dict.fromkeys(_string_list(policy_runtime_contract.get("blockers")) + _string_list(policy_enforcement_bundle.get("blockers"))))
+    ready = bool(policy_runtime_contract.get("ready")) and bool(policy_enforcement_bundle.get("ready")) and not blockers
+    next_step = _site_policy_execution_contract_next_step(ready, policy_execution_sequence, request_context)
+    return {
+        "kind": "ptcli.policy_execution_contract",
+        "ready": ready,
+        "status": "ready" if ready else "blocked",
+        "accepted_rules": bool(policy_execution_plan.get("accepted_rules")),
+        "source_trackers": _string_list(policy_execution_plan.get("source_trackers")),
+        "target_trackers": _string_list(policy_execution_plan.get("target_trackers")),
+        "contract_scope": "live_retorrent_job_request_and_completion_audit",
+        "live_request_template": policy_enforcement_bundle.get("live_request_template") if isinstance(policy_enforcement_bundle.get("live_request_template"), dict) else policy_execution_sequence.get("request_template"),
+        "required_request_fields": policy_runtime_contract.get("required_request_fields") if isinstance(policy_runtime_contract.get("required_request_fields"), list) else [],
+        "request_defaults": request_defaults,
+        "request_default_sources": request_default_sources,
+        "protected_fields": protected_fields,
+        "source_roles": [_site_policy_execution_contract_role(role, request_default_sources) for role in qbit_roles if isinstance(role, dict) and role.get("role") == "source"],
+        "target_roles": [_site_policy_execution_contract_role(role, request_default_sources) for role in qbit_roles if isinstance(role, dict) and role.get("role") == "target"],
+        "qbit_contract": qbit_contract,
+        "seeding_contract": seeding_contract,
+        "rule_contract": rule_contract,
+        "completion_contract": completion_contract,
+        "resume_contract": {
+            "allowed_override_fields": ["accept_rules", "confirm_upload", *request_defaults.keys(), "qbit_category", "qbit_tags", "uploaded_qbit_category", "uploaded_qbit_tags"],
+            "dry_run_first": True,
+            "read_before_execute": ["policy_execution_contract", "policy_runtime_contract", "policy_execution_final_report", "qbit_execution_gate"],
+        },
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request") if next_step.get("request") is not None else next_step.get("request_template"),
+        "read_order": ["policy_execution_contract", "policy_runtime_contract", "policy_execution_sequence", "policy_execution_plan", "policy_enforcement_bundle"],
+        "continue_when": "policy_execution_contract.ready=true and live request keeps every protected_fields[] value or stricter explicit override evidence",
+        "stop_when": [
+            "policy_execution_contract.ready=false",
+            "live request omits protected_fields",
+            "rule_contract.ready=false",
+            "qbit_contract.ready=false",
+            "seeding_contract.ready=false",
+            "duplicate_check.exists=true",
+        ],
+        "blockers": blockers,
+        "next_actions": _site_policy_execution_contract_next_actions(ready, blockers),
+        "safety": {
+            "mutates_state": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "live_upload": False,
+            "does_not_edit_config": True,
+            "does_not_override_site_rules": True,
+            "requires_explicit_confirmations": ["accept_rules=true", "confirm_upload=true"],
+        },
+    }
+
+
+def _site_policy_execution_contract_role(role: dict[str, Any], request_default_sources: dict[str, Any]) -> dict[str, Any]:
+    request_fields = role.get("request_fields") if isinstance(role.get("request_fields"), dict) else {}
+    return {
+        "role": role.get("role"),
+        "tracker": role.get("tracker"),
+        "request_fields": request_fields,
+        "request_field_sources": {str(field): request_default_sources.get(str(field)) for field in request_fields},
+        "qbit_client_fields": role.get("qbit_client_fields") if isinstance(role.get("qbit_client_fields"), dict) else {},
+        "limits_human": role.get("limits_human") if isinstance(role.get("limits_human"), dict) else {},
+        "seeding_requirements": role.get("seeding_requirements") if isinstance(role.get("seeding_requirements"), dict) else {},
+        "evidence_required": role.get("evidence_required") if isinstance(role.get("evidence_required"), list) else [],
+    }
+
+
+def _site_policy_execution_contract_next_step(ready: bool, policy_execution_sequence: dict[str, Any], request_context: dict[str, Any]) -> dict[str, Any]:
+    if ready:
+        request_template = policy_execution_sequence.get("request_template") if isinstance(policy_execution_sequence.get("request_template"), dict) else {}
+        return {
+            "tool": "source_url_check_and_submit",
+            "endpoint": "/v1/jobs/retorrent/from-url/check-and-submit",
+            "method": "POST",
+            "request_template": request_template,
+            "reason": "policy_execution_contract_ready",
+        }
+    next_step = policy_execution_sequence.get("next_step") if isinstance(policy_execution_sequence.get("next_step"), dict) else {}
+    if next_step:
+        return next_step
+    return {
+        "tool": "site_policies",
+        "endpoint": "/v1/site-policies",
+        "method": "POST",
+        "request": _site_policy_rerun_request(request_context, {"accept_rules": True}),
+        "reason": "policy_execution_contract_blocked",
+    }
+
+
+def _site_policy_execution_contract_next_actions(ready: bool, blockers: list[str]) -> list[str]:
+    if ready:
+        return ["Use policy_execution_contract.live_request_template for live jobs, preserve protected_fields, then verify completion_contract.required_evidence before reporting success."]
+    if blockers:
+        return ["Resolve policy_execution_contract.blockers via policy_repair_gate or policy_config_handoff before live retorrent automation."]
+    return ["Inspect policy_execution_contract.read_order before creating live retorrent jobs."]
 
 
 def _site_policy_runtime_contract_next_actions(ready: bool, blockers: list[str]) -> list[str]:
@@ -21691,7 +21807,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "description": "Return the configured Chinese PT site policy matrix: automation gates, qBittorrent rate limits, seeding requirements, rule URLs, and manual review blockers. This does not contact trackers.",
             "input_schema": site_policy_request_schema,
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_config_handoff", "policy_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
+                "required_fields": ["status", "ok", "ready", "policy_matrix", "rule_obligations", "policy_execution_profiles", "config_templates", "qbit_limits", "policy_gap_summary", "config_update_plan", "execution_readiness", "policy_execution_summary", "policy_setup_summary", "policy_readiness_summary", "policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_execution_sequence", "policy_enforcement_bundle", "policy_runtime_contract", "policy_execution_contract", "policy_config_handoff", "policy_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions", "agent_summary"],
                 "policy_fields": [
                     "tracker",
                     "roles",
@@ -21730,6 +21846,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "policy_execution_sequence_step_fields": ["name", "tool", "endpoint", "method", "request", "request_template", "read", "continue_when", "stop_when", "blockers"],
                 "policy_enforcement_bundle_fields": ["ready", "status", "action", "accepted_rules", "source_trackers", "target_trackers", "request_defaults", "request_default_sources", "live_request_template", "qbit_enforcement", "seeding_enforcement", "rule_gate", "config_repair", "runtime_contract", "live_job_requirements", "completion_evidence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
                 "policy_runtime_contract_fields": ["ready", "status", "accepted_rules", "source_trackers", "target_trackers", "required_request_fields", "request_defaults", "request_default_sources", "request_template", "protected_fields", "override_policy", "qbit_roles", "qbit_contract", "seeding_contract", "rule_contract", "completion_contract", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
+                "policy_execution_contract_fields": ["ready", "status", "accepted_rules", "source_trackers", "target_trackers", "contract_scope", "live_request_template", "required_request_fields", "request_defaults", "request_default_sources", "protected_fields", "source_roles", "target_roles", "qbit_contract", "seeding_contract", "rule_contract", "completion_contract", "resume_contract", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
+                "policy_execution_contract_role_fields": ["role", "tracker", "request_fields", "request_field_sources", "qbit_client_fields", "limits_human", "seeding_requirements", "evidence_required"],
                 "policy_runtime_protected_field_fields": ["field", "value", "source", "protection", "override_requires"],
                 "policy_runtime_completion_contract_fields": ["summary_fields", "required_evidence", "complete_when"],
                 "policy_enforcement_qbit_fields": ["ready", "role_count", "roles", "missing", "request_fields", "client_fields", "evidence_required"],
@@ -23910,6 +24028,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "policy_execution_sequence": {"type": "object"},
             "policy_enforcement_bundle": {"type": "object"},
             "policy_runtime_contract": {"type": "object"},
+            "policy_execution_contract": {"type": "object"},
             "policy_config_handoff": {"type": "object"},
             "policy_handoff": {"type": "object"},
             "next_step": {"type": "object"},
