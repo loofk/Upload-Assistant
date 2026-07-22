@@ -21444,10 +21444,12 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     progress_items = _goal_progress_items(deployment, site_policies, tool_names, live_validation_evidence)
     estimate = _goal_progress_estimate(progress_items)
     blockers = _goal_progress_blockers(progress_items, deployment, site_policies, live_validation_evidence)
-    next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight)
     policy_repair_gate = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
     policy_config_handoff = site_policies.get("policy_config_handoff") if isinstance(site_policies.get("policy_config_handoff"), dict) else {}
     config_update_plan = site_policies.get("config_update_plan") if isinstance(site_policies.get("config_update_plan"), dict) else {}
+    daily_candidate_plan = deployment.get("daily_candidates") if isinstance(deployment.get("daily_candidates"), dict) else {}
+    daily_schedule_handoff = daily_candidate_plan.get("schedule_handoff") if isinstance(daily_candidate_plan.get("schedule_handoff"), dict) else {}
+    next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight, daily_candidate_plan)
     return {
         "kind": "ptcli.goal_progress",
         "status": "ok" if estimate["critical_path_ready"] else "blocked",
@@ -21476,6 +21478,18 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 or (deployment.get("docker_compose") or {}).get("daily_schedule_service_ready"),
                 "qbit_configured": (deployment.get("qbit") or {}).get("configured"),
                 "connectivity_checked": deployment.get("connectivity_checked"),
+            },
+            "daily_candidates": {
+                "configured": daily_candidate_plan.get("configured"),
+                "status": daily_candidate_plan.get("status"),
+                "source": daily_candidate_plan.get("source"),
+                "env": daily_candidate_plan.get("env"),
+                "count": daily_candidate_plan.get("count"),
+                "schedules": daily_candidate_plan.get("schedules") if isinstance(daily_candidate_plan.get("schedules"), list) else [],
+                "schedule_handoff": daily_schedule_handoff or None,
+                "next_step": _goal_progress_daily_candidate_next_step(daily_candidate_plan),
+                "blockers": _string_list(daily_candidate_plan.get("blockers")),
+                "next_actions": _string_list(daily_candidate_plan.get("next_actions")),
             },
             "site_policies": {
                 "ready": site_policies.get("ready"),
@@ -22055,6 +22069,7 @@ def _goal_progress_next_step(
     site_policies: dict[str, Any] | None = None,
     live_validation_evidence: dict[str, Any] | None = None,
     live_validation_preflight: dict[str, Any] | None = None,
+    daily_candidate_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     by_id = {str(item.get("id")): item for item in items}
     if by_id.get("site_policy_config", {}).get("status") != "complete":
@@ -22078,6 +22093,9 @@ def _goal_progress_next_step(
         return {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "request": None, "reason": "run_seedbox_live_validation_preflight"}
     if blockers:
         return {"tool": "goal_progress", "endpoint": "/v1/goal/progress", "method": "GET", "reason": "inspect_remaining_blockers"}
+    daily_next_step = _goal_progress_daily_candidate_next_step(daily_candidate_plan)
+    if daily_next_step:
+        return daily_next_step
     return {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "reason": "exercise_daily_candidate_workflow"}
 
 
@@ -22121,6 +22139,38 @@ def _goal_progress_site_policy_next_step(site_policies: dict[str, Any] | None) -
     if tool:
         return {"tool": tool, "endpoint": endpoint, "method": "POST" if endpoint else None, "request": request, "reason": "site_policies.recommended"}
     return None
+
+
+def _goal_progress_daily_candidate_next_step(daily_candidate_plan: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(daily_candidate_plan, dict):
+        return None
+    handoff = daily_candidate_plan.get("schedule_handoff") if isinstance(daily_candidate_plan.get("schedule_handoff"), dict) else {}
+    api = handoff.get("api") if isinstance(handoff.get("api"), dict) else {}
+    if daily_candidate_plan.get("configured") and isinstance(api.get("create_jobs"), dict):
+        create_jobs = api["create_jobs"]
+        return {
+            "tool": create_jobs.get("tool") or "daily_candidates_schedule_job",
+            "endpoint": create_jobs.get("endpoint") or "/v1/jobs/candidates/daily/schedule",
+            "method": create_jobs.get("method") or "POST",
+            "request": create_jobs.get("request"),
+            "reason": "daily_candidate_schedule_ready",
+        }
+    if isinstance(api.get("inspect_schedule"), dict):
+        inspect_schedule = api["inspect_schedule"]
+        return {
+            "tool": inspect_schedule.get("tool") or "daily_candidates_schedule",
+            "endpoint": inspect_schedule.get("endpoint") or "/v1/candidates/daily/schedule",
+            "method": inspect_schedule.get("method") or "POST",
+            "request": inspect_schedule.get("request"),
+            "reason": "configure_daily_candidate_schedule",
+        }
+    return {
+        "tool": "deployment_check",
+        "endpoint": "/v1/deployment/check",
+        "method": "GET",
+        "request": None,
+        "reason": "inspect_daily_candidate_schedule",
+    }
 
 
 def tools_payload() -> dict[str, Any]:
@@ -22830,7 +22880,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
-                "evidence_fields": ["deployment", "site_policies", "live_validation", "live_validation_preflight", "tool_count"],
+                "evidence_fields": ["deployment", "daily_candidates", "site_policies", "live_validation", "live_validation_preflight", "tool_count"],
+                "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "schedules", "schedule_handoff", "next_step", "blockers", "next_actions"],
                 "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "next_step", "blockers"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "resume_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],

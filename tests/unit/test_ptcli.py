@@ -19330,6 +19330,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "completion_estimate" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_remaining" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_ready" in tool_by_name["goal_progress"]["response_contract"]["estimate_fields"]
+    assert "daily_candidates" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
+    assert "daily_candidate_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "schedule_handoff" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "next_step" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "live_validation" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "live_validation_preflight" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "site_policy_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -20104,6 +20108,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "ready_to_submit" in goal_progress_tool["response_contract"]["capability_status_values"]
     assert "submitted_needs_resume" in goal_progress_tool["response_contract"]["capability_status_values"]
     assert "live_submission_package" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
+    assert "daily_candidates" in goal_progress_tool["response_contract"]["evidence_fields"]
+    assert "schedule_handoff" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "live_submission_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_followup" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "resume_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
@@ -20151,6 +20157,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "ready_to_submit" in tools_by_name["goal_progress"]["response_contract"]["capability_status_values"]
         assert "submitted_running" in tools_by_name["goal_progress"]["response_contract"]["capability_status_values"]
         assert "live_submission_package" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+        assert "daily_candidates" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
+        assert "schedule_handoff" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "live_submission_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "live_validation_followup" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "resume_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
@@ -21318,6 +21326,10 @@ services:
     assert payload["source_context"]["target"] == "MTEAM"
     assert payload["evidence"]["deployment"]["docker_compose_api_ready"] is True
     assert payload["evidence"]["deployment"]["qbit_configured"] is True
+    assert payload["evidence"]["daily_candidates"]["configured"] is False
+    assert payload["evidence"]["daily_candidates"]["schedule_handoff"]["action"] == "configure_schedule"
+    assert payload["evidence"]["daily_candidates"]["next_step"]["tool"] == "daily_candidates_schedule"
+    assert payload["evidence"]["daily_candidates"]["next_step"]["request"]["schedules"][0]["limit"] == 10
     assert payload["evidence"]["site_policies"]["policy_repair_action"] == "review_rules"
     assert payload["evidence"]["site_policies"]["rule_review_request"]["source_tracker"] == "U2"
     assert payload["evidence"]["site_policies"]["rule_review_request"]["target"] == "MTEAM"
@@ -21422,6 +21434,14 @@ services:
     )
 
     preflight = payload["evidence"]["live_validation_preflight"]
+    daily = payload["evidence"]["daily_candidates"]
+    assert daily["configured"] is True
+    assert daily["count"] == 1
+    assert daily["schedule_handoff"]["ready"] is True
+    assert daily["next_step"]["tool"] == "daily_candidates_schedule_job"
+    assert daily["next_step"]["endpoint"] == "/v1/jobs/candidates/daily/schedule"
+    assert daily["next_step"]["request"]["schedules"][0]["job_request"]["source_tracker"] == "U2"
+    assert daily["next_step"]["request"]["schedules"][0]["job_request"]["target_trackers"] == "MTEAM"
     assert preflight["ready"] is True
     assert preflight["live_execution_package"]["ready"] is True
     assert preflight["live_validation_repair_plan"]["ready"] is True

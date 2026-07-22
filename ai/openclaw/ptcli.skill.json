@@ -29125,10 +29125,23 @@
         ],
         "evidence_fields": [
           "deployment",
+          "daily_candidates",
           "site_policies",
           "live_validation",
           "live_validation_preflight",
           "tool_count"
+        ],
+        "daily_candidate_evidence_fields": [
+          "configured",
+          "status",
+          "source",
+          "env",
+          "count",
+          "schedules",
+          "schedule_handoff",
+          "next_step",
+          "blockers",
+          "next_actions"
         ],
         "site_policy_evidence_fields": [
           "ready",
