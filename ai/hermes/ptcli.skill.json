@@ -197,6 +197,7 @@
     "deployment_or_seedbox_check": "deployment_check",
     "all_preflight_signals": "readiness_bundle",
     "rules_and_rate_limits": "site_policies",
+    "inspect_daily_candidate_scheduler": "daily_candidate_scheduler_plan",
     "daily_candidates": "daily_candidate_run_and_deliver",
     "daily_candidates_step_by_step": "daily_candidates_schedule_job",
     "deliver_daily_candidate_digest": "daily_candidate_delivery",
@@ -18815,6 +18816,156 @@
         "mutates_state": false,
         "live_upload": false,
         "requires_confirmation": []
+      }
+    },
+    {
+      "name": "daily_candidate_scheduler_plan",
+      "method": "POST",
+      "path": "/v1/candidates/daily/scheduler",
+      "description": "Read the Docker/seedbox daily-candidate scheduler plan, including next_run and AI handoff for running an immediate digest or starting the Compose daemon. This endpoint does not scan trackers or upload.",
+      "input_schema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "schedules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "source_tracker",
+                "target"
+              ],
+              "properties": {
+                "source_tracker": {
+                  "type": "string",
+                  "description": "Source tracker code, e.g. U2 or CHD."
+                },
+                "target": {
+                  "type": [
+                    "string",
+                    "array"
+                  ],
+                  "description": "Target tracker code(s), currently MTEAM duplicate checks are supported."
+                },
+                "limit": {
+                  "type": "integer",
+                  "default": 10,
+                  "maximum": 10
+                },
+                "scan_limit": {
+                  "type": "integer",
+                  "default": 50,
+                  "maximum": 200,
+                  "description": "How many recent source torrents to scan before scoring; default 50, hard cap 200."
+                },
+                "accept_rules": {
+                  "type": "boolean",
+                  "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
+                },
+                "check_dupes": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "exclude_source_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Source torrent ids already covered by the current batch; agents should pass this when refilling shortfalls to avoid duplicate submissions."
+                },
+                "base_dir": {
+                  "type": "string"
+                },
+                "config": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "time": {
+                  "type": "string",
+                  "default": "09:00"
+                },
+                "timezone": {
+                  "type": "string",
+                  "default": "Asia/Shanghai"
+                }
+              }
+            }
+          },
+          "now": {
+            "type": "string",
+            "description": "Optional ISO-8601 datetime used to calculate next_run for tests or diagnostics."
+          }
+        }
+      },
+      "response_contract": {
+        "required_fields": [
+          "status",
+          "ok",
+          "ready",
+          "source",
+          "env",
+          "schedule_count",
+          "enabled_count",
+          "now",
+          "next_run",
+          "next_runs",
+          "schedule_plan",
+          "scheduler_handoff",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "blockers",
+          "next_actions",
+          "safety"
+        ],
+        "next_run_fields": [
+          "name",
+          "time",
+          "timezone",
+          "run_at",
+          "seconds_until_run",
+          "job_endpoint",
+          "job_tool",
+          "job_request",
+          "delivery_endpoint",
+          "delivery_tool"
+        ],
+        "scheduler_handoff_fields": [
+          "ready",
+          "action",
+          "next_run",
+          "next_runs",
+          "compose",
+          "api",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "read_order",
+          "continue_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
+        ]
+      },
+      "workflow_hints": {
+        "before": "daily_candidate_run_and_deliver",
+        "compose_daemon": "docker compose --profile daily up -d ptcli-daily-scheduler"
+      },
+      "safety": {
+        "mutates_state": false,
+        "live_upload": false,
+        "requires_confirmation": [],
+        "contacts_trackers": false,
+        "contacts_qbittorrent": false
       }
     },
     {
@@ -41330,7 +41481,7 @@
       }
     }
   ],
-  "tool_count": 46,
+  "tool_count": 47,
   "openclaw": {
     "skill_id": "ptcli-retorrent",
     "entrypoint": "http://127.0.0.1:8080/openapi.json",

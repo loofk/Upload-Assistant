@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,6 +23,7 @@ from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, HARD_MAX_CANDIDATE_SCAN, MAX_CANDIDATE_SCAN, build_daily_candidates
 from src.ptcli.cli import build_parser, build_sites_payload, pipeline_payload, retorrent_payload, summary_check_payload
@@ -837,6 +839,16 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 except ServiceError as exc:
                     self._send_json(exc.status, {"status": "error", "message": str(exc)})
                 return
+            if path == "/v1/candidates/daily/scheduler":
+                if not self._authorized():
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
+                    return
+                query = {key: values[-1] for key, values in parse_qs(parsed_url.query).items() if values}
+                try:
+                    self._send_json(HTTPStatus.OK, daily_candidate_scheduler_plan_payload(query))
+                except ServiceError as exc:
+                    self._send_json(exc.status, {"status": "error", "message": str(exc)})
+                return
             if path == "/v1/jobs":
                 if not self._authorized():
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"status": "error", "message": "Unauthorized."})
@@ -890,6 +902,7 @@ def _handler_class(api_token: str | None, job_store: JobStore) -> type[BaseHTTPR
                 "/v1/summary/check": summary_check_service_payload,
                 "/v1/candidates/daily": lambda payload: asyncio.run(daily_candidates(payload)),
                 "/v1/candidates/daily/schedule": daily_candidate_schedule_payload,
+                "/v1/candidates/daily/scheduler": daily_candidate_scheduler_plan_payload,
                 "/v1/candidates/daily/deliver": daily_candidate_delivery_payload,
                 "/v1/jobs/retorrent/check": lambda payload: create_retorrent_check_job(job_store, payload),
                 "/v1/jobs/retorrent": lambda payload: create_retorrent_job(job_store, payload),
@@ -3685,6 +3698,139 @@ def daily_candidate_schedule_payload(request: dict[str, Any]) -> dict[str, Any]:
         "blockers": blockers,
         "next_actions": _daily_candidate_schedule_next_actions(schedules, blockers),
     }
+
+
+def daily_candidate_scheduler_plan_payload(request: dict[str, Any]) -> dict[str, Any]:
+    """Return the daemon scheduler plan for daily candidates without running scans."""
+    request = request if isinstance(request, dict) else {}
+    schedule_request = {key: request[key] for key in ("schedules",) if key in request}
+    schedule_plan = daily_candidate_schedule_payload(schedule_request)
+    now = _daily_candidate_scheduler_now(request.get("now"))
+    next_runs = [_daily_candidate_scheduler_next_run(schedule, now=now) for schedule in schedule_plan.get("schedules", []) if isinstance(schedule, dict) and schedule.get("enabled") is not False]
+    next_runs = [run for run in next_runs if run is not None]
+    next_runs.sort(key=lambda item: item["seconds_until_run"])
+    blockers = _string_list(schedule_plan.get("blockers")) if not next_runs else []
+    ready = bool(next_runs)
+    handoff = _daily_candidate_scheduler_handoff(next_runs, blockers, schedule_plan)
+    return {
+        "kind": "ptcli.daily_candidate_scheduler_plan",
+        "status": "ok" if ready else "blocked",
+        "ok": ready,
+        "ready": ready,
+        "source": schedule_plan.get("source"),
+        "env": schedule_plan.get("env"),
+        "schedule_count": schedule_plan.get("count", 0),
+        "enabled_count": len(next_runs),
+        "now": now.isoformat(),
+        "next_run": next_runs[0] if next_runs else None,
+        "next_runs": next_runs,
+        "schedule_plan": schedule_plan,
+        "scheduler_handoff": handoff,
+        "recommended_tool": handoff.get("recommended_tool"),
+        "recommended_endpoint": handoff.get("recommended_endpoint"),
+        "recommended_method": handoff.get("recommended_method"),
+        "recommended_request": handoff.get("recommended_request"),
+        "blockers": blockers,
+        "next_actions": _daily_candidate_scheduler_next_actions(ready, blockers),
+        "safety": {
+            "mutates_state": False,
+            "uploads": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "scheduler_plan_only": True,
+            "candidate_scans_require_daily_candidate_run_and_deliver_or_daily_candidates_schedule_job": True,
+        },
+    }
+
+
+def _daily_candidate_scheduler_now(value: Any) -> datetime:
+    if value:
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except ValueError as exc:
+            raise ServiceError("now must be an ISO-8601 datetime when supplied.", status=HTTPStatus.BAD_REQUEST) from exc
+        return parsed.astimezone() if parsed.tzinfo else parsed.astimezone()
+    return datetime.now().astimezone()
+
+
+def _daily_candidate_scheduler_next_run(schedule: dict[str, Any], *, now: datetime) -> dict[str, Any] | None:
+    schedule_info = schedule.get("schedule") if isinstance(schedule.get("schedule"), dict) else {}
+    time_text = str(schedule_info.get("time") or "09:00")
+    try:
+        hour_text, minute_text = time_text.split(":", 1)
+        hour = int(hour_text)
+        minute = int(minute_text)
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError
+    except ValueError:
+        return None
+    timezone = str(schedule_info.get("timezone") or os.environ.get("TZ") or "Asia/Shanghai")
+    try:
+        tz = ZoneInfo(timezone)
+    except Exception:
+        tz = ZoneInfo("Asia/Shanghai")
+        timezone = "Asia/Shanghai"
+    local_now = now.astimezone(tz)
+    run_at = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if run_at <= local_now:
+        run_at += timedelta(days=1)
+    return {
+        "name": schedule.get("name"),
+        "time": time_text,
+        "timezone": timezone,
+        "run_at": run_at.isoformat(),
+        "seconds_until_run": max(1, int((run_at - local_now).total_seconds())),
+        "job_endpoint": schedule.get("job_endpoint"),
+        "job_tool": schedule.get("job_tool"),
+        "job_request": schedule.get("job_request"),
+        "delivery_endpoint": DAILY_CANDIDATE_DELIVERY_ENDPOINT,
+        "delivery_tool": DAILY_CANDIDATE_DELIVERY_TOOL,
+    }
+
+
+def _daily_candidate_scheduler_handoff(next_runs: list[dict[str, Any]], blockers: list[str], schedule_plan: dict[str, Any]) -> dict[str, Any]:
+    ready = bool(next_runs) and not blockers
+    next_run = next_runs[0] if next_runs else None
+    recommended_request = {"schedules": schedule_plan.get("schedules", [])} if ready else {"schedules": _daily_candidate_schedule_env_example()}
+    return {
+        "kind": "ptcli.daily_candidate_scheduler_handoff",
+        "ready": ready,
+        "action": "wait_for_next_run" if ready else "configure_schedule",
+        "next_run": next_run,
+        "next_runs": next_runs,
+        "compose": {
+            "daemon": "docker compose --profile daily up -d ptcli-daily-scheduler",
+            "one_shot": "docker compose --profile daily run --rm ptcli-daily-schedule",
+        },
+        "api": {
+            "inspect_scheduler": {"tool": "daily_candidate_scheduler_plan", "endpoint": "/v1/candidates/daily/scheduler", "method": "POST", "request": recommended_request},
+            "run_now": {"tool": "daily_candidate_run_and_deliver", "endpoint": "/v1/jobs/candidates/daily/run-and-deliver", "method": "POST", "request": {**recommended_request, "write_files": True, "use_env_webhook": True}},
+            "batch_status": {"tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": {}},
+        },
+        "recommended_tool": "daily_candidate_run_and_deliver" if ready else "daily_candidates_schedule",
+        "recommended_endpoint": "/v1/jobs/candidates/daily/run-and-deliver" if ready else "/v1/candidates/daily/schedule",
+        "recommended_method": "POST",
+        "recommended_request": {**recommended_request, "write_files": True, "use_env_webhook": True} if ready else recommended_request,
+        "read_order": ["scheduler_handoff", "next_run", "schedule_plan.schedule_handoff"],
+        "continue_when": ["next_run is present", "docker compose --profile daily up -d ptcli-daily-scheduler is running on the seedbox"],
+        "stop_when": ["blockers is non-empty", "schedule_plan.schedule_handoff.ready=false"],
+        "safety": {
+            "plan_only": True,
+            "does_not_scan": True,
+            "does_not_submit_candidates": True,
+            "does_not_upload_torrents": True,
+        },
+        "blockers": blockers,
+        "next_actions": _daily_candidate_scheduler_next_actions(ready, blockers),
+    }
+
+
+def _daily_candidate_scheduler_next_actions(ready: bool, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Configure PTCLI_DAILY_CANDIDATE_SCHEDULES or POST scheduler_handoff.api.inspect_scheduler.request before starting the Docker scheduler."]
+    if ready:
+        return ["Keep ptcli-daily-scheduler running, or call scheduler_handoff.api.run_now for an immediate safe daily candidate digest."]
+    return ["Inspect schedule_plan.schedule_handoff.env_example, then configure one enabled daily candidate schedule."]
 
 
 def daily_candidate_delivery_payload(request: dict[str, Any]) -> dict[str, Any]:
@@ -30449,6 +30595,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
     source_url_check_submit_request_schema = _source_url_retorrent_tool_request_schema()
     candidate_request_schema = _daily_candidate_tool_request_schema()
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
+    candidate_scheduler_request_schema = _daily_candidate_scheduler_tool_request_schema()
     candidate_delivery_request_schema = _daily_candidate_delivery_tool_request_schema()
     candidate_run_and_deliver_request_schema = _daily_candidate_run_and_deliver_tool_request_schema()
     candidate_submit_request_schema = _candidate_submit_tool_request_schema()
@@ -30629,6 +30776,20 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "schedule_handoff_fields": ["ready", "action", "env", "configured_count", "enabled_count", "target_count", "env_example", "compose", "api", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
+        },
+        {
+            "name": "daily_candidate_scheduler_plan",
+            "method": "POST",
+            "path": "/v1/candidates/daily/scheduler",
+            "description": "Read the Docker/seedbox daily-candidate scheduler plan, including next_run and AI handoff for running an immediate digest or starting the Compose daemon. This endpoint does not scan trackers or upload.",
+            "input_schema": candidate_scheduler_request_schema,
+            "response_contract": {
+                "required_fields": ["status", "ok", "ready", "source", "env", "schedule_count", "enabled_count", "now", "next_run", "next_runs", "schedule_plan", "scheduler_handoff", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "blockers", "next_actions", "safety"],
+                "next_run_fields": ["name", "time", "timezone", "run_at", "seconds_until_run", "job_endpoint", "job_tool", "job_request", "delivery_endpoint", "delivery_tool"],
+                "scheduler_handoff_fields": ["ready", "action", "next_run", "next_runs", "compose", "api", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
+            },
+            "workflow_hints": {"before": "daily_candidate_run_and_deliver", "compose_daemon": "docker compose --profile daily up -d ptcli-daily-scheduler"},
+            "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": [], "contacts_trackers": False, "contacts_qbittorrent": False},
         },
         {
             "name": "daily_candidate_delivery",
@@ -31196,6 +31357,13 @@ def _daily_candidate_schedule_tool_request_schema() -> dict[str, Any]:
             }
         },
     }
+
+
+def _daily_candidate_scheduler_tool_request_schema() -> dict[str, Any]:
+    schema = json.loads(json.dumps(_daily_candidate_schedule_tool_request_schema()))
+    properties = schema.setdefault("properties", {})
+    properties["now"] = {"type": "string", "description": "Optional ISO-8601 datetime used to calculate next_run for tests or diagnostics."}
+    return schema
 
 
 def _daily_candidate_delivery_tool_request_schema() -> dict[str, Any]:
@@ -32498,6 +32666,7 @@ def _agent_tool_selection() -> dict[str, Any]:
         "deployment_or_seedbox_check": "deployment_check",
         "all_preflight_signals": "readiness_bundle",
         "rules_and_rate_limits": "site_policies",
+        "inspect_daily_candidate_scheduler": "daily_candidate_scheduler_plan",
         "daily_candidates": "daily_candidate_run_and_deliver",
         "daily_candidates_step_by_step": "daily_candidates_schedule_job",
         "deliver_daily_candidate_digest": "daily_candidate_delivery",
@@ -33145,6 +33314,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
     }
     daily_candidate_batch_schema = _daily_candidate_batch_status_tool_request_schema()
     candidate_schedule_request_schema = _daily_candidate_schedule_tool_request_schema()
+    candidate_scheduler_request_schema = _daily_candidate_scheduler_tool_request_schema()
     candidate_delivery_request_schema = _daily_candidate_delivery_tool_request_schema()
     candidate_run_and_deliver_request_schema = _daily_candidate_run_and_deliver_tool_request_schema()
     agent_run_preview_request_schema = _agent_run_preview_tool_request_schema()
@@ -33191,6 +33361,31 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "schedule_handoff": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "next_actions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    candidate_scheduler_response_schema = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string"},
+            "status": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "ready": {"type": "boolean"},
+            "source": {"type": "string"},
+            "env": {"type": "string"},
+            "schedule_count": {"type": "integer"},
+            "enabled_count": {"type": "integer"},
+            "now": {"type": "string"},
+            "next_run": {"type": ["object", "null"]},
+            "next_runs": {"type": "array", "items": {"type": "object"}},
+            "schedule_plan": {"type": "object"},
+            "scheduler_handoff": {"type": "object"},
+            "recommended_tool": {"type": ["string", "null"]},
+            "recommended_endpoint": {"type": ["string", "null"]},
+            "recommended_method": {"type": ["string", "null"]},
+            "recommended_request": {"type": ["object", "null"]},
+            "blockers": {"type": "array", "items": {"type": "string"}},
+            "next_actions": {"type": "array", "items": {"type": "string"}},
+            "safety": {"type": "object"},
         },
     }
     candidate_delivery_response_schema = {
@@ -34161,6 +34356,19 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                     "security": token_security,
                     "requestBody": {"required": False, "content": {"application/json": {"schema": candidate_schedule_request_schema}}},
                     "responses": {"200": {"description": "Normalized daily candidate schedule plan.", "content": {"application/json": {"schema": candidate_schedule_response_schema}}}},
+                },
+            },
+            "/v1/candidates/daily/scheduler": {
+                "get": {
+                    "operationId": "dailyRetorrentCandidateSchedulerPlanFromEnv",
+                    "security": token_security,
+                    "responses": {"200": {"description": "Daily candidate scheduler next-run plan from environment.", "content": {"application/json": {"schema": candidate_scheduler_response_schema}}}},
+                },
+                "post": {
+                    "operationId": "dailyRetorrentCandidateSchedulerPlan",
+                    "security": token_security,
+                    "requestBody": {"required": False, "content": {"application/json": {"schema": candidate_scheduler_request_schema}}},
+                    "responses": {"200": {"description": "Daily candidate scheduler next-run plan.", "content": {"application/json": {"schema": candidate_scheduler_response_schema}}}},
                 },
             },
             "/v1/candidates/daily/deliver": {

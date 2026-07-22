@@ -17659,6 +17659,49 @@ def test_daily_candidate_schedule_payload_reads_env(monkeypatch) -> None:
     assert payload["schedule_handoff"]["source"] == "env"
 
 
+def test_daily_candidate_scheduler_plan_payload_reports_next_run(monkeypatch) -> None:
+    monkeypatch.delenv("PTCLI_DAILY_CANDIDATE_SCHEDULES", raising=False)
+
+    payload = ptcli_service.daily_candidate_scheduler_plan_payload(
+        {
+            "now": "2026-07-06T09:31:00+08:00",
+            "schedules": [{"name": "u2-to-mteam", "source_tracker": "U2", "target": "MTEAM", "time": "09:30", "timezone": "Asia/Shanghai"}],
+        }
+    )
+
+    assert payload["kind"] == "ptcli.daily_candidate_scheduler_plan"
+    assert payload["status"] == "ok"
+    assert payload["ready"] is True
+    assert payload["enabled_count"] == 1
+    assert payload["next_run"]["name"] == "u2-to-mteam"
+    assert payload["next_run"]["run_at"] == "2026-07-07T09:30:00+08:00"
+    assert payload["next_run"]["seconds_until_run"] == 86340
+    assert payload["next_run"]["job_tool"] == "daily_candidates_job"
+    assert payload["next_run"]["delivery_tool"] == "daily_candidate_delivery"
+    handoff = payload["scheduler_handoff"]
+    assert handoff["kind"] == "ptcli.daily_candidate_scheduler_handoff"
+    assert handoff["ready"] is True
+    assert handoff["action"] == "wait_for_next_run"
+    assert handoff["compose"]["daemon"] == "docker compose --profile daily up -d ptcli-daily-scheduler"
+    assert handoff["api"]["inspect_scheduler"]["endpoint"] == "/v1/candidates/daily/scheduler"
+    assert handoff["api"]["run_now"]["tool"] == "daily_candidate_run_and_deliver"
+    assert payload["recommended_tool"] == "daily_candidate_run_and_deliver"
+    assert payload["safety"]["contacts_trackers"] is False
+
+
+def test_daily_candidate_scheduler_plan_payload_blocks_without_schedule(monkeypatch) -> None:
+    monkeypatch.delenv("PTCLI_DAILY_CANDIDATE_SCHEDULES", raising=False)
+
+    payload = ptcli_service.daily_candidate_scheduler_plan_payload({"now": "2026-07-06T09:31:00+08:00"})
+
+    assert payload["status"] == "blocked"
+    assert payload["ready"] is False
+    assert payload["next_run"] is None
+    assert payload["scheduler_handoff"]["action"] == "configure_schedule"
+    assert payload["recommended_tool"] == "daily_candidates_schedule"
+    assert "PTCLI_DAILY_CANDIDATE_SCHEDULES" in payload["blockers"][0]
+
+
 def test_daily_candidate_schedule_payload_exposes_env_template_when_missing(monkeypatch) -> None:
     monkeypatch.delenv("PTCLI_DAILY_CANDIDATE_SCHEDULES", raising=False)
 
@@ -20343,6 +20386,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/site-policies/rule-review" in paths
     assert "/v1/candidates/daily" in paths
     assert "/v1/candidates/daily/schedule" in paths
+    assert "/v1/candidates/daily/scheduler" in paths
     assert "/v1/candidates/daily/deliver" in paths
     assert "/v1/jobs/candidates/daily" in paths
     assert "/v1/jobs/candidates/daily/refill" in paths
@@ -20397,6 +20441,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "sequence_next_tool" in tool_by_name["source_url_check_and_submit"]["response_contract"]["agent_summary_fields"]
     assert "runs_duplicate_check_before_job_creation" in tool_by_name["source_url_check_and_submit"]["response_contract"]["safety"]
     assert tool_by_name["source_url_check_and_submit"]["safety"]["live_upload"] is True
+    assert tool_by_name["daily_candidate_scheduler_plan"]["path"] == "/v1/candidates/daily/scheduler"
+    assert tool_by_name["daily_candidate_scheduler_plan"]["input_schema"]["properties"]["now"]["type"] == "string"
+    assert "next_run" in tool_by_name["daily_candidate_scheduler_plan"]["response_contract"]["required_fields"]
+    assert "scheduler_handoff_fields" in tool_by_name["daily_candidate_scheduler_plan"]["response_contract"]
+    assert "job_request" in tool_by_name["daily_candidate_scheduler_plan"]["response_contract"]["next_run_fields"]
+    assert tool_by_name["daily_candidate_scheduler_plan"]["safety"]["contacts_trackers"] is False
     assert tool_by_name["summary_check"]["path"] == "/v1/summary/check"
     assert tool_by_name["summary_check"]["input_schema"]["required"] == ["summary_file"]
     assert tool_by_name["summary_check"]["safety"]["does_not_run_next_command"] is True
@@ -21785,6 +21835,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/site-policies/rule-review" in openapi["paths"]
     candidate_schedule_schema = openapi["paths"]["/v1/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "schedule_handoff" in candidate_schedule_schema["properties"]
+    candidate_scheduler_schema = openapi["paths"]["/v1/candidates/daily/scheduler"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "next_run" in candidate_scheduler_schema["properties"]
+    assert "scheduler_handoff" in candidate_scheduler_schema["properties"]
     assert "/v1/jobs/retorrent/check" in openapi["paths"]
     assert "/v1/jobs/retorrent/check/{job_id}/submit" in openapi["paths"]
     assert "/v1/jobs/retorrent" in openapi["paths"]
@@ -21793,6 +21846,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "/v1/jobs/retorrent/from-url/check-and-submit" in openapi["paths"]
     assert "/v1/candidates/daily" in openapi["paths"]
     assert "/v1/candidates/daily/schedule" in openapi["paths"]
+    assert "/v1/candidates/daily/scheduler" in openapi["paths"]
     assert "/v1/candidates/daily/deliver" in openapi["paths"]
     assert "file_delivery" in openapi["paths"]["/v1/candidates/daily/deliver"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]
     assert "/v1/jobs/candidates/daily" in openapi["paths"]
