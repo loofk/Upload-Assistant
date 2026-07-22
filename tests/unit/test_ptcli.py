@@ -15806,6 +15806,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert material_template["execute_request"]["ptgen_description_file"] == "/tmp/materials/ptgen-description.txt"
     assert material_template["examples_by_key"]["metadata_file"]["fetch_ptgen"] is True
     assert retorrent_job["candidate_submission_handoff"]["manual_retorrent_handoff"]["action"] == "configure_policy"
+    assert retorrent_job["candidate_submission_handoff"]["manual_retorrent_final_report"] == retorrent_job["manual_retorrent_final_report"]
     assert retorrent_job["candidate_submission_summary"]["candidate_job_id"] == candidate_job["job_id"]
     assert retorrent_job["candidate_submission_summary"]["candidate_rank"] == 1
     assert retorrent_job["candidate_submission_summary"]["candidate_source_id"] == "60635"
@@ -15836,6 +15837,9 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert retorrent_job["candidate_submission_summary"]["execution_handoff"]["recommended_tool"] == retorrent_job["closure_summary"]["recommended_tool"]
     assert retorrent_job["candidate_submission_summary"]["execution_handoff"]["material_input_template"] == material_template
     assert retorrent_job["candidate_submission_summary"]["manual_action"] == "configure_policy"
+    assert retorrent_job["candidate_submission_summary"]["manual_retorrent_verdict"] == retorrent_job["manual_retorrent_final_report"]["verdict"]
+    assert retorrent_job["candidate_submission_summary"]["manual_report_allowed"] == retorrent_job["manual_retorrent_final_report"]["report_allowed"]
+    assert retorrent_job["candidate_submission_summary"]["manual_retorrent_final_report"] == retorrent_job["manual_retorrent_final_report"]
     assert retorrent_job["candidate_submission_summary"]["closure_complete"] is False
     assert retorrent_job["candidate_submission_summary"]["recommended_tool"] == retorrent_job["closure_summary"]["recommended_tool"]
     assert retorrent_job["candidate_submission_summary"]["blockers"]
@@ -15846,9 +15850,14 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert sequence["action"] == "configure_policy"
     assert sequence["candidate_job_id"] == candidate_job["job_id"]
     assert sequence["retorrent_job_id"] == retorrent_job["job_id"]
+    assert sequence["manual_retorrent_final_report"] == retorrent_job["manual_retorrent_final_report"]
+    assert sequence["manual_retorrent_verdict"] == retorrent_job["manual_retorrent_final_report"]["verdict"]
+    assert sequence["manual_report_allowed"] == retorrent_job["manual_retorrent_final_report"]["report_allowed"]
+    assert "manual_retorrent_final_report" in sequence["read_order"]
+    assert "manual_retorrent_final_report.report_allowed=true" in sequence["complete_when"]
     assert sequence["next_step"]["name"] == "repair_site_policy_before_resume"
     assert sequence["next_step"]["tool"] == "site_policies"
-    assert sequence["next_step"]["read"] == ["policy_execution_sequence", "policy_execution_handoff", "rule_obligations"]
+    assert sequence["next_step"]["read"] == ["manual_retorrent_final_report", "policy_execution_sequence", "policy_execution_handoff", "rule_obligations"]
     assert "policy_execution_handoff.ready=false" in sequence["stop_when"]
     assert sequence["safety"]["does_not_bypass_site_rules"] is True
     followup = retorrent_job["candidate_submit_followup"]
@@ -15868,6 +15877,10 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert followup["job_control_summary_ref"] == "job_control_summary"
     assert followup["job_handoff_ref"] == "job_handoff"
     assert followup["read_order"][0] == "candidate_submit_followup"
+    assert "manual_retorrent_final_report" in followup["read_order"]
+    assert followup["manual_retorrent_final_report"] == retorrent_job["manual_retorrent_final_report"]
+    assert followup["manual_retorrent_verdict"] == retorrent_job["manual_retorrent_final_report"]["verdict"]
+    assert followup["manual_report_allowed"] == retorrent_job["manual_retorrent_final_report"]["report_allowed"]
     assert followup["candidate_submission_summary"] == retorrent_job["candidate_submission_summary"]
     assert retorrent_job["workflow_context"]["candidate_submit_sequence"] == sequence
     assert retorrent_job["workflow_context"]["candidate_submission_handoff"] == retorrent_job["candidate_submission_handoff"]
@@ -15916,6 +15929,10 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert daily_batch["items"][0]["submitted_jobs"][0]["retorrent_job_id"] == retorrent_job["job_id"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["candidate_source_id"] == "60635"
     assert daily_batch["items"][0]["submitted_jobs"][0]["action"] == "configure_policy"
+    assert daily_batch["items"][0]["submitted_jobs"][0]["manual_retorrent_verdict"] == retorrent_job["manual_retorrent_final_report"]["verdict"]
+    assert daily_batch["items"][0]["submitted_jobs"][0]["manual_report_allowed"] == retorrent_job["manual_retorrent_final_report"]["report_allowed"]
+    assert daily_batch["items"][0]["submitted_jobs"][0]["manual_retorrent_final_report"] == retorrent_job["manual_retorrent_final_report"]
+    assert "jobs[].manual_retorrent_final_report" in daily_batch["read_order"]
     assert "submitted_job." in daily_batch["blockers"][0]
     daily_gate = list_payload["daily_candidate_batch_gate"]
     assert daily_gate["kind"] == "ptcli.daily_candidate_batch_gate"
@@ -15928,6 +15945,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert daily_gate["first_blocker"].startswith("submitted_job.")
     assert daily_gate["recommended_tool"] == "site_policies"
     assert daily_gate["next_step"]["method"] == "POST"
+    assert "jobs[].manual_retorrent_final_report" in daily_gate["read_order"]
     blocked_submission_plan = list_payload["daily_candidate_submission_plan"]
     assert blocked_submission_plan["kind"] == "ptcli.daily_candidate_submission_plan"
     assert blocked_submission_plan["ready"] is False
@@ -15945,6 +15963,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_execution_summary["blocked_jobs"][0]["retorrent_job_id"] == retorrent_job["job_id"]
     assert blocked_execution_summary["blocked_jobs"][0]["recommended_tool"] == "site_policies"
     assert blocked_execution_summary["recommended_tool"] == "site_policies"
+    assert "jobs[].manual_retorrent_final_report" in blocked_execution_summary["read_order"]
     blocked_refill_plan = list_payload["daily_candidate_refill_plan"]
     assert blocked_refill_plan["kind"] == "ptcli.daily_candidate_refill_plan"
     assert blocked_refill_plan["action"] == "resolve_blockers"
@@ -15954,6 +15973,7 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert blocked_sequence["action"] == "resolve_blockers"
     assert blocked_sequence["steps"][0]["name"] == "inspect_blockers"
     assert blocked_sequence["steps"][0]["tool"] == "site_policies"
+    assert "manual_retorrent_final_report" in blocked_sequence["steps"][0]["read"]
     assert blocked_sequence["blockers"][0].startswith("submitted_job.")
     blocked_approval_sequence = list_payload["daily_candidate_approval_sequence"]
     assert blocked_approval_sequence["kind"] == "ptcli.daily_candidate_approval_sequence"
@@ -18766,13 +18786,20 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_options" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "policy_execution_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "policy_execution_plan" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "execution_state" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "execution_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
     assert "policy_execution_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
     assert "policy_execution_plan" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+    assert "manual_retorrent_verdict" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
     assert "policy_execution_ready" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
     assert "execution_state" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
     assert "execution_handoff" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submit_followup_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submit_sequence_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["agent_candidate_submission_fields"]
+    assert "manual_retorrent_final_report" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
     assert "candidate_submission_execution_handoff_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
     assert "state" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
     assert "should_resume" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
@@ -20469,10 +20496,17 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_execution_plan" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "policy_runtime_contract" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "execution_state" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "execution_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_handoff_fields"]
         assert "policy_execution_handoff" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "policy_execution_plan" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+        assert "manual_retorrent_verdict" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submit_followup_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submit_sequence_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["agent_candidate_submission_fields"]
+        assert "manual_retorrent_final_report" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "policy_runtime_contract" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "policy_enforcement_ready" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
