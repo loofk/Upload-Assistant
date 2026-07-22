@@ -15,6 +15,7 @@ python3 upload.py "/path/to/content" --args
 
 # 聚焦版 PT 转种 CLI（新功能入口）
 python3 ptcli.py sites --json
+python3 ptcli.py goal-progress --from U2 --source-id 60635 --target MTEAM --downloads-path /downloads --json
 python3 ptcli.py rules --trackers MTEAM,TJUPT --json
 python3 ptcli.py rule-check --from U2 --to MTEAM --accept-rules --json
 python3 ptcli.py source-info --tracker U2 --source-id 60635 --json

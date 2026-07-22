@@ -21254,6 +21254,71 @@ services:
     assert any(item["id"] == "seedbox_live_validation" for item in payload["critical_path_remaining"])
 
 
+def test_goal_progress_cli_outputs_read_only_audit(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    tmp_dir = tmp_path / "tmp"
+    job_dir = tmp_path / "jobs"
+    downloads_dir = tmp_path / "downloads"
+    for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
+        directory.mkdir(parents=True)
+    (data_dir / "config.py").write_text(
+        "config = {'DEFAULT': {'default_torrent_client': 'qbittorrent'}, 'TORRENT_CLIENTS': {'qbittorrent': {'torrent_client': 'qbit', 'qbit_url': 'http://host.docker.internal', 'qbit_port': '8080'}}}",
+        encoding="utf-8",
+    )
+    (tmp_path / "docker-compose.yml").write_text(
+        """
+services:
+  ptcli-api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+      - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+    volumes:
+      - /downloads:/downloads/:rw
+      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
+      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
+      - /app/tmp/:/Upload-Assistant/tmp/:rw
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TMPDIR", str(tmp_dir))
+
+    code = main(
+        [
+            "goal-progress",
+            "--base-dir",
+            str(tmp_path),
+            "--job-dir",
+            str(job_dir),
+            "--downloads-path",
+            str(downloads_dir),
+            "--source-url",
+            "https://u2.dmhy.org/details.php?id=60635",
+            "--target",
+            "MTEAM",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["kind"] == "ptcli.goal_progress"
+    assert payload["source_context"]["source_tracker"] == "U2"
+    assert payload["source_context"]["target"] == "MTEAM"
+    assert payload["evidence"]["deployment"]["docker_compose_api_ready"] is True
+    assert payload["evidence"]["live_validation"]["status"] == "missing"
+    assert payload["next_step"]["tool"] in {"site_policies", "readiness_bundle"}
+
+
 def test_goal_progress_payload_uses_completed_live_job_evidence(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
     data_dir = tmp_path / "data"

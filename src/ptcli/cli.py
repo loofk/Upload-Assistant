@@ -189,6 +189,35 @@ def build_parser() -> argparse.ArgumentParser:
     readiness_bundle.add_argument("--schedules-file", help="File containing a JSON array/object of daily candidate schedules.")
     readiness_bundle.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
 
+    goal_progress = subparsers.add_parser(
+        "goal-progress",
+        help="Read-only progress audit for the final Docker/AI ptcli retorrent service goal.",
+        description=(
+            "Build the same read-only progress audit exposed at /v1/goal/progress. "
+            "It summarizes Docker Compose deployment, AI tool contracts, task API, daily candidates, site policies, qBittorrent integration, and live validation evidence."
+        ),
+    )
+    goal_progress.add_argument("--config", help="Path to config.py, defaults to data/config.py.")
+    goal_progress.add_argument("--base-dir", help="Project/base directory used for config/cookies/tmp checks.")
+    goal_progress.add_argument("--cookies-dir", help="Cookie directory for deployment checks.")
+    goal_progress.add_argument("--job-dir", help="Directory for file-backed API jobs. Defaults to PTCLI_JOB_DIR or TMPDIR/ptcli-jobs.")
+    goal_progress.add_argument("--downloads-path", help="Mounted qBittorrent downloads path. Defaults to /downloads.")
+    goal_progress.add_argument("--compose-file", help="docker-compose.yml path for deployment checks.")
+    goal_progress.add_argument("--source-url", help="Source tracker details/download URL; preferred for AI handoff.")
+    goal_progress.add_argument("--source", help="Alias for --source-url.")
+    goal_progress.add_argument("--source-id", help="Source tracker torrent id when --from/--source-tracker is supplied.")
+    goal_progress.add_argument("--from", dest="source_tracker", help="Source tracker code when using --source-id.")
+    goal_progress.add_argument("--source-tracker", dest="source_tracker_alias", help="Alias for --from.")
+    goal_progress.add_argument("--target", help="Target tracker code(s), comma-separated.")
+    goal_progress.add_argument("--to", dest="target_trackers", help="Alias for --target.")
+    goal_progress.add_argument("--accept-rules", action="store_true", help="Acknowledge that involved tracker rules have been manually reviewed.")
+    goal_progress.add_argument("--confirm-upload", action="store_true", help="Confirm manual rule review and live upload intent for readiness scoring.")
+    goal_progress.add_argument("--job-id", help="Optional completed or submitted live job id used as validation evidence.")
+    goal_progress.add_argument("--live-job-id", help="Alias for --job-id.")
+    goal_progress.add_argument("--summary-file", help="Optional ptcli summary JSON used as live validation evidence.")
+    goal_progress.add_argument("--live-summary-file", help="Alias for --summary-file.")
+    goal_progress.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+
     rules = subparsers.add_parser("rules", help="Show rule review profiles for supported trackers.")
     rules.add_argument("--trackers", help="Optional comma-separated tracker codes. Defaults to all supported trackers.")
     rules.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
@@ -12120,6 +12149,31 @@ def readiness_bundle_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
     return readiness_bundle_payload({key: value for key, value in request.items() if value not in (None, "")})
 
 
+def goal_progress_cli_payload(args: argparse.Namespace) -> dict[str, Any]:
+    from src.ptcli.service import goal_progress_payload
+
+    source = args.source_url or args.source
+    source_tracker = args.source_tracker or args.source_tracker_alias
+    target = args.target or args.target_trackers
+    request: dict[str, Any] = {
+        "config": args.config,
+        "base_dir": args.base_dir,
+        "cookies_dir": args.cookies_dir,
+        "job_dir": args.job_dir,
+        "downloads_path": args.downloads_path,
+        "compose_file": args.compose_file,
+        "source_url": source,
+        "source_id": args.source_id,
+        "source_tracker": source_tracker,
+        "target": target,
+        "accept_rules": args.accept_rules,
+        "confirm_upload": args.confirm_upload,
+        "job_id": args.job_id or args.live_job_id,
+        "summary_file": args.summary_file or args.live_summary_file,
+    }
+    return goal_progress_payload({key: value for key, value in request.items() if value not in (None, "")})
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -12157,6 +12211,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = _with_captured_stdout(lambda: readiness_bundle_cli_payload(args), json_output)
             _print_payload(payload, json_output)
             return 0 if payload.get("ready") is True else 1
+
+        if args.command == "goal-progress":
+            payload = _with_captured_stdout(lambda: goal_progress_cli_payload(args), json_output)
+            _print_payload(payload, json_output)
+            return 0
 
         if args.command == "rule-check":
             payload = build_rule_check_payload(args)
