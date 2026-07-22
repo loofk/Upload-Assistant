@@ -19356,6 +19356,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_schedule_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "next_step" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "qbittorrent" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
+    assert "qbittorrent_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "qbit_enforcement_summary" in tool_by_name["goal_progress"]["response_contract"]["qbittorrent_evidence_fields"]
     assert "tracker_adapters" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "tracker_adapter_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "adapter_extension_final_report" in tool_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
@@ -20143,6 +20146,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "schedule_handoff" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_schedule_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "qbittorrent" in goal_progress_tool["response_contract"]["evidence_fields"]
+    assert "qbittorrent_evidence_fields" in goal_progress_tool["response_contract"]
+    assert "qbit_enforcement_summary" in goal_progress_tool["response_contract"]["qbittorrent_evidence_fields"]
     assert "tracker_adapters" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "tracker_adapter_evidence_fields" in goal_progress_tool["response_contract"]
     assert "adapter_extension_final_report" in goal_progress_tool["response_contract"]["tracker_adapter_evidence_fields"]
@@ -20198,6 +20204,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "schedule_handoff" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_schedule_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_delivery_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "qbittorrent" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
+        assert "qbittorrent_evidence_fields" in tools_by_name["goal_progress"]["response_contract"]
+        assert "qbit_enforcement_summary" in tools_by_name["goal_progress"]["response_contract"]["qbittorrent_evidence_fields"]
         assert "tracker_adapters" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "tracker_adapter_evidence_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "adapter_extension_final_report" in tools_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
@@ -21372,6 +21381,12 @@ services:
     assert payload["source_context"]["target"] == "MTEAM"
     assert payload["evidence"]["deployment"]["docker_compose_api_ready"] is True
     assert payload["evidence"]["deployment"]["qbit_configured"] is True
+    qbit = payload["evidence"]["qbittorrent"]
+    assert qbit["kind"] == "ptcli.goal_qbittorrent_evidence"
+    assert qbit["configured"] is True
+    assert qbit["status"] in {"configured_unverified", "live_evidence_pending"}
+    assert qbit["next_step"]["tool"] in {"ptcli_doctor", "qbit_inspect"}
+    assert qbit["complete_when"].startswith("qbit_enforcement_summary.ready=true")
     assert payload["evidence"]["daily_candidates"]["configured"] is False
     assert payload["evidence"]["daily_candidates"]["schedule_handoff"]["action"] == "configure_schedule"
     assert payload["evidence"]["daily_candidates"]["daily_schedule_gate"] is None
@@ -21404,6 +21419,7 @@ services:
     assert payload["read_order"][0] == "completion_estimate"
     assert "evidence.live_validation" in payload["read_order"]
     assert "evidence.live_validation_preflight" in payload["read_order"]
+    assert "evidence.qbittorrent" in payload["read_order"]
     assert any(item["id"] == "seedbox_live_validation" for item in payload["critical_path_remaining"])
 
 

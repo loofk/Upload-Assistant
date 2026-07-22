@@ -21559,6 +21559,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 "connectivity_checked": deployment.get("connectivity_checked"),
             },
             "daily_candidates": _goal_progress_daily_candidate_evidence(daily_candidate_plan),
+            "qbittorrent": _goal_progress_qbittorrent_evidence(deployment, live_validation_evidence, live_validation_preflight),
             "site_policies": {
                 "ready": site_policies.get("ready"),
                 "policy_repair_action": policy_repair_gate.get("action"),
@@ -21584,7 +21585,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
             "live_validation_preflight": live_validation_preflight,
             "tool_count": len(tools),
         },
-        "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence.live_validation", "evidence.live_validation_preflight", "evidence", "next_step", "blockers"],
+        "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence.live_validation", "evidence.live_validation_preflight", "evidence.qbittorrent", "evidence", "next_step", "blockers"],
         "next_actions": _goal_progress_next_actions(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight),
     }
 
@@ -22048,6 +22049,99 @@ def _goal_progress_daily_candidate_schedule_final_report(daily_candidate_plan: d
         "blockers": blockers,
         "next_actions": _string_list(daily_candidate_plan.get("next_actions")) or _string_list(schedule_handoff.get("next_actions")),
     }
+
+
+def _goal_progress_qbittorrent_evidence(deployment: dict[str, Any], live_validation_evidence: dict[str, Any], live_validation_preflight: dict[str, Any]) -> dict[str, Any]:
+    qbit = deployment.get("qbit") if isinstance(deployment.get("qbit"), dict) else {}
+    best = live_validation_evidence.get("best") if isinstance(live_validation_evidence.get("best"), dict) else {}
+    completion = live_validation_evidence.get("completion_evidence") if isinstance(live_validation_evidence.get("completion_evidence"), dict) else {}
+    live_source = completion or best
+    live_user_report = live_source.get("live_user_report") if isinstance(live_source.get("live_user_report"), dict) else {}
+    live_qbit = live_user_report.get("qbit") if isinstance(live_user_report.get("qbit"), dict) else {}
+    enforcement = live_source.get("qbit_enforcement_summary") if isinstance(live_source.get("qbit_enforcement_summary"), dict) else {}
+    preflight_package = live_validation_preflight.get("live_execution_package") if isinstance(live_validation_preflight.get("live_execution_package"), dict) else {}
+    configured = qbit.get("configured") is True
+    enforcement_ready = enforcement.get("ready") is True
+    live_ready = live_validation_evidence.get("ready") is True
+    if enforcement_ready:
+        status = "live_enforced"
+    elif live_source:
+        status = "live_evidence_pending"
+    elif configured:
+        status = "configured_unverified"
+    else:
+        status = "not_configured"
+    next_step = _goal_progress_qbittorrent_next_step(configured, enforcement_ready, live_ready, preflight_package)
+    blockers = [] if configured else ["qBittorrent client is not configured in data/config.py."]
+    if live_source and not enforcement_ready:
+        blockers.extend(_string_list(enforcement.get("blockers")))
+    return {
+        "kind": "ptcli.goal_qbittorrent_evidence",
+        "ready": bool(configured and (enforcement_ready or live_ready)),
+        "status": status,
+        "configured": configured,
+        "client": qbit.get("client"),
+        "torrent_client": qbit.get("torrent_client"),
+        "connectivity_checked": qbit.get("connectivity_checked") is True,
+        "host_hint": qbit.get("qbit_url"),
+        "port_hint": qbit.get("qbit_port"),
+        "live_evidence_source": live_source.get("source") if live_source else None,
+        "live_job_id": live_source.get("job_id") if live_source else None,
+        "live_job_status": live_source.get("job_status") if live_source else None,
+        "live_user_report_qbit": live_qbit or None,
+        "qbit_enforcement_summary": enforcement or None,
+        "live_execution_package_qbit_step": _goal_progress_qbittorrent_package_step(preflight_package),
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_method": next_step.get("method"),
+        "recommended_request": next_step.get("request"),
+        "read_order": ["qbittorrent", "qbit_enforcement_summary", "live_user_report_qbit", "live_execution_package_qbit_step", "next_step"],
+        "complete_when": "qbit_enforcement_summary.ready=true from a live job, or live_user_report.report_allowed=true with qBittorrent evidence present.",
+        "stop_when": ["configured=false", "qbit_enforcement_summary.blockers is non-empty", "live upload is attempted before qBittorrent injection/wait evidence is collected"],
+        "blockers": list(dict.fromkeys(blocker for blocker in blockers if blocker)),
+        "next_actions": _goal_progress_qbittorrent_next_actions(configured, enforcement_ready, live_source),
+    }
+
+
+def _goal_progress_qbittorrent_package_step(preflight_package: dict[str, Any]) -> dict[str, Any] | None:
+    steps = preflight_package.get("steps") if isinstance(preflight_package.get("steps"), list) else []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        request = step.get("request") if isinstance(step.get("request"), dict) else {}
+        argv = request.get("argv") if isinstance(request.get("argv"), list) else []
+        if "--connect-qbit" in argv or "qbit" in str(step.get("name") or "").lower():
+            return {
+                "name": step.get("name"),
+                "tool": step.get("tool"),
+                "method": step.get("method"),
+                "request": request,
+                "continue_when": step.get("continue_when"),
+                "stop_when": step.get("stop_when"),
+            }
+    return None
+
+
+def _goal_progress_qbittorrent_next_step(configured: bool, enforcement_ready: bool, live_ready: bool, preflight_package: dict[str, Any]) -> dict[str, Any]:
+    if not configured:
+        return {"tool": "deployment_check", "endpoint": "/v1/deployment/check", "method": "GET", "request": None, "reason": "configure_qbittorrent"}
+    if enforcement_ready or live_ready:
+        return {"tool": "goal_progress", "endpoint": "/v1/goal/progress", "method": "GET", "request": None, "reason": "qbittorrent_evidence_ready"}
+    qbit_step = _goal_progress_qbittorrent_package_step(preflight_package)
+    if qbit_step:
+        return {"tool": qbit_step.get("tool") or "ptcli_doctor", "endpoint": None, "method": qbit_step.get("method") or "CLI", "request": qbit_step.get("request"), "reason": "collect_qbittorrent_live_evidence"}
+    return {"tool": "qbit_inspect", "endpoint": "/v1/qbit/inspect", "method": "GET", "request": None, "reason": "inspect_configured_qbittorrent"}
+
+
+def _goal_progress_qbittorrent_next_actions(configured: bool, enforcement_ready: bool, live_source: dict[str, Any]) -> list[str]:
+    if not configured:
+        return ["Configure qBittorrent in data/config.py, then rerun goal_progress."]
+    if enforcement_ready:
+        return ["Use qbit_enforcement_summary as qBittorrent proof for upload-farming readiness."]
+    if live_source:
+        return ["Open qbit_enforcement_summary and live_user_report_qbit, resolve blockers, then rerun goal_progress with the same job evidence."]
+    return ["Run the live validation doctor or qbit_inspect to collect qBittorrent connectivity, injection, wait, and rate-limit evidence."]
 
 
 def _goal_progress_tracker_adapter_evidence(tracker_adapters: dict[str, Any]) -> dict[str, Any]:
@@ -23101,8 +23195,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
-                "evidence_fields": ["deployment", "daily_candidates", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
+                "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_schedule_final_report", "next_step", "blockers", "next_actions"],
+                "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "next_step", "blockers"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "resume_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
