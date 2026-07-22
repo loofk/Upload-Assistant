@@ -18616,6 +18616,12 @@ def test_site_policies_cli_exposes_policy_gap_summary(monkeypatch, capsys) -> No
     assert payload["policy_config_handoff"]["manual_review_required"] is False
     assert payload["policy_config_handoff"]["recommended_tool"] == "readiness_bundle"
     assert payload["policy_config_handoff"]["next_step"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    apply_handoff = payload["policy_config_apply_handoff"]
+    assert apply_handoff["kind"] == "ptcli.site_policy_config_apply_handoff"
+    assert apply_handoff["ready"] is True
+    assert apply_handoff["action"] == "verify_policy_ready"
+    assert apply_handoff["verification"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert apply_handoff["safety"]["does_not_edit_config"] is True
     assert payload["policy_gap_summary"]["by_role"]["source"]["trackers"] == ["U2"]
     assert payload["policy_gap_summary"]["by_role"]["target"]["trackers"] == ["MTEAM"]
 
@@ -18803,6 +18809,18 @@ def test_service_site_policies_payload_reports_missing_policy_fields(monkeypatch
     assert config_repair_handoff["rerun"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert config_repair_handoff["next_step"]["tool"] == "site_policy_rule_review"
     assert config_repair_handoff["safety"]["does_not_generate_rule_review_fingerprint_without_user_evidence"] is True
+    apply_handoff = payload["policy_config_apply_handoff"]
+    assert apply_handoff["kind"] == "ptcli.site_policy_config_apply_handoff"
+    assert apply_handoff["ready"] is False
+    assert apply_handoff["status"] == "blocked"
+    assert apply_handoff["action"] == "manual_rule_review_then_edit_config"
+    assert apply_handoff["manual_review"] == config_repair_handoff["manual_review"]
+    assert apply_handoff["edit_config"] == config_repair_handoff["edit_config"]
+    assert apply_handoff["preferred_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
+    assert apply_handoff["patch_paths"] == ['config["PTCLI"]["SITE_POLICIES"]["U2"]', 'config["PTCLI"]["SITE_POLICIES"]["MTEAM"]']
+    assert apply_handoff["verification"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert apply_handoff["safety"]["requires_explicit_config_edit"] is True
+    assert apply_handoff["safety"]["does_not_generate_rule_review_fingerprint_without_user_evidence"] is True
     assert payload["agent_summary"]["policy_coverage_ready"] is False
     assert payload["agent_summary"]["execution_ready"] is False
     assert payload["agent_summary"]["policy_execution_summary"] == payload["policy_execution_summary"]
@@ -19695,6 +19713,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_application_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_config_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_config_repair_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "policy_config_apply_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_plan_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "request_defaults" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
     assert "qbit_roles" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
@@ -19733,6 +19752,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_config_repair_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "manual_review" in tool_by_name["site_policies"]["response_contract"]["policy_config_repair_handoff_fields"]
     assert "edit_config" in tool_by_name["site_policies"]["response_contract"]["policy_config_repair_handoff_fields"]
+    assert "policy_config_apply_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "patch_paths" in tool_by_name["site_policies"]["response_contract"]["policy_config_apply_handoff_fields"]
+    assert "verification" in tool_by_name["site_policies"]["response_contract"]["policy_config_apply_handoff_fields"]
     assert "policy_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "execution_readiness" in tool_by_name["site_policies"]["response_contract"]["policy_fields"]
@@ -20250,6 +20272,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_repair_gate" in site_policy_schema["properties"]
     assert "policy_config_handoff" in site_policy_schema["properties"]
     assert "policy_config_repair_handoff" in site_policy_schema["properties"]
+    assert "policy_config_apply_handoff" in site_policy_schema["properties"]
     assert "policy_execution_handoff" in site_policy_schema["properties"]
     assert "policy_execution_plan" in site_policy_schema["properties"]
     assert "policy_execution_sequence" in site_policy_schema["properties"]
@@ -20771,6 +20794,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "resume_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "rule_review_request" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "config_update_plan" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
+    assert "policy_config_apply_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "policy_execution_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "policy_execution_plan" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "policy_runtime_contract" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
@@ -20835,6 +20859,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "rule_review_request" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "config_update_plan" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+        assert "policy_config_apply_handoff" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "policy_execution_handoff" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "policy_execution_plan" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "policy_runtime_contract" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
