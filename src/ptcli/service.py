@@ -12397,6 +12397,7 @@ def _site_policy_execution_plan(
     rule_obligations = policy_execution_handoff.get("rule_obligations") if isinstance(policy_execution_handoff.get("rule_obligations"), dict) else {}
     qbit_roles = _site_policy_execution_plan_qbit_roles(qbit_limit_plan, seeding_plan)
     request_defaults, request_default_sources = _site_policy_execution_plan_request_defaults(qbit_roles)
+    qbit_runtime_handoff = _site_policy_qbit_runtime_handoff(qbit_roles, request_defaults, request_default_sources)
     next_step = policy_execution_handoff.get("next_step") if isinstance(policy_execution_handoff.get("next_step"), dict) else policy_repair_gate.get("next_step") if isinstance(policy_repair_gate.get("next_step"), dict) else {}
     action = "continue_to_readiness" if ready else str(policy_repair_gate.get("action") or "configure_site_policy")
     return {
@@ -12409,6 +12410,7 @@ def _site_policy_execution_plan(
         "target_trackers": [role["tracker"] for role in qbit_roles if role.get("role") == "target"],
         "request_defaults": request_defaults,
         "request_default_sources": request_default_sources,
+        "qbit_runtime_handoff": qbit_runtime_handoff,
         "qbit_roles": qbit_roles,
         "qbit_limit_plan": qbit_limit_plan,
         "seeding_plan": seeding_plan,
@@ -12493,6 +12495,70 @@ def _site_policy_execution_plan_request_defaults(qbit_roles: list[dict[str, Any]
             defaults[str(key)] = value
             sources[str(key)] = f"site_policy:{tracker}"
     return defaults, sources
+
+
+def _site_policy_qbit_runtime_handoff(qbit_roles: list[dict[str, Any]], request_defaults: dict[str, Any], request_default_sources: dict[str, Any]) -> dict[str, Any]:
+    roles = [role for role in qbit_roles if isinstance(role, dict)]
+    role_items = [_site_policy_qbit_runtime_role(role, request_default_sources) for role in roles]
+    missing = [item["role_key"] for item in role_items if not item.get("request_fields") or not item.get("qbit_client_fields")]
+    source_items = [item for item in role_items if item.get("role") == "source"]
+    target_items = [item for item in role_items if item.get("role") == "target"]
+    return {
+        "kind": "ptcli.policy_qbit_runtime_handoff",
+        "ready": bool(role_items) and not missing,
+        "status": "ready" if role_items and not missing else "blocked",
+        "role_count": len(role_items),
+        "source_roles": source_items,
+        "target_roles": target_items,
+        "roles": role_items,
+        "request_defaults": request_defaults,
+        "request_default_sources": request_default_sources,
+        "apply_sequence": _site_policy_qbit_runtime_apply_sequence(source_items, target_items),
+        "evidence_required": list(dict.fromkeys(evidence for item in role_items for evidence in _string_list(item.get("evidence_required")))),
+        "read_order": ["policy_execution_plan.qbit_runtime_handoff", "policy_execution_plan.request_defaults", "policy_runtime_contract.qbit_runtime_handoff", "qbit_plan", "qbit_enforcement_summary"],
+        "continue_when": "live request includes qbit_runtime_handoff.request_defaults and qbit_enforcement_summary roles match qbit_runtime_handoff.roles",
+        "stop_when": ["qbit_runtime_handoff.ready=false", "qbit_enforcement_summary.mismatch_roles is non-empty", "qbit_rate_limit_repair_plan.action=repair_limits"],
+        "blockers": [f"qbit_runtime_handoff.{role_key}.missing_request_or_client_fields" for role_key in missing],
+        "next_actions": _site_policy_qbit_runtime_handoff_next_actions(missing),
+        "safety": {
+            "mutates_state": False,
+            "contacts_qbittorrent": False,
+            "limits_are_policy_defaults": True,
+            "override_requires_user_review": True,
+        },
+    }
+
+
+def _site_policy_qbit_runtime_role(role: dict[str, Any], request_default_sources: dict[str, Any]) -> dict[str, Any]:
+    role_name = str(role.get("role") or "unknown")
+    tracker = str(role.get("tracker") or "UNKNOWN")
+    request_fields = role.get("request_fields") if isinstance(role.get("request_fields"), dict) else {}
+    return {
+        "role": role_name,
+        "tracker": tracker,
+        "role_key": f"{role_name}:{tracker}",
+        "request_fields": request_fields,
+        "request_field_sources": {field: request_default_sources.get(field) for field in request_fields},
+        "qbit_client_fields": role.get("qbit_client_fields") if isinstance(role.get("qbit_client_fields"), dict) else {},
+        "limits_human": role.get("limits_human") if isinstance(role.get("limits_human"), dict) else {},
+        "seeding_requirements": role.get("seeding_requirements") if isinstance(role.get("seeding_requirements"), dict) else {},
+        "evidence_required": _string_list(role.get("evidence_required")),
+    }
+
+
+def _site_policy_qbit_runtime_apply_sequence(source_items: list[dict[str, Any]], target_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    if source_items:
+        steps.append({"name": "apply_source_limits", "roles": [item["role_key"] for item in source_items], "request_fields": {key: value for item in source_items for key, value in item.get("request_fields", {}).items()}, "evidence": ["source_torrent_hash", "source_wait", "qbit_enforcement_summary.source"]})
+    if target_items:
+        steps.append({"name": "apply_uploaded_target_limits", "roles": [item["role_key"] for item in target_items], "request_fields": {key: value for item in target_items for key, value in item.get("request_fields", {}).items()}, "evidence": ["uploaded_torrent_hash", "uploaded_wait", "qbit_enforcement_summary.uploaded"]})
+    return steps
+
+
+def _site_policy_qbit_runtime_handoff_next_actions(missing: list[str]) -> list[str]:
+    if not missing:
+        return ["Copy qbit_runtime_handoff.request_defaults into live job requests and verify qbit_enforcement_summary after source and uploaded torrents are injected."]
+    return ["Fill missing qBittorrent rate-limit fields in PTCLI.SITE_POLICIES, then rerun site_policies before live automation."]
 
 
 def _site_policy_execution_plan_next_actions(ready: bool, action: str, next_step: dict[str, Any], blockers: list[str]) -> list[str]:
@@ -12705,6 +12771,7 @@ def _site_policy_enforcement_bundle(
         "target_trackers": _string_list(policy_execution_plan.get("target_trackers")),
         "request_defaults": policy_execution_plan.get("request_defaults") if isinstance(policy_execution_plan.get("request_defaults"), dict) else {},
         "request_default_sources": policy_execution_plan.get("request_default_sources") if isinstance(policy_execution_plan.get("request_default_sources"), dict) else {},
+        "qbit_runtime_handoff": policy_execution_plan.get("qbit_runtime_handoff") if isinstance(policy_execution_plan.get("qbit_runtime_handoff"), dict) else {},
         "live_request_template": policy_execution_sequence.get("request_template") if isinstance(policy_execution_sequence.get("request_template"), dict) else _site_policy_execution_sequence_request_template(policy_execution_plan),
         "qbit_enforcement": _site_policy_enforcement_qbit(qbit_roles),
         "seeding_enforcement": _site_policy_enforcement_seeding(qbit_roles),
@@ -12771,6 +12838,7 @@ def _site_policy_runtime_contract(policy_execution_plan: dict[str, Any], policy_
     request_default_sources = policy_execution_plan.get("request_default_sources") if isinstance(policy_execution_plan.get("request_default_sources"), dict) else {}
     rule_gate = policy_enforcement_bundle.get("rule_gate") if isinstance(policy_enforcement_bundle.get("rule_gate"), dict) else {}
     qbit_enforcement = policy_enforcement_bundle.get("qbit_enforcement") if isinstance(policy_enforcement_bundle.get("qbit_enforcement"), dict) else {}
+    qbit_runtime_handoff = policy_enforcement_bundle.get("qbit_runtime_handoff") if isinstance(policy_enforcement_bundle.get("qbit_runtime_handoff"), dict) else policy_execution_plan.get("qbit_runtime_handoff") if isinstance(policy_execution_plan.get("qbit_runtime_handoff"), dict) else {}
     seeding_enforcement = policy_enforcement_bundle.get("seeding_enforcement") if isinstance(policy_enforcement_bundle.get("seeding_enforcement"), dict) else {}
     blockers = list(dict.fromkeys(_string_list(policy_execution_plan.get("blockers")) + _string_list(policy_execution_sequence.get("blockers")) + _string_list(policy_enforcement_bundle.get("blockers"))))
     ready = bool(policy_execution_plan.get("ready")) and bool(policy_execution_sequence.get("ready")) and bool(policy_enforcement_bundle.get("ready")) and not blockers
@@ -12799,6 +12867,7 @@ def _site_policy_runtime_contract(policy_execution_plan: dict[str, Any], policy_
             ],
         },
         "qbit_roles": qbit_roles,
+        "qbit_runtime_handoff": qbit_runtime_handoff,
         "qbit_contract": {
             "ready": qbit_enforcement.get("ready") is True,
             "expected_role_count": qbit_enforcement.get("role_count"),
@@ -32844,12 +32913,15 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "policy_readiness_summary_fields": ["ready", "phase", "accepted_rules", "tracker_count", "ready_trackers", "blocked_trackers", "missing_counts", "missing_rate_limits", "missing_seeding_requirements", "missing_rule_reviews", "placeholder_rule_reviews", "config", "first_blocker", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "policy_repair_gate_fields": ["ready", "action", "accepted_rules", "tracker_count", "ready_trackers", "blocked_trackers", "missing_counts", "missing_rate_limits", "missing_seeding_requirements", "missing_rule_reviews", "placeholder_rule_reviews", "manual_review_required", "config", "rule_review_request", "manual_steps", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
                 "policy_execution_handoff_fields": ["ready", "accepted_rules", "phase", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "qbit", "seeding", "transfer_rules", "rule_obligations", "config", "request", "continue_when", "stop_when", "blockers", "next_actions"],
-                "policy_execution_plan_fields": ["ready", "status", "action", "accepted_rules", "source_trackers", "target_trackers", "request_defaults", "request_default_sources", "qbit_roles", "qbit_limit_plan", "seeding_plan", "transfer_rule_plan", "rule_obligations", "required_confirmations", "evidence_required", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety", "request"],
+                "policy_execution_plan_fields": ["ready", "status", "action", "accepted_rules", "source_trackers", "target_trackers", "request_defaults", "request_default_sources", "qbit_runtime_handoff", "qbit_roles", "qbit_limit_plan", "seeding_plan", "transfer_rule_plan", "rule_obligations", "required_confirmations", "evidence_required", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety", "request"],
+                "policy_qbit_runtime_handoff_fields": ["ready", "status", "role_count", "source_roles", "target_roles", "roles", "request_defaults", "request_default_sources", "apply_sequence", "evidence_required", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
+                "policy_qbit_runtime_role_fields": ["role", "tracker", "role_key", "request_fields", "request_field_sources", "qbit_client_fields", "limits_human", "seeding_requirements", "evidence_required"],
+                "policy_qbit_runtime_apply_step_fields": ["name", "roles", "request_fields", "evidence"],
                 "policy_execution_plan_qbit_role_fields": ["role", "tracker", "request_fields", "qbit_client_fields", "limits_human", "seeding_requirements", "evidence_required"],
                 "policy_execution_sequence_fields": ["ready", "status", "action", "accepted_rules", "source_trackers", "target_trackers", "request_defaults", "request_default_sources", "request_template", "qbit_roles", "rule_obligations", "config_update_plan", "steps", "next_step", "read_order", "complete_when", "stop_when", "blockers", "next_actions", "safety"],
                 "policy_execution_sequence_step_fields": ["name", "tool", "endpoint", "method", "request", "request_template", "read", "continue_when", "stop_when", "blockers"],
-                "policy_enforcement_bundle_fields": ["ready", "status", "action", "accepted_rules", "source_trackers", "target_trackers", "request_defaults", "request_default_sources", "live_request_template", "qbit_enforcement", "seeding_enforcement", "rule_gate", "config_repair", "runtime_contract", "live_job_requirements", "completion_evidence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
-                "policy_runtime_contract_fields": ["ready", "status", "accepted_rules", "source_trackers", "target_trackers", "required_request_fields", "request_defaults", "request_default_sources", "request_template", "protected_fields", "override_policy", "qbit_roles", "qbit_contract", "seeding_contract", "rule_contract", "completion_contract", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
+                "policy_enforcement_bundle_fields": ["ready", "status", "action", "accepted_rules", "source_trackers", "target_trackers", "request_defaults", "request_default_sources", "qbit_runtime_handoff", "live_request_template", "qbit_enforcement", "seeding_enforcement", "rule_gate", "config_repair", "runtime_contract", "live_job_requirements", "completion_evidence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
+                "policy_runtime_contract_fields": ["ready", "status", "accepted_rules", "source_trackers", "target_trackers", "required_request_fields", "request_defaults", "request_default_sources", "request_template", "protected_fields", "override_policy", "qbit_roles", "qbit_runtime_handoff", "qbit_contract", "seeding_contract", "rule_contract", "completion_contract", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
                 "policy_execution_contract_fields": ["ready", "status", "accepted_rules", "source_trackers", "target_trackers", "contract_scope", "live_request_template", "required_request_fields", "request_defaults", "request_default_sources", "protected_fields", "source_roles", "target_roles", "qbit_contract", "seeding_contract", "rule_contract", "completion_contract", "resume_contract", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],
                 "policy_execution_contract_role_fields": ["role", "tracker", "request_fields", "request_field_sources", "qbit_client_fields", "limits_human", "seeding_requirements", "evidence_required"],
                 "policy_application_handoff_fields": ["ready", "status", "action", "accepted_rules", "source_trackers", "target_trackers", "request_patch", "request_patch_sources", "live_request_template", "submit_overrides_template", "protected_fields", "qbit", "seeding", "rules", "completion", "workflow", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions", "safety"],

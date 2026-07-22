@@ -19252,12 +19252,25 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
         "qbit_download_limit": "site_policy:U2",
         "uploaded_qbit_upload_limit": "site_policy:MTEAM",
     }
+    qbit_runtime = execution_plan["qbit_runtime_handoff"]
+    assert qbit_runtime["kind"] == "ptcli.policy_qbit_runtime_handoff"
+    assert qbit_runtime["ready"] is True
+    assert qbit_runtime["request_defaults"] == execution_plan["request_defaults"]
+    assert qbit_runtime["source_roles"][0]["role_key"] == "source:U2"
+    assert qbit_runtime["source_roles"][0]["request_fields"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert qbit_runtime["source_roles"][0]["request_field_sources"]["qbit_download_limit"] == "site_policy:U2"
+    assert qbit_runtime["target_roles"][0]["role_key"] == "target:MTEAM"
+    assert qbit_runtime["target_roles"][0]["request_fields"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert qbit_runtime["apply_sequence"][0]["name"] == "apply_source_limits"
+    assert qbit_runtime["apply_sequence"][1]["name"] == "apply_uploaded_target_limits"
     assert execution_plan["qbit_roles"][0]["role"] == "source"
     assert execution_plan["qbit_roles"][0]["request_fields"]["qbit_download_limit"] == 20 * 1024 * 1024
     assert execution_plan["qbit_roles"][0]["seeding_requirements"]["min_seed_time_hours"] == 72
     assert "source_wait.complete=true" in execution_plan["qbit_roles"][0]["evidence_required"]
     assert execution_plan["qbit_roles"][1]["role"] == "target"
     assert execution_plan["qbit_roles"][1]["request_fields"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert payload["policy_enforcement_bundle"]["qbit_runtime_handoff"] == qbit_runtime
+    assert payload["policy_runtime_contract"]["qbit_runtime_handoff"] == qbit_runtime
     assert execution_plan["qbit_roles"][1]["seeding_requirements"]["min_ratio"] == 1.0
     assert "uploaded_wait.complete=true" in execution_plan["qbit_roles"][1]["evidence_required"]
     assert execution_plan["required_confirmations"] == ["accept_rules=true", "confirm_upload=true before live upload"]
@@ -21582,6 +21595,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_config_apply_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_plan_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "request_defaults" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
+    assert "qbit_runtime_handoff" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
+    assert "policy_qbit_runtime_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "apply_sequence" in tool_by_name["site_policies"]["response_contract"]["policy_qbit_runtime_handoff_fields"]
+    assert "policy_qbit_runtime_role_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "request_field_sources" in tool_by_name["site_policies"]["response_contract"]["policy_qbit_runtime_role_fields"]
+    assert "policy_qbit_runtime_apply_step_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "qbit_roles" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_fields"]
     assert "policy_execution_plan_qbit_role_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "qbit_client_fields" in tool_by_name["site_policies"]["response_contract"]["policy_execution_plan_qbit_role_fields"]
@@ -21592,8 +21611,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "request_template" in tool_by_name["site_policies"]["response_contract"]["policy_execution_sequence_step_fields"]
     assert "policy_enforcement_bundle_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "live_request_template" in tool_by_name["site_policies"]["response_contract"]["policy_enforcement_bundle_fields"]
+    assert "qbit_runtime_handoff" in tool_by_name["site_policies"]["response_contract"]["policy_enforcement_bundle_fields"]
     assert "runtime_contract" in tool_by_name["site_policies"]["response_contract"]["policy_enforcement_bundle_fields"]
     assert "policy_runtime_contract_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "qbit_runtime_handoff" in tool_by_name["site_policies"]["response_contract"]["policy_runtime_contract_fields"]
     assert "protected_fields" in tool_by_name["site_policies"]["response_contract"]["policy_runtime_contract_fields"]
     assert "policy_execution_contract_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "source_roles" in tool_by_name["site_policies"]["response_contract"]["policy_execution_contract_fields"]
