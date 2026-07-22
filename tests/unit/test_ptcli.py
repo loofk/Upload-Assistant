@@ -15059,6 +15059,17 @@ def test_manual_retorrent_job_marks_qbit_limit_audit_pending_without_injection_e
         "qbit_download_limit": 20 * 1024 * 1024,
         "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
     }
+    assert job["qbit_rate_limit_repair_plan"]["repair_handoff"]["dry_run_call"]["safe_to_call_now"] is True
+    assert job["qbit_rate_limit_repair_plan"]["repair_handoff"]["execute_call"]["requires_user_review"] is True
+    assert job["qbit_rate_limit_repair_plan"]["repair_sequence"][0]["step"] == "dry_run_resume"
+    assert job["qbit_rate_limit_repair_plan"]["repair_sequence"][1]["step"] == "execute_repair"
+    assert job["qbit_rate_limit_repair_plan"]["repair_sequence"][2]["step"] == "verify_repair"
+    assert job["qbit_rate_limit_repair_plan"]["verification_call"]["read_fields"] == [
+        "qbit_rate_limit_repair_plan",
+        "qbit_execution_gate",
+        "qbit_enforcement_summary",
+        "qbit_limit_audit",
+    ]
     assert job["qbit_rate_limit_repair_plan"]["recommended_call"]["requires_user_review"] is True
     assert job["policy_execution_report"]["ready"] is False
     assert job["policy_execution_report"]["status"] == "pending"
@@ -15105,6 +15116,109 @@ def test_manual_retorrent_job_marks_qbit_limit_audit_pending_without_injection_e
     assert summary["site_policy_profile_handoff"] == job["site_policy_profile_handoff"]
     listed = store.list({"limit": "5"})["jobs"][0]
     assert listed["site_policy_profile_handoff"] == job["site_policy_profile_handoff"]
+
+
+def test_manual_retorrent_job_exposes_qbit_rate_limit_mismatch_repair_handoff(monkeypatch, tmp_path) -> None:
+    config = {
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {"allow_auto_download": True, "allow_retorrent": True, "download_rate_limit": "20MiB/s", "rule_review_fingerprint": "u2-review"},
+                "MTEAM": {"allow_auto_upload": True, "allow_retorrent": True, "upload_rate_limit": "2MiB/s", "rule_review_fingerprint": "mteam-review"},
+            }
+        }
+    }
+    source_hash = "c" * 40
+    uploaded_hash = "d" * 40
+
+    async def fake_retorrent(_request):
+        return {
+            "kind": "ptcli.service.retorrent",
+            "status": "blocked",
+            "ok": False,
+            "stages": [
+                {
+                    "stage": "inject-source",
+                    "ok": True,
+                    "result": {
+                        "hash": source_hash,
+                        "download_limit": 10 * 1024 * 1024,
+                        "rate_limits": {
+                            "applied": True,
+                            "requested": {"upload_limit": None, "download_limit": 20 * 1024 * 1024},
+                            "calls": [{"method": "torrents_set_download_limit", "torrent_hashes": source_hash, "limit": 20 * 1024 * 1024}],
+                        },
+                    },
+                },
+                {
+                    "stage": "target-upload",
+                    "ok": True,
+                    "result": {
+                        "status": "uploaded",
+                        "injected_torrent": {
+                            "hash": uploaded_hash,
+                            "upload_limit": 1 * 1024 * 1024,
+                            "rate_limits": {
+                                "applied": True,
+                                "requested": {"upload_limit": 2 * 1024 * 1024, "download_limit": None},
+                                "calls": [{"method": "torrents_set_upload_limit", "torrent_hashes": uploaded_hash, "limit": 2 * 1024 * 1024}],
+                            },
+                        },
+                    },
+                },
+            ],
+            "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
+            "blockers": ["qBittorrent rate limits did not match policy."],
+        }
+
+    monkeypatch.setattr(ptcli_service, "retorrent", fake_retorrent)
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    store = ptcli_service.JobStore(tmp_path, run_inline=True)
+
+    job = ptcli_service.create_manual_retorrent_job(
+        store,
+        {
+            "source": "https://u2.dmhy.org/details.php?id=60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+            "save_path": "/downloads",
+        },
+    )
+
+    repair_plan = job["qbit_rate_limit_repair_plan"]
+    assert job["qbit_enforcement_summary"]["ready"] is False
+    assert job["qbit_enforcement_summary"]["status"] == "mismatch"
+    assert job["qbit_enforcement_summary"]["mismatch_roles"] == ["source", "uploaded"]
+    assert job["qbit_execution_gate"]["action"] == "repair_rate_limits"
+    assert repair_plan["action"] == "repair_rate_limits"
+    assert repair_plan["pending_roles"] == []
+    assert repair_plan["mismatch_roles"] == ["source", "uploaded"]
+    assert repair_plan["request_patch"] == {
+        "qbit_download_limit": 20 * 1024 * 1024,
+        "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+    }
+    assert repair_plan["roles"][0]["repair_reason"] == "qbit_rate_limit_mismatch"
+    assert repair_plan["roles"][0]["observed_limits"]["download_limit"] == 10 * 1024 * 1024
+    assert repair_plan["roles"][0]["recommended_call"]["dry_run_request"] == {
+        "dry_run": True,
+        "qbit_download_limit": 20 * 1024 * 1024,
+    }
+    assert repair_plan["roles"][1]["recommended_call"]["execute_request"] == {
+        "dry_run": False,
+        "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+    }
+    assert repair_plan["repair_handoff"]["mismatch_roles"] == ["source", "uploaded"]
+    assert repair_plan["repair_handoff"]["dry_run_call"]["mutates_state"] is False
+    assert repair_plan["repair_handoff"]["execute_call"]["mutates_state"] is True
+    assert repair_plan["repair_sequence"][0]["request"] == repair_plan["dry_run_request"]
+    assert repair_plan["repair_sequence"][1]["request"] == repair_plan["execute_request"]
+    assert repair_plan["repair_sequence"][2]["success_when"] == [
+        "qbit_rate_limit_repair_plan.ready=true",
+        "qbit_execution_gate.ready=true",
+        "qbit_enforcement_summary.ready=true",
+    ]
+    assert repair_plan["verification_call"]["endpoint"].endswith(f"/v1/jobs/{job['job_id']}/summary")
+    assert store.summary(job["job_id"])["qbit_rate_limit_repair_plan"] == repair_plan
 
 
 def test_source_url_retorrent_job_infers_source_reference(monkeypatch, tmp_path) -> None:
