@@ -21928,6 +21928,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "runbook_ref" in tool_by_name["readiness_bundle"]["response_contract"]["agent_decision_fields"]
     assert tool_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
     assert "ready_to_create_job" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+    assert "next_call" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+    assert "next_call_fields" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]
+    assert "safe_to_call_now" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["next_call_fields"]
     assert "policy_execution_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "policy_execution_targets" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
@@ -22823,6 +22826,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]
         assert tools_by_name["source_url_retorrent_preflight"]["path"] == "/v1/retorrent/source-url/preflight"
         assert "ready_to_create_job" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+        assert "next_call" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
+        assert "next_call_fields" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]
+        assert "safe_to_call_now" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["next_call_fields"]
         assert "policy_execution_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "policy_execution_targets" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
         assert "policy_config_apply_handoff" in tools_by_name["source_url_retorrent_preflight"]["response_contract"]["required_fields"]
@@ -25724,6 +25730,19 @@ def test_source_url_preflight_ready_points_to_source_url_job(tmp_path, monkeypat
     assert payload["recommended_tool"] == "source_url_check_and_submit"
     assert payload["recommended_endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
     assert payload["recommended_request"] == payload["one_call_handoff"]["request"]
+    assert payload["next_call"]["kind"] == "ptcli.source_url_preflight_next_call"
+    assert payload["next_call"]["ready"] is True
+    assert payload["next_call"]["action"] == "check_and_submit"
+    assert payload["next_call"]["tool"] == "source_url_check_and_submit"
+    assert payload["next_call"]["endpoint"] == "/v1/jobs/retorrent/from-url/check-and-submit"
+    assert payload["next_call"]["request"] == payload["one_call_handoff"]["request"]
+    assert payload["next_call"]["safe_to_call_now"] is False
+    assert payload["next_call"]["requires_user_review"] is True
+    assert payload["next_call"]["mutates_state"] is True
+    assert payload["next_call"]["uploads"] is True
+    assert payload["next_call"]["contacts_trackers"] is True
+    assert payload["next_call"]["approval"]["requires_accept_rules"] is True
+    assert payload["next_call"]["safety"]["next_call_runs_duplicate_check_before_job_creation"] is True
     assert payload["agent_decision"]["decision"] == "call_check_and_submit"
     assert payload["agent_decision"]["can_check_and_submit"] is True
     assert payload["agent_decision"]["preferred_tool"] == "source_url_check_and_submit"

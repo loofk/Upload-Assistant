@@ -1855,6 +1855,7 @@ def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None
     next_step = _source_url_preflight_next_step(ready_to_create_job, readiness, duplicate_check_handoff)
     blockers = _source_url_preflight_blockers(readiness, source_reference, target_trackers)
     recommended = one_call_handoff if one_call_handoff.get("ready") else next_step
+    next_call = _source_url_preflight_next_call(ready_to_create_job, one_call_handoff, duplicate_check_handoff, next_step, blockers)
     status = "ok" if ready_to_create_job else "blocked"
     return {
         "kind": "ptcli.source_url_retorrent_preflight",
@@ -1891,6 +1892,7 @@ def source_url_retorrent_preflight_payload(request: dict[str, Any] | None = None
         "recommended_tool": recommended.get("tool"),
         "recommended_endpoint": recommended.get("endpoint"),
         "recommended_request": recommended.get("request"),
+        "next_call": next_call,
         "agent_decision": _source_url_preflight_agent_decision(ready_to_create_job, duplicate_check_handoff, one_call_handoff, next_step, blockers),
         "blockers": blockers,
         "warnings": _string_list(readiness.get("warnings")),
@@ -2071,6 +2073,108 @@ def _source_url_preflight_agent_decision(ready_to_create_job: bool, duplicate_ch
         "next_endpoint": next_step.get("endpoint"),
         "blockers": blockers,
     }
+
+
+def _source_url_preflight_next_call(
+    ready_to_create_job: bool,
+    one_call_handoff: dict[str, Any],
+    duplicate_check_handoff: dict[str, Any],
+    next_step: dict[str, Any],
+    blockers: list[str],
+) -> dict[str, Any]:
+    if ready_to_create_job and one_call_handoff.get("ready"):
+        action = "check_and_submit"
+        tool = one_call_handoff.get("tool")
+        endpoint = one_call_handoff.get("endpoint")
+        method = one_call_handoff.get("method") or "POST"
+        request = one_call_handoff.get("request")
+        safe_to_call_now = False
+        requires_user_review = True
+        reason = "ready_for_one_call_duplicate_check_and_job_submission"
+        read_before_call = ["next_call", "one_call_handoff", "policy_execution_targets", "duplicate_check", "safety"]
+        after_call = {
+            "read": ["next_call", "check_and_submit_gate", "duplicate_check", "job_id", "status_endpoint", "summary_endpoint", "check_and_submit_final_report", "blockers"],
+            "continue_when": "response.next_call.action=poll_job and response.next_call.safe_to_call_now=true",
+            "stop_when": ["response.next_call.action=stop_duplicate", "response.next_call.action=resolve_blockers"],
+        }
+    elif ready_to_create_job and duplicate_check_handoff.get("ready"):
+        action = "check_duplicates"
+        tool = duplicate_check_handoff.get("tool")
+        endpoint = duplicate_check_handoff.get("endpoint")
+        method = duplicate_check_handoff.get("method") or "POST"
+        request = duplicate_check_handoff.get("request")
+        safe_to_call_now = False
+        requires_user_review = True
+        reason = "ready_for_split_duplicate_check"
+        read_before_call = ["next_call", "duplicate_check_handoff", "job_creation_handoff", "policy_execution_targets"]
+        after_call = {
+            "read": ["duplicate_check", "submit_if_clear_handoff", "blockers"],
+            "continue_when": "duplicate_check.exists=false and submit_if_clear_handoff.ready=true",
+            "stop_when": ["duplicate_check.exists=true", "submit_if_clear_handoff.ready=false"],
+        }
+    else:
+        action = "resolve_preflight_blockers"
+        tool = next_step.get("tool")
+        endpoint = next_step.get("endpoint")
+        method = next_step.get("method") or "POST"
+        request = next_step.get("request")
+        safe_to_call_now = False
+        requires_user_review = True
+        reason = next_step.get("reason") or "source_url_preflight_blocked"
+        read_before_call = ["next_call", "blockers", "readiness_bundle", "policy_config_apply_handoff"]
+        after_call = {
+            "read": ["status", "ready", "blockers", "next_actions"],
+            "stop_when": ["source_url_preflight.blockers is non-empty"],
+        }
+    return {
+        "kind": "ptcli.source_url_preflight_next_call",
+        "ready": bool((ready_to_create_job and (one_call_handoff.get("ready") or duplicate_check_handoff.get("ready"))) or (tool and endpoint and not ready_to_create_job)),
+        "action": action,
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": method,
+        "request": request,
+        "safe_to_call_now": safe_to_call_now,
+        "requires_user_review": requires_user_review,
+        "mutates_state": action == "check_and_submit",
+        "uploads": action == "check_and_submit",
+        "contacts_trackers": action in {"check_and_submit", "check_duplicates"},
+        "contacts_qbittorrent": action == "check_and_submit",
+        "reason": reason,
+        "read_before_call": read_before_call,
+        "after_call": after_call,
+        "progress": {
+            "ready_to_create_job": ready_to_create_job,
+            "one_call_ready": one_call_handoff.get("ready") is True,
+            "duplicate_check_ready": duplicate_check_handoff.get("ready") is True,
+            "blocker_count": len(blockers),
+        },
+        "approval": {
+            "required": requires_user_review,
+            "requires_accept_rules": action == "check_and_submit",
+            "requires_confirm_upload": action == "check_and_submit",
+            "reason": "next call may create a live-capable retorrent job" if action == "check_and_submit" else "review preflight blockers and duplicate-check intent before calling",
+        },
+        "safety": {
+            "source_url_preflight_is_read_only": True,
+            "next_call_may_mutate": action == "check_and_submit",
+            "next_call_runs_duplicate_check_before_job_creation": action == "check_and_submit",
+            "next_call_stops_when_duplicate_exists": action == "check_and_submit",
+            "safe_to_call_now": safe_to_call_now,
+        },
+        "blockers": blockers,
+        "next_actions": _source_url_preflight_next_call_next_actions(action, blockers),
+    }
+
+
+def _source_url_preflight_next_call_next_actions(action: str, blockers: list[str]) -> list[str]:
+    if action == "check_and_submit":
+        return ["After explicit user approval, call next_call.request through source_url_check_and_submit, then follow response.next_call."]
+    if action == "check_duplicates":
+        return ["After explicit user approval, call duplicate check first and create a job only if duplicate_check.exists=false."]
+    if blockers:
+        return ["Resolve source_url_preflight.next_call.blockers, then rerun source_url_retorrent_preflight."]
+    return ["Inspect source_url_preflight.next_call before continuing."]
 
 
 def create_candidate_retorrent_job(job_store: JobStore, candidate_job_id: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -33072,8 +33176,9 @@ def _agent_run_preview_response_contract() -> dict[str, Any]:
 
 def _source_url_preflight_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "request", "source_reference", "target_trackers", "ready_to_create_job", "ready_for_live_upload", "duplicate_check", "duplicate_check_handoff", "one_call_handoff", "readiness_bundle", "policy_execution_summary", "policy_execution_handoff", "policy_execution_targets", "policy_config_apply_handoff", "job_template", "job_creation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "agent_decision", "blockers", "warnings", "next_actions", "safety"],
+        "required_fields": ["status", "ok", "ready", "dry_run", "mutates_state", "live_upload", "request", "source_reference", "target_trackers", "ready_to_create_job", "ready_for_live_upload", "duplicate_check", "duplicate_check_handoff", "one_call_handoff", "readiness_bundle", "policy_execution_summary", "policy_execution_handoff", "policy_execution_targets", "policy_config_apply_handoff", "job_template", "job_creation_handoff", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "next_call", "agent_decision", "blockers", "warnings", "next_actions", "safety"],
         "next_step_fields": ["tool", "endpoint", "method", "request", "reason", "blockers"],
+        "next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "progress", "approval", "safety", "blockers", "next_actions"],
         "policy_execution_handoff_fields": ["ready", "phase", "qbit", "seeding", "transfer_rules", "rule_obligations", "config", "next_step", "blockers", "next_actions"],
         "policy_execution_targets_fields": ["ready", "status", "source", "targets", "request_defaults", "qbit", "seeding", "rules", "enforcement", "blockers", "next_actions", "safety"],
         "policy_config_apply_handoff_fields": ["ready", "status", "action", "preferred_patch", "patch_paths", "manual_review", "edit_config", "verification", "next_step", "blockers", "next_actions"],
@@ -35036,6 +35141,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "recommended_tool": {"type": ["string", "null"]},
             "recommended_endpoint": {"type": ["string", "null"]},
             "recommended_request": {"type": ["object", "null"]},
+            "next_call": {"type": "object"},
             "agent_decision": {"type": "object"},
             "blockers": {"type": "array", "items": {"type": "string"}},
             "warnings": {"type": "array", "items": {"type": "string"}},
