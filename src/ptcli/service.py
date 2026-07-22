@@ -510,6 +510,7 @@ class JobStore:
             "resume_followup_handoff": _job_resume_followup_handoff(job, self._job_lineage(job)),
             "blocked_recovery_report": _job_blocked_recovery_report(job, summary_payload),
             "material_resolution": _job_material_resolution(job),
+            "job_summary_final_report": _job_summary_final_report(job, summary_payload),
             "candidate_submission": _job_candidate_submission(job),
             "check_submission": _job_check_submission(job),
             "live_validation_submission": _job_live_validation_submission(job),
@@ -15443,6 +15444,126 @@ def _job_lifecycle_next_actions(action: str, recommended_call: dict[str, Any], b
     return ["Inspect job_lifecycle_final_report.read_order and follow the recommended_call only when safe_to_call_now=true or after user review."]
 
 
+def _job_summary_final_report(job: dict[str, Any], payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Top-level first-read report for job status and summary endpoints."""
+    job_id = str(job.get("job_id") or "")
+    status = str(job.get("status") or "unknown")
+    payload_dict = payload if isinstance(payload, dict) else None
+    lifecycle = _job_lifecycle_final_report(job, payload_dict)
+    final_report = _job_final_report(job, payload_dict)
+    live_audit = _job_live_validation_completion_audit(job, payload_dict)
+    live_report = _job_live_user_report(job, payload_dict)
+    resume_report = _job_resume_final_report(job, payload_dict)
+    control = _job_control_summary(job, payload_dict)
+    recommended_call = lifecycle.get("recommended_call") if isinstance(lifecycle.get("recommended_call"), dict) else {}
+    live_required = _job_live_evidence_required(job, payload_dict)
+    blockers = list(dict.fromkeys([*_string_list(lifecycle.get("blockers")), *_string_list(final_report.get("blockers")), *_string_list(live_audit.get("blockers"))]))
+    report_allowed = bool(lifecycle.get("report_allowed") and (not live_required or live_audit.get("report_allowed") is True) and not blockers)
+    return {
+        "kind": "ptcli.job_summary_final_report",
+        "ready": bool(lifecycle.get("ready")),
+        "report_allowed": report_allowed,
+        "verdict": _job_summary_final_report_verdict(status, lifecycle, final_report, live_audit, blockers, live_required),
+        "action": lifecycle.get("action"),
+        "status": status,
+        "job_id": job_id or None,
+        "job_kind": job.get("kind"),
+        "terminal": lifecycle.get("terminal"),
+        "should_poll": lifecycle.get("should_poll"),
+        "should_resume": lifecycle.get("should_resume"),
+        "resume_preview_required": lifecycle.get("resume_preview_required"),
+        "summary_file": _job_summary_file(job),
+        "status_endpoint": lifecycle.get("status_endpoint"),
+        "summary_endpoint": lifecycle.get("summary_endpoint"),
+        "resume_endpoint": lifecycle.get("resume_endpoint"),
+        "primary_report_field": "live_validation_completion_audit" if live_required else "job_final_report",
+        "control_field": "job_lifecycle_final_report",
+        "lifecycle": {
+            "verdict": lifecycle.get("verdict"),
+            "action": lifecycle.get("action"),
+            "report_allowed": lifecycle.get("report_allowed"),
+            "recommended_tool": lifecycle.get("recommended_tool"),
+        },
+        "completion_gate": {
+            "job_final_report_allowed": final_report.get("report_allowed"),
+            "live_evidence_required": live_required,
+            "live_validation_completion_audit_allowed": live_audit.get("report_allowed"),
+            "live_user_report_allowed": live_report.get("report_allowed"),
+            "resume_report_allowed": resume_report.get("resume_report_allowed"),
+        },
+        "recommended_call": recommended_call,
+        "recommended_tool": recommended_call.get("tool"),
+        "recommended_endpoint": recommended_call.get("endpoint"),
+        "recommended_method": recommended_call.get("method"),
+        "recommended_request": recommended_call.get("request"),
+        "dry_run_request": lifecycle.get("dry_run_request"),
+        "execute_request": lifecycle.get("execute_request"),
+        "read_order": ["job_summary_final_report", "job_lifecycle_final_report", "job_final_report", "live_validation_completion_audit", "job_control_summary", "resume_final_report", "recovery_handoff", "job_handoff"],
+        "complete_when": _job_summary_final_report_complete_when(live_required),
+        "stop_when": _job_summary_final_report_stop_when(lifecycle, final_report, live_audit),
+        "safety": {
+            "read_only": True,
+            "mutates_state": False,
+            "safe_to_call_now": bool(recommended_call.get("safe_to_call_now")),
+            "resume_execute_requires_user_review": True,
+            "live_upload_requires_accept_rules_confirm_upload": True,
+            "must_not_report_live_complete_until_completion_audit": live_required,
+            "source_control_action": control.get("action"),
+        },
+        "blockers": blockers,
+        "next_actions": _job_summary_final_report_next_actions(lifecycle, recommended_call, blockers, job_id, live_required),
+    }
+
+
+def _job_live_evidence_required(job: dict[str, Any], payload: dict[str, Any] | None = None) -> bool:
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    if request.get("confirm_upload") is True or request.get("execute") is True or request.get("target_execute") is True:
+        return True
+    if request.get("live_validation_submission") or request.get("live_validation_followup"):
+        return True
+    if str(job.get("kind") or "") in {"ptcli.retorrent", "ptcli.source_url_retorrent", "ptcli.checked_retorrent", "ptcli.target_upload"}:
+        return True
+    return bool(isinstance(payload, dict) and (payload.get("live_validation_completion_audit") or payload.get("live_user_report")))
+
+
+def _job_summary_final_report_verdict(status: str, lifecycle: dict[str, Any], final_report: dict[str, Any], live_audit: dict[str, Any], blockers: list[str], live_required: bool) -> str:
+    action = str(lifecycle.get("action") or "")
+    if blockers and action not in {"poll", "read_summary"}:
+        return "blocked"
+    if status in {"queued", "running"} or action == "poll":
+        return "poll"
+    if live_required and live_audit.get("report_allowed") is True:
+        return "report_complete"
+    if not live_required and final_report.get("report_allowed") is True:
+        return "report_complete"
+    return str(lifecycle.get("verdict") or final_report.get("verdict") or status or "inspect")
+
+
+def _job_summary_final_report_complete_when(live_required: bool) -> list[str]:
+    if live_required:
+        return ["job_summary_final_report.verdict=report_complete", *LIVE_VALIDATION_COMPLETE_WHEN]
+    return ["job_summary_final_report.verdict=report_complete", "job_final_report.report_allowed=true"]
+
+
+def _job_summary_final_report_stop_when(lifecycle: dict[str, Any], final_report: dict[str, Any], live_audit: dict[str, Any]) -> list[str]:
+    return list(dict.fromkeys([*_string_list(lifecycle.get("stop_when")), *_string_list(final_report.get("stop_when")), *_string_list(live_audit.get("stop_when")), "job_summary_final_report.blockers is non-empty"]))
+
+
+def _job_summary_final_report_next_actions(lifecycle: dict[str, Any], recommended_call: dict[str, Any], blockers: list[str], job_id: str, live_required: bool) -> list[str]:
+    if blockers:
+        return ["Resolve job_summary_final_report.blockers before continuing this job."]
+    action = str(lifecycle.get("action") or "")
+    if action == "poll":
+        return [f"Poll /v1/jobs/{job_id} until terminal, then read job_summary_final_report again."]
+    if action == "preview_resume" and recommended_call.get("request"):
+        return ["Call job_summary_final_report.recommended_call as a dry-run preview, then review command_argv and safety gates before execute."]
+    if action == "execute_resume" and recommended_call.get("execute_request"):
+        return ["Execute resume only after user review, then poll the returned child job."]
+    if live_required:
+        return ["Read live_validation_completion_audit and report completion only when job_summary_final_report.complete_when is satisfied."]
+    return ["Read job_final_report and report only when job_summary_final_report.report_allowed=true."]
+
+
 def _job_progress_handoff(job: dict[str, Any], payload: dict[str, Any] | None = None) -> dict[str, Any]:
     job_id = str(job.get("job_id") or "")
     status = str(job.get("status") or "unknown")
@@ -16321,6 +16442,7 @@ def _job_list_item(job: dict[str, Any], job_lineage: dict[str, Any] | None = Non
         "resume_followup_handoff": _job_resume_followup_handoff(job, job_lineage or _job_lineage_summary(job)),
         "blocked_recovery_report": _job_blocked_recovery_report(job),
         "material_resolution": _job_material_resolution(job),
+        "job_summary_final_report": _job_summary_final_report(job),
         "candidate_submission": _job_candidate_submission(job),
         "check_submission": _job_check_submission(job),
         "live_validation_submission": _job_live_validation_submission(job),
@@ -18563,6 +18685,7 @@ def _job_public_payload(job: dict[str, Any], job_lineage: dict[str, Any] | None 
         "resume_followup_handoff": _job_resume_followup_handoff(job, job_lineage or _job_lineage_summary(job)),
         "blocked_recovery_report": _job_blocked_recovery_report(job),
         "material_resolution": _job_material_resolution(job),
+        "job_summary_final_report": _job_summary_final_report(job),
         "candidate_submission": _job_candidate_submission(job),
         "check_submission": _job_check_submission(job),
         "live_validation_submission": _job_live_validation_submission(job),
@@ -29015,7 +29138,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "path": "/v1/jobs/{job_id}/summary",
             "description": "Return the job result, parsed summary-file payload, and direct AI-readable resume/status endpoints when available.",
             "input_schema": job_id_schema,
-            "response_contract": {"required_fields": ["status", "ok", "job_id", "kind", "runtime", "status_endpoint", "summary_endpoint", "resume_endpoint", "summary_file", "resume_state", "summary", "next_stage", "next_command", "next_command_argv", "should_execute_next_command", "automation_action", "agent_summary", "agent_decision", "candidate_digest", "candidate_control_summary", "submit_if_clear_handoff", "policy_coverage", "site_policy_profiles", "site_policy_execution_profiles", "site_policy_profile_handoff", "policy_handoff", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_application_report", "policy_config_apply_handoff", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_rate_limit_repair_plan", "policy_execution_report", "policy_execution_final_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "material_preparation_final_report", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_user_report", "live_validation_final_report", "live_validation_completion_audit", "live_action_sequence", "live_validation_submission", "live_validation_followup", "manual_retorrent_handoff", "manual_retorrent_final_report", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "job_progress_handoff", "resume_plan", "resume_requirements", "resume_execution_handoff", "job_resume_handoff", "resume_final_report", "job_lifecycle_final_report", "recovery_handoff", "job_control_summary", "blocked_recovery_report", "job_final_report", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "resume_followup_handoff", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"], "job_final_report_fields": _job_response_contract()["job_final_report_fields"], "resume_final_report_fields": _job_response_contract()["resume_final_report_fields"], "job_lifecycle_final_report_fields": _job_response_contract()["job_lifecycle_final_report_fields"], "resume_followup_handoff_fields": _job_response_contract()["resume_followup_handoff_fields"], "blocked_recovery_report_fields": _job_response_contract()["blocked_recovery_report_fields"], "policy_application_report_fields": _job_response_contract()["policy_application_report_fields"], "live_validation_completion_audit_fields": _job_response_contract()["live_validation_completion_audit_fields"]},
+            "response_contract": {"required_fields": ["status", "ok", "job_id", "kind", "runtime", "status_endpoint", "summary_endpoint", "resume_endpoint", "summary_file", "resume_state", "summary", "next_stage", "next_command", "next_command_argv", "should_execute_next_command", "automation_action", "agent_summary", "agent_decision", "candidate_digest", "candidate_control_summary", "submit_if_clear_handoff", "policy_coverage", "site_policy_profiles", "site_policy_execution_profiles", "site_policy_profile_handoff", "policy_handoff", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_application_report", "policy_config_apply_handoff", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_rate_limit_repair_plan", "policy_execution_report", "policy_execution_final_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "material_preparation_final_report", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_user_report", "live_validation_final_report", "live_validation_completion_audit", "live_action_sequence", "live_validation_submission", "live_validation_followup", "manual_retorrent_handoff", "manual_retorrent_final_report", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "job_progress_handoff", "resume_plan", "resume_requirements", "resume_execution_handoff", "job_resume_handoff", "resume_final_report", "job_lifecycle_final_report", "job_summary_final_report", "recovery_handoff", "job_control_summary", "blocked_recovery_report", "job_final_report", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "resume_followup_handoff", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff", "result", "blockers", "next_actions"], "job_final_report_fields": _job_response_contract()["job_final_report_fields"], "resume_final_report_fields": _job_response_contract()["resume_final_report_fields"], "job_lifecycle_final_report_fields": _job_response_contract()["job_lifecycle_final_report_fields"], "job_summary_final_report_fields": _job_response_contract()["job_summary_final_report_fields"], "resume_followup_handoff_fields": _job_response_contract()["resume_followup_handoff_fields"], "blocked_recovery_report_fields": _job_response_contract()["blocked_recovery_report_fields"], "policy_application_report_fields": _job_response_contract()["policy_application_report_fields"], "live_validation_completion_audit_fields": _job_response_contract()["live_validation_completion_audit_fields"]},
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },
         {
@@ -30060,7 +30183,7 @@ def _target_upload_service_response_contract() -> dict[str, Any]:
 
 def _job_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "status_endpoint", "summary_endpoint", "resume_endpoint", "summary_file", "resume_state", "next_stage", "next_command", "next_command_argv", "should_execute_next_command", "automation_action", "agent_summary", "agent_decision", "candidate_digest", "candidate_control_summary", "submit_if_clear_handoff", "policy_coverage", "site_policy_profiles", "site_policy_execution_profiles", "site_policy_profile_handoff", "policy_handoff", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_application_report", "policy_config_apply_handoff", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_rate_limit_repair_plan", "policy_execution_report", "policy_execution_final_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "material_preparation_final_report", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_service_gate", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_user_report", "live_validation_final_report", "live_validation_completion_audit", "live_action_sequence", "live_validation_submission", "live_validation_followup", "manual_retorrent_handoff", "manual_retorrent_final_report", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "job_progress_handoff", "resume_plan", "resume_requirements", "resume_execution_handoff", "job_resume_handoff", "resume_final_report", "job_lifecycle_final_report", "recovery_handoff", "job_control_summary", "blocked_recovery_report", "job_final_report", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "resume_followup_handoff", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
+        "required_fields": ["status", "ok", "job_id", "kind", "request", "command_argv", "blockers", "next_actions", "interruption", "cancellation", "runtime", "status_endpoint", "summary_endpoint", "resume_endpoint", "summary_file", "resume_state", "next_stage", "next_command", "next_command_argv", "should_execute_next_command", "automation_action", "agent_summary", "agent_decision", "candidate_digest", "candidate_control_summary", "submit_if_clear_handoff", "policy_coverage", "site_policy_profiles", "site_policy_execution_profiles", "site_policy_profile_handoff", "policy_handoff", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_application_report", "policy_config_apply_handoff", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_rate_limit_repair_plan", "policy_execution_report", "policy_execution_final_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "material_preparation_final_report", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_service_gate", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_user_report", "live_validation_final_report", "live_validation_completion_audit", "live_action_sequence", "live_validation_submission", "live_validation_followup", "manual_retorrent_handoff", "manual_retorrent_final_report", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "job_progress_handoff", "resume_plan", "resume_requirements", "resume_execution_handoff", "job_resume_handoff", "resume_final_report", "job_lifecycle_final_report", "job_summary_final_report", "recovery_handoff", "job_control_summary", "blocked_recovery_report", "job_final_report", "resume_lineage", "job_lineage", "resume_context", "resume_audit", "resume_summary", "resume_followup_handoff", "material_resolution", "candidate_submission", "check_submission", "source_reference", "workflow_context", "job_handoff"],
         "status_values": JOB_STATUS_VALUES,
         "blocked_fields": ["blockers", "next_actions", "interruption", "cancellation", "runtime", "resume_state", "resume_plan", "resume_requirements", "next_command_argv", "agent_decision"],
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
@@ -30085,6 +30208,7 @@ def _job_response_contract() -> dict[str, Any]:
         "job_resume_handoff_fields": ["action", "ready", "available", "allowed", "recommended", "terminal", "should_poll", "preview_required", "subcommand", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "required_overrides", "suggested_overrides", "recommended_inputs", "unresolved_recommended_inputs", "missing_confirmations", "allowed_overrides", "safety", "read_before_execute", "continue_when", "stop_when", "blockers", "next_actions"],
         "resume_final_report_fields": ["ready", "resume_report_allowed", "job_complete_report_allowed", "verdict", "action", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_request", "dry_run_request", "execute_request", "requirements", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
         "job_lifecycle_final_report_fields": ["ready", "report_allowed", "verdict", "action", "status", "job_id", "job_kind", "terminal", "should_poll", "should_resume", "resume_preview_required", "summary_file", "status_endpoint", "summary_endpoint", "resume_endpoint", "primary_next_step", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "sequence", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+        "job_summary_final_report_fields": ["ready", "report_allowed", "verdict", "action", "status", "job_id", "job_kind", "terminal", "should_poll", "should_resume", "resume_preview_required", "summary_file", "status_endpoint", "summary_endpoint", "resume_endpoint", "primary_report_field", "control_field", "lifecycle", "completion_gate", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "dry_run_request", "execute_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
         "resume_preview_fields": ["dry_run", "mutates_state", "live_upload", "command_argv", "original_next_command_argv", "applied_overrides", "ignored_overrides", "material_resolution", "resume_context", "resume_lineage", "resume_plan", "resume_requirements", "agent_decision"],
         "resume_audit_fields": ["is_resume_job", "parent_job_id", "parent_status", "parent_kind", "child_status", "resume_available", "resume_allowed", "resume_recommended", "next_subcommand", "next_command_argv", "applied_override_keys", "ignored_override_keys", "covered_recommended_inputs", "unresolved_recommended_inputs", "dry_run_request", "execute_request", "next_step", "next_actions"],
         "job_lineage_fields": ["job_id", "parent_job_id", "root_job_id", "depth", "is_resume_job", "chain", "child_count", "children", "latest_child", "has_active_child", "terminal_child_count", "next_actions"],
@@ -30200,7 +30324,7 @@ def _daily_candidate_delivery_response_contract() -> dict[str, Any]:
 def _job_list_response_contract() -> dict[str, Any]:
     return {
         "required_fields": ["status", "ok", "count", "total", "limit", "filters", "status_counts", "queue", "daily_candidate_batch_summary", "daily_candidate_batch_gate", "daily_candidate_submission_plan", "daily_candidate_execution_summary", "daily_candidate_refill_plan", "daily_candidate_batch_sequence", "daily_candidate_approval_sequence", "daily_candidate_batch_execution_context", "daily_candidate_final_report", "daily_candidate_tracking_report", "daily_candidate_completion_gate", "daily_candidate_batch_publish_payload", "jobs", "next_actions"],
-        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_control_summary", "candidate_submission", "check_submission", "live_validation_submission", "live_validation_followup", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "source_reference", "duplicate_check", "submit_if_clear_handoff", "site_policy_profiles", "site_policy_execution_profiles", "site_policy_profile_handoff", "policy_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_application_report", "policy_config_apply_handoff", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_rate_limit_repair_plan", "policy_execution_report", "policy_execution_final_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "material_preparation_final_report", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_service_gate", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_user_report", "live_validation_final_report", "live_validation_completion_audit", "live_action_sequence", "manual_retorrent_handoff", "manual_retorrent_final_report", "agent_decision", "job_progress_handoff", "resume_plan", "resume_requirements", "resume_execution_handoff", "job_resume_handoff", "resume_final_report", "job_lifecycle_final_report", "recovery_handoff", "job_control_summary", "blocked_recovery_report", "job_final_report", "resume_lineage", "job_lineage", "resume_summary", "resume_followup_handoff", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
+        "job_fields": ["job_id", "kind", "status", "blockers", "next_actions", "interruption", "cancellation", "runtime", "summary_file", "candidate_control_summary", "candidate_submission", "check_submission", "live_validation_submission", "live_validation_followup", "candidate_batch_handoff", "candidate_submission_handoff", "candidate_submission_summary", "candidate_submit_followup", "candidate_submit_sequence", "source_reference", "duplicate_check", "submit_if_clear_handoff", "site_policy_profiles", "site_policy_execution_profiles", "site_policy_profile_handoff", "policy_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_application_handoff", "policy_application_report", "policy_config_apply_handoff", "policy_enforcement_gate", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_rate_limit_repair_plan", "policy_execution_report", "policy_execution_final_report", "qbit_execution_gate", "materials_handoff", "material_evidence_summary", "material_gap_summary", "material_preparation_final_report", "metadata_prepare_handoff", "materials_prepare_handoff", "retorrent_stage_handoff", "target_package_handoff", "target_upload_service_gate", "target_upload_handoff", "closure_handoff", "closure_summary", "seedbox_live_validation_completion_report", "live_completion_gate", "live_user_report", "live_validation_final_report", "live_validation_completion_audit", "live_action_sequence", "manual_retorrent_handoff", "manual_retorrent_final_report", "agent_decision", "job_progress_handoff", "resume_plan", "resume_requirements", "resume_execution_handoff", "job_resume_handoff", "resume_final_report", "job_lifecycle_final_report", "job_summary_final_report", "recovery_handoff", "job_control_summary", "blocked_recovery_report", "job_final_report", "resume_lineage", "job_lineage", "resume_summary", "resume_followup_handoff", "material_resolution", "job_handoff", "status_endpoint", "summary_endpoint", "resume_endpoint"],
         "daily_candidate_batch_summary_fields": ["ready", "filters", "list_window", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "available_submit_request_count", "unsubmitted_safe_count", "retorrent_status_counts", "retorrent_action_counts", "complete_count", "running_count", "blocked_count", "items", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "daily_candidate_batch_gate_fields": ["ready", "action", "candidate_job_count", "submitted_retorrent_job_count", "ready_to_submit_count", "unsubmitted_safe_count", "complete_count", "running_count", "blocked_count", "retorrent_status_counts", "retorrent_action_counts", "first_submit_request", "first_submit_endpoint", "first_submitted_job", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
         "daily_candidate_submission_plan_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "submitted_retorrent_job_count", "running_count", "shortfall_count", "target_met", "ready_target_met", "first_submit_request", "submit_requests", "shortfall_recovery", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_user_inputs", "read_order", "continue_when", "stop_when", "shortfall_blockers", "hard_blockers", "blockers", "next_actions"],
@@ -30932,6 +31056,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_summary": {"type": "object"},
             "resume_followup_handoff": {"type": "object"},
             "material_resolution": {"type": ["object", "null"]},
+            "job_summary_final_report": {"type": "object"},
             "candidate_submission": {"type": ["object", "null"]},
             "check_submission": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
@@ -31051,6 +31176,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "resume_summary": {"type": "object"},
             "resume_followup_handoff": {"type": "object"},
             "material_resolution": {"type": ["object", "null"]},
+            "job_summary_final_report": {"type": "object"},
             "candidate_submission": {"type": ["object", "null"]},
             "check_submission": {"type": ["object", "null"]},
             "source_reference": {"type": ["object", "null"]},
@@ -31102,6 +31228,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
                         "job_control_summary": {"type": "object"},
                         "blocked_recovery_report": {"type": "object"},
                         "job_final_report": {"type": "object"},
+                        "job_summary_final_report": {"type": "object"},
                         "job_resume_handoff": {"type": "object"},
                         "resume_final_report": {"type": "object"},
                         "resume_followup_handoff": {"type": "object"},
