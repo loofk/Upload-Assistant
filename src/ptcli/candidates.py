@@ -28,6 +28,7 @@ from src.ptcli.target import search_mteam_duplicates
 
 DEFAULT_CANDIDATE_LIMIT = 10
 MAX_CANDIDATE_SCAN = 50
+HARD_MAX_CANDIDATE_SCAN = 200
 SOURCE_URL_RETORRENT_JOB_ENDPOINT = "/v1/jobs/retorrent/from-url"
 SOURCE_URL_RETORRENT_JOB_TOOL = "source_url_retorrent_job"
 PLACEHOLDER_FINGERPRINTS = {"manual-review", "manual-review-yyyy-mm-dd", "reviewed-yyyy-mm-dd"}
@@ -63,28 +64,30 @@ async def build_daily_candidates(
     accept_rules: bool = False,
     check_dupes: bool = True,
     exclude_source_ids: list[str] | None = None,
+    scan_limit: int | None = None,
 ) -> dict[str, Any]:
     source = normalize_tracker(source_tracker)
     targets = parse_tracker_list(target_trackers_raw)
     limit = max(1, min(int(limit or DEFAULT_CANDIDATE_LIMIT), DEFAULT_CANDIDATE_LIMIT))
+    scan_limit = _normalize_scan_limit(scan_limit)
     excluded_source_ids = _normalize_source_ids(exclude_source_ids)
     invalid = unsupported_trackers([source, *targets])
     if invalid:
-        return _blocked_payload(source, targets, limit, [f"Unsupported tracker(s) for focused candidate scope: {', '.join(invalid)}"], exclude_source_ids=excluded_source_ids)
+        return _blocked_payload(source, targets, limit, [f"Unsupported tracker(s) for focused candidate scope: {', '.join(invalid)}"], exclude_source_ids=excluded_source_ids, scan_limit=scan_limit)
     if source in targets:
-        return _blocked_payload(source, targets, limit, ["Source tracker cannot also be a target tracker."], exclude_source_ids=excluded_source_ids)
+        return _blocked_payload(source, targets, limit, ["Source tracker cannot also be a target tracker."], exclude_source_ids=excluded_source_ids, scan_limit=scan_limit)
 
     rule_check = build_rule_check(source, targets, accept_rules=accept_rules)
     site_policy = build_site_policy_report(config, [source, *targets], accept_rules=accept_rules)
-    source_capability = _source_candidate_capability(source, base_dir=base_dir, limit=limit, exclude_source_ids=excluded_source_ids)
-    discovery_handoff = _candidate_discovery_handoff(source_capability, targets, limit=limit, exclude_source_ids=excluded_source_ids)
+    source_capability = _source_candidate_capability(source, base_dir=base_dir, limit=limit, scan_limit=scan_limit, exclude_source_ids=excluded_source_ids)
+    discovery_handoff = _candidate_discovery_handoff(source_capability, targets, limit=limit, scan_limit=scan_limit, exclude_source_ids=excluded_source_ids)
     scored_candidates: list[dict[str, Any]] = []
     blockers: list[str] = []
     next_actions: list[str] = []
     discovered_seeds: list[CandidateSeed] = []
     skipped_source_ids: list[str] = []
     try:
-        discovered_seeds = await fetch_recent_candidate_seeds(source, base_dir=base_dir, limit=MAX_CANDIDATE_SCAN)
+        discovered_seeds = await fetch_recent_candidate_seeds(source, base_dir=base_dir, limit=scan_limit)
         seeds = _filter_excluded_candidate_seeds(discovered_seeds, excluded_source_ids)
         excluded_lookup = set(excluded_source_ids)
         skipped_source_ids = [seed.torrent_id for seed in discovered_seeds if str(seed.torrent_id) in excluded_lookup]
@@ -127,9 +130,19 @@ async def build_daily_candidates(
         check_dupes=check_dupes,
         base_dir=base_dir,
         exclude_source_ids=excluded_source_ids,
+        scan_limit=scan_limit,
         discovery_handoff=discovery_handoff,
     )
     target_summary = _candidate_target_summary(limit, scan_count=len(discovered_seeds), selected_count=len(candidates), ready_count=ready_count)
+    pagination_plan = _candidate_pagination_plan(
+        source,
+        targets,
+        target_summary,
+        scan_limit=scan_limit,
+        exclude_source_ids=excluded_source_ids,
+        discovered_count=len(discovered_seeds),
+        eligible_count=len(seeds),
+    )
     return {
         "kind": "ptcli.daily_candidates",
         "status": status,
@@ -139,6 +152,8 @@ async def build_daily_candidates(
         "limit": limit,
         "target_count": target_summary["target_count"],
         "scan_count": target_summary["scan_count"],
+        "scan_limit": scan_limit,
+        "max_scan_limit": HARD_MAX_CANDIDATE_SCAN,
         "discovered_count": len(discovered_seeds),
         "eligible_count": len(seeds),
         "excluded_count": len(skipped_source_ids),
@@ -151,12 +166,14 @@ async def build_daily_candidates(
         "target_summary": target_summary,
         "source_capability": source_capability,
         "candidate_discovery_handoff": discovery_handoff,
+        "pagination_plan": pagination_plan,
         "rule_check": rule_check,
         "site_policy": site_policy,
         "ranking": {
             "strategy": "ready-first, then descending score, then source listing order",
             "score_range": "0-100",
-            "scan_count": len(seeds),
+            "scan_count": len(discovered_seeds),
+            "scan_limit": scan_limit,
             "selected_count": len(candidates),
         },
         "digest": digest,
@@ -964,6 +981,7 @@ def _candidate_digest(
     check_dupes: bool = True,
     base_dir: str | None = None,
     exclude_source_ids: list[str] | None = None,
+    scan_limit: int | None = None,
     discovery_handoff: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ready_candidates = [candidate for candidate in candidates if candidate.get("status") == "ready"]
@@ -980,8 +998,14 @@ def _candidate_digest(
     approval_queue = _candidate_approval_queue(push_items)
     target_summary = _candidate_target_summary(limit, scan_count=scan_count, selected_count=len(candidates), ready_count=len(ready_candidates))
     push_summary = _candidate_push_summary(target_summary, review_count, blocked_count, recommendation)
-    request_context = _candidate_discovery_request_context(source_tracker, target_trackers, limit, accept_rules=accept_rules, check_dupes=check_dupes, base_dir=base_dir, exclude_source_ids=exclude_source_ids)
-    discovery_handoff = discovery_handoff or _candidate_discovery_handoff(_source_candidate_capability(str(source_tracker or ""), base_dir=base_dir, limit=limit, exclude_source_ids=exclude_source_ids), target_trackers or [], limit=limit, exclude_source_ids=exclude_source_ids)
+    request_context = _candidate_discovery_request_context(source_tracker, target_trackers, limit, accept_rules=accept_rules, check_dupes=check_dupes, base_dir=base_dir, exclude_source_ids=exclude_source_ids, scan_limit=scan_limit)
+    discovery_handoff = discovery_handoff or _candidate_discovery_handoff(
+        _source_candidate_capability(str(source_tracker or ""), base_dir=base_dir, limit=limit, scan_limit=scan_limit, exclude_source_ids=exclude_source_ids),
+        target_trackers or [],
+        limit=limit,
+        scan_limit=scan_limit,
+        exclude_source_ids=exclude_source_ids,
+    )
     execution_plan = _candidate_execution_plan(push_items, approval_queue, target_summary, blockers, next_actions, recommendation=recommendation, request_context=request_context)
     daily_candidate_report = _candidate_daily_report(push_items, approval_queue, execution_plan, target_summary, blockers, recommendation=recommendation)
     daily_candidate_batch_report = _candidate_batch_report(push_items, approval_queue, execution_plan, daily_candidate_report, target_summary, blockers)
@@ -1619,6 +1643,7 @@ def _candidate_discovery_request_context(
     check_dupes: bool,
     base_dir: str | None,
     exclude_source_ids: list[str] | None = None,
+    scan_limit: int | None = None,
 ) -> dict[str, Any]:
     request: dict[str, Any] = {
         "source_tracker": source_tracker,
@@ -1633,20 +1658,28 @@ def _candidate_discovery_request_context(
     excluded = _normalize_source_ids(exclude_source_ids)
     if excluded:
         request["exclude_source_ids"] = excluded
+    normalized_scan_limit = _normalize_scan_limit(scan_limit)
+    if normalized_scan_limit != MAX_CANDIDATE_SCAN:
+        request["scan_limit"] = normalized_scan_limit
     return request
 
 
 def _candidate_shortfall_recovery(target_summary: dict[str, Any], request_context: dict[str, Any], *, ready_shortfall: int, selected_shortfall: int) -> dict[str, Any]:
     target_count = int(target_summary.get("target_count") or DEFAULT_CANDIDATE_LIMIT)
+    scan_limit = _normalize_scan_limit(request_context.get("scan_limit") if request_context.get("scan_limit") is not None else None)
+    next_scan_limit = min(HARD_MAX_CANDIDATE_SCAN, scan_limit + MAX_CANDIDATE_SCAN)
+    can_increase_scan_limit = scan_limit < HARD_MAX_CANDIDATE_SCAN
     retry_request = {
         key: value
         for key, value in {
             "source_tracker": request_context.get("source_tracker"),
             "target": request_context.get("target"),
             "limit": target_count,
+            "scan_limit": next_scan_limit if can_increase_scan_limit and ready_shortfall else scan_limit,
             "accept_rules": request_context.get("accept_rules"),
             "check_dupes": True,
             "base_dir": request_context.get("base_dir"),
+            "exclude_source_ids": request_context.get("exclude_source_ids"),
         }.items()
         if value is not None and value != ""
     }
@@ -1661,6 +1694,10 @@ def _candidate_shortfall_recovery(target_summary: dict[str, Any], request_contex
         "ready_shortfall_count": ready_shortfall,
         "scan_count": target_summary.get("scan_count"),
         "max_scan_count": MAX_CANDIDATE_SCAN,
+        "scan_limit": scan_limit,
+        "next_scan_limit": next_scan_limit if can_increase_scan_limit else None,
+        "max_scan_limit": HARD_MAX_CANDIDATE_SCAN,
+        "pagination_supported": False,
         "recommended_tool": "daily_candidates_job" if ready_shortfall else None,
         "recommended_endpoint": "/v1/jobs/candidates/daily" if ready_shortfall else None,
         "recommended_method": "POST" if ready_shortfall else None,
@@ -2340,10 +2377,12 @@ def _candidate_tier(candidate: dict[str, Any]) -> str:
     return str(ranking.get("tier") or candidate.get("status") or "")
 
 
-def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list[str], *, exclude_source_ids: list[str] | None = None) -> dict[str, Any]:
+def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list[str], *, exclude_source_ids: list[str] | None = None, scan_limit: int | None = None) -> dict[str, Any]:
     excluded_source_ids = _normalize_source_ids(exclude_source_ids)
-    source_capability = _source_candidate_capability(source, limit=limit, exclude_source_ids=excluded_source_ids)
-    discovery_handoff = _candidate_discovery_handoff(source_capability, targets, limit=limit, exclude_source_ids=excluded_source_ids)
+    scan_limit = _normalize_scan_limit(scan_limit)
+    source_capability = _source_candidate_capability(source, limit=limit, scan_limit=scan_limit, exclude_source_ids=excluded_source_ids)
+    discovery_handoff = _candidate_discovery_handoff(source_capability, targets, limit=limit, scan_limit=scan_limit, exclude_source_ids=excluded_source_ids)
+    target_summary = _candidate_target_summary(limit, scan_count=0, selected_count=0, ready_count=0)
     return {
         "kind": "ptcli.daily_candidates",
         "status": "blocked",
@@ -2361,6 +2400,8 @@ def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list
         },
         "target_count": limit,
         "scan_count": 0,
+        "scan_limit": scan_limit,
+        "max_scan_limit": HARD_MAX_CANDIDATE_SCAN,
         "discovered_count": 0,
         "eligible_count": 0,
         "excluded_count": 0,
@@ -2368,18 +2409,20 @@ def _blocked_payload(source: str, targets: list[str], limit: int, blockers: list
         "skipped_source_ids": [],
         "shortfall_count": limit,
         "target_met": False,
-        "target_summary": _candidate_target_summary(limit, scan_count=0, selected_count=0, ready_count=0),
+        "target_summary": target_summary,
         "source_capability": source_capability,
         "candidate_discovery_handoff": discovery_handoff,
-        "digest": _candidate_digest([], blockers, [], limit=limit, scan_count=0, source_tracker=source, target_trackers=targets, exclude_source_ids=excluded_source_ids, discovery_handoff=discovery_handoff),
+        "pagination_plan": _candidate_pagination_plan(source, targets, target_summary, scan_limit=scan_limit, exclude_source_ids=excluded_source_ids, discovered_count=0, eligible_count=0),
+        "digest": _candidate_digest([], blockers, [], limit=limit, scan_count=0, source_tracker=source, target_trackers=targets, exclude_source_ids=excluded_source_ids, scan_limit=scan_limit, discovery_handoff=discovery_handoff),
         "candidates": [],
         "blockers": blockers,
         "next_actions": [],
     }
 
 
-def _source_candidate_capability(source: str, *, base_dir: str | None = None, limit: int = MAX_CANDIDATE_SCAN, exclude_source_ids: list[str] | None = None) -> dict[str, Any]:
+def _source_candidate_capability(source: str, *, base_dir: str | None = None, limit: int = DEFAULT_CANDIDATE_LIMIT, scan_limit: int | None = None, exclude_source_ids: list[str] | None = None) -> dict[str, Any]:
     normalized = normalize_tracker(source) if source else source
+    scan_limit = _normalize_scan_limit(scan_limit)
     adapter = _candidate_discovery_adapter(normalized)
     info_adapter = source_info_adapter(normalized)
     download_adapter = source_download_adapter(normalized)
@@ -2401,9 +2444,12 @@ def _source_candidate_capability(source: str, *, base_dir: str | None = None, li
         "network_mode": "live_recent_listing_with_cookie" if adapter == "nexusphp_recent_or_search_html" else "not_enabled",
         "scan": {
             "limit": max(1, min(int(limit or MAX_CANDIDATE_SCAN), MAX_CANDIDATE_SCAN)),
-            "max_limit": MAX_CANDIDATE_SCAN,
+            "scan_limit": scan_limit,
+            "default_scan_limit": MAX_CANDIDATE_SCAN,
+            "max_scan_limit": HARD_MAX_CANDIDATE_SCAN,
             "recent_url": _recent_url(normalized) if normalized in GENERIC_DETAILS_BASE_URLS else None,
             "pagination": "first_recent_page",
+            "pagination_supported": False,
             "exclude_source_ids": _normalize_source_ids(exclude_source_ids),
         },
         "credentials": {
@@ -2431,10 +2477,11 @@ def _candidate_discovery_adapter(source: str) -> str | None:
     return None
 
 
-def _candidate_discovery_handoff(source_capability: dict[str, Any], targets: list[str], *, limit: int, exclude_source_ids: list[str] | None = None) -> dict[str, Any]:
+def _candidate_discovery_handoff(source_capability: dict[str, Any], targets: list[str], *, limit: int, scan_limit: int | None = None, exclude_source_ids: list[str] | None = None) -> dict[str, Any]:
     ready = bool(source_capability.get("ready"))
     blockers = _string_list(source_capability.get("blockers"))
     excluded = _normalize_source_ids(exclude_source_ids)
+    scan_limit = _normalize_scan_limit(scan_limit)
     return {
         "kind": "ptcli.daily_candidate_discovery_handoff",
         "ready": ready,
@@ -2445,6 +2492,7 @@ def _candidate_discovery_handoff(source_capability: dict[str, Any], targets: lis
         "implementation": source_capability.get("implementation"),
         "network_mode": source_capability.get("network_mode"),
         "scan": source_capability.get("scan"),
+        "pagination_plan": _candidate_discovery_static_pagination_plan(source_capability, targets, limit=limit, scan_limit=scan_limit, exclude_source_ids=excluded),
         "dedupe": {
             "dedupe_key": "source_tracker,target,source_id",
             "exclude_source_ids": excluded,
@@ -2477,6 +2525,86 @@ def _candidate_discovery_next_actions(ready: bool, blockers: list[str], source_c
     if cookie_path:
         actions.append(f"Refresh the source cookie at {cookie_path}.")
     return actions
+
+
+def _normalize_scan_limit(scan_limit: int | None) -> int:
+    return max(1, min(int(scan_limit or MAX_CANDIDATE_SCAN), HARD_MAX_CANDIDATE_SCAN))
+
+
+def _candidate_discovery_static_pagination_plan(source_capability: dict[str, Any], targets: list[str], *, limit: int, scan_limit: int, exclude_source_ids: list[str]) -> dict[str, Any]:
+    can_increase = scan_limit < HARD_MAX_CANDIDATE_SCAN
+    next_scan_limit = min(HARD_MAX_CANDIDATE_SCAN, max(scan_limit + MAX_CANDIDATE_SCAN, limit))
+    return {
+        "kind": "ptcli.daily_candidate_discovery_pagination_plan",
+        "pagination_supported": False,
+        "offset_supported": False,
+        "scan_limit": scan_limit,
+        "default_scan_limit": MAX_CANDIDATE_SCAN,
+        "max_scan_limit": HARD_MAX_CANDIDATE_SCAN,
+        "can_increase_scan_limit": can_increase,
+        "next_scan_limit": next_scan_limit if can_increase else None,
+        "next_request_patch": {"scan_limit": next_scan_limit, "exclude_source_ids": exclude_source_ids} if can_increase else None,
+        "adapter": source_capability.get("candidate_discovery_adapter"),
+        "safe_to_call_when": "rules/cookies are configured and previous digest.ready_shortfall_count>0",
+        "stop_when": ["scan_limit reaches max_scan_limit", "pagination adapter is unavailable", "new candidates are still all excluded or blocked"],
+        "extension_required": "Implement tracker-specific page/offset cursor before setting pagination_supported=true.",
+        "target_trackers": targets,
+    }
+
+
+def _candidate_pagination_plan(
+    source: str,
+    targets: list[str],
+    target_summary: dict[str, Any],
+    *,
+    scan_limit: int,
+    exclude_source_ids: list[str],
+    discovered_count: int,
+    eligible_count: int,
+) -> dict[str, Any]:
+    ready_shortfall = int(target_summary.get("ready_shortfall_count") or 0)
+    selected_shortfall = int(target_summary.get("shortfall_count") or 0)
+    can_increase = scan_limit < HARD_MAX_CANDIDATE_SCAN
+    next_scan_limit = min(HARD_MAX_CANDIDATE_SCAN, scan_limit + MAX_CANDIDATE_SCAN)
+    action = "increase_scan_limit" if (ready_shortfall or selected_shortfall) and can_increase else "implement_pagination_adapter" if (ready_shortfall or selected_shortfall) else "none"
+    next_request = {
+        "source_tracker": source,
+        "target": ",".join(targets),
+        "limit": int(target_summary.get("target_count") or DEFAULT_CANDIDATE_LIMIT),
+        "scan_limit": next_scan_limit,
+        "check_dupes": True,
+    }
+    if exclude_source_ids:
+        next_request["exclude_source_ids"] = exclude_source_ids
+    return {
+        "kind": "ptcli.daily_candidate_pagination_plan",
+        "ready": action != "implement_pagination_adapter",
+        "action": action,
+        "pagination_supported": False,
+        "offset_supported": False,
+        "scan_limit": scan_limit,
+        "default_scan_limit": MAX_CANDIDATE_SCAN,
+        "max_scan_limit": HARD_MAX_CANDIDATE_SCAN,
+        "next_scan_limit": next_scan_limit if action == "increase_scan_limit" else None,
+        "discovered_count": discovered_count,
+        "eligible_count": eligible_count,
+        "selected_shortfall_count": selected_shortfall,
+        "ready_shortfall_count": ready_shortfall,
+        "recommended_tool": "daily_candidates_job" if action == "increase_scan_limit" else None,
+        "recommended_endpoint": "/v1/jobs/candidates/daily" if action == "increase_scan_limit" else None,
+        "recommended_method": "POST" if action == "increase_scan_limit" else None,
+        "recommended_request": next_request if action == "increase_scan_limit" else None,
+        "blockers": [] if action != "implement_pagination_adapter" else ["pagination_adapter_missing"],
+        "next_actions": _candidate_pagination_next_actions(action, ready_shortfall, selected_shortfall),
+    }
+
+
+def _candidate_pagination_next_actions(action: str, ready_shortfall: int, selected_shortfall: int) -> list[str]:
+    if action == "increase_scan_limit":
+        return [f"Increase scan_limit to continue filling daily candidates; ready shortfall={ready_shortfall}, selected shortfall={selected_shortfall}."]
+    if action == "implement_pagination_adapter":
+        return ["Add tracker-specific pagination/cursor support before expecting more candidates from this source list."]
+    return ["Daily candidate scan target is satisfied; no pagination action is needed."]
 
 
 def _normalize_source_ids(source_ids: list[str] | None) -> list[str]:

@@ -23373,8 +23373,13 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_discovery_handoff_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "candidate_discovery_profile_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "candidate_discovery_dedupe_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
+        assert "candidate_pagination_plan_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "excluded_count" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
+        assert "scan_limit" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
+        assert "pagination_plan" in tools_by_name["daily_candidates_job"]["response_contract"]["result_fields"]
+        assert "scan_limit" in tools_by_name["daily_candidates_job"]["input_schema"]["properties"]
         assert "dedupe" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_handoff_fields"]
+        assert "pagination_plan" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_handoff_fields"]
         assert "site_policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["push_item_fields"]
         assert "site_policy_profile_handoff" in tools_by_name["daily_candidates_job"]["response_contract"]["approval_prompt_fields"]
         assert "site_policy_summary" in tools_by_name["daily_candidates_job"]["response_contract"]["policy_summary_fields"]
@@ -23392,6 +23397,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "candidate_discovery_profile" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_summary_fields"]
         assert "safe_to_submit_when" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_handoff_fields"]
         assert "applied_before_scoring" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_dedupe_fields"]
+        assert "next_scan_limit" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_pagination_plan_fields"]
         assert "required_seed_outputs" in tools_by_name["daily_candidates_job"]["response_contract"]["candidate_discovery_profile_fields"]
         assert "downloadability_cookie_fields" in tools_by_name["daily_candidates_job"]["response_contract"]
         assert "status" in tools_by_name["daily_candidates_job"]["response_contract"]["downloadability_cookie_fields"]
@@ -25626,6 +25632,8 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["status"] == "ok"
     assert result["target_count"] == 1
     assert result["scan_count"] == 1
+    assert result["scan_limit"] == 50
+    assert result["max_scan_limit"] == 200
     assert result["count"] == 1
     assert result["ready_count"] == 1
     assert result["shortfall_count"] == 0
@@ -25637,6 +25645,8 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert result["source_capability"]["candidate_discovery_adapter"] == "nexusphp_recent_or_search_html"
     assert result["source_capability"]["implementation"] == "generic_recent_cookie"
     assert result["source_capability"]["scan"]["recent_url"] == "https://u2.dmhy.org/torrents.php?incldead=0"
+    assert result["source_capability"]["scan"]["scan_limit"] == 50
+    assert result["source_capability"]["scan"]["pagination_supported"] is False
     assert result["source_capability"]["credentials"]["cookie_required"] is True
     discovery = result["candidate_discovery_handoff"]
     assert discovery["kind"] == "ptcli.daily_candidate_discovery_handoff"
@@ -25646,6 +25656,9 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert discovery["target_count"] == 1
     assert discovery["adapter"] == "nexusphp_recent_or_search_html"
     assert discovery["implementation"] == "generic_recent_cookie"
+    assert discovery["pagination_plan"]["scan_limit"] == 50
+    assert discovery["pagination_plan"]["next_scan_limit"] == 100
+    assert discovery["pagination_plan"]["pagination_supported"] is False
     assert "source_id" in discovery["required_seed_outputs"]
     assert "imdb_id" in discovery["required_enrichment_outputs"]
     assert "duplicate check" in discovery["candidate_filters"][1]
@@ -25654,6 +25667,8 @@ async def test_daily_candidates_builds_ready_candidate(monkeypatch) -> None:
     assert discovery["extension_contract"]["nexusphp_tracker"].startswith("provide details base URL")
     assert result["digest"]["recommendation"] == "submit_top_candidate_when_confirmed"
     assert result["digest"]["candidate_discovery_handoff"] == discovery
+    assert result["pagination_plan"]["action"] == "none"
+    assert result["pagination_plan"]["scan_limit"] == 50
     assert result["digest"]["target_count"] == 1
     assert result["digest"]["target_met"] is True
     assert result["digest"]["shortfall_count"] == 0
@@ -25956,7 +25971,10 @@ async def test_daily_candidates_filters_excluded_source_ids_before_scoring(monke
     ]
     fetched_source_ids: list[str] = []
 
-    async def fake_fetch_recent_candidate_seeds(*_args, **_kwargs):
+    fetch_kwargs: dict[str, object] = {}
+
+    async def fake_fetch_recent_candidate_seeds(*_args, **kwargs):
+        fetch_kwargs.update(kwargs)
         return seeds
 
     async def fake_fetch_source_info(_config, tracker, source_id, **_kwargs):
@@ -25980,8 +25998,9 @@ async def test_daily_candidates_filters_excluded_source_ids_before_scoring(monke
         },
     }
 
-    result = await ptcli_candidates.build_daily_candidates(config, "U2", "MTEAM", limit=10, accept_rules=True, exclude_source_ids=["60635", "60635"])
+    result = await ptcli_candidates.build_daily_candidates(config, "U2", "MTEAM", limit=10, accept_rules=True, exclude_source_ids=["60635", "60635"], scan_limit=100)
 
+    assert fetch_kwargs["limit"] == 100
     assert fetched_source_ids == ["60636"]
     assert result["status"] == "partial"
     assert result["discovered_count"] == 2
@@ -25990,6 +26009,11 @@ async def test_daily_candidates_filters_excluded_source_ids_before_scoring(monke
     assert result["excluded_count"] == 1
     assert result["exclude_source_ids"] == ["60635"]
     assert result["skipped_source_ids"] == ["60635"]
+    assert result["scan_limit"] == 100
+    assert result["pagination_plan"]["action"] == "increase_scan_limit"
+    assert result["pagination_plan"]["next_scan_limit"] == 150
+    assert result["pagination_plan"]["recommended_request"]["scan_limit"] == 150
+    assert result["pagination_plan"]["recommended_request"]["exclude_source_ids"] == ["60635"]
     assert result["candidates"][0]["source"]["torrent_id"] == "60636"
     assert result["source_capability"]["scan"]["exclude_source_ids"] == ["60635"]
     handoff = result["candidate_discovery_handoff"]
@@ -26012,6 +26036,8 @@ async def test_daily_candidates_service_passes_excluded_source_ids(monkeypatch) 
             "ok": True,
             "target_count": 10,
             "scan_count": 2,
+            "scan_limit": 100,
+            "max_scan_limit": 200,
             "discovered_count": 2,
             "eligible_count": 1,
             "excluded_count": 1,
@@ -26024,6 +26050,7 @@ async def test_daily_candidates_service_passes_excluded_source_ids(monkeypatch) 
             "target_summary": {"target_count": 10, "scan_count": 2, "selected_count": 1, "ready_count": 1},
             "source_capability": {"ready": True},
             "candidate_discovery_handoff": {"kind": "ptcli.daily_candidate_discovery_handoff", "dedupe": {"exclude_source_ids": ["60635"]}},
+            "pagination_plan": {"kind": "ptcli.daily_candidate_pagination_plan", "recommended_request": {"scan_limit": 150}},
             "site_policy": {"ready": True},
             "ranking": {"scan_count": 2, "selected_count": 1},
             "digest": {"kind": "ptcli.daily_candidates_digest", "candidate_control_summary": None},
@@ -26035,12 +26062,16 @@ async def test_daily_candidates_service_passes_excluded_source_ids(monkeypatch) 
     monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: {})
     monkeypatch.setattr(ptcli_service, "build_daily_candidates", fake_build_daily_candidates)
 
-    payload = await ptcli_service.daily_candidates({"source_tracker": "U2", "target": "MTEAM", "exclude_source_ids": ["60635", "60635"], "accept_rules": True})
+    payload = await ptcli_service.daily_candidates({"source_tracker": "U2", "target": "MTEAM", "exclude_source_ids": ["60635", "60635"], "scan_limit": 100, "accept_rules": True})
 
     assert captured["source_tracker"] == "U2"
     assert captured["target_trackers_raw"] == "MTEAM"
     assert captured["exclude_source_ids"] == ["60635"]
+    assert captured["scan_limit"] == 100
     assert payload["request"]["exclude_source_ids"] == ["60635"]
+    assert payload["request"]["scan_limit"] == 100
+    assert payload["scan_limit"] == 100
+    assert payload["pagination_plan"]["recommended_request"]["scan_limit"] == 150
     assert payload["excluded_count"] == 1
     assert payload["skipped_source_ids"] == ["60635"]
     assert payload["candidate_discovery_handoff"]["dedupe"]["exclude_source_ids"] == ["60635"]
@@ -26095,11 +26126,14 @@ async def test_daily_candidates_execution_plan_reports_ready_shortfall(monkeypat
     assert plan["shortfall_recovery"]["source_tracker"] == "U2"
     assert plan["shortfall_recovery"]["target_trackers"] == ["MTEAM"]
     assert plan["shortfall_recovery"]["ready_shortfall_count"] == 9
+    assert plan["shortfall_recovery"]["scan_limit"] == 50
+    assert plan["shortfall_recovery"]["next_scan_limit"] == 100
+    assert plan["shortfall_recovery"]["pagination_supported"] is False
     assert plan["shortfall_recovery"]["recommended_tool"] == "daily_candidates_job"
     assert plan["shortfall_recovery"]["recommended_endpoint"] == "/v1/jobs/candidates/daily"
-    assert plan["shortfall_recovery"]["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "accept_rules": True, "check_dupes": True}
+    assert plan["shortfall_recovery"]["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "scan_limit": 100, "accept_rules": True, "check_dupes": True}
     assert plan["recommended_tool"] == "daily_candidates_job"
-    assert plan["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "accept_rules": True, "check_dupes": True}
+    assert plan["recommended_request"] == {"source_tracker": "U2", "target": "MTEAM", "limit": 10, "scan_limit": 100, "accept_rules": True, "check_dupes": True}
     assert result["digest"]["push_payload"]["execution_plan"] == plan
     batch_report = result["digest"]["daily_candidate_batch_report"]
     assert batch_report["ready"] is False

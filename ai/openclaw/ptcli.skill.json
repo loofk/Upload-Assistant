@@ -13017,6 +13017,12 @@
             "default": 10,
             "maximum": 10
           },
+          "scan_limit": {
+            "type": "integer",
+            "default": 50,
+            "maximum": 200,
+            "description": "How many recent source torrents to scan before scoring; default 50, hard cap 200."
+          },
           "accept_rules": {
             "type": "boolean",
             "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
@@ -13046,6 +13052,8 @@
           "ok",
           "target_count",
           "scan_count",
+          "scan_limit",
+          "max_scan_limit",
           "discovered_count",
           "eligible_count",
           "excluded_count",
@@ -13058,6 +13066,7 @@
           "target_summary",
           "source_capability",
           "candidate_discovery_handoff",
+          "pagination_plan",
           "site_policy",
           "ranking",
           "digest",
@@ -13305,6 +13314,7 @@
           "implementation",
           "network_mode",
           "scan",
+          "pagination_plan",
           "dedupe",
           "credentials",
           "required_seed_outputs",
@@ -13337,6 +13347,26 @@
           "exclude_source_ids",
           "excluded_count",
           "applied_before_scoring"
+        ],
+        "candidate_pagination_plan_fields": [
+          "ready",
+          "action",
+          "pagination_supported",
+          "offset_supported",
+          "scan_limit",
+          "default_scan_limit",
+          "max_scan_limit",
+          "next_scan_limit",
+          "discovered_count",
+          "eligible_count",
+          "selected_shortfall_count",
+          "ready_shortfall_count",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "blockers",
+          "next_actions"
         ],
         "downloadability_cookie_fields": [
           "required",
@@ -13662,6 +13692,12 @@
             "type": "integer",
             "default": 10,
             "maximum": 10
+          },
+          "scan_limit": {
+            "type": "integer",
+            "default": 50,
+            "maximum": 200,
+            "description": "How many recent source torrents to scan before scoring; default 50, hard cap 200."
           },
           "accept_rules": {
             "type": "boolean",
@@ -15644,11 +15680,14 @@
           "candidates",
           "target_count",
           "scan_count",
+          "scan_limit",
+          "max_scan_limit",
           "discovered_count",
           "eligible_count",
           "excluded_count",
           "exclude_source_ids",
           "skipped_source_ids",
+          "pagination_plan",
           "ready_count"
         ],
         "digest_fields": [
@@ -15911,6 +15950,7 @@
           "implementation",
           "network_mode",
           "scan",
+          "pagination_plan",
           "dedupe",
           "credentials",
           "required_seed_outputs",
@@ -15943,6 +15983,26 @@
           "exclude_source_ids",
           "excluded_count",
           "applied_before_scoring"
+        ],
+        "candidate_pagination_plan_fields": [
+          "ready",
+          "action",
+          "pagination_supported",
+          "offset_supported",
+          "scan_limit",
+          "default_scan_limit",
+          "max_scan_limit",
+          "next_scan_limit",
+          "discovered_count",
+          "eligible_count",
+          "selected_shortfall_count",
+          "ready_shortfall_count",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "blockers",
+          "next_actions"
         ],
         "downloadability_cookie_fields": [
           "required",
@@ -18609,6 +18669,12 @@
                   "default": 10,
                   "maximum": 10
                 },
+                "scan_limit": {
+                  "type": "integer",
+                  "default": 50,
+                  "maximum": 200,
+                  "description": "How many recent source torrents to scan before scoring; default 50, hard cap 200."
+                },
                 "accept_rules": {
                   "type": "boolean",
                   "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
@@ -18846,6 +18912,12 @@
                   "default": 10,
                   "maximum": 10
                 },
+                "scan_limit": {
+                  "type": "integer",
+                  "default": 50,
+                  "maximum": 200,
+                  "description": "How many recent source torrents to scan before scoring; default 50, hard cap 200."
+                },
                 "accept_rules": {
                   "type": "boolean",
                   "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
@@ -19081,6 +19153,12 @@
                   "type": "integer",
                   "default": 10,
                   "maximum": 10
+                },
+                "scan_limit": {
+                  "type": "integer",
+                  "default": 50,
+                  "maximum": 200,
+                  "description": "How many recent source torrents to scan before scoring; default 50, hard cap 200."
                 },
                 "accept_rules": {
                   "type": "boolean",
@@ -39267,6 +39345,12 @@
                   "default": 10,
                   "maximum": 10
                 },
+                "scan_limit": {
+                  "type": "integer",
+                  "default": 50,
+                  "maximum": 200,
+                  "description": "How many recent source torrents to scan before scoring; default 50, hard cap 200."
+                },
                 "accept_rules": {
                   "type": "boolean",
                   "description": "Whether rule obligations have been manually reviewed for executable candidate templates."
@@ -39825,6 +39909,12 @@
                   "type": "integer",
                   "default": 10,
                   "maximum": 10
+                },
+                "scan_limit": {
+                  "type": "integer",
+                  "default": 50,
+                  "maximum": 200,
+                  "description": "How many recent source torrents to scan before scoring; default 50, hard cap 200."
                 },
                 "accept_rules": {
                   "type": "boolean",

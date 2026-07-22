@@ -23,7 +23,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import parse_qs, urlparse
 
-from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, MAX_CANDIDATE_SCAN, build_daily_candidates
+from src.ptcli.candidates import DEFAULT_CANDIDATE_LIMIT, HARD_MAX_CANDIDATE_SCAN, MAX_CANDIDATE_SCAN, build_daily_candidates
 from src.ptcli.cli import build_parser, build_sites_payload, pipeline_payload, retorrent_payload, summary_check_payload
 from src.ptcli.cli import target_upload_payload as cli_target_upload_payload
 from src.ptcli.config import load_config, resolve_client_config
@@ -3508,6 +3508,7 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         accept_rules=bool(context.get("accept_rules")),
         check_dupes=bool(context.get("check_dupes")),
         exclude_source_ids=_string_list(context.get("exclude_source_ids")),
+        scan_limit=int(context.get("scan_limit") or MAX_CANDIDATE_SCAN),
     )
     return {
         "kind": "ptcli.service.daily_candidates",
@@ -3528,6 +3529,8 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         "count": result.get("count", 0),
         "target_count": result.get("target_count"),
         "scan_count": result.get("scan_count"),
+        "scan_limit": result.get("scan_limit"),
+        "max_scan_limit": result.get("max_scan_limit"),
         "discovered_count": result.get("discovered_count"),
         "eligible_count": result.get("eligible_count"),
         "excluded_count": result.get("excluded_count"),
@@ -3537,6 +3540,7 @@ async def daily_candidates(request: dict[str, Any]) -> dict[str, Any]:
         "shortfall_count": result.get("shortfall_count"),
         "target_met": result.get("target_met"),
         "target_summary": result.get("target_summary"),
+        "pagination_plan": result.get("pagination_plan"),
     }
 
 
@@ -6341,10 +6345,12 @@ def _candidate_request_context(request: dict[str, Any]) -> dict[str, Any]:
     target = _target_trackers(request)
     limit = int(request.get("limit") or DEFAULT_CANDIDATE_LIMIT)
     limit = max(1, min(limit, DEFAULT_CANDIDATE_LIMIT))
+    scan_limit = max(1, min(int(request.get("scan_limit") or MAX_CANDIDATE_SCAN), HARD_MAX_CANDIDATE_SCAN))
     return {
         "source_tracker": str(source),
         "target_trackers": target,
         "limit": limit,
+        "scan_limit": scan_limit,
         "config": request.get("config"),
         "base_dir": request.get("base_dir"),
         "accept_rules": bool(request.get("accept_rules")),
@@ -30910,6 +30916,7 @@ def _daily_candidate_tool_request_schema() -> dict[str, Any]:
             "source_tracker": {"type": "string", "description": "Source tracker code, e.g. U2 or CHD."},
             "target": {"type": ["string", "array"], "description": "Target tracker code(s), currently MTEAM duplicate checks are supported."},
             "limit": {"type": "integer", "default": DEFAULT_CANDIDATE_LIMIT, "maximum": DEFAULT_CANDIDATE_LIMIT},
+            "scan_limit": {"type": "integer", "default": MAX_CANDIDATE_SCAN, "maximum": HARD_MAX_CANDIDATE_SCAN, "description": "How many recent source torrents to scan before scoring; default 50, hard cap 200."},
             "accept_rules": {"type": "boolean", "description": "Whether rule obligations have been manually reviewed for executable candidate templates."},
             "check_dupes": {"type": "boolean", "default": True},
             "exclude_source_ids": {"type": "array", "items": {"type": "string"}, "description": "Source torrent ids already covered by the current batch; agents should pass this when refilling shortfalls to avoid duplicate submissions."},
@@ -31788,7 +31795,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
     candidate_contract = _candidate_response_contract()
     contract.update(
         {
-            "result_fields": ["ranking", "digest", "candidates", "target_count", "scan_count", "discovered_count", "eligible_count", "excluded_count", "exclude_source_ids", "skipped_source_ids", "ready_count"],
+            "result_fields": ["ranking", "digest", "candidates", "target_count", "scan_count", "scan_limit", "max_scan_limit", "discovered_count", "eligible_count", "excluded_count", "exclude_source_ids", "skipped_source_ids", "pagination_plan", "ready_count"],
             "digest_fields": candidate_contract["digest_fields"],
             "candidate_fields": candidate_contract["candidate_fields"],
             "push_item_fields": candidate_contract["push_item_fields"],
@@ -31802,6 +31809,7 @@ def _daily_candidate_job_response_contract() -> dict[str, Any]:
             "candidate_discovery_handoff_fields": candidate_contract["candidate_discovery_handoff_fields"],
             "candidate_discovery_profile_fields": candidate_contract["candidate_discovery_profile_fields"],
             "candidate_discovery_dedupe_fields": candidate_contract["candidate_discovery_dedupe_fields"],
+            "candidate_pagination_plan_fields": candidate_contract["candidate_pagination_plan_fields"],
             "downloadability_cookie_fields": candidate_contract["downloadability_cookie_fields"],
             "downloadability_source_pull_fields": candidate_contract["downloadability_source_pull_fields"],
             "publish_card_action_fields": candidate_contract["publish_card_action_fields"],
@@ -31916,7 +31924,7 @@ def _daily_candidate_batch_status_response_contract() -> dict[str, Any]:
 
 def _candidate_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "target_count", "scan_count", "discovered_count", "eligible_count", "excluded_count", "exclude_source_ids", "skipped_source_ids", "count", "ready_count", "shortfall_count", "target_met", "target_summary", "source_capability", "candidate_discovery_handoff", "site_policy", "ranking", "digest", "candidate_control_summary", "candidates", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "target_count", "scan_count", "scan_limit", "max_scan_limit", "discovered_count", "eligible_count", "excluded_count", "exclude_source_ids", "skipped_source_ids", "count", "ready_count", "shortfall_count", "target_met", "target_summary", "source_capability", "candidate_discovery_handoff", "pagination_plan", "site_policy", "ranking", "digest", "candidate_control_summary", "candidates", "blockers", "next_actions"],
         "digest_fields": [
             "recommendation",
             "recommended_action",
@@ -32054,9 +32062,10 @@ def _candidate_response_contract() -> dict[str, Any]:
         "candidate_executability_item_fields": ["rank", "source_tracker", "source_id", "source_url", "target", "title", "ready", "can_submit_after_approval", "requires_human_approval", "status", "first_blocked_phase", "first_blocked_check", "checks", "missing_checks", "submit_tool", "submit_endpoint", "submit_request", "required_user_inputs", "blockers"],
         "candidate_executability_check_fields": ["name", "phase", "ready", "status", "required_fields", "blocking"],
         "downloadability_summary_fields": ["ready", "downloadable", "source_tracker", "source_id", "source_url", "source_download_adapter", "source_info_adapter", "candidate_discovery_adapter", "candidate_discovery_profile", "policy_allows_download", "policy_allows_retorrent", "rules_accepted", "manual_review_required", "cookie", "source_pull", "continue_when", "stop_when", "blockers", "next_actions"],
-        "candidate_discovery_handoff_fields": ["ready", "source_tracker", "target_trackers", "target_count", "adapter", "implementation", "network_mode", "scan", "dedupe", "credentials", "required_seed_outputs", "required_enrichment_outputs", "candidate_filters", "safe_to_push_when", "safe_to_submit_when", "extension_contract", "safety", "blockers", "next_actions"],
+        "candidate_discovery_handoff_fields": ["ready", "source_tracker", "target_trackers", "target_count", "adapter", "implementation", "network_mode", "scan", "pagination_plan", "dedupe", "credentials", "required_seed_outputs", "required_enrichment_outputs", "candidate_filters", "safe_to_push_when", "safe_to_submit_when", "extension_contract", "safety", "blockers", "next_actions"],
         "candidate_discovery_profile_fields": ["ready", "source_tracker", "source_info_adapter", "source_download_adapter", "candidate_discovery_adapter", "implementation", "network_mode", "scan", "credentials", "required_seed_outputs", "required_enrichment_outputs", "safety", "blockers"],
         "candidate_discovery_dedupe_fields": ["dedupe_key", "exclude_source_ids", "excluded_count", "applied_before_scoring"],
+        "candidate_pagination_plan_fields": ["ready", "action", "pagination_supported", "offset_supported", "scan_limit", "default_scan_limit", "max_scan_limit", "next_scan_limit", "discovered_count", "eligible_count", "selected_shortfall_count", "ready_shortfall_count", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "blockers", "next_actions"],
         "downloadability_cookie_fields": ["required", "path", "exists", "status", "note"],
         "downloadability_source_pull_fields": ["tool", "endpoint", "request", "direct_cli_tool", "direct_cli_args"],
         "publish_card_action_fields": ["decision", "can_submit", "tool", "endpoint", "request", "approval_prompt", "required_user_inputs", "next_actions"],
@@ -32869,6 +32878,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "source_tracker": {"type": "string", "description": "Source tracker code, e.g. U2 or CHD."},
             "target": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}], "description": "Target tracker code(s), currently MTEAM duplicate checks are supported."},
             "limit": {"type": "integer", "default": DEFAULT_CANDIDATE_LIMIT, "maximum": DEFAULT_CANDIDATE_LIMIT},
+            "scan_limit": {"type": "integer", "default": MAX_CANDIDATE_SCAN, "maximum": HARD_MAX_CANDIDATE_SCAN, "description": "How many recent source torrents to scan before scoring; default 50, hard cap 200."},
             "config": {"type": "string"},
             "base_dir": {"type": "string"},
             "accept_rules": {"type": "boolean", "description": "Whether rule obligations have been manually reviewed for candidate execution templates."},
