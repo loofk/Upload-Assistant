@@ -15892,6 +15892,19 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert tracking["recommended_call"]["requires_user_review"] is True
     assert tracking["loop_control"] == batch_sequence["loop_control"]
     assert tracking["read_order"][0] == "daily_candidate_tracking_report"
+    completion_gate = list_payload["daily_candidate_completion_gate"]
+    assert completion_gate["kind"] == "ptcli.daily_candidate_completion_gate"
+    assert completion_gate["complete"] is False
+    assert completion_gate["action"] == "submit_next"
+    assert completion_gate["target_count"] == 1
+    assert completion_gate["ready_count"] == 1
+    assert completion_gate["safe_to_submit_count"] == 1
+    assert completion_gate["remaining_submit_count"] == 1
+    assert completion_gate["progress"] == {"ready": "1/1", "submitted": "0/1", "complete": "0/1"}
+    assert completion_gate["recommended_tool"] == "submit_daily_candidate_job"
+    assert completion_gate["recommended_request"]["source_id"] == "60635"
+    assert completion_gate["recommended_call"]["requires_user_review"] is True
+    assert "submit_next without explicit user approval" in completion_gate["stop_when"]
     publish_payload = list_payload["daily_candidate_batch_publish_payload"]
     assert publish_payload["kind"] == "ptcli.daily_candidate_batch_publish_payload"
     assert publish_payload["status"] == "ready_for_approval"
@@ -15900,6 +15913,8 @@ def test_daily_candidates_job_promotes_digest_for_agents(monkeypatch, tmp_path) 
     assert publish_payload["items"][0]["requires_user_approval"] is True
     assert publish_payload["top_item"] == publish_payload["items"][0]
     assert publish_payload["tracking"]["recommended_tool"] == "submit_daily_candidate_job"
+    assert publish_payload["completion_gate"] == completion_gate
+    assert publish_payload["daily_candidate_completion_gate"] == completion_gate
     assert publish_payload["publish_contract"]["does_not_upload"] is True
 
 
@@ -16540,13 +16555,22 @@ def test_daily_candidate_final_report_exposes_completion_evidence() -> None:
     assert "completed_jobs[].summary_endpoint.target_upload_handoff.uploaded_seeding_evidence" in report["completion_report"]["evidence_refs"]
     assert "completed_jobs[].summary_endpoint.live_completion_gate" in report["completion_report"]["evidence_refs"]
     assert report["next_actions"] == ["Report daily_candidate_final_report.completion_report with completed job evidence."]
+    tracking_report = {"action": "report_complete", "should_report": True, "target_count": 1, "ready_count": 1, "submitted_retorrent_job_count": 1, "complete_count": 1, "running_count": 0, "blocked_count": 0, "ready_shortfall_count": 0, "blockers": []}
+    completion_gate = ptcli_service._daily_candidate_completion_gate(tracking_report, report, {"action": "complete", "complete_jobs": [complete_job], "running_jobs": [], "blocked_jobs": []}, {"ready_shortfall_count": 0}, {"next_step": {"tool": "get_job_summary", "endpoint": "/v1/jobs/job-retorrent-1/summary", "method": "GET", "reason": "all_submitted_candidates_complete"}})
+    assert completion_gate["kind"] == "ptcli.daily_candidate_completion_gate"
+    assert completion_gate["complete"] is True
+    assert completion_gate["action"] == "report_complete"
+    assert completion_gate["progress"]["complete"] == "1/1"
+    assert completion_gate["recommended_tool"] == "get_job_summary"
     publish_payload = ptcli_service._daily_candidate_batch_publish_payload(
         {"blockers": []},
         {"approval_items": []},
         report,
-        {"action": "report_complete", "should_report": True, "submitted_retorrent_job_count": 1, "complete_count": 1, "running_count": 0, "blocked_count": 0, "ready_shortfall_count": 0, "blockers": []},
+        tracking_report,
+        completion_gate,
     )
     assert publish_payload["status"] == "ready_to_report"
+    assert publish_payload["completion_gate"] == completion_gate
     assert publish_payload["completion_items"][0]["retorrent_job_id"] == "job-retorrent-1"
     assert publish_payload["completion_items"][0]["qbit_enforcement_ready"] is True
     assert publish_payload["completion_items"][0]["qbit_execution_ready"] is True
@@ -19579,6 +19603,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_enforcement_summary" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
     assert "qbit_execution_gate" in tool_by_name["get_job_status"]["response_contract"]["blocked_recovery_report_fields"]
     assert "configure_policy" in tool_by_name["get_job_status"]["response_contract"]["recovery_actions"]
+    assert "daily_candidate_completion_gate" in tool_by_name["list_jobs"]["response_contract"]["required_fields"]
+    assert "daily_candidate_completion_gate_fields" in tool_by_name["list_jobs"]["response_contract"]
+    assert "complete" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_completion_gate_fields"]
+    assert "completion_gate" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["required_fields"]
+    assert "daily_candidate_completion_gate_fields" in tool_by_name["daily_candidate_batch_status"]["response_contract"]
+    assert "completion_gate" in tool_by_name["daily_candidate_batch_status"]["response_contract"]["daily_candidate_batch_publish_payload_fields"]
     assert "job_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "job_final_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
