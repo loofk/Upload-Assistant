@@ -21920,7 +21920,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "seedbox_live_trial_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "readiness" in tool_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
     assert "report_contract" in tool_by_name["deployment_check"]["response_contract"]["seedbox_live_trial_handoff_fields"]
+    assert "daily_candidate_config_final_report" in tool_by_name["deployment_check"]["response_contract"]["required_fields"]
+    assert "daily_candidate_config_final_report_fields" in tool_by_name["deployment_check"]["response_contract"]
+    assert "env" in tool_by_name["deployment_check"]["response_contract"]["daily_candidate_config_final_report_fields"]
+    assert "smoke_checks" in tool_by_name["deployment_check"]["response_contract"]["daily_candidate_config_final_report_fields"]
     assert "seedbox_live_trial" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
+    assert "daily_candidate_config_final_report" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
     assert "docker_compose_api_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "docker_compose_daily_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "docker_compose_fields" in tool_by_name["deployment_check"]["response_contract"]
@@ -21941,6 +21946,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidates" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "daily_candidate_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "schedule_handoff" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_config_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_schedule_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "goal_handoff" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
@@ -22909,6 +22915,7 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "live_submission_package" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "daily_candidates" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "schedule_handoff" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_config_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_schedule_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "refill_loop_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
@@ -22987,6 +22994,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_submission_package" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "daily_candidates" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "schedule_handoff" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "daily_candidate_config_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_schedule_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_delivery_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_target_fulfillment_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
@@ -22997,6 +23005,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "daily_candidate_goal_handoff_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "delivery" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_handoff_fields"]
         assert "refill" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_handoff_fields"]
+        assert "daily_candidate_config_final_report" in tools_by_name["deployment_check"]["response_contract"]["required_fields"]
+        assert "daily_candidate_config_final_report_fields" in tools_by_name["deployment_check"]["response_contract"]
+        assert "smoke_checks" in tools_by_name["deployment_check"]["response_contract"]["daily_candidate_config_final_report_fields"]
         assert "qbittorrent" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "qbittorrent_evidence_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "qbit_enforcement_summary" in tools_by_name["goal_progress"]["response_contract"]["qbittorrent_evidence_fields"]
@@ -24331,6 +24342,25 @@ services:
     assert delivery["safety"]["publishing_uploads"] is False
     assert delivery["safety"]["submit_requires_user_approval"] is True
     assert payload["deployment_handoff"]["daily_candidate_delivery_handoff"] == delivery
+    config_report = payload["daily_candidate_config_final_report"]
+    assert config_report["kind"] == "ptcli.daily_candidate_config_final_report"
+    assert config_report["ready"] is True
+    assert config_report["verdict"] == "schedule_configured"
+    assert config_report["action"] == "start_scheduler_or_create_jobs"
+    assert config_report["configured_schedule_count"] == 1
+    assert config_report["target_count"] == 10
+    assert config_report["env"]["schedule_env"] == "PTCLI_DAILY_CANDIDATE_SCHEDULES"
+    assert config_report["env"]["dotenv_line"].startswith("PTCLI_DAILY_CANDIDATE_SCHEDULES=[")
+    assert '"confirm_upload":false' in config_report["env"]["dotenv_line"]
+    assert len(config_report["env"]["json_sha256"]) == 64
+    assert config_report["compose"]["daemon_command"].endswith("--profile daily up -d ptcli-daily-scheduler")
+    assert config_report["compose"]["daily_scheduler_service_ready"] is True
+    assert config_report["api"]["scheduler_plan"]["endpoint"] == "/v1/candidates/daily/scheduler"
+    assert [item["name"] for item in config_report["smoke_checks"]] == ["inspect_schedule", "scheduler_plan", "one_shot_digest"]
+    assert config_report["safety"]["schedule_must_keep_confirm_upload_false"] is True
+    assert payload["deployment_handoff"]["daily_candidate_config_final_report"] == config_report
+    assert payload["deployment_runbook"]["daily_candidate_config_final_report"] == config_report
+    assert payload["agent_handoff"]["daily_candidate_config_final_report"] == config_report
     assert payload["deployment_handoff"]["next_step"]["action"] == "run_manual_preflight"
     final_report = payload["deployment_final_report"]
     assert final_report["kind"] == "ptcli.deployment_final_report"
@@ -24553,6 +24583,22 @@ def test_deployment_check_blocks_missing_config(tmp_path, monkeypatch) -> None:
     assert delivery["safety"]["publishing_mutates_tracker"] is False
     assert delivery["blockers"]
     assert payload["deployment_handoff"]["daily_candidate_delivery_handoff"] == delivery
+    config_report = payload["daily_candidate_config_final_report"]
+    assert config_report["kind"] == "ptcli.daily_candidate_config_final_report"
+    assert config_report["ready"] is False
+    assert config_report["verdict"] == "schedule_config_needed"
+    assert config_report["action"] == "copy_env_then_verify_schedule"
+    assert config_report["env"]["schedule_env"] == "PTCLI_DAILY_CANDIDATE_SCHEDULES"
+    assert config_report["env"]["dotenv_line"].startswith("PTCLI_DAILY_CANDIDATE_SCHEDULES=[")
+    assert '"limit":10' in config_report["env"]["dotenv_line"]
+    assert '"confirm_upload":false' in config_report["env"]["dotenv_line"]
+    assert len(config_report["env"]["json_sha256"]) == 64
+    assert config_report["api"]["inspect_schedule"]["endpoint"] == "/v1/candidates/daily/schedule"
+    assert config_report["api"]["scheduler_plan"]["endpoint"] == "/v1/candidates/daily/scheduler"
+    assert config_report["safety"]["uploads"] is False
+    assert config_report["safety"]["contacts_trackers"] is False
+    assert config_report["blockers"]
+    assert "Copy daily_candidate_config_final_report.env.dotenv_line into .env" in config_report["next_actions"][0]
     final_report = payload["deployment_final_report"]
     assert final_report["kind"] == "ptcli.deployment_final_report"
     assert final_report["ready"] is False
