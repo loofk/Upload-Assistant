@@ -10821,12 +10821,14 @@ def _target_upload_service_diagnostics(result: dict[str, Any]) -> dict[str, Any]
 
 def _target_upload_service_handoff(context: dict[str, Any], result: dict[str, Any], diagnostics: dict[str, Any], ready: bool, blockers: list[str]) -> dict[str, Any]:
     request = _target_upload_retry_request(context, execute=bool(context.get("execute")))
+    synthetic_job = {"kind": "ptcli.target_upload", "request": context, "result": result, "status": "complete" if ready else "blocked", "blockers": blockers}
     return {
         "kind": "ptcli.target_upload_handoff",
         "ready": ready,
         "action": "complete" if ready else "resolve_blockers",
         "ready_for_live_upload": diagnostics.get("preflight", {}).get("ready") and not blockers,
         "uploaded_seeding_ready": bool(diagnostics.get("ready_for_uploaded_seeding")),
+        "uploaded_seeding_evidence": _target_upload_uploaded_seeding_evidence(synthetic_job, result, diagnostics),
         "preflight": diagnostics.get("preflight"),
         "completion": diagnostics.get("completion"),
         "summary_file": result.get("summary_file"),
@@ -16813,6 +16815,7 @@ def _job_target_upload_handoff(job: dict[str, Any], summary_payload: dict[str, A
     preflight = target_upload_diagnostics.get("preflight") if isinstance(target_upload_diagnostics.get("preflight"), dict) else {}
     completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
     payload_review = target_upload_diagnostics.get("payload_review") if isinstance(target_upload_diagnostics.get("payload_review"), dict) else {}
+    uploaded_seeding_evidence = _target_upload_uploaded_seeding_evidence(job, result, target_upload_diagnostics)
     materials_handoff = _job_materials_handoff(job, summary_payload)
     duplicate_check = _job_duplicate_check(job)
     duplicate_exists = duplicate_check.get("exists") is True
@@ -16845,6 +16848,7 @@ def _job_target_upload_handoff(job: dict[str, Any], summary_payload: dict[str, A
         "action": action,
         "ready_for_live_upload": can_upload_now,
         "uploaded_seeding_ready": bool(uploaded_seeding_ready),
+        "uploaded_seeding_evidence": uploaded_seeding_evidence,
         "preflight": {
             "ready": preflight_ready,
             "payload_ready": payload_ready,
@@ -16875,6 +16879,56 @@ def _job_target_upload_handoff(job: dict[str, Any], summary_payload: dict[str, A
         "summary_file": job.get("summary_file") or _job_summary_file(job),
         "blockers": list(dict.fromkeys(gate_blockers + upload_blockers)),
         "next_actions": _target_upload_handoff_next_actions(action, missing_confirmations, materials_handoff, upload_blockers),
+    }
+
+
+def _target_upload_uploaded_seeding_evidence(job: dict[str, Any], result: dict[str, Any], target_upload_diagnostics: dict[str, Any]) -> dict[str, Any]:
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    completion = target_upload_diagnostics.get("completion") if isinstance(target_upload_diagnostics.get("completion"), dict) else {}
+    checks = completion.get("checks") if isinstance(completion.get("checks"), dict) else {}
+    qbit_summary = _job_qbit_enforcement_summary(job, result)
+    qbit_roles = qbit_summary.get("roles") if isinstance(qbit_summary, dict) and isinstance(qbit_summary.get("roles"), list) else []
+    uploaded_roles = [role for role in qbit_roles if isinstance(role, dict) and role.get("role") == "uploaded"]
+    uploaded_role = uploaded_roles[0] if uploaded_roles else {}
+    uploaded_torrent_hash = completion.get("uploaded_torrent_hash") or target_upload_diagnostics.get("uploaded_torrent_hash") or summary.get("uploaded_torrent_hash")
+    injected_torrent_hash = completion.get("injected_torrent_hash") or summary.get("injected_torrent_hash")
+    uploaded_torrent_path = completion.get("uploaded_torrent_path") or target_upload_diagnostics.get("uploaded_torrent_path") or summary.get("uploaded_torrent_path")
+    wait_complete = _first_bool(completion.get("ready_for_uploaded_seeding"), completion.get("complete"), checks.get("uploaded_wait_complete"), target_upload_diagnostics.get("ready_for_uploaded_seeding"))
+    injection_verified = _first_bool(completion.get("injection_verified"), completion.get("injection_visible_in_client"), checks.get("injection_verified"), checks.get("injection_visible_in_client"), bool(injected_torrent_hash) if injected_torrent_hash else None)
+    required = {
+        "uploaded_torrent_hash": bool(uploaded_torrent_hash),
+        "injected_torrent_hash": bool(injected_torrent_hash),
+        "uploaded_torrent_path": bool(uploaded_torrent_path),
+        "uploaded_wait_complete": wait_complete is True,
+        "injection_verified": injection_verified is True,
+    }
+    missing = [key for key, value in required.items() if value is False]
+    return {
+        "kind": "ptcli.uploaded_seeding_evidence",
+        "ready": not missing,
+        "status": "ready" if not missing else "missing_evidence",
+        "uploaded_torrent_id": target_upload_diagnostics.get("uploaded_torrent_id") or summary.get("uploaded_torrent_id"),
+        "uploaded_torrent_hash": uploaded_torrent_hash,
+        "injected_torrent_hash": injected_torrent_hash,
+        "uploaded_torrent_path": uploaded_torrent_path,
+        "uploaded_wait_complete": wait_complete,
+        "injection_verified": injection_verified,
+        "qbit": {
+            "client": qbit_summary.get("client") if isinstance(qbit_summary, dict) else None,
+            "category": request.get("uploaded_qbit_category"),
+            "tags": request.get("uploaded_qbit_tags"),
+            "upload_limit": request.get("uploaded_qbit_upload_limit"),
+            "download_limit": request.get("uploaded_qbit_download_limit"),
+            "uploaded_role_applied": uploaded_role.get("status") == "applied" if uploaded_role else None,
+            "uploaded_role": uploaded_role or None,
+            "enforcement_ready": qbit_summary.get("ready") if isinstance(qbit_summary, dict) else None,
+        },
+        "required": required,
+        "missing": missing,
+        "read_fields": ["target_upload_handoff.uploaded_seeding_evidence", "qbit_enforcement_summary", "closure_summary.target", "live_user_report.qbit"],
+        "complete_when": "uploaded_seeding_evidence.ready=true and qbit.enforcement_ready is not false",
+        "stop_when": "uploaded_seeding_evidence.missing is non-empty after target_upload_job completes",
     }
 
 
@@ -17271,6 +17325,7 @@ def _job_seedbox_live_validation_completion_report(job: dict[str, Any], summary_
     duplicate_clear = duplicate_check.get("searched") is True and duplicate_check.get("exists") is False
     closure_blockers = _string_list(closure_summary.get("blockers"))
     target_upload_blockers = _string_list(target_upload_handoff.get("blockers")) if isinstance(target_upload_handoff, dict) else []
+    uploaded_seeding_evidence = target_upload_handoff.get("uploaded_seeding_evidence") if isinstance(target_upload_handoff, dict) and isinstance(target_upload_handoff.get("uploaded_seeding_evidence"), dict) else {}
     qbit_blockers = _string_list(qbit_enforcement_summary.get("blockers")) if isinstance(qbit_enforcement_summary, dict) else []
     policy_blockers = _string_list(policy_execution_report.get("blockers")) if isinstance(policy_execution_report, dict) else []
     material_blockers = _string_list(material_evidence_summary.get("blockers")) if isinstance(material_evidence_summary, dict) else []
@@ -17354,6 +17409,7 @@ def _job_seedbox_live_validation_completion_report(job: dict[str, Any], summary_
             "applied_roles": qbit_enforcement_summary.get("applied_roles") if isinstance(qbit_enforcement_summary, dict) else None,
             "pending_roles": qbit_enforcement_summary.get("pending_roles") if isinstance(qbit_enforcement_summary, dict) else None,
             "mismatch_roles": qbit_enforcement_summary.get("mismatch_roles") if isinstance(qbit_enforcement_summary, dict) else None,
+            "uploaded_seeding_evidence": uploaded_seeding_evidence or None,
         },
         "source": {
             "ready": source.get("ready"),
@@ -17373,6 +17429,7 @@ def _job_seedbox_live_validation_completion_report(job: dict[str, Any], summary_
             "target_torrent_file": evidence.get("target_torrent_file"),
             "uploaded_torrent_path": evidence.get("uploaded_torrent_path"),
             "qbit_roles": qbit_enforcement_summary.get("roles") if isinstance(qbit_enforcement_summary, dict) else None,
+            "uploaded_seeding_evidence": uploaded_seeding_evidence or None,
             "material_summary": material_evidence_summary,
         },
         "recommended_tool": recommended.get("tool"),
@@ -17479,6 +17536,8 @@ def _job_live_user_report(job: dict[str, Any], summary_payload: dict[str, Any] |
     validation = _job_seedbox_live_validation_completion_report(job, summary_payload)
     closure = _job_closure_summary(job, summary_payload)
     qbit = _job_qbit_enforcement_summary(job, summary_payload)
+    target_upload_handoff = _job_target_upload_handoff(job, summary_payload)
+    uploaded_seeding_evidence = target_upload_handoff.get("uploaded_seeding_evidence") if isinstance(target_upload_handoff, dict) and isinstance(target_upload_handoff.get("uploaded_seeding_evidence"), dict) else {}
     duplicate_check = validation.get("duplicate_check") if isinstance(validation.get("duplicate_check"), dict) else {}
     source = validation.get("source") if isinstance(validation.get("source"), dict) else {}
     target = validation.get("target") if isinstance(validation.get("target"), dict) else {}
@@ -17519,6 +17578,7 @@ def _job_live_user_report(job: dict[str, Any], summary_payload: dict[str, Any] |
             "applied_roles": qbit.get("applied_roles") if isinstance(qbit, dict) else None,
             "pending_roles": qbit.get("pending_roles") if isinstance(qbit, dict) else None,
             "mismatch_roles": qbit.get("mismatch_roles") if isinstance(qbit, dict) else None,
+            "uploaded_seeding_evidence": uploaded_seeding_evidence or None,
         },
         "evidence": {
             "source_torrent_path": evidence.get("source_torrent_path"),
@@ -24447,7 +24507,8 @@ def _target_upload_service_response_contract() -> dict[str, Any]:
         "required_fields": ["status", "ok", "kind", "request", "command_argv", "mutates_state", "mutates_filesystem", "mutates_network", "live_upload", "summary", "artifacts", "target_upload_service_gate", "target_upload_diagnostics", "target_upload_handoff", "closure_handoff", "summary_file", "automation_action", "resume_state", "blockers", "next_actions", "safety"],
         "target_upload_service_gate_fields": ["ready", "status", "execute", "confirm_upload", "uploaded_torrent_closure_requested", "policy_enforcement_gate", "policy_enforcement_bundle", "blockers", "next_actions", "safety"],
         "target_upload_diagnostics_fields": ["mode", "ready", "uploaded", "ready_for_uploaded_seeding", "uploaded_torrent_id", "uploaded_torrent_hash", "uploaded_torrent_path", "preflight", "completion", "payload_review", "fresh_duplicate_check", "blockers", "next_actions"],
-        "target_upload_handoff_fields": ["ready", "action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "completion", "summary_file", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "target_upload_handoff_fields": ["ready", "action", "ready_for_live_upload", "uploaded_seeding_ready", "uploaded_seeding_evidence", "preflight", "completion", "summary_file", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "uploaded_seeding_evidence_fields": ["ready", "status", "uploaded_torrent_id", "uploaded_torrent_hash", "injected_torrent_hash", "uploaded_torrent_path", "uploaded_wait_complete", "injection_verified", "qbit", "required", "missing", "read_fields", "complete_when", "stop_when"],
         "closure_fields": ["download_uploaded_torrent", "inject_uploaded_torrent", "wait_uploaded_complete", "uploaded_torrent_hash", "injected_torrent_hash", "uploaded_wait"],
         "safety": ["live_upload_requires_confirm_upload", "does_not_skip_duplicate_check", "does_not_skip_rule_gate", "requires_uploaded_torrent_seeding_closure"],
     }
@@ -24499,10 +24560,11 @@ def _job_response_contract() -> dict[str, Any]:
         "qbit_enforcement_handoff_fields": ["ready", "status", "roles", "pending_roles", "mismatch_roles", "blockers", "next_step", "continue_when", "stop_when"],
         "qbit_enforcement_summary_fields": ["ready", "status", "client", "expected_role_count", "applied_role_count", "pending_role_count", "mismatch_role_count", "expected_roles", "applied_roles", "pending_roles", "mismatch_roles", "roles", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "qbit_enforcement_role_fields": ["role", "ready", "status", "category", "tags", "expected_limits", "observed_limits", "upload_limit_source", "download_limit_source", "evidence_present", "requires_injection_evidence", "requires_rate_limit_repair", "blockers", "requested_options"],
+        "uploaded_seeding_evidence_fields": ["ready", "status", "uploaded_torrent_id", "uploaded_torrent_hash", "injected_torrent_hash", "uploaded_torrent_path", "uploaded_wait_complete", "injection_verified", "qbit", "required", "missing", "read_fields", "complete_when", "stop_when"],
         "policy_execution_report_fields": ["ready", "status", "source", "targets", "site_policy_ready", "accepted_rules", "seeding_requirements", "policy_qbit_defaults", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "policy_enforcement_gate", "request_overrides", "qbit_plan", "qbit_limit_audit", "qbit_handoff", "qbit_enforcement_summary", "qbit_ready", "expected_qbit_roles", "applied_qbit_roles", "pending_qbit_roles", "mismatch_qbit_roles", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_execution_final_report_fields": ["ready", "ready_for_live", "verdict", "status", "site_policy", "rate_limits", "seeding", "runtime_contract", "policy_gate", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "qbit_execution_gate_fields": ["ready", "status", "action", "client", "expected_role_count", "applied_role_count", "pending_role_count", "mismatch_role_count", "expected_roles", "applied_roles", "pending_roles", "mismatch_roles", "source", "uploaded", "rate_limit_status", "seeding_status", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "dry_run_request", "execute_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
-        "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
+        "target_upload_handoff_fields": ["action", "ready_for_live_upload", "uploaded_seeding_ready", "uploaded_seeding_evidence", "preflight", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "policy_handoff_fields": ["ready", "accepted_rules", "site_policy_ready", "source", "targets", "missing_policy_fields", "disabled_automation", "qbit_defaults", "qbit_plan", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
         "manual_retorrent_handoff_fields": ["action", "live_ready", "live_checklist", "duplicate_clear", "missing_confirmations", "policy_coverage_ready", "policy_enforcement_ready", "policy_enforcement_bundle", "policy_runtime_ready", "policy_runtime_contract", "can_attempt_live", "can_resume", "resume_plan", "blockers", "next_actions"],
         "manual_retorrent_final_report_fields": ["ready", "report_allowed", "verdict", "status", "source_reference", "target_trackers", "duplicate_check", "policy", "materials", "target_upload", "closure", "live", "control", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],

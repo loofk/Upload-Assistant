@@ -11112,6 +11112,16 @@ async def test_service_target_upload_returns_closure_handoff(monkeypatch, tmp_pa
     assert payload["target_upload_diagnostics"]["ready_for_uploaded_seeding"] is True
     assert payload["target_upload_handoff"]["ready"] is True
     assert payload["target_upload_handoff"]["uploaded_seeding_ready"] is True
+    evidence = payload["target_upload_handoff"]["uploaded_seeding_evidence"]
+    assert evidence["ready"] is True
+    assert evidence["uploaded_torrent_id"] == "999"
+    assert evidence["uploaded_torrent_hash"] == "a" * 40
+    assert evidence["injected_torrent_hash"] == "a" * 40
+    assert evidence["uploaded_torrent_path"] == "/tmp/MTEAM-999.torrent"
+    assert evidence["uploaded_wait_complete"] is True
+    assert evidence["qbit"]["category"] == "MTEAM"
+    assert evidence["qbit"]["tags"] == "retorrent"
+    assert evidence["missing"] == []
     assert payload["safety"]["does_not_skip_duplicate_check"] is True
 
 
@@ -18832,6 +18842,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "qbit_enforcement_summary_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "applied_role_count" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_enforcement_summary_fields"]
     assert "recommended_tool" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_enforcement_summary_fields"]
+    assert "uploaded_seeding_evidence_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "uploaded_torrent_hash" in tool_by_name["manual_retorrent_job"]["response_contract"]["uploaded_seeding_evidence_fields"]
+    assert "uploaded_seeding_evidence" in tool_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
     assert "qbit_enforcement_role_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "requires_injection_evidence" in tool_by_name["manual_retorrent_job"]["response_contract"]["qbit_enforcement_role_fields"]
     assert "policy_execution_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
@@ -20825,6 +20838,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "target_upload_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "next_step" in tools_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
         assert "recommended_tool" in tools_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
+        assert "uploaded_seeding_evidence_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
+        assert "uploaded_seeding_evidence" in tools_by_name["manual_retorrent_job"]["response_contract"]["target_upload_handoff_fields"]
         assert "closure_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "closure_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "closure_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
