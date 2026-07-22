@@ -19371,6 +19371,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "schedule_handoff" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_schedule_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "goal_handoff" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_goal_handoff_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "delivery" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_handoff_fields"]
     assert "next_step" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "qbittorrent" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "qbittorrent_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -20168,6 +20171,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "schedule_handoff" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_schedule_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "daily_candidate_delivery_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "goal_handoff" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_goal_handoff_fields" in goal_progress_tool["response_contract"]
+    assert "delivery" in goal_progress_tool["response_contract"]["daily_candidate_goal_handoff_fields"]
     assert "qbittorrent" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "qbittorrent_evidence_fields" in goal_progress_tool["response_contract"]
     assert "qbit_enforcement_summary" in goal_progress_tool["response_contract"]["qbittorrent_evidence_fields"]
@@ -20229,6 +20235,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "schedule_handoff" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_schedule_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "daily_candidate_delivery_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "goal_handoff" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "daily_candidate_goal_handoff_fields" in tools_by_name["goal_progress"]["response_contract"]
+        assert "delivery" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_goal_handoff_fields"]
         assert "qbittorrent" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "qbittorrent_evidence_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "qbit_enforcement_summary" in tools_by_name["goal_progress"]["response_contract"]["qbittorrent_evidence_fields"]
@@ -21423,6 +21432,14 @@ services:
     assert payload["evidence"]["daily_candidates"]["daily_candidate_final_report"] is None
     assert payload["evidence"]["daily_candidates"]["daily_candidate_delivery_final_report"] is None
     assert payload["evidence"]["daily_candidates"]["daily_candidate_schedule_final_report"]["verdict"] == "schedule_missing"
+    daily_handoff = payload["evidence"]["daily_candidates"]["goal_handoff"]
+    assert daily_handoff["kind"] == "ptcli.goal_daily_candidate_handoff"
+    assert daily_handoff["action"] == "configure_schedule"
+    assert daily_handoff["target_count"] == 10
+    assert daily_handoff["schedule"]["inspect_call"]["endpoint"] == "/v1/candidates/daily/schedule"
+    assert daily_handoff["schedule"]["create_jobs_call"]["endpoint"] == "/v1/jobs/candidates/daily/schedule"
+    assert daily_handoff["delivery"]["requires_user_approval_before_submit"] is True
+    assert daily_handoff["safety"]["submit_requires_human_approval"] is True
     assert payload["evidence"]["daily_candidates"]["next_step"]["tool"] == "daily_candidates_schedule"
     assert payload["evidence"]["daily_candidates"]["next_step"]["request"]["schedules"][0]["limit"] == 10
     assert payload["evidence"]["site_policies"]["policy_repair_action"] == "review_rules"

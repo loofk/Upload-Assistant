@@ -22118,6 +22118,7 @@ def _goal_progress_daily_candidate_evidence(daily_candidate_plan: dict[str, Any]
         "daily_candidate_final_report": final_report or None,
         "daily_candidate_delivery_final_report": delivery_final or None,
         "daily_candidate_schedule_final_report": _goal_progress_daily_candidate_schedule_final_report(daily_candidate_plan, schedule_handoff),
+        "goal_handoff": _goal_progress_daily_candidate_goal_handoff(daily_candidate_plan, schedule_handoff, control, delivery, delivery_plan, final_report, delivery_final),
         "next_step": _goal_progress_daily_candidate_next_step(daily_candidate_plan),
         "blockers": _string_list(daily_candidate_plan.get("blockers")),
         "next_actions": _string_list(daily_candidate_plan.get("next_actions")),
@@ -22162,6 +22163,138 @@ def _goal_progress_daily_candidate_schedule_final_report(daily_candidate_plan: d
         "blockers": blockers,
         "next_actions": _string_list(daily_candidate_plan.get("next_actions")) or _string_list(schedule_handoff.get("next_actions")),
     }
+
+
+def _goal_progress_daily_candidate_goal_handoff(
+    daily_candidate_plan: dict[str, Any],
+    schedule_handoff: dict[str, Any],
+    control: dict[str, Any],
+    delivery: dict[str, Any],
+    delivery_plan: dict[str, Any],
+    final_report: dict[str, Any],
+    delivery_final: dict[str, Any],
+) -> dict[str, Any]:
+    next_step = _goal_progress_daily_candidate_next_step(daily_candidate_plan)
+    configured = bool(daily_candidate_plan.get("configured"))
+    blockers = _string_list(daily_candidate_plan.get("blockers")) or _string_list(schedule_handoff.get("blockers"))
+    create_jobs = _goal_progress_daily_candidate_api_call(schedule_handoff, "create_jobs")
+    inspect_schedule = _goal_progress_daily_candidate_api_call(schedule_handoff, "inspect_schedule")
+    publish_call = _goal_progress_daily_candidate_recommended_call(delivery_final, delivery_plan, delivery, action_hint="publish_notification")
+    submit_call = _goal_progress_daily_candidate_recommended_call(final_report, control, delivery_plan, action_hint="submit_candidate")
+    shortfall_call = _goal_progress_daily_candidate_shortfall_call(final_report, control, delivery_plan)
+    action = "configure_schedule"
+    if configured and final_report.get("ready"):
+        action = str(final_report.get("action") or "inspect_candidates")
+    elif configured:
+        action = "create_or_poll_candidate_jobs"
+    return {
+        "kind": "ptcli.goal_daily_candidate_handoff",
+        "ready": bool(configured and not blockers),
+        "status": daily_candidate_plan.get("status"),
+        "action": action,
+        "target_count": int(schedule_handoff.get("target_count") or final_report.get("target_count") or DEFAULT_CANDIDATE_LIMIT),
+        "configured": configured,
+        "configured_count": int(daily_candidate_plan.get("count") or schedule_handoff.get("configured_count") or 0),
+        "enabled_count": int(schedule_handoff.get("enabled_count") or 0),
+        "schedule": {
+            "source": daily_candidate_plan.get("source"),
+            "env": daily_candidate_plan.get("env"),
+            "schedules": daily_candidate_plan.get("schedules") if isinstance(daily_candidate_plan.get("schedules"), list) else [],
+            "env_example": schedule_handoff.get("env_example") if isinstance(schedule_handoff.get("env_example"), dict) else None,
+            "compose": schedule_handoff.get("compose") if isinstance(schedule_handoff.get("compose"), dict) else None,
+            "inspect_call": inspect_schedule,
+            "create_jobs_call": create_jobs,
+        },
+        "delivery": {
+            "publish_call": publish_call,
+            "submit_call": submit_call,
+            "shortfall_call": shortfall_call,
+            "requires_user_approval_before_submit": True,
+        },
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool") if isinstance(next_step, dict) else None,
+        "recommended_endpoint": next_step.get("endpoint") if isinstance(next_step, dict) else None,
+        "recommended_method": next_step.get("method") if isinstance(next_step, dict) else None,
+        "recommended_request": next_step.get("request") if isinstance(next_step, dict) else None,
+        "read_order": ["goal_handoff", "daily_candidate_schedule_final_report", "schedule_handoff", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "candidate_control_summary"],
+        "continue_when": "schedule is configured, candidate jobs are created, digest is read, and explicit user approval is collected before submit_candidate.",
+        "stop_when": [
+            "goal_handoff.blockers is non-empty",
+            "site policy gate is not ready",
+            "duplicate_check.exists=true for a candidate",
+            "candidate submission is attempted without explicit human approval and confirm_upload=true",
+        ],
+        "safety": {
+            "mutates_state": False,
+            "uploads": False,
+            "creates_jobs_only_via_create_jobs_call": True,
+            "submit_requires_human_approval": True,
+            "does_not_bypass_site_rules": True,
+        },
+        "blockers": blockers,
+        "next_actions": _goal_progress_daily_candidate_goal_next_actions(configured, blockers, create_jobs, publish_call, submit_call, shortfall_call),
+    }
+
+
+def _goal_progress_daily_candidate_api_call(schedule_handoff: dict[str, Any], name: str) -> dict[str, Any] | None:
+    api = schedule_handoff.get("api") if isinstance(schedule_handoff.get("api"), dict) else {}
+    call = api.get(name) if isinstance(api.get(name), dict) else {}
+    if not call:
+        return None
+    return {
+        "tool": call.get("tool"),
+        "endpoint": call.get("endpoint"),
+        "method": call.get("method"),
+        "request": call.get("request"),
+    }
+
+
+def _goal_progress_daily_candidate_recommended_call(*sources: dict[str, Any], action_hint: str) -> dict[str, Any] | None:
+    for source in sources:
+        if not isinstance(source, dict) or not source:
+            continue
+        action = str(source.get("action") or source.get("verdict") or "")
+        if action_hint not in action and action_hint == "submit_candidate" and "approval" not in action:
+            continue
+        tool = source.get("recommended_tool")
+        endpoint = source.get("recommended_endpoint")
+        request = source.get("recommended_request")
+        if tool or endpoint or request:
+            return {"tool": tool, "endpoint": endpoint, "method": source.get("recommended_method") or ("POST" if endpoint else None), "request": request, "source_action": action or None}
+    return None
+
+
+def _goal_progress_daily_candidate_shortfall_call(*sources: dict[str, Any]) -> dict[str, Any] | None:
+    for source in sources:
+        if not isinstance(source, dict) or not source:
+            continue
+        recovery = source.get("shortfall_recovery") if isinstance(source.get("shortfall_recovery"), dict) else {}
+        if not recovery:
+            continue
+        return {
+            "tool": recovery.get("recommended_tool"),
+            "endpoint": recovery.get("recommended_endpoint"),
+            "method": recovery.get("recommended_method") or ("POST" if recovery.get("recommended_endpoint") else None),
+            "request": recovery.get("recommended_request"),
+            "action": recovery.get("action"),
+        }
+    return None
+
+
+def _goal_progress_daily_candidate_goal_next_actions(configured: bool, blockers: list[str], create_jobs: dict[str, Any] | None, publish_call: dict[str, Any] | None, submit_call: dict[str, Any] | None, shortfall_call: dict[str, Any] | None) -> list[str]:
+    if blockers:
+        return ["Resolve goal_handoff.blockers before creating or submitting daily candidate jobs."]
+    if not configured:
+        return ["Configure schedule.env_example.shell or POST schedule.inspect_call.request, then create daily candidate jobs only via schedule.create_jobs_call."]
+    if create_jobs:
+        return ["Call schedule.create_jobs_call, then read daily_candidate_final_report and daily_candidate_delivery_final_report."]
+    if publish_call:
+        return ["Publish delivery.publish_call if you only need a candidate digest; this does not upload or submit torrents."]
+    if submit_call:
+        return ["Ask the user to approve one candidate, keep confirm_upload=true explicit, then call delivery.submit_call."]
+    if shortfall_call:
+        return ["Use delivery.shortfall_call to refill the candidate list until target_count is met or scan is exhausted."]
+    return ["Inspect goal_handoff.read_order before taking the next daily candidate action."]
 
 
 def _goal_progress_qbittorrent_evidence(deployment: dict[str, Any], live_validation_evidence: dict[str, Any], live_validation_preflight: dict[str, Any]) -> dict[str, Any]:
@@ -23309,7 +23442,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
-                "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_schedule_final_report", "next_step", "blockers", "next_actions"],
+                "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_schedule_final_report", "goal_handoff", "next_step", "blockers", "next_actions"],
+                "daily_candidate_goal_handoff_fields": ["ready", "status", "action", "target_count", "configured", "configured_count", "enabled_count", "schedule", "delivery", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
                 "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
                 "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
