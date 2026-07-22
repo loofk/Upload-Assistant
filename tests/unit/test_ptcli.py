@@ -13420,6 +13420,12 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert job["job_final_report"]["ready_for_user_report"] is False
     assert job["job_final_report"]["recommended_call"]["tool"] == "get_job_status"
     assert job["job_final_report"]["read_order"][0] == "job_final_report"
+    assert job["job_lifecycle_final_report"]["kind"] == "ptcli.job_lifecycle_final_report"
+    assert job["job_lifecycle_final_report"]["verdict"] == "poll"
+    assert job["job_lifecycle_final_report"]["action"] == "poll"
+    assert job["job_lifecycle_final_report"]["recommended_tool"] == "get_job_status"
+    assert job["job_lifecycle_final_report"]["primary_next_step"]["name"] == "poll_status"
+    assert job["job_lifecycle_final_report"]["safety"]["must_not_report_complete_until_summary_read"] is True
     assert job["job_progress_handoff"]["kind"] == "ptcli.job_progress_handoff"
     assert job["job_progress_handoff"]["action"] == "poll"
     assert job["job_progress_handoff"]["recommended_tool"] == "get_job_status"
@@ -13444,6 +13450,7 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert payload["jobs"][0]["job_control_summary"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
     assert payload["jobs"][0]["job_control_summary"]["poll_resume_summary_sequence"]["steps"][0]["name"] == "poll_status"
     assert payload["jobs"][0]["job_final_report"]["verdict"] == "poll"
+    assert payload["jobs"][0]["job_lifecycle_final_report"]["verdict"] == "poll"
     assert payload["jobs"][0]["job_resume_handoff"]["action"] == "poll"
     assert any("Poll running jobs" in action for action in payload["next_actions"])
 
@@ -13973,6 +13980,14 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["job_final_report"]["report_allowed"] is False
     assert job["job_final_report"]["recommended_call"]["tool"] == "resume_job"
     assert "materials_handoff.not_ready" in job["job_final_report"]["blockers"]
+    assert job["job_lifecycle_final_report"]["kind"] == "ptcli.job_lifecycle_final_report"
+    assert job["job_lifecycle_final_report"]["verdict"] == "preview_resume"
+    assert job["job_lifecycle_final_report"]["action"] == "preview_resume"
+    assert job["job_lifecycle_final_report"]["recommended_call"]["tool"] == "resume_job"
+    assert job["job_lifecycle_final_report"]["dry_run_request"] == job["materials_handoff"]["resume_handoff"]["dry_run_request"]
+    assert job["job_lifecycle_final_report"]["execute_request"] == job["materials_handoff"]["resume_handoff"]["execute_request"]
+    assert job["job_lifecycle_final_report"]["sequence"]["primary_next_step"]["name"] == "preview_resume"
+    assert "job_lifecycle_final_report" in job["job_lifecycle_final_report"]["read_order"]
     assert job["job_progress_handoff"]["kind"] == "ptcli.job_progress_handoff"
     assert job["job_progress_handoff"]["action"] == "resolve_blockers"
     assert job["job_progress_handoff"]["current_stage"]["name"] == "source_identified"
@@ -13997,6 +14012,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert summary["resume_execution_handoff"] == job["resume_execution_handoff"]
     assert summary["job_resume_handoff"] == job["job_resume_handoff"]
     assert summary["resume_final_report"] == job["resume_final_report"]
+    assert summary["job_lifecycle_final_report"] == job["job_lifecycle_final_report"]
     assert summary["job_progress_handoff"] == job["job_progress_handoff"]
     assert summary["resume_summary"] == job["resume_summary"]
     assert summary["job_handoff"] == job["job_handoff"]
@@ -14011,6 +14027,7 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
 
     listed = store.list({"status": "blocked"})["jobs"][0]
     assert listed["resume_final_report"]["verdict"] == "preview_resume"
+    assert listed["job_lifecycle_final_report"]["verdict"] == "preview_resume"
     assert listed["resume_final_report"]["recommended_call"]["request"] == {"job_id": job["job_id"], "dry_run": True}
     assert listed["blocked_recovery_report"] == job["blocked_recovery_report"]
 
@@ -20244,6 +20261,12 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "resume_final_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
     assert "resume_final_report_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "job_complete_report_allowed" in tool_by_name["get_job_status"]["response_contract"]["resume_final_report_fields"]
+    assert "job_lifecycle_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "job_lifecycle_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "job_lifecycle_final_report" in tool_by_name["list_jobs"]["response_contract"]["job_fields"]
+    assert "job_lifecycle_final_report_fields" in tool_by_name["get_job_status"]["response_contract"]
+    assert "primary_next_step" in tool_by_name["get_job_status"]["response_contract"]["job_lifecycle_final_report_fields"]
+    assert "safety" in tool_by_name["get_job_status"]["response_contract"]["job_lifecycle_final_report_fields"]
     assert "job_resume_handoff_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "dry_run_request" in tool_by_name["get_job_status"]["response_contract"]["job_resume_handoff_fields"]
     assert "execute_request" in tool_by_name["get_job_status"]["response_contract"]["job_resume_handoff_fields"]
@@ -22392,6 +22415,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_final_report" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
         assert "resume_final_report_fields" in tools_by_name["get_job_status"]["response_contract"]
         assert "job_complete_report_allowed" in tools_by_name["get_job_status"]["response_contract"]["resume_final_report_fields"]
+        assert "job_lifecycle_final_report" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
+        assert "job_lifecycle_final_report" in tools_by_name["get_job_summary"]["response_contract"]["required_fields"]
+        assert "job_lifecycle_final_report" in tools_by_name["list_jobs"]["response_contract"]["job_fields"]
+        assert "job_lifecycle_final_report_fields" in tools_by_name["get_job_status"]["response_contract"]
+        assert "primary_next_step" in tools_by_name["get_job_status"]["response_contract"]["job_lifecycle_final_report_fields"]
         assert "recovery_handoff" in tools_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
         assert "recovery_handoff" in tools_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
         assert "recovery_handoff" in tools_by_name["get_job_status"]["response_contract"]["required_fields"]
