@@ -18460,6 +18460,7 @@ def test_site_policy_rule_review_requires_explicit_manual_evidence(monkeypatch) 
     assert final_report["report_allowed"] is False
     assert final_report["verdict"] == "needs_manual_review"
     assert final_report["action"] == "collect_manual_rule_review_evidence"
+    assert final_report["merged_config_patch"] is None
     assert final_report["safety"]["must_not_fabricate_fingerprint"] is True
     assert final_report["recommended_tool"] == "site_policy_rule_review"
 
@@ -18494,19 +18495,32 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert payload["config_patch"]["safe_to_auto_apply"] is False
     assert payload["config_patch"]["structured_patch"]["U2"]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
     assert payload["config_patch"]["flat_patch"]["MTEAM"]["rule_review_fingerprint"] == reviews["MTEAM"]["rule_review_fingerprint"]
+    assert payload["merged_config_patch"]["kind"] == "ptcli.site_policy_rule_review_merged_config_patch"
+    assert payload["merged_config_patch"]["safe_to_auto_apply"] is False
+    assert payload["merged_config_patch"]["structured_patch"]["U2"]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
+    assert payload["merged_config_patch"]["structured_patch"]["U2"]["qbit_limits"]["download_limit"] == "20MiB/s"
+    assert payload["merged_config_patch"]["structured_patch"]["U2"]["seeding_requirements"]["min_seed_time_hours"] == 72
+    assert payload["merged_config_patch"]["structured_patch"]["MTEAM"]["rule_review_fingerprint"] == reviews["MTEAM"]["rule_review_fingerprint"]
+    assert payload["merged_config_patch"]["structured_patch"]["MTEAM"]["qbit_limits"]["upload_limit"] == "2MiB/s"
+    assert payload["merged_config_patch"]["structured_patch"]["MTEAM"]["seeding_requirements"]["min_ratio"] == 1.0
     final_report = payload["rule_review_final_report"]
     assert final_report["ready"] is True
     assert final_report["report_allowed"] is True
     assert final_report["verdict"] == "patch_ready"
     assert final_report["action"] == "copy_config_patch"
+    assert final_report["merged_config_patch"] == payload["merged_config_patch"]
     assert final_report["merge_plan"]["fingerprint_patch_source"] == "site_policy_rule_review.config_patch.structured_patch"
+    assert final_report["merge_plan"]["merged_patch_source"] == "site_policy_rule_review.merged_config_patch"
     assert final_report["merge_plan"]["fingerprint_patch_wins"] is True
     assert final_report["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert final_report["review_items"][0]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
     assert payload["next_step"]["tool"] == "edit_config"
+    assert payload["next_step"]["request"] == payload["merged_config_patch"]
     assert payload["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert payload["recommended_request"] == payload["merged_config_patch"]
     assert payload["recommended_endpoint"] is None
     assert payload["read_order"][0] == "rule_review_final_report"
+    assert "merged_config_patch" in payload["read_order"]
 
 
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
@@ -19200,8 +19214,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["site_policy_rule_review"]["path"] == "/v1/site-policies/rule-review"
     assert tool_by_name["site_policy_rule_review"]["input_schema"]["required"] == ["rules_reviewed", "reviewer", "reviewed_at"]
     assert "config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+    assert "merged_config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "rule_review_final_report" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "rule_review_final_report_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
+    assert "merged_config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
     assert "merge_plan" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
     assert "rule_review_fingerprint" in tool_by_name["site_policy_rule_review"]["response_contract"]["review_fields"]
     assert tool_by_name["site_policy_rule_review"]["safety"]["does_not_edit_config"] is True
@@ -19679,6 +19695,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "config_update_plan" in site_policy_schema["properties"]
     rule_review_schema = openapi["paths"]["/v1/site-policies/rule-review"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "config_patch" in rule_review_schema["properties"]
+    assert "merged_config_patch" in rule_review_schema["properties"]
     assert "rule_review_final_report" in rule_review_schema["properties"]
     assert "reviews" in rule_review_schema["properties"]
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -20138,8 +20155,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "agent_decision" in retorrent_tool["response_contract"]["required_fields"]
     assert "confirm_upload=true" in retorrent_tool["safety"]["requires_confirmation"]
     rule_review_tool = next(tool for tool in manifest["tools"] if tool["name"] == "site_policy_rule_review")
+    assert "merged_config_patch" in rule_review_tool["response_contract"]["required_fields"]
     assert "rule_review_final_report" in rule_review_tool["response_contract"]["required_fields"]
     assert "rule_review_final_report_fields" in rule_review_tool["response_contract"]
+    assert "merged_config_patch" in rule_review_tool["response_contract"]["rule_review_final_report_fields"]
     assert "merge_plan" in rule_review_tool["response_contract"]["rule_review_final_report_fields"]
     goal_progress_tool = next(tool for tool in manifest["tools"] if tool["name"] == "goal_progress")
     assert "ready_to_submit" in goal_progress_tool["response_contract"]["capability_status_values"]
@@ -20229,7 +20248,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_validation_preflight_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
         assert "rule_review_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+        assert "merged_config_patch" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
         assert "rule_review_final_report_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]
+        assert "merged_config_patch" in tools_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
         assert "merge_plan" in tools_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
