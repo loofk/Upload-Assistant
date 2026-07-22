@@ -35281,11 +35281,19 @@
           },
           "summary_file": {
             "type": "string",
-            "description": "Optional ptcli summary JSON used by goal_progress as live validation evidence."
+            "description": "Optional ptcli summary JSON used by goal_progress as live validation evidence; ptcli.daily_schedule.summary is also used as daily candidate scheduler evidence."
           },
           "live_summary_file": {
             "type": "string",
             "description": "Alias for summary_file when auditing seedbox live validation evidence."
+          },
+          "daily_candidate_summary_file": {
+            "type": "string",
+            "description": "Path to ptcli-daily-schedule-summary.json used as daily candidate scheduler evidence."
+          },
+          "daily_schedule_summary_file": {
+            "type": "string",
+            "description": "Alias for daily_candidate_summary_file."
           },
           "downloads_path": {
             "type": "string"
@@ -35362,6 +35370,8 @@
           "source",
           "env",
           "count",
+          "summary_file",
+          "summary_evidence",
           "schedules",
           "schedule_handoff",
           "schedule_digest",
@@ -35374,6 +35384,10 @@
           "daily_candidate_final_report",
           "daily_candidate_delivery_final_report",
           "daily_candidate_operational_final_report",
+          "daily_candidate_target_fulfillment_report",
+          "daily_scheduler_final_report",
+          "delivery_result",
+          "delivery_audit",
           "daily_candidate_schedule_final_report",
           "goal_handoff",
           "next_step",
@@ -35797,11 +35811,19 @@
           },
           "summary_file": {
             "type": "string",
-            "description": "Optional ptcli summary JSON used by goal_progress as live validation evidence."
+            "description": "Optional ptcli summary JSON used by goal_progress as live validation evidence; ptcli.daily_schedule.summary is also used as daily candidate scheduler evidence."
           },
           "live_summary_file": {
             "type": "string",
             "description": "Alias for summary_file when auditing seedbox live validation evidence."
+          },
+          "daily_candidate_summary_file": {
+            "type": "string",
+            "description": "Path to ptcli-daily-schedule-summary.json used as daily candidate scheduler evidence."
+          },
+          "daily_schedule_summary_file": {
+            "type": "string",
+            "description": "Alias for daily_candidate_summary_file."
           },
           "downloads_path": {
             "type": "string"
