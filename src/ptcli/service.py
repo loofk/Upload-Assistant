@@ -8590,6 +8590,12 @@ def _daily_candidate_completion_report(execution_summary: dict[str, Any], execut
     running_jobs = execution_summary.get("running_jobs") if isinstance(execution_summary.get("running_jobs"), list) else execution_context.get("running_jobs") if isinstance(execution_context.get("running_jobs"), list) else []
     blocked_jobs = execution_summary.get("blocked_jobs") if isinstance(execution_summary.get("blocked_jobs"), list) else execution_context.get("blocked_jobs") if isinstance(execution_context.get("blocked_jobs"), list) else []
     completed = [_daily_candidate_completed_job_report(job) for job in complete_jobs if isinstance(job, dict)]
+    completion_blockers = [
+        f"completed_job.{item.get('retorrent_job_id') or item.get('source_id')}.report_not_allowed"
+        for item in completed
+        if item.get("report_allowed") is not True
+    ]
+    blockers = list(dict.fromkeys([*_string_list(blockers), *completion_blockers]))
     completed_report_allowed = bool(completed) and all(item.get("report_allowed") is True for item in completed)
     report_allowed = completed_report_allowed and not running_jobs and not blocked_jobs and not blockers
     return {
@@ -8632,6 +8638,13 @@ def _daily_candidate_completed_job_report(job: dict[str, Any]) -> dict[str, Any]
     qbit_enforcement_summary = job.get("qbit_enforcement_summary") if isinstance(job.get("qbit_enforcement_summary"), dict) else None
     qbit_execution_gate = job.get("qbit_execution_gate") if isinstance(job.get("qbit_execution_gate"), dict) else None
     uploaded_seeding_evidence = job.get("uploaded_seeding_evidence") if isinstance(job.get("uploaded_seeding_evidence"), dict) else None
+    duplicate_exists = duplicate_check.get("exists")
+    upstream_report_allowed = bool(job.get("job_report_allowed") or job_final_report.get("report_allowed") or job.get("manual_report_allowed") or manual_report.get("report_allowed"))
+    closure_complete = job.get("closure_complete") is True
+    policy_application_ready = job.get("policy_application_ready") is True
+    qbit_execution_ready = (qbit_execution_gate.get("ready") if isinstance(qbit_execution_gate, dict) else job.get("qbit_execution_ready")) is True
+    uploaded_seeding_ready = (uploaded_seeding_evidence.get("ready") if isinstance(uploaded_seeding_evidence, dict) else job.get("uploaded_seeding_ready")) is True
+    report_allowed = upstream_report_allowed and duplicate_exists is not True and closure_complete and policy_application_ready and qbit_execution_ready and uploaded_seeding_ready
     return {
         "retorrent_job_id": job.get("retorrent_job_id"),
         "source_id": job.get("candidate_source_id"),
@@ -8642,17 +8655,17 @@ def _daily_candidate_completed_job_report(job: dict[str, Any]) -> dict[str, Any]
         "status_endpoint": job.get("status_endpoint"),
         "job_final_verdict": job.get("job_final_verdict") or job_final_report.get("verdict"),
         "manual_retorrent_verdict": job.get("manual_retorrent_verdict") or manual_report.get("verdict"),
-        "report_allowed": bool(job.get("job_report_allowed") or job_final_report.get("report_allowed") or job.get("manual_report_allowed") or manual_report.get("report_allowed")),
-        "duplicate_exists": duplicate_check.get("exists"),
+        "report_allowed": report_allowed,
+        "duplicate_exists": duplicate_exists,
         "closure_complete": job.get("closure_complete"),
         "policy_execution_ready": job.get("policy_execution_ready"),
         "policy_application_ready": job.get("policy_application_ready"),
         "policy_application_handoff": job.get("policy_application_handoff") if isinstance(job.get("policy_application_handoff"), dict) else None,
         "qbit_enforcement_ready": qbit_enforcement_summary.get("ready") if isinstance(qbit_enforcement_summary, dict) else job.get("qbit_enforcement_ready"),
         "qbit_enforcement_summary": qbit_enforcement_summary,
-        "qbit_execution_ready": qbit_execution_gate.get("ready") if isinstance(qbit_execution_gate, dict) else job.get("qbit_execution_ready"),
+        "qbit_execution_ready": qbit_execution_ready,
         "qbit_execution_gate": qbit_execution_gate,
-        "uploaded_seeding_ready": uploaded_seeding_evidence.get("ready") if isinstance(uploaded_seeding_evidence, dict) else job.get("uploaded_seeding_ready"),
+        "uploaded_seeding_ready": uploaded_seeding_ready,
         "uploaded_seeding_evidence": uploaded_seeding_evidence,
         "job_final_report": job_final_report,
         "manual_retorrent_final_report": manual_report,
