@@ -17975,6 +17975,21 @@ async def test_source_url_check_and_submit_creates_job_when_duplicate_clear(monk
     assert payload["check_and_submit_gate"]["confirm_upload"] is True
     assert payload["check_and_submit_gate"]["recommended_tool"] == "get_job_status"
     assert payload["check_and_submit_gate"]["recommended_request"] == {"job_id": "abc123"}
+    final_report = payload["check_and_submit_final_report"]
+    assert final_report["kind"] == "ptcli.check_and_submit_final_report"
+    assert final_report["ready"] is True
+    assert final_report["report_allowed"] is True
+    assert final_report["verdict"] == "submitted_poll"
+    assert final_report["status"] == "submitted"
+    assert final_report["duplicate_check"]["exists"] is False
+    assert final_report["submission"]["job_created"] is True
+    assert final_report["submission"]["job_id"] == "abc123"
+    assert final_report["submission"]["status_endpoint"] == "/v1/jobs/abc123"
+    assert final_report["confirmations"]["accept_rules"] is True
+    assert final_report["confirmations"]["confirm_upload"] is True
+    assert final_report["recommended_call"]["tool"] == "get_job_status"
+    assert final_report["recommended_call"]["request"] == {"job_id": "abc123"}
+    assert final_report["blockers"] == []
     sequence = payload["manual_retorrent_sequence"]
     assert sequence["kind"] == "ptcli.manual_retorrent_sequence"
     assert sequence["ready"] is True
@@ -18037,6 +18052,17 @@ async def test_source_url_check_and_submit_stops_on_duplicate(monkeypatch) -> No
     assert payload["check_and_submit_gate"]["duplicate_exists"] is True
     assert payload["check_and_submit_gate"]["recommended_tool"] is None
     assert payload["check_and_submit_gate"]["first_blocker"] == "duplicate_check.exists"
+    final_report = payload["check_and_submit_final_report"]
+    assert final_report["kind"] == "ptcli.check_and_submit_final_report"
+    assert final_report["ready"] is False
+    assert final_report["report_allowed"] is True
+    assert final_report["verdict"] == "duplicate_stopped"
+    assert final_report["status"] == "stopped"
+    assert final_report["duplicate_check"]["exists"] is True
+    assert final_report["duplicate_check"]["dupes"] == [{"name": "Existing"}]
+    assert final_report["submission"]["job_created"] is False
+    assert final_report["recommended_call"]["tool"] is None
+    assert final_report["recommended_call"]["reason"] == "target_duplicate_exists"
     sequence = payload["manual_retorrent_sequence"]
     assert sequence["ready"] is False
     assert sequence["phase"] == "stop_duplicate"
@@ -18439,10 +18465,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["source_url_check_and_submit"]["input_schema"]["required"] == ["source_url", "target"]
     assert "check_and_submit_gate" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "manual_retorrent_sequence" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
+    assert "check_and_submit_final_report" in tool_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
     assert "check_and_submit_gate_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "manual_retorrent_sequence_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
+    assert "check_and_submit_final_report_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "manual_retorrent_step_fields" in tool_by_name["source_url_check_and_submit"]["response_contract"]
     assert "action" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_gate_fields"]
+    assert "verdict" in tool_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_final_report_fields"]
     assert "sequence_next_tool" in tool_by_name["source_url_check_and_submit"]["response_contract"]["agent_summary_fields"]
     assert "runs_duplicate_check_before_job_creation" in tool_by_name["source_url_check_and_submit"]["response_contract"]["safety"]
     assert tool_by_name["source_url_check_and_submit"]["safety"]["live_upload"] is True
@@ -19705,6 +19734,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "duplicate_check" in source_url_check_submit_schema["properties"]
     assert "submitted_job" in source_url_check_submit_schema["properties"]
     assert "check_and_submit_gate" in source_url_check_submit_schema["properties"]
+    assert "check_and_submit_final_report" in source_url_check_submit_schema["properties"]
     schedule_jobs_schema = openapi["paths"]["/v1/jobs/candidates/daily/schedule"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "schedule_digest" in schedule_jobs_schema["properties"]
     assert "notification_payload" in schedule_jobs_schema["properties"]
@@ -20253,9 +20283,12 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert tools_by_name["source_url_check_and_submit"]["path"] == "/v1/jobs/retorrent/from-url/check-and-submit"
         assert "check_and_submit_gate" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
         assert "manual_retorrent_sequence" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
+        assert "check_and_submit_final_report" in tools_by_name["source_url_check_and_submit"]["response_contract"]["required_fields"]
         assert "check_and_submit_gate_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
         assert "manual_retorrent_sequence_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
+        assert "check_and_submit_final_report_fields" in tools_by_name["source_url_check_and_submit"]["response_contract"]
         assert "action" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_gate_fields"]
+        assert "verdict" in tools_by_name["source_url_check_and_submit"]["response_contract"]["check_and_submit_final_report_fields"]
         assert tools_by_name["source_url_retorrent_job"]["path"] == "/v1/jobs/retorrent/from-url"
         assert tools_by_name["source_url_retorrent_job"]["input_schema"]["required"] == ["source_url", "target"]
         manual_properties = tools_by_name["manual_retorrent_job"]["input_schema"]["properties"]

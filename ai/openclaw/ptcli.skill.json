@@ -9655,6 +9655,7 @@
           "summary_endpoint",
           "check_and_submit_gate",
           "manual_retorrent_sequence",
+          "check_and_submit_final_report",
           "agent_summary",
           "blockers",
           "next_actions"
@@ -9727,6 +9728,24 @@
           "repeat_when",
           "stop_when",
           "complete_when"
+        ],
+        "check_and_submit_final_report_fields": [
+          "ready",
+          "report_allowed",
+          "verdict",
+          "status",
+          "source_reference",
+          "target_trackers",
+          "duplicate_check",
+          "submission",
+          "confirmations",
+          "control",
+          "recommended_call",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "blockers",
+          "next_actions"
         ],
         "agent_summary_fields": [
           "ready",
