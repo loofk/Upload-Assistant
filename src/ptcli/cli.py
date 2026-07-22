@@ -11729,7 +11729,7 @@ def _with_captured_stdout(factory: Any, json_output: bool) -> dict[str, Any]:
 
 
 def daily_schedule_payload(args: argparse.Namespace) -> dict[str, Any]:
-    from src.ptcli.service import JobStore, create_daily_candidate_schedule_jobs
+    from src.ptcli.service import JobStore, create_daily_candidate_run_and_deliver, create_daily_candidate_schedule_jobs
 
     request: dict[str, Any] = {}
     if args.schedules_file:
@@ -11737,29 +11737,54 @@ def daily_schedule_payload(args: argparse.Namespace) -> dict[str, Any]:
     elif args.schedules_json:
         request["schedules"] = json.loads(args.schedules_json)
     store = JobStore(args.job_dir, run_inline=True)
-    payload = create_daily_candidate_schedule_jobs(store, request)
+    webhook_url = getattr(args, "notification_webhook_url", None) or os.environ.get("PTCLI_DAILY_CANDIDATE_WEBHOOK_URL")
+    delivery_requested = bool(getattr(args, "write_notification", False) or webhook_url)
+    if delivery_requested:
+        delivery_request = {
+            **request,
+            "deliver": True,
+            "write_files": bool(getattr(args, "write_notification", False)),
+            "output_dir": str(_daily_candidate_output_dir(getattr(args, "notification_output_dir", None) or getattr(args, "summary_output_dir", None), store.root)),
+            "use_env_webhook": bool(webhook_url and not getattr(args, "notification_webhook_url", None)),
+            "webhook_timeout": float(getattr(args, "notification_webhook_timeout", 10.0) or 10.0),
+        }
+        if webhook_url:
+            delivery_request["webhook_url"] = webhook_url
+        payload = create_daily_candidate_run_and_deliver(store, delivery_request)
+        schedule_payload = payload.get("schedule_result") if isinstance(payload.get("schedule_result"), dict) else {}
+    else:
+        payload = create_daily_candidate_schedule_jobs(store, request)
+        schedule_payload = payload
     result = {
-        **payload,
+        **schedule_payload,
         "kind": "ptcli.cli.daily_schedule",
         "job_dir": str(store.root),
         "execution": {
             "mode": "inline",
             "source": "schedules_file" if args.schedules_file else "schedules_json" if args.schedules_json else "env",
             "uploads": False,
+            "run_and_deliver": delivery_requested,
         },
     }
+    if delivery_requested:
+        result["run_and_deliver_result"] = payload
+        result["run_and_deliver_report"] = payload.get("run_and_deliver_report")
+        result["delivery_result"] = _daily_schedule_delivery_result_from_service(payload)
+        result["notification_files"] = _daily_schedule_notification_files_from_delivery(result["delivery_result"])
+        result["notification_webhook"] = _daily_schedule_webhook_from_delivery(result["delivery_result"])
+        result["status"] = str(schedule_payload.get("status") or payload.get("status") or result.get("status"))
     if args.write_summary:
         result["summary_file"] = _write_daily_schedule_summary(result, args, store.root)
-    if getattr(args, "write_notification", False):
+    if getattr(args, "write_notification", False) and not delivery_requested:
         result["notification_files"] = _write_daily_schedule_notification_files(result, args, store.root)
         if args.write_summary:
             result["summary_file"] = _write_daily_schedule_summary(result, args, store.root)
-    webhook_url = getattr(args, "notification_webhook_url", None) or os.environ.get("PTCLI_DAILY_CANDIDATE_WEBHOOK_URL")
-    if webhook_url:
+    if webhook_url and not delivery_requested:
         result["notification_webhook"] = _post_daily_schedule_notification_webhook(result, webhook_url, timeout=float(getattr(args, "notification_webhook_timeout", 10.0) or 10.0))
         if args.write_summary:
             result["summary_file"] = _write_daily_schedule_summary(result, args, store.root)
-    result["delivery_result"] = _daily_schedule_delivery_result(result, webhook_url=webhook_url)
+    if "delivery_result" not in result:
+        result["delivery_result"] = _daily_schedule_delivery_result(result, webhook_url=webhook_url)
     result["delivery_audit"] = _daily_schedule_delivery_audit(result, webhook_url=webhook_url)
     if args.write_summary:
         result["summary_file"] = _write_daily_schedule_summary(result, args, store.root)
@@ -11892,6 +11917,8 @@ def _write_daily_schedule_summary(payload: dict[str, Any], args: argparse.Namesp
         "notification_webhook": payload.get("notification_webhook"),
         "delivery_result": payload.get("delivery_result"),
         "delivery_audit": payload.get("delivery_audit"),
+        "run_and_deliver_result": payload.get("run_and_deliver_result"),
+        "run_and_deliver_report": payload.get("run_and_deliver_report"),
         "agent_decision": payload.get("agent_decision"),
         "blockers": payload.get("blockers", []),
         "next_actions": payload.get("next_actions", []),
@@ -11972,6 +11999,67 @@ def _post_daily_schedule_notification_webhook(payload: dict[str, Any], url: str,
     except requests.RequestException as exc:
         result["error"] = str(exc)
     return result
+
+
+def _daily_schedule_delivery_result_from_service(payload: dict[str, Any]) -> dict[str, Any]:
+    delivery_result = payload.get("delivery_result") if isinstance(payload.get("delivery_result"), dict) else {}
+    run_report = payload.get("run_and_deliver_report") if isinstance(payload.get("run_and_deliver_report"), dict) else {}
+    file_delivery = delivery_result.get("file_delivery") if isinstance(delivery_result.get("file_delivery"), dict) else {}
+    webhook_delivery = delivery_result.get("webhook_delivery") if isinstance(delivery_result.get("webhook_delivery"), dict) else {}
+    blockers = _string_list(delivery_result.get("blockers")) + _string_list(run_report.get("blockers"))
+    blockers = list(dict.fromkeys(blockers))
+    return {
+        "kind": "ptcli.daily_schedule.delivery_result",
+        "status": delivery_result.get("status") or payload.get("status"),
+        "ok": bool(delivery_result.get("ok")) and not blockers,
+        "publish_ready": bool(run_report.get("notification_delivered") or delivery_result.get("ready")),
+        "channel_attempted": bool(file_delivery.get("attempted") or webhook_delivery.get("attempted")),
+        "file_delivery": file_delivery,
+        "webhook_delivery": webhook_delivery,
+        "payload_fingerprint": delivery_result.get("payload_fingerprint") or run_report.get("payload_fingerprint"),
+        "service_delivery_result": delivery_result,
+        "run_and_deliver_report": run_report,
+        "agent_handoff": {
+            "read": "delivery_result",
+            "notification_payload": "notification_payload",
+            "delivery_handoff": "delivery_handoff",
+            "run_and_deliver_report": "run_and_deliver_report",
+            "execution_summary": "delivery_handoff.execution_summary",
+            "summary_file": payload.get("summary_file"),
+            "retry_tool": "daily-schedule",
+            "retry_requires_upload_confirmation": False,
+        },
+        "blockers": blockers,
+        "next_actions": _daily_schedule_delivery_next_actions(
+            bool(run_report.get("notification_delivered") or delivery_result.get("ready")),
+            bool(file_delivery.get("attempted")),
+            bool(webhook_delivery.get("attempted")),
+            blockers,
+        ),
+    }
+
+
+def _daily_schedule_notification_files_from_delivery(delivery_result: dict[str, Any]) -> dict[str, str]:
+    file_delivery = delivery_result.get("file_delivery") if isinstance(delivery_result.get("file_delivery"), dict) else {}
+    files: dict[str, str] = {}
+    if file_delivery.get("json"):
+        files["json"] = str(file_delivery["json"])
+    if file_delivery.get("text"):
+        files["text"] = str(file_delivery["text"])
+    return files
+
+
+def _daily_schedule_webhook_from_delivery(delivery_result: dict[str, Any]) -> dict[str, Any]:
+    webhook_delivery = delivery_result.get("webhook_delivery") if isinstance(delivery_result.get("webhook_delivery"), dict) else {}
+    if not webhook_delivery.get("attempted"):
+        return {}
+    return {
+        "url": webhook_delivery.get("url"),
+        "attempted": bool(webhook_delivery.get("attempted")),
+        "ok": bool(webhook_delivery.get("ok")),
+        "status_code": webhook_delivery.get("status_code"),
+        "error": webhook_delivery.get("error"),
+    }
 
 
 def _daily_schedule_delivery_result(payload: dict[str, Any], *, webhook_url: str | None) -> dict[str, Any]:
@@ -12197,7 +12285,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "daily-schedule":
             payload = _with_captured_stdout(lambda: daily_schedule_payload(args), json_output)
             _print_payload(payload, json_output)
-            return 0 if payload.get("status") in {"ok", "partial"} else 1
+            return 0 if payload.get("status") in {"ok", "partial", "delivered"} else 1
 
         if args.command == "daily-scheduler":
             return run_daily_scheduler(args, json_output=json_output)

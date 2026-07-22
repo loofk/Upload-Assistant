@@ -3330,7 +3330,7 @@ def _daily_candidate_delivery_post_webhook(notification_payload: dict[str, Any],
     req = urllib_request.Request(webhook_url, data=body, headers={"Content-Type": JSON_CONTENT_TYPE}, method="POST")
     try:
         with urllib_request.urlopen(req, timeout=timeout) as response:  # noqa: S310
-            status_code = int(getattr(response, "status", response.getcode()))
+            status_code = int(getattr(response, "status", None) or response.getcode())
     except (OSError, urllib_error.URLError, urllib_error.HTTPError) as exc:
         result.update({"ok": False, "error": str(exc), "blocker": str(exc)})
         return result

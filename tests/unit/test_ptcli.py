@@ -17648,14 +17648,21 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     webhook_calls = []
 
     class FakeWebhookResponse:
-        status_code = 204
+        status = 204
 
-    def fake_post(url, *, json, timeout):
-        webhook_calls.append({"url": url, "json": json, "timeout": timeout})
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        webhook_calls.append({"url": request.full_url, "json": body, "timeout": timeout})
         return FakeWebhookResponse()
 
     monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
-    monkeypatch.setattr(ptcli_cli.requests, "post", fake_post)
+    monkeypatch.setattr(ptcli_service.urllib_request, "urlopen", fake_urlopen)
     schedules_file = tmp_path / "schedules.json"
     schedules_file.write_text(json.dumps([{"name": "chd-to-mteam", "source_tracker": "CHD", "target": "MTEAM", "accept_rules": True}]), encoding="utf-8")
 
@@ -17702,6 +17709,10 @@ def test_daily_schedule_cli_runs_configured_schedules(monkeypatch, tmp_path, cap
     assert summary["delivery_handoff"] == payload["delivery_handoff"]
     assert summary["delivery_result"] == payload["delivery_result"]
     assert summary["delivery_audit"] == payload["delivery_audit"]
+    assert summary["run_and_deliver_report"] == payload["run_and_deliver_report"]
+    assert summary["run_and_deliver_result"]["kind"] == "ptcli.daily_candidate_run_and_deliver"
+    assert payload["run_and_deliver_report"]["notification_delivered"] is True
+    assert payload["delivery_result"]["run_and_deliver_report"]["notification_delivered"] is True
     assert payload["delivery_result"]["kind"] == "ptcli.daily_schedule.delivery_result"
     assert payload["delivery_result"]["status"] == "delivered"
     assert payload["delivery_result"]["ok"] is True
@@ -17844,13 +17855,14 @@ def test_daily_schedule_webhook_error_is_reported(monkeypatch, tmp_path, capsys)
             "next_actions": [],
         }
 
-    def fake_post(_url, *, json, timeout):
-        assert json["notification_payload"]["top_item"]["source_id"] == "60635"
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["notification_payload"]["top_item"]["source_id"] == "60635"
         assert timeout == 10.0
-        raise ptcli_cli.requests.RequestException("connection refused")
+        raise OSError("connection refused")
 
     monkeypatch.setattr(ptcli_service, "daily_candidates", fake_daily_candidates)
-    monkeypatch.setattr(ptcli_cli.requests, "post", fake_post)
+    monkeypatch.setattr(ptcli_service.urllib_request, "urlopen", fake_urlopen)
     schedules_file = tmp_path / "schedules.json"
     schedules_file.write_text(json.dumps([{"name": "u2-to-mteam", "source_tracker": "U2", "target": "MTEAM", "accept_rules": True}]), encoding="utf-8")
 
@@ -17888,6 +17900,8 @@ def test_daily_schedule_webhook_error_is_reported(monkeypatch, tmp_path, capsys)
     assert summary["notification_webhook"] == payload["notification_webhook"]
     assert summary["delivery_result"] == payload["delivery_result"]
     assert summary["delivery_audit"] == payload["delivery_audit"]
+    assert summary["run_and_deliver_report"] == payload["run_and_deliver_report"]
+    assert payload["run_and_deliver_report"]["delivery_ok"] is False
 
 
 def test_daily_schedule_uses_env_output_dir_for_handoff_files(monkeypatch, tmp_path, capsys) -> None:
