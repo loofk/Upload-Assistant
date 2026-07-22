@@ -19552,6 +19552,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "compose_deployable" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "api_auth_recommended" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "env_template_ready" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+    assert "docker_compose_host_path_envs" in tool_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
     assert "deployment_env_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "copy_command" in tool_by_name["deployment_check"]["response_contract"]["deployment_env_fields"]
     assert "deployment_handoff_fields" in tool_by_name["deployment_check"]["response_contract"]
@@ -19570,6 +19571,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "docker_compose_fields" in tool_by_name["deployment_check"]["response_contract"]
     assert "ptcli_api_service_ready" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
     assert "ptcli_api_healthcheck" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
+    assert "host_path_envs" in tool_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
     assert "manual_retorrent" in tool_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
     assert tool_by_name["goal_progress"]["path"] == "/v1/goal/progress"
     assert tool_by_name["goal_progress"]["method"] == "GET"
@@ -20516,6 +20518,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "compose_deployable" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "api_auth_recommended" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "env_template_ready" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
+        assert "docker_compose_host_path_envs" in tools_by_name["deployment_check"]["response_contract"]["agent_summary_fields"]
         assert "deployment_env_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "copy_command" in tools_by_name["deployment_check"]["response_contract"]["deployment_env_fields"]
         assert "deployment_handoff_fields" in tools_by_name["deployment_check"]["response_contract"]
@@ -20534,6 +20537,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "docker_compose_fields" in tools_by_name["deployment_check"]["response_contract"]
         assert "ptcli_api_service_ready" in tools_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
         assert "ptcli_api_healthcheck" in tools_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
+        assert "host_path_envs" in tools_by_name["deployment_check"]["response_contract"]["docker_compose_fields"]
         assert "manual_retorrent" in tools_by_name["deployment_check"]["response_contract"]["agent_handoff_fields"]
         assert tools_by_name["readiness_bundle"]["path"] == "/v1/readiness/bundle"
         assert "live_readiness" in tools_by_name["readiness_bundle"]["response_contract"]["required_fields"]
@@ -21381,12 +21385,20 @@ def test_ptcli_docker_compose_defaults_are_seedbox_ready() -> None:
     assert "PTCLI_MAX_CONCURRENT_JOBS=${PTCLI_MAX_CONCURRENT_JOBS:-1}" in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=${PTCLI_DAILY_CANDIDATE_SCHEDULES:-}" in compose
     assert "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=${PTCLI_DAILY_CANDIDATE_WEBHOOK_URL:-}" in compose
+    assert "${PTCLI_DOWNLOADS_HOST_PATH:-/path/to/torrents/}:/downloads/:rw" in compose
+    assert "${PTCLI_CONFIG_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/config.py}:/Upload-Assistant/data/config.py:rw" in compose
+    assert "${PTCLI_COOKIES_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/data/cookies/}:/Upload-Assistant/data/cookies/:rw" in compose
+    assert "${PTCLI_TMP_HOST_PATH:-/mnt/user/appdata/Upload-Assistant/tmp/}:/Upload-Assistant/tmp/:rw" in compose
     assert "- daily" in compose
     assert 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]' in compose
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES=" in env_example
     assert '"confirm_upload":false' in env_example
     assert "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL=" in env_example
     assert "PTCLI_MAX_CONCURRENT_JOBS=1" in env_example
+    assert "PTCLI_DOWNLOADS_HOST_PATH=/path/to/torrents/" in env_example
+    assert "PTCLI_CONFIG_HOST_PATH=/mnt/user/appdata/Upload-Assistant/data/config.py" in env_example
+    assert "PTCLI_COOKIES_HOST_PATH=/mnt/user/appdata/Upload-Assistant/data/cookies/" in env_example
+    assert "PTCLI_TMP_HOST_PATH=/mnt/user/appdata/Upload-Assistant/tmp/" in env_example
     assert "name: ${PTCLI_DOCKER_NETWORK:-upload-assistant-ptcli}" in compose
     assert "yournetwork" not in compose
     assert "PTCLI_API_TOKEN=change-me" in env_example
@@ -21420,10 +21432,10 @@ services:
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
-      - /downloads:/downloads/:rw
-      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
-      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
-      - /app/tmp/:/Upload-Assistant/tmp/:rw
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
@@ -21460,12 +21472,17 @@ services:
     assert payload["deployment_env"]["copy_command"] == "cp .env.ptcli.example .env"
     assert payload["deployment_env"]["missing_keys"] == []
     assert "PTCLI_API_TOKEN" in payload["deployment_env"]["required_keys"]
+    assert "PTCLI_DOWNLOADS_HOST_PATH" in payload["deployment_env"]["required_keys"]
+    assert "PTCLI_CONFIG_HOST_PATH" in payload["deployment_env"]["required_keys"]
+    assert "PTCLI_COOKIES_HOST_PATH" in payload["deployment_env"]["required_keys"]
+    assert "PTCLI_TMP_HOST_PATH" in payload["deployment_env"]["required_keys"]
     assert "PTCLI_DAILY_CANDIDATE_SCHEDULES" in payload["deployment_env"]["daily_keys"]
     assert payload["docker_compose"]["daily_schedule_service_ready"] is True
     assert payload["docker_compose"]["daily_scheduler_service_ready"] is True
     assert payload["docker_compose"]["ptcli_api_service_ready"] is True
     assert payload["docker_compose"]["ptcli_api_healthcheck"] is True
     assert payload["docker_compose"]["ptcli_api_localhost_port"] is True
+    assert payload["docker_compose"]["host_path_envs"] is True
     assert payload["docker_compose"]["downloads_mount"] is True
     assert payload["queue"]["max_concurrent_jobs"] == 2
     assert payload["agent_summary"]["ready_for_ai"] is True
@@ -21477,6 +21494,7 @@ services:
     assert payload["agent_summary"]["api_auth_recommended"] is True
     assert payload["agent_summary"]["docker_compose_daily_ready"] is True
     assert payload["agent_summary"]["docker_compose_api_ready"] is True
+    assert payload["agent_summary"]["docker_compose_host_path_envs"] is True
     assert payload["agent_summary"]["env_template_ready"] is True
     assert payload["agent_summary"]["env_template_present"] is True
     assert payload["agent_summary"]["daily_candidate_schedule_count"] == 1
@@ -21503,6 +21521,7 @@ services:
     assert final_report["verdict"] == "ready_for_readiness_bundle"
     assert final_report["docker"]["ptcli_api_service_ready"] is True
     assert final_report["docker"]["localhost_port"] is True
+    assert final_report["docker"]["host_path_envs"] is True
     assert final_report["docker"]["start_api_command"].endswith("up -d --build ptcli-api")
     assert final_report["api"]["health"] == "http://127.0.0.1:8080/health"
     assert final_report["api"]["token_configured"] is False
@@ -21540,6 +21559,7 @@ services:
     assert bootstrap["mkdir_commands"] == []
     assert bootstrap["compose"]["api_ready"] is True
     assert bootstrap["compose"]["daily_ready"] is True
+    assert bootstrap["compose"]["host_path_envs"] is True
     assert bootstrap["compose"]["start_api"].endswith("up -d --build ptcli-api")
     assert bootstrap["qbit"]["configured"] is True
     assert bootstrap["daily_candidates"]["configured"] is True
@@ -21585,6 +21605,7 @@ services:
     assert payload["agent_handoff"]["docker_compose"]["daily_scheduler_ready"] is True
     assert payload["agent_handoff"]["docker_compose"]["api_ready"] is True
     assert payload["agent_handoff"]["docker_compose"]["api_service"]["healthcheck"] is True
+    assert payload["agent_handoff"]["docker_compose"]["api_service"]["host_path_envs"] is True
     assert payload["agent_handoff"]["docker_compose"]["api_service"]["config_mount"] is True
     assert payload["agent_handoff"]["env"]["template_ready"] is True
     assert payload["agent_handoff"]["safety"]["live_upload_requires"] == ["accept_rules=true", "confirm_upload=true", "non-duplicate target", "ready site policy gate"]
@@ -21687,10 +21708,10 @@ services:
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
-      - /downloads:/downloads/:rw
-      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
-      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
-      - /app/tmp/:/Upload-Assistant/tmp/:rw
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
@@ -21822,10 +21843,10 @@ services:
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
-      - /downloads:/downloads/:rw
-      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
-      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
-      - /app/tmp/:/Upload-Assistant/tmp/:rw
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
@@ -21916,10 +21937,10 @@ services:
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
-      - /downloads:/downloads/:rw
-      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
-      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
-      - /app/tmp/:/Upload-Assistant/tmp/:rw
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
@@ -21983,10 +22004,10 @@ services:
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
-      - /downloads:/downloads/:rw
-      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
-      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
-      - /app/tmp/:/Upload-Assistant/tmp/:rw
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
@@ -22108,10 +22129,10 @@ services:
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
-      - /downloads:/downloads/:rw
-      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
-      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
-      - /app/tmp/:/Upload-Assistant/tmp/:rw
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
@@ -22231,10 +22252,10 @@ services:
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
-      - /downloads:/downloads/:rw
-      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
-      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
-      - /app/tmp/:/Upload-Assistant/tmp/:rw
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
@@ -22353,10 +22374,10 @@ services:
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
-      - /downloads:/downloads/:rw
-      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
-      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
-      - /app/tmp/:/Upload-Assistant/tmp/:rw
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
@@ -22543,10 +22564,10 @@ services:
       - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
       - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
     volumes:
-      - /downloads:/downloads/:rw
-      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
-      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
-      - /app/tmp/:/Upload-Assistant/tmp/:rw
+      - ${PTCLI_DOWNLOADS_HOST_PATH:-/downloads}:/downloads/:rw
+      - ${PTCLI_CONFIG_HOST_PATH:-/app/data/config.py}:/Upload-Assistant/data/config.py:rw
+      - ${PTCLI_COOKIES_HOST_PATH:-/app/data/cookies/}:/Upload-Assistant/data/cookies/:rw
+      - ${PTCLI_TMP_HOST_PATH:-/app/tmp/}:/Upload-Assistant/tmp/:rw
     command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]

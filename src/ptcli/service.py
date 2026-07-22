@@ -21741,7 +21741,18 @@ def _runtime_binary_status(name: str) -> dict[str, Any]:
 
 
 def _deployment_env_template_summary(template_path: Path, env_path: Path) -> dict[str, Any]:
-    required_keys = ["TZ", "PTCLI_API_TOKEN", "PTCLI_PUBLIC_BASE_URL", "PTCLI_MAX_CONCURRENT_JOBS", "PTCLI_JOB_DIR", "PTCLI_DOWNLOADS_PATH"]
+    required_keys = [
+        "TZ",
+        "PTCLI_API_TOKEN",
+        "PTCLI_PUBLIC_BASE_URL",
+        "PTCLI_MAX_CONCURRENT_JOBS",
+        "PTCLI_JOB_DIR",
+        "PTCLI_DOWNLOADS_PATH",
+        "PTCLI_DOWNLOADS_HOST_PATH",
+        "PTCLI_CONFIG_HOST_PATH",
+        "PTCLI_COOKIES_HOST_PATH",
+        "PTCLI_TMP_HOST_PATH",
+    ]
     daily_keys = ["PTCLI_DAILY_CANDIDATE_SCHEDULES", "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL"]
     optional_keys = ["PTCLI_DOCKER_NETWORK"]
     present = template_path.is_file()
@@ -21780,7 +21791,12 @@ def _deployment_env_template_summary(template_path: Path, env_path: Path) -> dic
         "optional_keys": optional_keys,
         "missing_keys": missing_keys,
         "copy_command": f"cp {template_path.name} {env_path.name}",
-        "edit_after_copy": ["Set PTCLI_API_TOKEN before exposing the API.", "Adjust PTCLI_PUBLIC_BASE_URL if OpenClaw/Hermes reaches ptcli through a reverse proxy.", "Set PTCLI_DAILY_CANDIDATE_SCHEDULES when daily candidate jobs are needed."],
+        "edit_after_copy": [
+            "Set PTCLI_API_TOKEN before exposing the API.",
+            "Adjust PTCLI_PUBLIC_BASE_URL if OpenClaw/Hermes reaches ptcli through a reverse proxy.",
+            "Set PTCLI_DOWNLOADS_HOST_PATH, PTCLI_CONFIG_HOST_PATH, PTCLI_COOKIES_HOST_PATH, and PTCLI_TMP_HOST_PATH to real seedbox paths.",
+            "Set PTCLI_DAILY_CANDIDATE_SCHEDULES when daily candidate jobs are needed.",
+        ],
         "security": {
             "api_token_default": "change-me",
             "api_token_required_when_exposed": True,
@@ -21873,6 +21889,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
             }
     scheduler_command = 'command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
     schedule_command = 'command: ["daily-schedule", "--write-summary", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]'
+    host_path_envs = all(key in text for key in ("PTCLI_DOWNLOADS_HOST_PATH", "PTCLI_CONFIG_HOST_PATH", "PTCLI_COOKIES_HOST_PATH", "PTCLI_TMP_HOST_PATH"))
     return {
         "present": exists,
         "readable": exists,
@@ -21889,6 +21906,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
         "config_mount": ":/Upload-Assistant/data/config.py:" in text,
         "cookies_mount": ":/Upload-Assistant/data/cookies/" in text or ":/Upload-Assistant/data/cookies:" in text,
         "tmp_mount": ":/Upload-Assistant/tmp/" in text or ":/Upload-Assistant/tmp:" in text,
+        "host_path_envs": host_path_envs,
         "daily_schedule_service": "ptcli-daily-schedule:" in text,
         "daily_scheduler_service": "ptcli-daily-scheduler:" in text,
         "daily_profile": "- daily" in text,
@@ -21909,6 +21927,7 @@ def _deployment_docker_compose_summary(compose_path: Path) -> dict[str, Any]:
                 ":/Upload-Assistant/data/config.py:" in text,
                 (":/Upload-Assistant/data/cookies/" in text or ":/Upload-Assistant/data/cookies:" in text),
                 (":/Upload-Assistant/tmp/" in text or ":/Upload-Assistant/tmp:" in text),
+                host_path_envs,
             )
         ),
         "daily_schedule_service_ready": all(
@@ -21954,6 +21973,7 @@ def _deployment_docker_compose_api_message(summary: dict[str, Any]) -> str:
             ("data/config.py mount", summary.get("config_mount")),
             ("data/cookies mount", summary.get("cookies_mount")),
             ("tmp mount", summary.get("tmp_mount")),
+            ("host path env vars", summary.get("host_path_envs")),
         )
         if not ready
     ]
@@ -22036,6 +22056,7 @@ def _deployment_agent_summary(
         "daily_candidates_configured": bool(daily_candidate_plan.get("configured")),
         "docker_compose_api_ready": bool(docker_compose.get("ptcli_api_service_ready")),
         "docker_compose_daily_ready": bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready")),
+        "docker_compose_host_path_envs": bool(docker_compose.get("host_path_envs")),
         "env_template_ready": bool(env_template.get("ready")),
         "env_template_present": bool(env_template.get("template_present")),
         "missing_mounts": mounts.get("missing", []),
@@ -22169,6 +22190,7 @@ def _deployment_final_report(
             "daily_schedule_ready": bool(docker_compose.get("daily_schedule_service_ready")),
             "localhost_port": bool(docker_compose.get("ptcli_api_localhost_port")),
             "host_gateway": bool(docker_compose.get("host_gateway")),
+            "host_path_envs": bool(docker_compose.get("host_path_envs")),
             "start_api_command": (seedbox_bootstrap_handoff.get("compose") or {}).get("start_api") if isinstance(seedbox_bootstrap_handoff.get("compose"), dict) else None,
             "start_daily_scheduler_command": (seedbox_bootstrap_handoff.get("compose") or {}).get("start_daily_scheduler") if isinstance(seedbox_bootstrap_handoff.get("compose"), dict) else None,
         },
@@ -22466,6 +22488,7 @@ def _deployment_seedbox_bootstrap_handoff(
             "file": compose_file,
             "api_ready": bool(docker_compose.get("ptcli_api_service_ready")),
             "daily_ready": bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready")),
+            "host_path_envs": bool(docker_compose.get("host_path_envs")),
             "start_api": f"docker compose -f {compose_file} up -d --build ptcli-api",
             "start_daily_scheduler": f"docker compose -f {compose_file} --profile daily up -d ptcli-daily-scheduler",
         },
@@ -22704,6 +22727,7 @@ def _deployment_agent_handoff(
                 "api_token_env": bool(docker_compose.get("ptcli_api_token_env")),
                 "job_dir_env": bool(docker_compose.get("ptcli_job_dir_env")),
                 "host_gateway": bool(docker_compose.get("host_gateway")),
+                "host_path_envs": bool(docker_compose.get("host_path_envs")),
                 "downloads_mount": bool(docker_compose.get("downloads_mount")),
                 "config_mount": bool(docker_compose.get("config_mount")),
                 "cookies_mount": bool(docker_compose.get("cookies_mount")),
@@ -24613,7 +24637,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
             "response_contract": {
                 "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "deployment_final_report", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
-                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "env_template_ready", "env_template_present"],
+                "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "docker_compose_host_path_envs", "env_template_ready", "env_template_present"],
                 "runtime_tools_fields": ["ready", "required", "optional", "missing_required", "message"],
                 "deployment_env_fields": ["ready", "template_present", "template_readable", "template_path", "env_path", "env_present", "required_keys", "daily_keys", "optional_keys", "missing_keys", "copy_command", "edit_after_copy", "security", "next_actions"],
                 "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "env", "qbit", "safety", "blockers", "warnings"],
@@ -24622,7 +24646,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "seedbox_live_trial_handoff_fields": ["ready", "status", "action", "read_only", "compose", "api", "readiness", "live_order", "report_contract", "safety", "required_confirmations", "qbit", "next_step", "blockers", "warnings", "next_actions"],
                 "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
-                "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
+                "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
         },

@@ -30149,6 +30149,7 @@
           "daily_candidates_configured",
           "docker_compose_api_ready",
           "docker_compose_daily_ready",
+          "docker_compose_host_path_envs",
           "env_template_ready",
           "env_template_present"
         ],
@@ -30285,6 +30286,7 @@
           "ptcli_api_token_env",
           "ptcli_job_dir_env",
           "host_gateway",
+          "host_path_envs",
           "downloads_mount",
           "config_mount",
           "cookies_mount",
