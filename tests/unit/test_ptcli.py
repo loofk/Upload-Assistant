@@ -16903,6 +16903,45 @@ def test_daily_candidate_final_report_exposes_completion_evidence() -> None:
     assert publish_payload["publish_contract"]["safe_to_publish_without_tracker_mutation"] is True
 
 
+def test_daily_candidate_completion_report_blocks_when_submitted_job_is_blocked() -> None:
+    complete_job = {
+        "retorrent_job_id": "job-retorrent-1",
+        "status": "complete",
+        "candidate_source_id": "60635",
+        "candidate_title": "Example.Release",
+        "action": "complete",
+        "summary_endpoint": "/v1/jobs/job-retorrent-1/summary",
+        "job_final_report": {"kind": "ptcli.job_final_report", "verdict": "ready_to_report", "report_allowed": True, "duplicate_check": {"exists": False}},
+        "manual_retorrent_final_report": {"kind": "ptcli.manual_retorrent_final_report", "verdict": "ready_to_report", "report_allowed": True},
+        "qbit_execution_gate": {"kind": "ptcli.qbit_execution_gate", "ready": True},
+        "uploaded_seeding_evidence": {"kind": "ptcli.uploaded_seeding_evidence", "ready": True},
+    }
+    blocked_job = {
+        "retorrent_job_id": "job-retorrent-2",
+        "status": "blocked",
+        "candidate_source_id": "60636",
+        "candidate_title": "Blocked.Release",
+        "action": "configure_policy",
+        "summary_endpoint": "/v1/jobs/job-retorrent-2/summary",
+        "blockers": ["site policy review missing"],
+    }
+
+    report = ptcli_service._daily_candidate_completion_report(
+        {"complete_jobs": [complete_job], "running_jobs": [], "blocked_jobs": [blocked_job]},
+        {},
+        ["submitted_job.job-retorrent-2.configure_policy"],
+    )
+
+    assert report["kind"] == "ptcli.daily_candidate_completion_report"
+    assert report["ready"] is False
+    assert report["report_allowed"] is False
+    assert report["complete_count"] == 1
+    assert report["blocked_count"] == 1
+    assert report["completed_jobs"][0]["report_allowed"] is True
+    assert report["blockers"] == ["submitted_job.job-retorrent-2.configure_policy"]
+    assert report["next_actions"] == ["Resolve blocked submitted jobs before reporting daily candidate completion."]
+
+
 def test_candidate_retorrent_handoff_prefers_material_resume_request(tmp_path) -> None:
     result = {
         "kind": "ptcli.service.retorrent",

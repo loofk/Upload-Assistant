@@ -8590,10 +8590,12 @@ def _daily_candidate_completion_report(execution_summary: dict[str, Any], execut
     running_jobs = execution_summary.get("running_jobs") if isinstance(execution_summary.get("running_jobs"), list) else execution_context.get("running_jobs") if isinstance(execution_context.get("running_jobs"), list) else []
     blocked_jobs = execution_summary.get("blocked_jobs") if isinstance(execution_summary.get("blocked_jobs"), list) else execution_context.get("blocked_jobs") if isinstance(execution_context.get("blocked_jobs"), list) else []
     completed = [_daily_candidate_completed_job_report(job) for job in complete_jobs if isinstance(job, dict)]
+    completed_report_allowed = bool(completed) and all(item.get("report_allowed") is True for item in completed)
+    report_allowed = completed_report_allowed and not running_jobs and not blocked_jobs and not blockers
     return {
         "kind": "ptcli.daily_candidate_completion_report",
-        "ready": bool(completed) and not running_jobs and not blocked_jobs and not blockers,
-        "report_allowed": bool(completed) and not running_jobs,
+        "ready": report_allowed,
+        "report_allowed": report_allowed,
         "complete_count": len(completed),
         "running_count": len(running_jobs),
         "blocked_count": len(blocked_jobs),
