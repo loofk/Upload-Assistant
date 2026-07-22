@@ -29189,7 +29189,15 @@
           "rule_review_request",
           "config_update_plan",
           "policy_config_handoff",
+          "policy_execution_ready",
+          "policy_execution_phase",
+          "policy_execution_summary",
+          "policy_execution_handoff",
+          "policy_execution_plan",
+          "policy_enforcement_bundle",
+          "policy_runtime_contract",
           "next_step",
+          "read_order",
           "blockers"
         ],
         "tracker_adapter_evidence_fields": [

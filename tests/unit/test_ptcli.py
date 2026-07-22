@@ -19368,6 +19368,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "site_policy_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "rule_review_request" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "config_update_plan" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+    assert "policy_execution_handoff" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+    assert "policy_execution_plan" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+    assert "policy_runtime_contract" in tool_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
     assert "completion_evidence" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "submission_ready" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_submission_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
@@ -20158,6 +20161,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "resume_final_report" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "rule_review_request" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "config_update_plan" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
+    assert "policy_execution_handoff" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
+    assert "policy_execution_plan" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
+    assert "policy_runtime_contract" in goal_progress_tool["response_contract"]["site_policy_evidence_fields"]
     assert "live_validation_preflight" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "live_validation_preflight_fields" in goal_progress_tool["response_contract"]
     assert "request" in goal_progress_tool["response_contract"]["next_step_fields"]
@@ -20216,6 +20222,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "resume_final_report" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "rule_review_request" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "config_update_plan" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+        assert "policy_execution_handoff" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+        assert "policy_execution_plan" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
+        assert "policy_runtime_contract" in tools_by_name["goal_progress"]["response_contract"]["site_policy_evidence_fields"]
         assert "live_validation_preflight" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "live_validation_preflight_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
@@ -21402,6 +21411,12 @@ services:
     assert payload["evidence"]["site_policies"]["config_update_plan"]["structured_patch"]["MTEAM"]["qbit_limits"]["upload_limit"]
     assert payload["evidence"]["site_policies"]["config_update_plan"]["flat_patch"]["U2"]["download_rate_limit"]
     assert payload["evidence"]["site_policies"]["config_update_plan"]["flat_patch"]["MTEAM"]["upload_rate_limit"]
+    assert payload["evidence"]["site_policies"]["policy_execution_ready"] is False
+    assert payload["evidence"]["site_policies"]["policy_execution_phase"] == "configure_site_policy"
+    assert payload["evidence"]["site_policies"]["policy_execution_plan"]["action"] == "review_rules"
+    assert "confirm_upload=true before live upload" in payload["evidence"]["site_policies"]["policy_execution_plan"]["required_confirmations"]
+    assert "policy_enforcement_bundle.ready=true" in payload["evidence"]["site_policies"]["policy_enforcement_bundle"]["live_job_requirements"]
+    assert "source_url" in payload["evidence"]["site_policies"]["policy_runtime_contract"]["required_request_fields"]
     assert payload["evidence"]["site_policies"]["next_step"]["tool"] == "site_policy_rule_review"
     adapters = payload["evidence"]["tracker_adapters"]
     assert adapters["adapter_extension_final_report"]["kind"] == "ptcli.adapter_extension_final_report"
@@ -21417,6 +21432,7 @@ services:
     assert payload["next_step"]["request"] == payload["evidence"]["site_policies"]["rule_review_request"]
     assert any("evidence.site_policies.policy_repair_gate.next_step" in action for action in payload["next_actions"])
     assert payload["read_order"][0] == "completion_estimate"
+    assert "evidence.site_policies" in payload["read_order"]
     assert "evidence.live_validation" in payload["read_order"]
     assert "evidence.live_validation_preflight" in payload["read_order"]
     assert "evidence.qbittorrent" in payload["read_order"]

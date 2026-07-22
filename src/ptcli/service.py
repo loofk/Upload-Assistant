@@ -21526,6 +21526,11 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     blockers = _goal_progress_blockers(progress_items, deployment, site_policies, live_validation_evidence)
     policy_repair_gate = site_policies.get("policy_repair_gate") if isinstance(site_policies.get("policy_repair_gate"), dict) else {}
     policy_config_handoff = site_policies.get("policy_config_handoff") if isinstance(site_policies.get("policy_config_handoff"), dict) else {}
+    policy_execution_handoff = site_policies.get("policy_execution_handoff") if isinstance(site_policies.get("policy_execution_handoff"), dict) else {}
+    policy_execution_summary = site_policies.get("policy_execution_summary") if isinstance(site_policies.get("policy_execution_summary"), dict) else {}
+    policy_execution_plan = site_policies.get("policy_execution_plan") if isinstance(site_policies.get("policy_execution_plan"), dict) else {}
+    policy_runtime_contract = site_policies.get("policy_runtime_contract") if isinstance(site_policies.get("policy_runtime_contract"), dict) else {}
+    policy_enforcement_bundle = site_policies.get("policy_enforcement_bundle") if isinstance(site_policies.get("policy_enforcement_bundle"), dict) else {}
     config_update_plan = site_policies.get("config_update_plan") if isinstance(site_policies.get("config_update_plan"), dict) else {}
     daily_candidate_plan = deployment.get("daily_candidates") if isinstance(deployment.get("daily_candidates"), dict) else {}
     next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight, daily_candidate_plan)
@@ -21577,7 +21582,48 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 if config_update_plan
                 else None,
                 "policy_config_handoff": policy_config_handoff or None,
-                "next_step": policy_repair_gate.get("next_step") if isinstance(policy_repair_gate.get("next_step"), dict) else policy_config_handoff.get("next_step") if isinstance(policy_config_handoff.get("next_step"), dict) else None,
+                "policy_execution_ready": policy_execution_handoff.get("ready") if policy_execution_handoff else policy_execution_summary.get("ready"),
+                "policy_execution_phase": policy_execution_handoff.get("phase"),
+                "policy_execution_summary": policy_execution_summary or None,
+                "policy_execution_handoff": policy_execution_handoff or None,
+                "policy_execution_plan": {
+                    "ready": policy_execution_plan.get("ready"),
+                    "action": policy_execution_plan.get("action"),
+                    "request_defaults": policy_execution_plan.get("request_defaults") if isinstance(policy_execution_plan.get("request_defaults"), dict) else {},
+                    "request_default_sources": policy_execution_plan.get("request_default_sources") if isinstance(policy_execution_plan.get("request_default_sources"), dict) else {},
+                    "required_confirmations": _string_list(policy_execution_plan.get("required_confirmations")),
+                    "recommended_tool": policy_execution_plan.get("recommended_tool"),
+                    "recommended_endpoint": policy_execution_plan.get("recommended_endpoint"),
+                }
+                if policy_execution_plan
+                else None,
+                "policy_enforcement_bundle": {
+                    "ready": policy_enforcement_bundle.get("ready"),
+                    "action": policy_enforcement_bundle.get("action"),
+                    "request_defaults": policy_enforcement_bundle.get("request_defaults") if isinstance(policy_enforcement_bundle.get("request_defaults"), dict) else {},
+                    "live_job_requirements": _string_list(policy_enforcement_bundle.get("live_job_requirements")),
+                    "completion_evidence": _string_list(policy_enforcement_bundle.get("completion_evidence")),
+                    "blockers": _string_list(policy_enforcement_bundle.get("blockers")),
+                }
+                if policy_enforcement_bundle
+                else None,
+                "policy_runtime_contract": {
+                    "ready": policy_runtime_contract.get("ready"),
+                    "required_request_fields": _string_list(policy_runtime_contract.get("required_request_fields")),
+                    "request_defaults": policy_runtime_contract.get("request_defaults") if isinstance(policy_runtime_contract.get("request_defaults"), dict) else {},
+                    "protected_fields": policy_runtime_contract.get("protected_fields") if isinstance(policy_runtime_contract.get("protected_fields"), list) else [],
+                    "completion_contract": policy_runtime_contract.get("completion_contract") if isinstance(policy_runtime_contract.get("completion_contract"), dict) else None,
+                }
+                if policy_runtime_contract
+                else None,
+                "next_step": policy_repair_gate.get("next_step")
+                if isinstance(policy_repair_gate.get("next_step"), dict)
+                else policy_execution_handoff.get("next_step")
+                if isinstance(policy_execution_handoff.get("next_step"), dict)
+                else policy_config_handoff.get("next_step")
+                if isinstance(policy_config_handoff.get("next_step"), dict)
+                else None,
+                "read_order": ["policy_repair_gate", "policy_execution_handoff", "policy_execution_plan", "policy_runtime_contract", "config_update_plan"],
                 "blockers": _string_list(site_policies.get("blockers")),
             },
             "tracker_adapters": _goal_progress_tracker_adapter_evidence(tracker_adapters),
@@ -21585,7 +21631,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
             "live_validation_preflight": live_validation_preflight,
             "tool_count": len(tools),
         },
-        "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence.live_validation", "evidence.live_validation_preflight", "evidence.qbittorrent", "evidence", "next_step", "blockers"],
+        "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence.site_policies", "evidence.live_validation", "evidence.live_validation_preflight", "evidence.qbittorrent", "evidence", "next_step", "blockers"],
         "next_actions": _goal_progress_next_actions(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight),
     }
 
@@ -23198,7 +23244,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "evidence_fields": ["deployment", "daily_candidates", "qbittorrent", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
                 "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_schedule_final_report", "next_step", "blockers", "next_actions"],
                 "qbittorrent_evidence_fields": ["ready", "status", "configured", "client", "torrent_client", "connectivity_checked", "host_hint", "port_hint", "live_evidence_source", "live_job_id", "live_job_status", "live_user_report_qbit", "qbit_enforcement_summary", "live_execution_package_qbit_step", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
-                "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "next_step", "blockers"],
+                "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "policy_execution_ready", "policy_execution_phase", "policy_execution_summary", "policy_execution_handoff", "policy_execution_plan", "policy_enforcement_bundle", "policy_runtime_contract", "next_step", "read_order", "blockers"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "resume_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
                 "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
