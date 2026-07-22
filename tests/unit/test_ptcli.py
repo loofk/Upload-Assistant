@@ -20585,6 +20585,21 @@ def test_site_policy_rule_review_requires_explicit_manual_evidence(monkeypatch) 
     assert payload["recommended_tool"] == "site_policy_rule_review"
     assert payload["recommended_endpoint"] == "/v1/site-policies/rule-review"
     assert payload["next_step"]["reason"] == "complete_manual_rule_review_evidence"
+    review_package = payload["rule_review_package"]
+    assert review_package["kind"] == "ptcli.site_policy_rule_review_package"
+    assert review_package["ready"] is False
+    assert review_package["action"] == "review_tracker_rules_then_submit_template"
+    assert {item["tracker"] for item in review_package["rules_to_review"]} == {"U2", "MTEAM"}
+    assert review_package["submit_request_template"]["rules_reviewed"] is True
+    assert review_package["submit_request_template"]["reviewer"] == "<reviewer>"
+    assert review_package["submit_request_template"]["reviewed_at"] == "<YYYY-MM-DD>"
+    assert review_package["submit_request_template"]["source_tracker"] == "U2"
+    assert review_package["submit_request_template"]["target"] == "MTEAM"
+    assert review_package["submit_request_template"]["rules_urls"]["U2"].endswith("/rules.php")
+    assert review_package["after_config_edit"]["endpoint"] == "/v1/site-policies"
+    assert review_package["safety"]["must_not_auto_confirm_rules"] is True
+    assert payload["next_step"]["request"] == review_package["submit_request_template"]
+    assert payload["recommended_request"] == review_package["submit_request_template"]
     final_report = payload["rule_review_final_report"]
     assert final_report["kind"] == "ptcli.site_policy_rule_review_final_report"
     assert final_report["ready"] is False
@@ -20592,6 +20607,7 @@ def test_site_policy_rule_review_requires_explicit_manual_evidence(monkeypatch) 
     assert final_report["verdict"] == "needs_manual_review"
     assert final_report["action"] == "collect_manual_rule_review_evidence"
     assert final_report["merged_config_patch"] is None
+    assert final_report["rule_review_package"] == review_package
     assert final_report["safety"]["must_not_fabricate_fingerprint"] is True
     assert final_report["recommended_tool"] == "site_policy_rule_review"
     apply_report = payload["config_apply_final_report"]
@@ -20633,6 +20649,13 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert payload["config_patch"]["safe_to_auto_apply"] is False
     assert payload["config_patch"]["structured_patch"]["U2"]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
     assert payload["config_patch"]["flat_patch"]["MTEAM"]["rule_review_fingerprint"] == reviews["MTEAM"]["rule_review_fingerprint"]
+    review_package = payload["rule_review_package"]
+    assert review_package["ready"] is True
+    assert review_package["status"] == "patch_ready"
+    assert review_package["submit_request_template"]["source_url"] == "https://u2.dmhy.org/details.php?id=60635"
+    assert review_package["submit_request_template"]["reviewer"] == "liuxiang"
+    assert review_package["submit_request_template"]["reviewed_at"] == "2026-07-21"
+    assert review_package["after_submit"]["continue_when"] == "config_apply_final_report.ready=true and copyable_config.ready=true"
     assert payload["merged_config_patch"]["kind"] == "ptcli.site_policy_rule_review_merged_config_patch"
     assert payload["merged_config_patch"]["safe_to_auto_apply"] is False
     assert payload["merged_config_patch"]["structured_patch"]["U2"]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
@@ -20647,6 +20670,7 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert final_report["verdict"] == "patch_ready"
     assert final_report["action"] == "copy_config_patch"
     assert final_report["merged_config_patch"] == payload["merged_config_patch"]
+    assert final_report["rule_review_package"] == review_package
     assert final_report["merge_plan"]["fingerprint_patch_source"] == "site_policy_rule_review.config_patch.structured_patch"
     assert final_report["merge_plan"]["merged_patch_source"] == "site_policy_rule_review.merged_config_patch"
     assert final_report["merge_plan"]["fingerprint_patch_wins"] is True
@@ -20680,8 +20704,8 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert payload["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert payload["recommended_request"] == payload["merged_config_patch"]
     assert payload["recommended_endpoint"] is None
-    assert payload["read_order"][0] == "rule_review_final_report"
-    assert payload["read_order"][1] == "config_apply_final_report"
+    assert payload["read_order"][0] == "rule_review_package"
+    assert payload["read_order"][1] == "rule_review_final_report"
     assert "merged_config_patch" in payload["read_order"]
 
 
@@ -21725,11 +21749,15 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "rule_review_request" in tool_by_name["site_policies"]["response_contract"]["policy_repair_gate_fields"]
     assert tool_by_name["site_policy_rule_review"]["path"] == "/v1/site-policies/rule-review"
     assert tool_by_name["site_policy_rule_review"]["input_schema"]["required"] == ["rules_reviewed", "reviewer", "reviewed_at"]
+    assert "rule_review_package" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+    assert "rule_review_package_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
+    assert "submit_request_template" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_package_fields"]
     assert "config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "merged_config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "rule_review_final_report" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "config_apply_final_report" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "rule_review_final_report_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
+    assert "rule_review_package" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
     assert "merged_config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
     assert "merge_plan" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
     assert "config_apply_final_report_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
@@ -22898,6 +22926,9 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "agent_decision" in retorrent_tool["response_contract"]["required_fields"]
     assert "confirm_upload=true" in retorrent_tool["safety"]["requires_confirmation"]
     rule_review_tool = next(tool for tool in manifest["tools"] if tool["name"] == "site_policy_rule_review")
+    assert "rule_review_package" in rule_review_tool["response_contract"]["required_fields"]
+    assert "rule_review_package_fields" in rule_review_tool["response_contract"]
+    assert "submit_request_template" in rule_review_tool["response_contract"]["rule_review_package_fields"]
     assert "merged_config_patch" in rule_review_tool["response_contract"]["required_fields"]
     assert "rule_review_final_report" in rule_review_tool["response_contract"]["required_fields"]
     assert "config_apply_final_report" in rule_review_tool["response_contract"]["required_fields"]
@@ -23030,6 +23061,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_validation_preflight_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
         assert "rule_review_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+        assert "rule_review_package" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+        assert "rule_review_package_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]
+        assert "submit_request_template" in tools_by_name["site_policy_rule_review"]["response_contract"]["rule_review_package_fields"]
         assert "merged_config_patch" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
         assert "config_apply_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
         assert "rule_review_final_report_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]

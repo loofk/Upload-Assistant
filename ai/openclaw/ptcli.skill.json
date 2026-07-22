@@ -44380,6 +44380,7 @@
           "requires_manual_review",
           "request",
           "reviews",
+          "rule_review_package",
           "config_patch",
           "merged_config_patch",
           "rule_review_final_report",
@@ -44401,6 +44402,22 @@
           "flat_patch",
           "manual_steps"
         ],
+        "rule_review_package_fields": [
+          "ready",
+          "review_required",
+          "status",
+          "action",
+          "rules_to_review",
+          "submit_request_template",
+          "after_submit",
+          "after_config_edit",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
+        ],
         "config_patch_fields": [
           "config_path",
           "preferred_shape",
@@ -44418,6 +44435,7 @@
           "requested_trackers",
           "requested_roles",
           "review_items",
+          "rule_review_package",
           "config_patch",
           "merged_config_patch",
           "merge_plan",
