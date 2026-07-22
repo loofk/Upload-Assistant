@@ -13411,6 +13411,10 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert job["job_control_summary"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
     assert job["job_control_summary"]["recommended_call"]["tool"] == "get_job_status"
     assert job["job_control_summary"]["read_order"][:5] == ["job_control_summary", "live_completion_gate", "job_handoff", "recovery_handoff", "seedbox_live_validation_completion_report"]
+    assert job["job_control_summary"]["poll_resume_summary_sequence"]["kind"] == "ptcli.job_poll_resume_summary_sequence"
+    assert [step["name"] for step in job["job_control_summary"]["poll_resume_summary_sequence"]["steps"]] == ["poll_status", "read_summary_when_terminal"]
+    assert job["job_control_summary"]["poll_resume_summary_sequence"]["primary_next_step"]["tool"] == "get_job_status"
+    assert job["job_control_summary"]["poll_resume_summary_sequence"]["primary_next_step"]["endpoint"] == f"/v1/jobs/{job_id}"
     assert job["job_final_report"]["kind"] == "ptcli.job_final_report"
     assert job["job_final_report"]["verdict"] == "poll"
     assert job["job_final_report"]["ready_for_user_report"] is False
@@ -13438,6 +13442,7 @@ def test_job_store_exposes_runtime_polling_context_for_queued_jobs(tmp_path) -> 
     assert payload["jobs"][0]["job_progress_handoff"]["action"] == "poll"
     assert payload["jobs"][0]["job_control_summary"]["action"] == "poll"
     assert payload["jobs"][0]["job_control_summary"]["recommended_endpoint"] == f"/v1/jobs/{job_id}"
+    assert payload["jobs"][0]["job_control_summary"]["poll_resume_summary_sequence"]["steps"][0]["name"] == "poll_status"
     assert payload["jobs"][0]["job_final_report"]["verdict"] == "poll"
     assert payload["jobs"][0]["job_resume_handoff"]["action"] == "poll"
     assert any("Poll running jobs" in action for action in payload["next_actions"])
@@ -13941,6 +13946,12 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert job["job_control_summary"]["execute_request"] == job["materials_handoff"]["resume_handoff"]["execute_request"]
     assert "materials_handoff.not_ready" in job["job_control_summary"]["blockers"]
     assert "resume_execution_handoff" in job["job_control_summary"]["read_order"]
+    sequence = job["job_control_summary"]["poll_resume_summary_sequence"]
+    assert sequence["kind"] == "ptcli.job_poll_resume_summary_sequence"
+    assert [step["name"] for step in sequence["steps"]] == ["preview_resume", "execute_resume", "poll_child", "read_child_summary"]
+    assert sequence["primary_next_step"]["request"] == job["materials_handoff"]["resume_handoff"]["dry_run_request"]
+    assert sequence["steps"][1]["request"] == job["materials_handoff"]["resume_handoff"]["execute_request"]
+    assert sequence["steps"][1]["requires_user_review"] is True
     assert job["job_final_report"]["kind"] == "ptcli.job_final_report"
     assert job["job_final_report"]["verdict"] == "needs_resume_preview"
     assert job["job_final_report"]["report_allowed"] is False
@@ -19072,6 +19083,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "job_control_summary_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "read_order" in tool_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
     assert "recommended_call" in tool_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
+    assert "poll_resume_summary_sequence" in tool_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
+    assert "job_poll_resume_summary_sequence_fields" in tool_by_name["get_job_status"]["response_contract"]
+    assert "primary_next_step" in tool_by_name["get_job_status"]["response_contract"]["job_poll_resume_summary_sequence_fields"]
     assert "job_control_summary_source_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "recommended_call_fields" in tool_by_name["get_job_status"]["response_contract"]
     assert "recommended_call_gate_fields" in tool_by_name["get_job_status"]["response_contract"]
@@ -21076,6 +21090,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "job_control_summary_fields" in tools_by_name["get_job_status"]["response_contract"]
         assert "read_order" in tools_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
         assert "recommended_call" in tools_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
+        assert "poll_resume_summary_sequence" in tools_by_name["get_job_status"]["response_contract"]["job_control_summary_fields"]
+        assert "job_poll_resume_summary_sequence_fields" in tools_by_name["get_job_status"]["response_contract"]
+        assert "primary_next_step" in tools_by_name["get_job_status"]["response_contract"]["job_poll_resume_summary_sequence_fields"]
         assert "job_control_summary_source_fields" in tools_by_name["get_job_status"]["response_contract"]
         assert "recovery_handoff_fields" in tools_by_name["manual_retorrent_job"]["response_contract"]
         assert "dry_run_request" in tools_by_name["manual_retorrent_job"]["response_contract"]["recovery_handoff_fields"]

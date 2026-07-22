@@ -12626,6 +12626,7 @@ def _job_control_summary(job: dict[str, Any], payload: dict[str, Any] | None = N
         "summary_endpoint": runtime.get("summary_endpoint"),
         "resume_endpoint": runtime.get("resume_endpoint"),
         "read_order": _job_control_read_order(action),
+        "poll_resume_summary_sequence": _job_poll_resume_summary_sequence(job_id, status, action, runtime, recommended_call, recovery_handoff, job_handoff),
         "continue_when": _job_control_continue_when(action, recovery_handoff, job_handoff, completion_report),
         "stop_when": _job_control_stop_when(action, recovery_handoff, job_handoff, completion_report, closure_summary),
         "complete_when": _job_control_complete_when(completion_report, closure_summary),
@@ -12639,6 +12640,146 @@ def _job_control_summary(job: dict[str, Any], payload: dict[str, Any] | None = N
         },
         "blockers": blockers,
         "next_actions": _job_control_next_actions(action, recommended_call, blockers, runtime, job_id),
+    }
+
+
+def _job_poll_resume_summary_sequence(
+    job_id: str,
+    status: str,
+    action: str,
+    runtime: dict[str, Any],
+    recommended_call: dict[str, Any] | None,
+    recovery_handoff: dict[str, Any],
+    job_handoff: dict[str, Any],
+) -> dict[str, Any]:
+    status_endpoint = str(runtime.get("status_endpoint") or f"/v1/jobs/{job_id}")
+    summary_endpoint = str(runtime.get("summary_endpoint") or f"/v1/jobs/{job_id}/summary")
+    resume_endpoint = str(runtime.get("resume_endpoint") or f"/v1/jobs/{job_id}/resume")
+    dry_run_request = recovery_handoff.get("dry_run_request") if isinstance(recovery_handoff.get("dry_run_request"), dict) else job_handoff.get("dry_run_request") if isinstance(job_handoff.get("dry_run_request"), dict) else None
+    execute_request = recovery_handoff.get("execute_request") if isinstance(recovery_handoff.get("execute_request"), dict) else job_handoff.get("execute_request") if isinstance(job_handoff.get("execute_request"), dict) else None
+    recommended_request = (recommended_call or {}).get("request") if isinstance((recommended_call or {}).get("request"), dict) else None
+    if dry_run_request is None and action in {"resume_preview", "resume_execute", "prepare_materials", "prepare_target_package", "target_upload_closure"}:
+        dry_run_request = recommended_request or {"job_id": job_id, "dry_run": True}
+    if execute_request is None and action in {"resume_execute", "prepare_materials", "prepare_target_package", "target_upload_closure"}:
+        execute_request = {"job_id": job_id}
+    steps: list[dict[str, Any]] = []
+    if runtime.get("should_poll") or action == "poll":
+        steps.append(
+            {
+                "index": 1,
+                "name": "poll_status",
+                "tool": "get_job_status",
+                "endpoint": status_endpoint,
+                "method": "GET",
+                "request": {"job_id": job_id},
+                "repeat_when": "status in queued,running",
+                "continue_when": "status in blocked,failed,cancelled,complete",
+            }
+        )
+        steps.append(
+            {
+                "index": 2,
+                "name": "read_summary_when_terminal",
+                "tool": "get_job_summary",
+                "endpoint": summary_endpoint,
+                "method": "GET",
+                "request": {"job_id": job_id},
+                "continue_when": "job_final_report or live_user_report is readable",
+            }
+        )
+    elif action in {"read_summary", "done"} or status == "complete":
+        steps.append(
+            {
+                "index": 1,
+                "name": "read_summary",
+                "tool": "get_job_summary",
+                "endpoint": summary_endpoint,
+                "method": "GET",
+                "request": {"job_id": job_id},
+                "continue_when": "job_final_report.report_allowed=true or live_user_report.report_allowed=true",
+            }
+        )
+    elif action in {"resume_preview", "resume_execute", "prepare_materials", "prepare_target_package", "target_upload_closure"}:
+        steps.append(
+            {
+                "index": 1,
+                "name": "preview_resume",
+                "tool": "resume_job",
+                "endpoint": resume_endpoint,
+                "method": "POST",
+                "request": dry_run_request,
+                "continue_when": "resume_preview.dry_run=true and command_argv is allowlisted",
+            }
+        )
+        steps.append(
+            {
+                "index": 2,
+                "name": "execute_resume",
+                "tool": "resume_job",
+                "endpoint": resume_endpoint,
+                "method": "POST",
+                "request": execute_request,
+                "requires_user_review": True,
+                "continue_when": "child job_id is returned",
+            }
+        )
+        steps.append(
+            {
+                "index": 3,
+                "name": "poll_child",
+                "tool": "get_job_status",
+                "endpoint": "/v1/jobs/{child_job_id}",
+                "method": "GET",
+                "request": {"job_id": "<child_job_id>"},
+                "repeat_when": "child.status in queued,running",
+            }
+        )
+        steps.append(
+            {
+                "index": 4,
+                "name": "read_child_summary",
+                "tool": "get_job_summary",
+                "endpoint": "/v1/jobs/{child_job_id}/summary",
+                "method": "GET",
+                "request": {"job_id": "<child_job_id>"},
+                "continue_when": "child.job_final_report is readable",
+            }
+        )
+    elif action in {"blocked", "failed", "cancelled", "stop", "stop_duplicate"}:
+        steps.append(
+            {
+                "index": 1,
+                "name": "inspect_terminal_blockers",
+                "tool": "get_job_summary",
+                "endpoint": summary_endpoint,
+                "method": "GET",
+                "request": {"job_id": job_id},
+                "continue_when": "blockers and next_actions are reported to the user",
+            }
+        )
+    else:
+        call = recommended_call if isinstance(recommended_call, dict) else {}
+        steps.append(
+            {
+                "index": 1,
+                "name": "follow_recommended_call",
+                "tool": call.get("tool"),
+                "endpoint": call.get("endpoint"),
+                "method": call.get("method"),
+                "request": call.get("request"),
+                "continue_when": "recommended_call.safe_to_call_now=true or user has reviewed required gates",
+            }
+        )
+    return {
+        "kind": "ptcli.job_poll_resume_summary_sequence",
+        "job_id": job_id or None,
+        "status": status,
+        "action": action,
+        "ready": bool(steps),
+        "primary_next_step": steps[0] if steps else None,
+        "steps": steps,
+        "complete_when": ["terminal status reached", "job_final_report or live_user_report read", "blockers reported or completion evidence reported"],
+        "stop_when": ["duplicate_check.exists=true", "recommended_call.safe_to_call_now=false without user review", "resume preview command is not allowlisted"],
     }
 
 
@@ -25060,7 +25201,8 @@ def _job_response_contract() -> dict[str, Any]:
         "running_fields": ["runtime.should_poll", "runtime.poll_after_seconds", "runtime.status_endpoint", "agent_decision.should_poll"],
         "cancel_fields": ["cancellation", "agent_decision.stop_reason", "runtime.terminal"],
         "job_handoff_fields": ["action", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "resume_execution_handoff", "candidate_submission_execution", "retorrent_stage_handoff", "material_input_template", "continue_when", "stop_when", "status_endpoint", "summary_endpoint", "resume_endpoint", "poll_after_seconds", "should_poll", "can_resume", "resume_recommended", "can_attempt_live", "blockers", "next_actions"],
-        "job_control_summary_fields": ["state", "action", "ready", "terminal", "should_poll", "should_resume", "resume_preview_required", "safe_to_call_now", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "poll_after_seconds", "status_endpoint", "summary_endpoint", "resume_endpoint", "read_order", "continue_when", "stop_when", "complete_when", "sources", "blockers", "next_actions"],
+        "job_control_summary_fields": ["state", "action", "ready", "terminal", "should_poll", "should_resume", "resume_preview_required", "safe_to_call_now", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "recommended_call", "dry_run_request", "execute_request", "poll_after_seconds", "status_endpoint", "summary_endpoint", "resume_endpoint", "read_order", "poll_resume_summary_sequence", "continue_when", "stop_when", "complete_when", "sources", "blockers", "next_actions"],
+        "job_poll_resume_summary_sequence_fields": ["ready", "primary_next_step", "steps", "complete_when", "stop_when"],
         "job_final_report_fields": ["ready", "ready_for_user_report", "report_allowed", "verdict", "status", "job_id", "job_kind", "summary_file", "control", "progress", "source_reference", "target_trackers", "duplicate_check", "manual_retorrent", "live", "closure", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "job_progress_handoff_fields": ["ready", "action", "progress", "current_stage", "stages", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "job_progress_stage_fields": ["name", "label", "ready", "blocked", "recommended_tool", "evidence", "blockers"],

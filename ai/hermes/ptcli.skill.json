@@ -2010,12 +2010,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -3763,12 +3771,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -5383,12 +5399,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -7003,12 +7027,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -8627,12 +8659,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -10950,12 +10990,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -13149,12 +13197,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -17825,12 +17881,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -19407,12 +19471,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -20998,12 +21070,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -22558,12 +22638,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -24671,12 +24759,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -26456,12 +26552,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
@@ -27913,12 +28017,20 @@
           "summary_endpoint",
           "resume_endpoint",
           "read_order",
+          "poll_resume_summary_sequence",
           "continue_when",
           "stop_when",
           "complete_when",
           "sources",
           "blockers",
           "next_actions"
+        ],
+        "job_poll_resume_summary_sequence_fields": [
+          "ready",
+          "primary_next_step",
+          "steps",
+          "complete_when",
+          "stop_when"
         ],
         "job_final_report_fields": [
           "ready",
