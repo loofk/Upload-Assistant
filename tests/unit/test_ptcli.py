@@ -15945,6 +15945,9 @@ def test_submit_daily_candidate_job_creates_retorrent_from_selected_digest_item(
     assert daily_batch["items"][0]["submitted_jobs"][0]["retorrent_job_id"] == retorrent_job["job_id"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["candidate_source_id"] == "60635"
     assert daily_batch["items"][0]["submitted_jobs"][0]["action"] == "configure_policy"
+    assert daily_batch["items"][0]["submitted_jobs"][0]["job_final_verdict"] == retorrent_job["job_final_report"]["verdict"]
+    assert daily_batch["items"][0]["submitted_jobs"][0]["job_report_allowed"] == retorrent_job["job_final_report"]["report_allowed"]
+    assert daily_batch["items"][0]["submitted_jobs"][0]["job_final_report"] == retorrent_job["job_final_report"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["manual_retorrent_verdict"] == retorrent_job["manual_retorrent_final_report"]["verdict"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["manual_report_allowed"] == retorrent_job["manual_retorrent_final_report"]["report_allowed"]
     assert daily_batch["items"][0]["submitted_jobs"][0]["manual_retorrent_final_report"] == retorrent_job["manual_retorrent_final_report"]
@@ -18887,6 +18890,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "manual_retorrent_final_report" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submit_sequence_fields"]
     assert "manual_retorrent_final_report" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["agent_candidate_submission_fields"]
     assert "manual_retorrent_final_report" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
+    assert "job_final_report" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
+    assert "job_final_verdict" in tool_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
     assert "candidate_submission_execution_handoff_fields" in tool_by_name["submit_daily_candidate_job"]["response_contract"]
     assert "state" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
     assert "should_resume" in tool_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_execution_handoff_fields"]
@@ -20624,6 +20629,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "manual_retorrent_final_report" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submit_sequence_fields"]
         assert "manual_retorrent_final_report" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["agent_candidate_submission_fields"]
         assert "manual_retorrent_final_report" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
+        assert "job_final_report" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
+        assert "job_final_verdict" in tools_by_name["list_jobs"]["response_contract"]["daily_candidate_submitted_item_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "policy_runtime_contract" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
         assert "policy_enforcement_ready" in tools_by_name["submit_daily_candidate_job"]["response_contract"]["candidate_submission_summary_fields"]
