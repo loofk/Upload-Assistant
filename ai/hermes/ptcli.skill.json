@@ -635,6 +635,7 @@
           "request_from": "schedule_digest.submission_handoff.items[].request_template after human rule review",
           "read": [
             "job_id",
+            "policy_application_handoff",
             "candidate_submit_sequence",
             "candidate_submit_followup",
             "job_handoff",
@@ -16191,6 +16192,8 @@
           "duplicate_exists",
           "closure_complete",
           "policy_execution_ready",
+          "policy_application_ready",
+          "policy_application_handoff",
           "job_final_report",
           "manual_retorrent_final_report",
           "read_order"
@@ -16407,6 +16410,8 @@
           "manual_retorrent_final_report",
           "closure_complete",
           "policy_execution_ready",
+          "policy_application_ready",
+          "policy_application_handoff",
           "execution_state",
           "blockers",
           "next_actions"
@@ -25698,6 +25703,8 @@
           "duplicate_exists",
           "closure_complete",
           "policy_execution_ready",
+          "policy_application_ready",
+          "policy_application_handoff",
           "job_final_report",
           "manual_retorrent_final_report",
           "read_order"
@@ -25914,6 +25921,8 @@
           "manual_retorrent_final_report",
           "closure_complete",
           "policy_execution_ready",
+          "policy_application_ready",
+          "policy_application_handoff",
           "execution_state",
           "blockers",
           "next_actions"
