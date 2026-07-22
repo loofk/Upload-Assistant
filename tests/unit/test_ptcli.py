@@ -18797,6 +18797,20 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert final_report["recommended_call"]["safe_to_call_now"] is True
     assert "adapter_extension_final_report" in final_report["read_order"]
     assert "requested_flow.ready=true" in final_report["complete_when"]
+    readiness_report = payload["site_extension_readiness_final_report"]
+    assert readiness_report["kind"] == "ptcli.site_extension_readiness_final_report"
+    assert readiness_report["ready"] is True
+    assert readiness_report["report_allowed"] is True
+    assert readiness_report["verdict"] == "ready_for_seedbox_live_validation"
+    assert readiness_report["requested_flow"] == coverage["requested_flow"]
+    assert readiness_report["missing_by_tracker"] == {}
+    assert "source_info_adapter" in readiness_report["role_requirements"]["source"]
+    assert "target_upload_adapter" in readiness_report["role_requirements"]["target"]
+    assert "source_torrent_hash" in readiness_report["required_evidence_by_role"]["source"]
+    assert "uploaded_torrent_hash" in readiness_report["required_evidence_by_role"]["target"]
+    assert "U2" in readiness_report["policy_config_required_fields"]
+    assert readiness_report["recommended_call"]["tool"] == "readiness_bundle"
+    assert "site_extension_readiness_final_report" in readiness_report["read_order"]
     source_rollout = {item["tracker"]: item for item in rollout["source_rollout"]}
     assert source_rollout["U2"]["ready_for_role"] is True
     assert source_rollout["U2"]["full_live_closure_to_mteam"] is True
@@ -21893,6 +21907,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "extension_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "tracker_rollout_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "adapter_extension_final_report" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
+        assert "site_extension_readiness_final_report" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_checklist" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_coverage_summary_fields" in tools_by_name["site_profiles"]["response_contract"]
@@ -21907,7 +21922,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "validation_matrix" in tools_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
         assert "tracker_rollout_handoff_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "adapter_extension_final_report_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "site_extension_readiness_final_report_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "recommended_call" in tools_by_name["site_profiles"]["response_contract"]["adapter_extension_final_report_fields"]
+        assert "required_evidence_by_role" in tools_by_name["site_profiles"]["response_contract"]["site_extension_readiness_final_report_fields"]
         assert "tracker_rollout_item_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
         assert "missing_components" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
@@ -23261,9 +23278,11 @@ services:
     assert payload["evidence"]["site_policies"]["next_step"]["tool"] == "site_policy_rule_review"
     adapters = payload["evidence"]["tracker_adapters"]
     assert adapters["adapter_extension_final_report"]["kind"] == "ptcli.adapter_extension_final_report"
+    assert adapters["site_extension_readiness_final_report"]["kind"] == "ptcli.site_extension_readiness_final_report"
     assert adapters["tracker_rollout_handoff"]["kind"] == "ptcli.tracker_rollout_handoff"
     assert adapters["adapter_coverage_summary"]["coverage_counts"]
     assert "adapter_extension_final_report" in adapters["adapter_extension_final_report"]["read_order"]
+    assert "site_extension_readiness_final_report" in adapters["site_extension_readiness_final_report"]["read_order"]
     assert payload["evidence"]["live_validation"]["status"] == "missing"
     assert payload["evidence"]["live_validation"]["ready"] is False
     assert payload["evidence"]["live_validation_preflight"]["kind"] == "ptcli.goal_live_validation_preflight"
