@@ -17523,6 +17523,46 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
                 },
             }
         ],
+        "candidate_executability_matrix": {
+            "kind": "ptcli.daily_candidate_executability_matrix",
+            "ready": True,
+            "status": "ready_for_approval",
+            "item_count": 1,
+            "safe_to_submit_count": 1,
+            "blocked_count": 0,
+            "ready_count": 1,
+            "next_source_id": "60635",
+            "next_phase": None,
+            "next_evidence": None,
+            "items": [
+                {
+                    "rank": 1,
+                    "source_tracker": "U2",
+                    "source_id": "60635",
+                    "source_url": "https://u2.dmhy.org/details.php?id=60635",
+                    "target": "MTEAM",
+                    "title": "Example",
+                    "ready": True,
+                    "can_submit_after_approval": True,
+                    "requires_human_approval": True,
+                    "status": "ready_for_approval",
+                    "first_blocked_phase": None,
+                    "first_blocked_check": None,
+                    "checks": [{"name": "duplicate_clear", "phase": "duplicate", "ready": True, "status": "ready", "required_fields": ["duplicate_check.clear=true"], "blocking": False}],
+                    "missing_checks": [],
+                    "submit_tool": "submit_daily_candidate_job",
+                    "submit_endpoint": "/v1/jobs/candidates/{candidate_job_id}/submit",
+                    "submit_request": {"rank": 1, "source_id": "60635", "confirm_upload": True, "save_path": "/downloads"},
+                    "required_user_inputs": ["explicit approval", "confirm_upload=true", "save_path or path"],
+                    "blockers": [],
+                }
+            ],
+            "phase_summary": {"duplicate": {"ready": True, "item_count": 1, "blocked_count": 0, "blocked_source_ids": []}},
+            "blockers": [],
+            "continue_when": "candidate_executability_matrix.safe_to_submit_count>0 and user explicitly approves one candidate with confirm_upload=true",
+            "stop_when": ["candidate_executability_matrix.blockers is non-empty", "candidate_executability_matrix.safe_to_submit_count=0"],
+            "next_actions": ["Ask the user to approve candidate_executability_matrix.items[0].submit_request with confirm_upload=true, then call submit_daily_candidate_job."],
+        },
     }
 
     async def fake_daily_candidates(_request):
@@ -17569,6 +17609,10 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["push_payload"]["shortfall_count"] == 9
     assert payload["schedule_digest"]["push_payload"]["target_met"] is False
     assert payload["schedule_digest"]["push_payload"]["top_item"]["source_id"] == "60635"
+    assert payload["schedule_digest"]["candidate_executability_matrix"]["safe_to_submit_count"] == 1
+    assert payload["schedule_digest"]["candidate_executability_matrix"] == payload["schedule_digest"]["push_payload"]["candidate_executability_matrix"]
+    assert payload["schedule_digest"]["candidate_executability_matrix"]["items"][0]["source_id"] == "60635"
+    assert payload["schedule_digest"]["push_items"][0]["candidate_executability"]["can_submit_after_approval"] is True
     schedule_report = payload["schedule_digest"]["daily_candidate_report"]
     assert schedule_report["kind"] == "ptcli.daily_candidate_report"
     assert schedule_report["scope"] == "schedule_batch"
@@ -17664,6 +17708,8 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["confirm_upload"] is True
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["request_template"]["save_path"] == "/downloads"
     assert payload["schedule_digest"]["submission_handoff"]["items"][0]["candidate_execution_context"] == schedule_execution_context
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["candidate_executability"]["ready"] is True
+    assert payload["schedule_digest"]["submission_handoff"]["items"][0]["can_submit_after_approval"] is True
     schedule_policy_execution = payload["schedule_digest"]["submission_handoff"]["items"][0]["policy_execution"]
     assert schedule_policy_execution["ready"] is True
     assert schedule_policy_execution["rule_obligations_ready"] is True
@@ -17736,6 +17782,7 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["notification_payload"]["first_approval_prompt"] == schedule_approval_prompt
     assert payload["notification_payload"]["approval_prompts"] == payload["schedule_digest"]["approval_queue"]["approval_prompts"]
     assert payload["notification_payload"]["top_safe_candidates"] == payload["schedule_digest"]["top_safe_candidates"]
+    assert payload["notification_payload"]["candidate_executability_matrix"] == payload["schedule_digest"]["candidate_executability_matrix"]
     assert payload["notification_payload"]["daily_candidate_report"] == schedule_report
     assert payload["notification_payload"]["daily_candidate_batch_report"] == schedule_batch_report
     assert payload["notification_payload"]["next_step"] == payload["schedule_digest"]["submission_handoff"]["next_step"]
@@ -17753,6 +17800,7 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert payload["delivery_handoff"]["first_approval_prompt"] == schedule_approval_prompt
     assert payload["delivery_handoff"]["approval_prompts"] == payload["schedule_digest"]["approval_queue"]["approval_prompts"]
     assert payload["delivery_handoff"]["top_safe_candidates"] == payload["schedule_digest"]["top_safe_candidates"]
+    assert payload["delivery_handoff"]["candidate_executability_matrix"] == payload["schedule_digest"]["candidate_executability_matrix"]
     assert payload["delivery_handoff"]["daily_candidate_report"] == schedule_report
     assert payload["delivery_handoff"]["daily_candidate_batch_report"] == schedule_batch_report
     assert payload["delivery_handoff"]["notification_payload"] == payload["notification_payload"]
@@ -17799,6 +17847,7 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert delivery_plan["publish_request"]["write_files"] is True
     assert delivery_plan["publish_request"]["use_env_webhook"] is True
     assert delivery_plan["first_submit_request"] == payload["daily_schedule_gate"]["first_submit_request"]
+    assert delivery_plan["candidate_executability_matrix"] == payload["schedule_digest"]["candidate_executability_matrix"]
     assert delivery_plan["safe_to_publish"] is True
     assert delivery_plan["recommended_action_safety"] == {
         "mutates_state": True,
@@ -17820,6 +17869,7 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert schedule_context["recommended_tool"] == "submit_daily_candidate_job"
     assert schedule_context["recommended_request"] == delivery_plan["recommended_request"]
     assert schedule_context["first_candidate_execution_context"] == schedule_execution_context
+    assert schedule_context["candidate_executability_matrix"] == payload["schedule_digest"]["candidate_executability_matrix"]
     assert schedule_context["first_submit_request"] == delivery_plan["first_submit_request"]
     assert schedule_context["required_user_inputs"] == ["explicit candidate approval", "accept_rules=true", "confirm_upload=true", "save_path or path"]
     assert schedule_context["safety"]["does_not_bypass_site_rules"] is True
