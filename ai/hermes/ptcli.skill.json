@@ -23130,6 +23130,7 @@
           "doctor_result_handoff",
           "live_validation_result",
           "live_submission_package",
+          "live_submission_final_report",
           "service",
           "blockers",
           "next_actions"
@@ -23186,6 +23187,23 @@
           "submit",
           "after_submit",
           "report_contract",
+          "blockers",
+          "next_actions",
+          "safety"
+        ],
+        "live_submission_final_report_fields": [
+          "ready",
+          "status",
+          "verdict",
+          "doctor",
+          "submission",
+          "post_submit",
+          "completion_contract",
+          "read_order",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
           "blockers",
           "next_actions",
           "safety"
