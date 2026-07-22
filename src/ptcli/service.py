@@ -22236,6 +22236,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
     deployment_handoff = _deployment_runtime_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
     deployment_runbook = _deployment_runbook(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
     daily_candidate_trigger_handoff = _deployment_daily_candidate_trigger_handoff(agent_summary, paths, daily_candidate_plan, docker_compose, blockers, warnings)
+    daily_candidate_delivery_handoff = _deployment_daily_candidate_delivery_handoff(daily_candidate_plan, docker_compose, daily_candidate_trigger_handoff, blockers, warnings)
     seedbox_bootstrap_handoff = _deployment_seedbox_bootstrap_handoff(agent_summary, paths, mounts, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
     agent_handoff = _deployment_agent_handoff(agent_summary, paths, qbit, daily_candidate_plan, docker_compose, env_template, blockers, warnings)
     deployment_final_report = _deployment_final_report(
@@ -22266,8 +22267,11 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         warnings=warnings,
     )
     deployment_runbook["daily_candidate_trigger_handoff"] = daily_candidate_trigger_handoff
+    deployment_runbook["daily_candidate_delivery_handoff"] = daily_candidate_delivery_handoff
     deployment_handoff["daily_candidate_trigger_handoff"] = daily_candidate_trigger_handoff
+    deployment_handoff["daily_candidate_delivery_handoff"] = daily_candidate_delivery_handoff
     agent_handoff["daily_candidate_trigger_handoff"] = daily_candidate_trigger_handoff
+    agent_handoff["daily_candidate_delivery_handoff"] = daily_candidate_delivery_handoff
     deployment_handoff["seedbox_live_trial"] = seedbox_live_trial_handoff
     agent_handoff["seedbox_live_trial"] = seedbox_live_trial_handoff
     return {
@@ -22290,6 +22294,7 @@ def deployment_check_payload(request: dict[str, Any] | None = None) -> dict[str,
         "deployment_runbook": deployment_runbook,
         "deployment_handoff": deployment_handoff,
         "daily_candidate_trigger_handoff": daily_candidate_trigger_handoff,
+        "daily_candidate_delivery_handoff": daily_candidate_delivery_handoff,
         "seedbox_bootstrap_handoff": seedbox_bootstrap_handoff,
         "seedbox_live_trial_handoff": seedbox_live_trial_handoff,
         "deployment_final_report": deployment_final_report,
@@ -22895,6 +22900,111 @@ def _deployment_daily_candidate_trigger_next_actions(ready: bool, schedule_ready
     if not api_ready or not compose_daily_ready:
         return ["Repair docker-compose.yml ptcli-api and daily profile services, then rerun deployment_check."]
     return ["Inspect daily_candidate_trigger_handoff before enabling daily delivery."]
+
+
+def _deployment_daily_candidate_delivery_handoff(
+    daily_candidate_plan: dict[str, Any],
+    docker_compose: dict[str, Any],
+    trigger_handoff: dict[str, Any],
+    blockers: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    api = trigger_handoff.get("api") if isinstance(trigger_handoff.get("api"), dict) else {}
+    compose = trigger_handoff.get("compose") if isinstance(trigger_handoff.get("compose"), dict) else {}
+    batch_status = api.get("batch_status") if isinstance(api.get("batch_status"), dict) else {}
+    webhook_configured = bool(os.environ.get("PTCLI_DAILY_CANDIDATE_WEBHOOK_URL"))
+    trigger_ready = bool(trigger_handoff.get("ready"))
+    api_ready = bool(docker_compose.get("ptcli_api_service_ready"))
+    file_ready = bool(docker_compose.get("daily_scheduler_service_ready") or docker_compose.get("daily_schedule_service_ready"))
+    delivery_blockers = list(blockers)
+    delivery_blockers.extend(_string_list(trigger_handoff.get("blockers")))
+    delivery_blockers = list(dict.fromkeys(delivery_blockers))
+    ready = bool((trigger_ready or api_ready or file_ready) and not delivery_blockers)
+    status = "ready" if ready else "blocked" if delivery_blockers else "configure_delivery"
+    publish_payload_sources = [
+        "daily_candidate_batch_status.daily_candidate_batch_publish_payload",
+        "daily_candidate_trigger_handoff.api.batch_status",
+        "ptcli-daily-candidates-notification.json.notification_payload",
+        "ptcli-daily-schedule-summary.json.notification_payload",
+    ]
+    return {
+        "kind": "ptcli.daily_candidate_deployment_delivery_handoff",
+        "ready": ready,
+        "status": status,
+        "action": "publish_daily_candidate_digest" if ready else "repair_daily_candidate_delivery",
+        "read_only": True,
+        "publish_payload_field": "daily_candidate_batch_publish_payload",
+        "notification_payload_field": "notification_payload",
+        "publish_payload_sources": publish_payload_sources,
+        "channels": {
+            "ai_pull": {
+                "ready": api_ready,
+                "tool": batch_status.get("tool") or "daily_candidate_batch_status",
+                "endpoint": batch_status.get("endpoint") or "/v1/jobs/candidates/daily/batch",
+                "method": batch_status.get("method") or "GET",
+                "request": batch_status.get("request"),
+                "payload_field": "daily_candidate_batch_publish_payload",
+                "safe_to_retry": True,
+            },
+            "local_files": {
+                "ready": file_ready,
+                "enabled_by_compose": True,
+                "write_notification": True,
+                "summary_file": compose.get("summary_file") or "/Upload-Assistant/tmp/daily-candidates/ptcli-daily-schedule-summary.json",
+                "notification_files": compose.get("notification_files")
+                or [
+                    "/Upload-Assistant/tmp/daily-candidates/ptcli-daily-candidates-notification.json",
+                    "/Upload-Assistant/tmp/daily-candidates/ptcli-daily-candidates-notification.txt",
+                ],
+                "payload_field": "notification_payload",
+                "safe_to_retry": True,
+            },
+            "webhook": {
+                "ready": webhook_configured,
+                "configured": webhook_configured,
+                "env": "PTCLI_DAILY_CANDIDATE_WEBHOOK_URL",
+                "url": "<configured>" if webhook_configured else None,
+                "payload_field": "notification_payload",
+                "safe_to_retry": True,
+            },
+        },
+        "delivery_plan": daily_candidate_plan.get("daily_candidate_delivery_plan") if isinstance(daily_candidate_plan.get("daily_candidate_delivery_plan"), dict) else {},
+        "delivery_final_report": daily_candidate_plan.get("daily_candidate_delivery_final_report") if isinstance(daily_candidate_plan.get("daily_candidate_delivery_final_report"), dict) else {},
+        "workflow": [
+            {"index": 1, "name": "trigger_daily_candidates", "tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "request": api.get("create_jobs", {}).get("request") if isinstance(api.get("create_jobs"), dict) else None, "continue_when": "candidate jobs are queued or complete", "stop_when": "daily_candidate_trigger_handoff.blockers is non-empty"},
+            {"index": 2, "name": "read_publish_payload", "tool": "daily_candidate_batch_status", "endpoint": "/v1/jobs/candidates/daily/batch", "method": "GET", "request": batch_status.get("request"), "read": ["daily_candidate_batch_publish_payload", "daily_candidate_tracking_report"], "continue_when": "daily_candidate_batch_publish_payload is present", "stop_when": "daily_candidate_batch_publish_payload.blockers is non-empty"},
+            {"index": 3, "name": "deliver_digest", "tool": "ai_pull_or_file_or_webhook", "endpoint": None, "method": None, "read": publish_payload_sources, "continue_when": "digest is visible to the AI/IM/webhook consumer", "stop_when": "no delivery channel can read notification_payload or daily_candidate_batch_publish_payload"},
+            {"index": 4, "name": "wait_for_user_approval", "tool": "ask_user", "endpoint": None, "method": None, "read": ["approval_queue", "first_approval_prompt", "submit_request"], "continue_when": "user explicitly approves a candidate", "stop_when": "user does not approve or candidate blockers are present"},
+        ],
+        "read_order": ["daily_candidate_delivery_handoff", "daily_candidate_trigger_handoff", "daily_candidate_batch_publish_payload", "notification_payload", "daily_candidate_delivery_final_report"],
+        "continue_when": "daily_candidate_delivery_handoff.ready=true and one channel has delivered the digest; submit only after explicit user approval",
+        "stop_when": "delivery_handoff.blockers is non-empty or any submit action lacks accept_rules=true and confirm_upload=true",
+        "safety": {
+            "publishing_mutates_tracker": False,
+            "publishing_uploads": False,
+            "contacts_trackers": False,
+            "contacts_qbittorrent": False,
+            "submit_requires_user_approval": True,
+            "submit_requires": ["accept_rules=true", "confirm_upload=true", "duplicate_check.exists=false", "site policy gate ready"],
+            "webhook_payload_contains_no_credentials": True,
+        },
+        "blockers": delivery_blockers,
+        "warnings": warnings,
+        "next_actions": _deployment_daily_candidate_delivery_next_actions(ready, api_ready, file_ready, webhook_configured, delivery_blockers),
+    }
+
+
+def _deployment_daily_candidate_delivery_next_actions(ready: bool, api_ready: bool, file_ready: bool, webhook_configured: bool, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve daily_candidate_delivery_handoff.blockers, then rerun deployment_check."]
+    if ready:
+        actions = ["Publish daily_candidate_batch_publish_payload via AI pull, local notification files, or webhook; this does not submit or upload torrents."]
+        if not webhook_configured:
+            actions.append("Optionally set PTCLI_DAILY_CANDIDATE_WEBHOOK_URL to push the digest to an external consumer.")
+        return actions
+    if not api_ready and not file_ready:
+        return ["Start ptcli-api or the daily compose profile so a delivery channel can expose the daily candidate digest."]
+    return ["Inspect daily_candidate_delivery_handoff.channels before publishing the daily candidate digest."]
 
 
 def _deployment_final_report(
@@ -25382,18 +25492,19 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 },
             },
             "response_contract": {
-                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "daily_candidate_trigger_handoff", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "deployment_final_report", "agent_summary", "agent_handoff"],
+                "required_fields": ["status", "ok", "ready", "checks", "blockers", "warnings", "next_actions", "paths", "mounts", "runtime_tools", "queue", "qbit", "daily_candidates", "deployment_env", "docker_compose", "deployment_runbook", "deployment_handoff", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "seedbox_bootstrap_handoff", "seedbox_live_trial_handoff", "deployment_final_report", "agent_summary", "agent_handoff"],
                 "status_values": ["ok", "blocked"],
                 "agent_summary_fields": ["ready_for_ai", "ready_for_manual_retorrent", "ready_for_daily_candidates", "manual_workflow_ready", "daily_workflow_ready", "compose_deployable", "api_local_only", "api_auth_recommended", "missing_mounts", "qbit_configured", "daily_candidates_configured", "docker_compose_api_ready", "docker_compose_daily_ready", "docker_compose_host_path_envs", "env_template_ready", "env_template_present"],
                 "runtime_tools_fields": ["ready", "required", "optional", "missing_required", "message"],
                 "deployment_env_fields": ["ready", "template_present", "template_readable", "template_path", "env_path", "env_present", "required_keys", "daily_keys", "optional_keys", "missing_keys", "copy_command", "edit_after_copy", "security", "next_actions"],
-                "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "daily_candidate_trigger_handoff", "env", "qbit", "safety", "blockers", "warnings"],
-                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "env", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "qbit", "next_step", "deployment_runbook", "seedbox_live_trial", "warnings"],
+                "deployment_runbook_fields": ["ready", "compose_file", "api_base_url", "service", "steps", "first_step", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "env", "qbit", "safety", "blockers", "warnings"],
+                "deployment_handoff_fields": ["ready", "compose_deployable", "api", "env", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "qbit", "next_step", "deployment_runbook", "seedbox_live_trial", "warnings"],
                 "daily_candidate_trigger_handoff_fields": ["ready", "status", "action", "read_only", "configured", "configured_schedule_count", "target_count", "publish_payload_field", "compose", "api", "env", "workflow", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
+                "daily_candidate_delivery_handoff_fields": ["ready", "status", "action", "read_only", "publish_payload_field", "notification_payload_field", "publish_payload_sources", "channels", "delivery_plan", "delivery_final_report", "workflow", "read_order", "continue_when", "stop_when", "safety", "blockers", "warnings", "next_actions"],
                 "seedbox_bootstrap_handoff_fields": ["ready", "action", "read_only", "configured_paths", "missing_mounts", "mkdir_commands", "config_file", "env_file", "compose", "qbit", "daily_candidates", "verification_requests", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "continue_when", "stop_when", "blockers", "warnings", "next_actions"],
                 "seedbox_live_trial_handoff_fields": ["ready", "status", "action", "read_only", "compose", "api", "readiness", "live_order", "report_contract", "safety", "required_confirmations", "qbit", "next_step", "blockers", "warnings", "next_actions"],
                 "deployment_final_report_fields": ["ready", "report_allowed", "verdict", "deployment_status", "docker", "api", "mounts", "env", "runtime", "qbit", "workflows", "safety", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "warnings", "next_actions"],
-                "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
+                "agent_handoff_fields": ["ready", "recommended_first_step", "manual_retorrent", "daily_candidates", "daily_candidate_trigger_handoff", "daily_candidate_delivery_handoff", "seedbox_live_trial", "qbit", "docker_compose", "env", "safety", "next_tools"],
                 "docker_compose_fields": ["ptcli_api_service_ready", "ptcli_api_service", "ptcli_api_command", "ptcli_api_healthcheck", "ptcli_api_localhost_port", "ptcli_api_token_env", "ptcli_job_dir_env", "host_gateway", "host_path_envs", "downloads_mount", "config_mount", "cookies_mount", "tmp_mount", "daily_schedule_service_ready", "daily_scheduler_service_ready"],
             },
             "safety": {"mutates_state": False, "live_upload": False, "requires_confirmation": []},
@@ -27843,6 +27954,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "deployment_runbook": {"type": "object"},
             "deployment_handoff": {"type": "object"},
             "daily_candidate_trigger_handoff": {"type": "object"},
+            "daily_candidate_delivery_handoff": {"type": "object"},
             "seedbox_bootstrap_handoff": {"type": "object"},
             "seedbox_live_trial_handoff": {"type": "object"},
             "deployment_final_report": {"type": "object"},
