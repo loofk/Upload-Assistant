@@ -20713,6 +20713,15 @@ def _deployment_daily_candidate_plan(request: dict[str, Any]) -> dict[str, Any]:
         "count": plan.get("count", 0),
         "schedules": plan.get("schedules", []),
         "schedule_handoff": plan.get("schedule_handoff") if isinstance(plan.get("schedule_handoff"), dict) else {},
+        "schedule_digest": plan.get("schedule_digest") if isinstance(plan.get("schedule_digest"), dict) else {},
+        "candidate_control_summary": plan.get("candidate_control_summary") if isinstance(plan.get("candidate_control_summary"), dict) else {},
+        "notification_payload": plan.get("notification_payload") if isinstance(plan.get("notification_payload"), dict) else {},
+        "delivery_handoff": plan.get("delivery_handoff") if isinstance(plan.get("delivery_handoff"), dict) else {},
+        "daily_schedule_gate": plan.get("daily_schedule_gate") if isinstance(plan.get("daily_schedule_gate"), dict) else {},
+        "daily_candidate_delivery_plan": plan.get("daily_candidate_delivery_plan") if isinstance(plan.get("daily_candidate_delivery_plan"), dict) else {},
+        "daily_candidate_schedule_execution_context": plan.get("daily_candidate_schedule_execution_context") if isinstance(plan.get("daily_candidate_schedule_execution_context"), dict) else {},
+        "daily_candidate_final_report": plan.get("daily_candidate_final_report") if isinstance(plan.get("daily_candidate_final_report"), dict) else {},
+        "daily_candidate_delivery_final_report": plan.get("daily_candidate_delivery_final_report") if isinstance(plan.get("daily_candidate_delivery_final_report"), dict) else {},
         "blockers": _string_list(plan.get("blockers")),
         "next_actions": _string_list(plan.get("next_actions")),
     }
@@ -21519,7 +21528,6 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     policy_config_handoff = site_policies.get("policy_config_handoff") if isinstance(site_policies.get("policy_config_handoff"), dict) else {}
     config_update_plan = site_policies.get("config_update_plan") if isinstance(site_policies.get("config_update_plan"), dict) else {}
     daily_candidate_plan = deployment.get("daily_candidates") if isinstance(deployment.get("daily_candidates"), dict) else {}
-    daily_schedule_handoff = daily_candidate_plan.get("schedule_handoff") if isinstance(daily_candidate_plan.get("schedule_handoff"), dict) else {}
     next_step = _goal_progress_next_step(progress_items, blockers, site_policies, live_validation_evidence, live_validation_preflight, daily_candidate_plan)
     return {
         "kind": "ptcli.goal_progress",
@@ -21550,18 +21558,7 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 "qbit_configured": (deployment.get("qbit") or {}).get("configured"),
                 "connectivity_checked": deployment.get("connectivity_checked"),
             },
-            "daily_candidates": {
-                "configured": daily_candidate_plan.get("configured"),
-                "status": daily_candidate_plan.get("status"),
-                "source": daily_candidate_plan.get("source"),
-                "env": daily_candidate_plan.get("env"),
-                "count": daily_candidate_plan.get("count"),
-                "schedules": daily_candidate_plan.get("schedules") if isinstance(daily_candidate_plan.get("schedules"), list) else [],
-                "schedule_handoff": daily_schedule_handoff or None,
-                "next_step": _goal_progress_daily_candidate_next_step(daily_candidate_plan),
-                "blockers": _string_list(daily_candidate_plan.get("blockers")),
-                "next_actions": _string_list(daily_candidate_plan.get("next_actions")),
-            },
+            "daily_candidates": _goal_progress_daily_candidate_evidence(daily_candidate_plan),
             "site_policies": {
                 "ready": site_policies.get("ready"),
                 "policy_repair_action": policy_repair_gate.get("action"),
@@ -21960,6 +21957,97 @@ def _goal_progress_live_validation_evidence_next_actions(status: str, ready: boo
     if has_candidates:
         return ["Open evidence.live_validation.best, resolve its blockers or missing_evidence, then rerun /v1/goal/progress with the same job_dir/job_id."]
     return ["Run readiness_bundle.live_execution_package on a real U2/CHD -> MTEAM seedbox job, then rerun /v1/goal/progress with job_id or job_dir."]
+
+
+def _goal_progress_daily_candidate_evidence(daily_candidate_plan: dict[str, Any]) -> dict[str, Any]:
+    schedule_handoff = daily_candidate_plan.get("schedule_handoff") if isinstance(daily_candidate_plan.get("schedule_handoff"), dict) else {}
+    schedule_digest = daily_candidate_plan.get("schedule_digest") if isinstance(daily_candidate_plan.get("schedule_digest"), dict) else {}
+    control = daily_candidate_plan.get("candidate_control_summary") if isinstance(daily_candidate_plan.get("candidate_control_summary"), dict) else {}
+    notification = daily_candidate_plan.get("notification_payload") if isinstance(daily_candidate_plan.get("notification_payload"), dict) else {}
+    delivery = daily_candidate_plan.get("delivery_handoff") if isinstance(daily_candidate_plan.get("delivery_handoff"), dict) else {}
+    gate = daily_candidate_plan.get("daily_schedule_gate") if isinstance(daily_candidate_plan.get("daily_schedule_gate"), dict) else {}
+    delivery_plan = daily_candidate_plan.get("daily_candidate_delivery_plan") if isinstance(daily_candidate_plan.get("daily_candidate_delivery_plan"), dict) else {}
+    execution = daily_candidate_plan.get("daily_candidate_schedule_execution_context") if isinstance(daily_candidate_plan.get("daily_candidate_schedule_execution_context"), dict) else {}
+    final_report = daily_candidate_plan.get("daily_candidate_final_report") if isinstance(daily_candidate_plan.get("daily_candidate_final_report"), dict) else {}
+    delivery_final = daily_candidate_plan.get("daily_candidate_delivery_final_report") if isinstance(daily_candidate_plan.get("daily_candidate_delivery_final_report"), dict) else {}
+    return {
+        "configured": daily_candidate_plan.get("configured"),
+        "status": daily_candidate_plan.get("status"),
+        "source": daily_candidate_plan.get("source"),
+        "env": daily_candidate_plan.get("env"),
+        "count": daily_candidate_plan.get("count"),
+        "schedules": daily_candidate_plan.get("schedules") if isinstance(daily_candidate_plan.get("schedules"), list) else [],
+        "schedule_handoff": schedule_handoff or None,
+        "schedule_digest": {
+            "target_count": schedule_digest.get("target_count"),
+            "selected_count": schedule_digest.get("selected_count"),
+            "ready_count": schedule_digest.get("ready_count"),
+            "shortfall_count": schedule_digest.get("shortfall_count"),
+            "target_met": schedule_digest.get("target_met"),
+            "pending_job_count": schedule_digest.get("pending_job_count"),
+        }
+        if schedule_digest
+        else None,
+        "candidate_control_summary": control or None,
+        "notification_payload": {
+            "ready": notification.get("ready"),
+            "status": notification.get("status"),
+            "submission_ready": notification.get("submission_ready"),
+            "counts": notification.get("counts") if isinstance(notification.get("counts"), dict) else {},
+        }
+        if notification
+        else None,
+        "delivery_handoff": delivery or None,
+        "daily_schedule_gate": gate or None,
+        "daily_candidate_delivery_plan": delivery_plan or None,
+        "daily_candidate_schedule_execution_context": execution or None,
+        "daily_candidate_final_report": final_report or None,
+        "daily_candidate_delivery_final_report": delivery_final or None,
+        "daily_candidate_schedule_final_report": _goal_progress_daily_candidate_schedule_final_report(daily_candidate_plan, schedule_handoff),
+        "next_step": _goal_progress_daily_candidate_next_step(daily_candidate_plan),
+        "blockers": _string_list(daily_candidate_plan.get("blockers")),
+        "next_actions": _string_list(daily_candidate_plan.get("next_actions")),
+    }
+
+
+def _goal_progress_daily_candidate_schedule_final_report(daily_candidate_plan: dict[str, Any], schedule_handoff: dict[str, Any]) -> dict[str, Any]:
+    next_step = _goal_progress_daily_candidate_next_step(daily_candidate_plan)
+    configured = bool(daily_candidate_plan.get("configured"))
+    blockers = _string_list(daily_candidate_plan.get("blockers")) or _string_list(schedule_handoff.get("blockers"))
+    ready = configured and not blockers
+    return {
+        "kind": "ptcli.daily_candidate_schedule_final_report",
+        "ready": ready,
+        "report_allowed": ready,
+        "verdict": "schedule_ready" if ready else "schedule_missing",
+        "action": "create_schedule_jobs" if ready else "configure_schedule",
+        "configured_count": int(daily_candidate_plan.get("count") or schedule_handoff.get("configured_count") or 0),
+        "enabled_count": int(schedule_handoff.get("enabled_count") or 0),
+        "target_count": int(schedule_handoff.get("target_count") or DEFAULT_CANDIDATE_LIMIT),
+        "source": daily_candidate_plan.get("source"),
+        "env": daily_candidate_plan.get("env"),
+        "schedules": daily_candidate_plan.get("schedules") if isinstance(daily_candidate_plan.get("schedules"), list) else [],
+        "schedule_handoff": schedule_handoff or None,
+        "next_step": next_step,
+        "recommended_tool": next_step.get("tool") if isinstance(next_step, dict) else None,
+        "recommended_endpoint": next_step.get("endpoint") if isinstance(next_step, dict) else None,
+        "recommended_request": next_step.get("request") if isinstance(next_step, dict) else None,
+        "read_order": ["daily_candidate_schedule_final_report", "schedule_handoff", "daily_candidate_delivery_final_report", "candidate_control_summary", "blockers"],
+        "complete_when": "daily_candidate_schedule_final_report.ready=true and schedule_handoff.api.create_jobs has been used to create daily candidate jobs.",
+        "stop_when": [
+            "daily_candidate_schedule_final_report.ready=false",
+            "site policy gate is not ready",
+            "candidate results are treated as submitted without explicit approval",
+        ],
+        "safety": {
+            "mutates_state": False,
+            "uploads": False,
+            "creates_jobs_only_after_explicit_call": True,
+            "submitting_candidates_requires": ["human approval", "confirm_upload=true", "accept_rules=true", "target duplicate clear"],
+        },
+        "blockers": blockers,
+        "next_actions": _string_list(daily_candidate_plan.get("next_actions")) or _string_list(schedule_handoff.get("next_actions")),
+    }
 
 
 def _goal_progress_tracker_adapter_evidence(tracker_adapters: dict[str, Any]) -> dict[str, Any]:
@@ -23014,7 +23102,7 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
                 "evidence_fields": ["deployment", "daily_candidates", "site_policies", "tracker_adapters", "live_validation", "live_validation_preflight", "tool_count"],
-                "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "schedules", "schedule_handoff", "next_step", "blockers", "next_actions"],
+                "daily_candidate_evidence_fields": ["configured", "status", "source", "env", "count", "schedules", "schedule_handoff", "schedule_digest", "candidate_control_summary", "notification_payload", "delivery_handoff", "daily_schedule_gate", "daily_candidate_delivery_plan", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_schedule_final_report", "next_step", "blockers", "next_actions"],
                 "site_policy_evidence_fields": ["ready", "policy_repair_action", "policy_repair_ready", "policy_repair_gate", "rule_review_request", "config_update_plan", "policy_config_handoff", "next_step", "blockers"],
                 "tracker_adapter_evidence_fields": ["ready", "status", "verdict", "requested_trackers", "requested_flow", "adapter_extension_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_handoff", "extension_validation_matrix", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "blockers", "next_actions"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_submission_final_report", "live_validation_submission", "live_validation_followup", "resume_final_report", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],

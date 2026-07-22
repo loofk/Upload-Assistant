@@ -19353,6 +19353,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidates" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "daily_candidate_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
     assert "schedule_handoff" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_schedule_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_delivery_final_report" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "next_step" in tool_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
     assert "tracker_adapters" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "tracker_adapter_evidence_fields" in tool_by_name["goal_progress"]["response_contract"]
@@ -20139,6 +20141,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "live_submission_package" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "daily_candidates" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "schedule_handoff" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_schedule_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
+    assert "daily_candidate_delivery_final_report" in goal_progress_tool["response_contract"]["daily_candidate_evidence_fields"]
     assert "tracker_adapters" in goal_progress_tool["response_contract"]["evidence_fields"]
     assert "tracker_adapter_evidence_fields" in goal_progress_tool["response_contract"]
     assert "adapter_extension_final_report" in goal_progress_tool["response_contract"]["tracker_adapter_evidence_fields"]
@@ -20192,6 +20196,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_submission_package" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "daily_candidates" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "schedule_handoff" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "daily_candidate_schedule_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
+        assert "daily_candidate_delivery_final_report" in tools_by_name["goal_progress"]["response_contract"]["daily_candidate_evidence_fields"]
         assert "tracker_adapters" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "tracker_adapter_evidence_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "adapter_extension_final_report" in tools_by_name["goal_progress"]["response_contract"]["tracker_adapter_evidence_fields"]
@@ -21368,6 +21374,10 @@ services:
     assert payload["evidence"]["deployment"]["qbit_configured"] is True
     assert payload["evidence"]["daily_candidates"]["configured"] is False
     assert payload["evidence"]["daily_candidates"]["schedule_handoff"]["action"] == "configure_schedule"
+    assert payload["evidence"]["daily_candidates"]["daily_schedule_gate"] is None
+    assert payload["evidence"]["daily_candidates"]["daily_candidate_final_report"] is None
+    assert payload["evidence"]["daily_candidates"]["daily_candidate_delivery_final_report"] is None
+    assert payload["evidence"]["daily_candidates"]["daily_candidate_schedule_final_report"]["verdict"] == "schedule_missing"
     assert payload["evidence"]["daily_candidates"]["next_step"]["tool"] == "daily_candidates_schedule"
     assert payload["evidence"]["daily_candidates"]["next_step"]["request"]["schedules"][0]["limit"] == 10
     assert payload["evidence"]["site_policies"]["policy_repair_action"] == "review_rules"
@@ -21484,6 +21494,18 @@ services:
     assert daily["configured"] is True
     assert daily["count"] == 1
     assert daily["schedule_handoff"]["ready"] is True
+    assert daily["daily_schedule_gate"] is None
+    assert daily["daily_candidate_delivery_plan"] is None
+    assert daily["daily_candidate_schedule_execution_context"] is None
+    assert daily["daily_candidate_final_report"] is None
+    assert daily["daily_candidate_delivery_final_report"] is None
+    schedule_report = daily["daily_candidate_schedule_final_report"]
+    assert schedule_report["kind"] == "ptcli.daily_candidate_schedule_final_report"
+    assert schedule_report["ready"] is True
+    assert schedule_report["verdict"] == "schedule_ready"
+    assert schedule_report["action"] == "create_schedule_jobs"
+    assert schedule_report["target_count"] == 10
+    assert schedule_report["recommended_tool"] == "daily_candidates_schedule_job"
     assert daily["next_step"]["tool"] == "daily_candidates_schedule_job"
     assert daily["next_step"]["endpoint"] == "/v1/jobs/candidates/daily/schedule"
     assert daily["next_step"]["request"]["schedules"][0]["job_request"]["source_tracker"] == "U2"
