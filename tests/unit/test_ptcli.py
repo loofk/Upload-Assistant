@@ -19126,6 +19126,32 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert payload["policy_execution_summary"]["transfer_rule_plan"]["by_tracker"]["MTEAM"]["freeleech_required"] is True
     assert payload["policy_execution_summary"]["recommended_tool"] == "readiness_bundle"
     assert payload["policy_execution_summary"]["next_actions"] == ["Policy execution summary is ready; continue with readiness_bundle or manual/source-url retorrent preflight."]
+    execution_targets = payload["policy_execution_targets"]
+    assert execution_targets["kind"] == "ptcli.policy_execution_targets"
+    assert execution_targets["ready"] is True
+    assert execution_targets["source_trackers"] == ["U2"]
+    assert execution_targets["target_trackers"] == ["MTEAM"]
+    assert execution_targets["request_defaults"] == {
+        "qbit_download_limit": 20 * 1024 * 1024,
+        "uploaded_qbit_upload_limit": 2 * 1024 * 1024,
+    }
+    assert execution_targets["source"]["role_key"] == "source:U2"
+    assert execution_targets["source"]["qbit"]["request_fields"]["qbit_download_limit"] == 20 * 1024 * 1024
+    assert execution_targets["source"]["seeding"]["requirements"]["min_seed_time_hours"] == 72
+    assert execution_targets["source"]["rules"]["scope"] == "download_and_retorrent"
+    assert execution_targets["source"]["rules"]["ready"] is True
+    assert execution_targets["targets"][0]["role_key"] == "target:MTEAM"
+    assert execution_targets["targets"][0]["qbit"]["request_fields"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert execution_targets["targets"][0]["seeding"]["requirements"]["min_ratio"] == 1.0
+    assert execution_targets["targets"][0]["rules"]["required_confirmations"] == [
+        "target_rules_reviewed",
+        "target_upload_allowed",
+        "target_retorrent_allowed",
+        "target_seeding_obligations_accepted",
+    ]
+    assert execution_targets["rules"]["ready"] is True
+    assert execution_targets["enforcement"]["qbit_ready"] is True
+    assert execution_targets["safety"]["requires_confirm_upload_for_live"] is True
     assert payload["policy_setup_summary"]["kind"] == "ptcli.site_policy_setup_summary"
     assert payload["policy_setup_summary"]["ready"] is True
     assert payload["policy_setup_summary"]["missing_fingerprints"] == []
@@ -21432,6 +21458,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_readiness_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_repair_gate" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_handoff" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
+    assert "policy_execution_targets" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_plan" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_execution_sequence" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "policy_enforcement_bundle" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
@@ -21511,6 +21538,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_execution_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "qbit" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
     assert "rule_obligations" in tool_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
+    assert "policy_execution_targets_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "request_defaults" in tool_by_name["site_policies"]["response_contract"]["policy_execution_targets_fields"]
+    assert "policy_execution_target_fields" in tool_by_name["site_policies"]["response_contract"]
+    assert "role_key" in tool_by_name["site_policies"]["response_contract"]["policy_execution_target_fields"]
     assert "policy_gap_summary" in tool_by_name["site_policies"]["response_contract"]["required_fields"]
     assert "missing_by_category" in tool_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
     assert "next_step" in tool_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
@@ -22980,6 +23011,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_readiness_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_repair_gate" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_handoff" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
+        assert "policy_execution_targets" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_plan" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_execution_sequence" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "policy_enforcement_bundle" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
@@ -23024,6 +23056,10 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "policy_execution_handoff_fields" in tools_by_name["site_policies"]["response_contract"]
         assert "qbit" in tools_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
         assert "rule_obligations" in tools_by_name["site_policies"]["response_contract"]["policy_execution_handoff_fields"]
+        assert "policy_execution_targets_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "request_defaults" in tools_by_name["site_policies"]["response_contract"]["policy_execution_targets_fields"]
+        assert "policy_execution_target_fields" in tools_by_name["site_policies"]["response_contract"]
+        assert "role_key" in tools_by_name["site_policies"]["response_contract"]["policy_execution_target_fields"]
         assert "policy_gap_summary" in tools_by_name["site_policies"]["response_contract"]["required_fields"]
         assert "missing_by_category" in tools_by_name["site_policies"]["response_contract"]["gap_summary_fields"]
         assert "next_step" in tools_by_name["site_policies"]["response_contract"]["policy_handoff_fields"]
