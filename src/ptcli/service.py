@@ -2602,6 +2602,7 @@ def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
     extension_handoff = _sites_extension_handoff(extension_plan, extension_validation_matrix, flow_matrix, context)
     adapter_coverage_summary = _sites_adapter_coverage_summary(capability_matrix, policy_matrix, flow_matrix, extension_plan, extension_validation_matrix, context)
     tracker_rollout_handoff = _sites_tracker_rollout_handoff(adapter_coverage_summary, extension_plan, extension_validation_matrix, flow_matrix, context)
+    adapter_extension_final_report = _sites_adapter_extension_final_report(adapter_coverage_summary, extension_plan, extension_validation_matrix, extension_handoff, tracker_rollout_handoff, context)
     return {
         "kind": "ptcli.sites",
         "status": "ok" if not blockers else "blocked",
@@ -2620,6 +2621,7 @@ def sites_payload(request: dict[str, Any] | None = None) -> dict[str, Any]:
         "extension_validation_matrix": extension_validation_matrix,
         "extension_handoff": extension_handoff,
         "tracker_rollout_handoff": tracker_rollout_handoff,
+        "adapter_extension_final_report": adapter_extension_final_report,
         "flow_matrix": flow_matrix,
         "reference_flows": base.get("flows", []),
         "source_info_trackers": base.get("source_info_trackers", []),
@@ -5571,6 +5573,116 @@ def _sites_tracker_rollout_handoff(
         "blockers": _sites_tracker_rollout_blockers(adapter_coverage_summary, extension_plan),
         "next_actions": _sites_tracker_rollout_next_actions(action, next_source, next_target),
     }
+
+
+def _sites_adapter_extension_final_report(
+    adapter_coverage_summary: dict[str, Any],
+    extension_plan: dict[str, Any],
+    extension_validation_matrix: dict[str, Any],
+    extension_handoff: dict[str, Any],
+    tracker_rollout_handoff: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    blockers = list(
+        dict.fromkeys(
+            _string_list(adapter_coverage_summary.get("blockers"))
+            + _string_list(extension_plan.get("blockers"))
+            + _string_list(extension_validation_matrix.get("blockers"))
+            + _string_list(tracker_rollout_handoff.get("blockers"))
+        )
+    )
+    requested_flow = adapter_coverage_summary.get("requested_flow") if isinstance(adapter_coverage_summary.get("requested_flow"), dict) else {}
+    validation_blocked = _string_list(extension_validation_matrix.get("blocked_trackers"))
+    coverage_ready = adapter_coverage_summary.get("ready") is True
+    validation_ready = extension_validation_matrix.get("ready") is True
+    rollout_ready = tracker_rollout_handoff.get("ready") is True
+    ready = coverage_ready and validation_ready and rollout_ready and not blockers
+    next_step = tracker_rollout_handoff.get("next_step") if isinstance(tracker_rollout_handoff.get("next_step"), dict) else {}
+    verdict = _sites_adapter_extension_final_verdict(
+        ready=ready,
+        requested_flow=requested_flow,
+        validation_blocked=validation_blocked,
+        blockers=blockers,
+    )
+    return {
+        "kind": "ptcli.adapter_extension_final_report",
+        "ready": ready,
+        "report_allowed": ready,
+        "verdict": verdict,
+        "requested_trackers": _string_list(context.get("trackers")),
+        "requested_flow": requested_flow,
+        "coverage": {
+            "ready": coverage_ready,
+            "source_ready_trackers": _string_list(adapter_coverage_summary.get("source_ready_trackers")),
+            "target_ready_trackers": _string_list(adapter_coverage_summary.get("target_ready_trackers")),
+            "live_reference_sources_to_mteam": _string_list(adapter_coverage_summary.get("live_reference_sources_to_mteam")),
+            "coverage_counts": adapter_coverage_summary.get("coverage_counts") if isinstance(adapter_coverage_summary.get("coverage_counts"), dict) else {},
+            "missing_by_tracker": adapter_coverage_summary.get("missing_by_tracker") if isinstance(adapter_coverage_summary.get("missing_by_tracker"), dict) else {},
+            "priority_next": adapter_coverage_summary.get("priority_next") if isinstance(adapter_coverage_summary.get("priority_next"), dict) else None,
+        },
+        "extension": {
+            "ready": extension_plan.get("ready") is True,
+            "reference_sources_to_mteam": _string_list(extension_plan.get("reference_sources_to_mteam")),
+            "next_item": extension_plan.get("next_item") if isinstance(extension_plan.get("next_item"), dict) else None,
+            "implementation_order": extension_handoff.get("implementation_order") if isinstance(extension_handoff.get("implementation_order"), list) else [],
+            "recommended_next_tracker": extension_handoff.get("recommended_next_tracker"),
+        },
+        "validation": {
+            "ready": validation_ready,
+            "ready_trackers": _string_list(extension_validation_matrix.get("ready_trackers")),
+            "blocked_trackers": validation_blocked,
+            "next_item": extension_validation_matrix.get("next_item") if isinstance(extension_validation_matrix.get("next_item"), dict) else None,
+        },
+        "rollout": {
+            "ready": rollout_ready,
+            "action": tracker_rollout_handoff.get("action"),
+            "next_source_tracker": tracker_rollout_handoff.get("next_source_tracker"),
+            "next_target_tracker": tracker_rollout_handoff.get("next_target_tracker"),
+            "validation_ready_trackers": _string_list(tracker_rollout_handoff.get("validation_ready_trackers")),
+            "validation_blocked_trackers": _string_list(tracker_rollout_handoff.get("validation_blocked_trackers")),
+        },
+        "recommended_tool": next_step.get("tool"),
+        "recommended_endpoint": next_step.get("endpoint"),
+        "recommended_request": next_step.get("request"),
+        "recommended_call": {
+            "tool": next_step.get("tool"),
+            "endpoint": next_step.get("endpoint"),
+            "method": next_step.get("method"),
+            "request": next_step.get("request"),
+            "reason": next_step.get("reason"),
+            "safe_to_call_now": bool(ready or next_step.get("tool") in {"site_profiles", "site_policies", "readiness_bundle"}),
+            "requires_user_review": not ready,
+        },
+        "read_order": ["adapter_extension_final_report", "tracker_rollout_handoff", "adapter_coverage_summary", "extension_validation_matrix", "extension_handoff", "extension_plan"],
+        "complete_when": "adapter_extension_final_report.report_allowed=true and requested_flow.ready=true before treating a new Chinese PT site flow as adapter-ready.",
+        "stop_when": "adapter_extension_final_report.verdict in adapter_blocked, policy_blocked, validation_blocked, unsupported_flow without a safe recommended_call.",
+        "blockers": blockers,
+        "next_actions": _sites_adapter_extension_final_next_actions(verdict, next_step, blockers),
+    }
+
+
+def _sites_adapter_extension_final_verdict(*, ready: bool, requested_flow: dict[str, Any], validation_blocked: list[str], blockers: list[str]) -> str:
+    if ready:
+        return "adapter_ready"
+    if requested_flow and requested_flow.get("ready") is not True:
+        return "unsupported_flow"
+    if validation_blocked:
+        return "validation_blocked"
+    if any("policy" in blocker or "rule" in blocker for blocker in blockers):
+        return "policy_blocked"
+    if blockers:
+        return "adapter_blocked"
+    return "inspect"
+
+
+def _sites_adapter_extension_final_next_actions(verdict: str, next_step: dict[str, Any], blockers: list[str]) -> list[str]:
+    if verdict == "adapter_ready":
+        return ["Use adapter_extension_final_report.recommended_call to run readiness or preflight for the requested source/target flow before live upload."]
+    if next_step:
+        return [f"Follow adapter_extension_final_report.recommended_call via {next_step.get('tool')} after reviewing blockers and site policy requirements."]
+    if blockers:
+        return ["Resolve adapter_extension_final_report.blockers before adding or validating this Chinese PT site flow."]
+    return ["Inspect adapter_extension_final_report.read_order to choose the next adapter extension step."]
 
 
 def _sites_tracker_rollout_blockers(adapter_coverage_summary: dict[str, Any], extension_plan: dict[str, Any]) -> list[str]:
@@ -22564,7 +22676,7 @@ def _summary_check_response_contract() -> dict[str, Any]:
 
 def _sites_response_contract() -> dict[str, Any]:
     return {
-        "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "policy_matrix", "policy_execution_summary", "adapter_coverage_summary", "extension_plan", "extension_validation_matrix", "extension_handoff", "tracker_rollout_handoff", "flow_matrix", "agent_summary", "blockers", "next_actions"],
+        "required_fields": ["status", "ok", "ready", "sites", "capability_matrix", "adapter_profiles", "policy_matrix", "policy_execution_summary", "adapter_coverage_summary", "extension_plan", "extension_validation_matrix", "extension_handoff", "tracker_rollout_handoff", "adapter_extension_final_report", "flow_matrix", "agent_summary", "blockers", "next_actions"],
         "capability_fields": ["tracker", "capabilities", "adapter_profile", "policy_profile", "execution_readiness", "ready_for_source", "ready_for_mteam_target_flow", "ready_as_target"],
         "adapter_profile_fields": ["tracker", "source_info", "source_info_adapter", "source_download", "source_download_adapter", "target_upload", "target_upload_adapter", "credential_requirements", "mteam_source_flow", "full_live_closure_to_mteam", "implemented_roles", "extension_notes", "extension_checklist", "adapter_contract"],
         "adapter_contract_fields": ["reference_adapters", "source_info_contract", "source_download_contract", "target_upload_contract", "policy_contract", "validation_contract", "done_when"],
@@ -22580,6 +22692,7 @@ def _sites_response_contract() -> dict[str, Any]:
         "extension_handoff_fields": ["ready", "phase", "recommended_next_tracker", "reference_flow", "implementation_order", "tracker_steps", "validation_matrix", "next_validation", "adapter_contract", "endpoint_sequence", "validation_sequence", "continue_when", "stop_when", "blockers", "next_actions"],
         "tracker_rollout_handoff_fields": ["ready", "action", "requested_trackers", "requested_flow", "reference_flows", "live_reference_sources_to_mteam", "source_rollout", "target_rollout", "next_source_tracker", "next_target_tracker", "extension_plan_ready", "validation_ready_trackers", "validation_blocked_trackers", "next_step", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
         "tracker_rollout_item_fields": ["tracker", "role", "applicable", "ready_for_role", "full_live_closure_to_mteam", "policy_ready", "validation_ready", "adapter", "credential_requirements", "missing_components", "required_evidence", "next_tool", "next_endpoint", "checks"],
+        "adapter_extension_final_report_fields": ["ready", "report_allowed", "verdict", "requested_trackers", "requested_flow", "coverage", "extension", "validation", "rollout", "recommended_tool", "recommended_endpoint", "recommended_request", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
         "agent_summary_fields": ["ready", "site_count", "source_info_count", "source_download_count", "target_upload_count", "full_live_closure_to_mteam_count", "policy_profile_count", "reference_flow_count", "extension_ready", "extension_blocker_count", "coverage_ready", "coverage_blocker_count", "coverage_priority_next_tracker", "recommended_next_tool", "blocker_count"],
         "safety": ["does_not_contact_trackers", "does_not_contact_qbittorrent", "does_not_upload"],
     }
@@ -23786,6 +23899,7 @@ def openapi_payload(*, require_auth: bool | None = None) -> dict[str, Any]:
             "extension_validation_matrix": {"type": "object"},
             "extension_handoff": {"type": "object"},
             "tracker_rollout_handoff": {"type": "object"},
+            "adapter_extension_final_report": {"type": "object"},
             "flow_matrix": {"type": "array", "items": {"type": "object"}},
             "reference_flows": {"type": "array", "items": {"type": "object"}},
             "agent_summary": {"type": "object"},

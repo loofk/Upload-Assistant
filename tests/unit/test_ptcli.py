@@ -17581,6 +17581,21 @@ def test_service_sites_payload_exposes_adapter_and_policy_profiles(monkeypatch) 
     assert rollout["next_source_tracker"] is None
     assert rollout["next_target_tracker"] is None
     assert rollout["recommended_tool"] == "readiness_bundle"
+    final_report = payload["adapter_extension_final_report"]
+    assert final_report["kind"] == "ptcli.adapter_extension_final_report"
+    assert final_report["ready"] is True
+    assert final_report["report_allowed"] is True
+    assert final_report["verdict"] == "adapter_ready"
+    assert final_report["requested_flow"] == coverage["requested_flow"]
+    assert final_report["coverage"]["source_ready_trackers"] == ["U2", "MTEAM"]
+    assert final_report["coverage"]["target_ready_trackers"] == ["MTEAM"]
+    assert final_report["extension"]["reference_sources_to_mteam"] == ["U2"]
+    assert final_report["validation"]["ready_trackers"] == ["U2", "MTEAM"]
+    assert final_report["rollout"]["action"] == "validate_requested_flow"
+    assert final_report["recommended_call"]["tool"] == "readiness_bundle"
+    assert final_report["recommended_call"]["safe_to_call_now"] is True
+    assert "adapter_extension_final_report" in final_report["read_order"]
+    assert "requested_flow.ready=true" in final_report["complete_when"]
     source_rollout = {item["tracker"]: item for item in rollout["source_rollout"]}
     assert source_rollout["U2"]["ready_for_role"] is True
     assert source_rollout["U2"]["full_live_closure_to_mteam"] is True
@@ -19204,6 +19219,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "extension_validation_matrix" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "tracker_rollout_handoff" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
+    assert "adapter_extension_final_report" in tool_by_name["site_profiles"]["response_contract"]["required_fields"]
     assert "extension_checklist" in tool_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
     assert "adapter_coverage_summary_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "adapter_coverage_item_fields" in tool_by_name["site_profiles"]["response_contract"]
@@ -19218,6 +19234,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "validation_matrix" in tool_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
     assert "tracker_rollout_handoff_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "source_rollout" in tool_by_name["site_profiles"]["response_contract"]["tracker_rollout_handoff_fields"]
+    assert "adapter_extension_final_report_fields" in tool_by_name["site_profiles"]["response_contract"]
+    assert "recommended_call" in tool_by_name["site_profiles"]["response_contract"]["adapter_extension_final_report_fields"]
     assert "tracker_rollout_item_fields" in tool_by_name["site_profiles"]["response_contract"]
     assert "applicable" in tool_by_name["site_profiles"]["response_contract"]["tracker_rollout_item_fields"]
     assert "ready_for_role" in tool_by_name["site_profiles"]["response_contract"]["tracker_rollout_item_fields"]
@@ -20134,6 +20152,7 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "extension_validation_matrix" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "tracker_rollout_handoff" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
+        assert "adapter_extension_final_report" in tools_by_name["site_profiles"]["response_contract"]["required_fields"]
         assert "extension_checklist" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["adapter_profile_fields"]
         assert "adapter_coverage_summary_fields" in tools_by_name["site_profiles"]["response_contract"]
@@ -20147,6 +20166,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "extension_handoff_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "validation_matrix" in tools_by_name["site_profiles"]["response_contract"]["extension_handoff_fields"]
         assert "tracker_rollout_handoff_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "adapter_extension_final_report_fields" in tools_by_name["site_profiles"]["response_contract"]
+        assert "recommended_call" in tools_by_name["site_profiles"]["response_contract"]["adapter_extension_final_report_fields"]
         assert "tracker_rollout_item_fields" in tools_by_name["site_profiles"]["response_contract"]
         assert "adapter_contract" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
         assert "missing_components" in tools_by_name["site_profiles"]["response_contract"]["extension_item_fields"]
