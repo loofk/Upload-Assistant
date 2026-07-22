@@ -30523,6 +30523,7 @@
           "request",
           "reviews",
           "config_patch",
+          "rule_review_final_report",
           "next_step",
           "blockers",
           "next_actions"
@@ -30548,6 +30549,28 @@
           "safe_to_auto_apply",
           "mutates_state",
           "apply_order"
+        ],
+        "rule_review_final_report_fields": [
+          "ready",
+          "report_allowed",
+          "verdict",
+          "action",
+          "requested_trackers",
+          "requested_roles",
+          "review_items",
+          "config_patch",
+          "merge_plan",
+          "after_edit",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
         ],
         "next_step_fields": [
           "tool",

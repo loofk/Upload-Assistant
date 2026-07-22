@@ -18454,6 +18454,14 @@ def test_site_policy_rule_review_requires_explicit_manual_evidence(monkeypatch) 
     assert payload["recommended_tool"] == "site_policy_rule_review"
     assert payload["recommended_endpoint"] == "/v1/site-policies/rule-review"
     assert payload["next_step"]["reason"] == "complete_manual_rule_review_evidence"
+    final_report = payload["rule_review_final_report"]
+    assert final_report["kind"] == "ptcli.site_policy_rule_review_final_report"
+    assert final_report["ready"] is False
+    assert final_report["report_allowed"] is False
+    assert final_report["verdict"] == "needs_manual_review"
+    assert final_report["action"] == "collect_manual_rule_review_evidence"
+    assert final_report["safety"]["must_not_fabricate_fingerprint"] is True
+    assert final_report["recommended_tool"] == "site_policy_rule_review"
 
 
 def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
@@ -18486,10 +18494,19 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert payload["config_patch"]["safe_to_auto_apply"] is False
     assert payload["config_patch"]["structured_patch"]["U2"]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
     assert payload["config_patch"]["flat_patch"]["MTEAM"]["rule_review_fingerprint"] == reviews["MTEAM"]["rule_review_fingerprint"]
+    final_report = payload["rule_review_final_report"]
+    assert final_report["ready"] is True
+    assert final_report["report_allowed"] is True
+    assert final_report["verdict"] == "patch_ready"
+    assert final_report["action"] == "copy_config_patch"
+    assert final_report["merge_plan"]["fingerprint_patch_source"] == "site_policy_rule_review.config_patch.structured_patch"
+    assert final_report["merge_plan"]["fingerprint_patch_wins"] is True
+    assert final_report["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert final_report["review_items"][0]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
     assert payload["next_step"]["tool"] == "edit_config"
     assert payload["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert payload["recommended_endpoint"] is None
-    assert payload["read_order"][0] == "status"
+    assert payload["read_order"][0] == "rule_review_final_report"
 
 
 def test_service_tools_and_openapi_include_job_endpoints() -> None:
@@ -19183,6 +19200,9 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert tool_by_name["site_policy_rule_review"]["path"] == "/v1/site-policies/rule-review"
     assert tool_by_name["site_policy_rule_review"]["input_schema"]["required"] == ["rules_reviewed", "reviewer", "reviewed_at"]
     assert "config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+    assert "rule_review_final_report" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+    assert "rule_review_final_report_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
+    assert "merge_plan" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
     assert "rule_review_fingerprint" in tool_by_name["site_policy_rule_review"]["response_contract"]["review_fields"]
     assert tool_by_name["site_policy_rule_review"]["safety"]["does_not_edit_config"] is True
     assert "policy_execution_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
@@ -19651,6 +19671,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "config_update_plan" in site_policy_schema["properties"]
     rule_review_schema = openapi["paths"]["/v1/site-policies/rule-review"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "config_patch" in rule_review_schema["properties"]
+    assert "rule_review_final_report" in rule_review_schema["properties"]
     assert "reviews" in rule_review_schema["properties"]
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "capability_matrix" in site_profiles_schema["properties"]
@@ -20108,6 +20129,10 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "resume_lineage" in retorrent_tool["response_contract"]["required_fields"]
     assert "agent_decision" in retorrent_tool["response_contract"]["required_fields"]
     assert "confirm_upload=true" in retorrent_tool["safety"]["requires_confirmation"]
+    rule_review_tool = next(tool for tool in manifest["tools"] if tool["name"] == "site_policy_rule_review")
+    assert "rule_review_final_report" in rule_review_tool["response_contract"]["required_fields"]
+    assert "rule_review_final_report_fields" in rule_review_tool["response_contract"]
+    assert "merge_plan" in rule_review_tool["response_contract"]["rule_review_final_report_fields"]
     goal_progress_tool = next(tool for tool in manifest["tools"] if tool["name"] == "goal_progress")
     assert "ready_to_submit" in goal_progress_tool["response_contract"]["capability_status_values"]
     assert "submitted_needs_resume" in goal_progress_tool["response_contract"]["capability_status_values"]
@@ -20179,6 +20204,9 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "live_validation_preflight" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
         assert "live_validation_preflight_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
+        assert "rule_review_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+        assert "rule_review_final_report_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]
+        assert "merge_plan" in tools_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]
