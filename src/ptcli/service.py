@@ -21218,10 +21218,11 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
     tools = _agent_tool_schemas()
     tool_names = {str(tool.get("name")) for tool in tools}
     live_validation_evidence = _goal_progress_live_validation_evidence(request)
+    live_validation_preflight = _goal_progress_live_validation_preflight(request, live_validation_evidence)
     progress_items = _goal_progress_items(deployment, site_policies, tool_names, live_validation_evidence)
     estimate = _goal_progress_estimate(progress_items)
     blockers = _goal_progress_blockers(progress_items, deployment, site_policies, live_validation_evidence)
-    next_step = _goal_progress_next_step(progress_items, blockers, live_validation_evidence)
+    next_step = _goal_progress_next_step(progress_items, blockers, live_validation_evidence, live_validation_preflight)
     return {
         "kind": "ptcli.goal_progress",
         "status": "ok" if estimate["critical_path_ready"] else "blocked",
@@ -21258,10 +21259,11 @@ def goal_progress_payload(request: dict[str, Any] | None = None) -> dict[str, An
                 "blockers": _string_list(site_policies.get("blockers")),
             },
             "live_validation": live_validation_evidence,
+            "live_validation_preflight": live_validation_preflight,
             "tool_count": len(tools),
         },
-        "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence.live_validation", "evidence", "next_step", "blockers"],
-        "next_actions": _goal_progress_next_actions(progress_items, blockers, live_validation_evidence),
+        "read_order": ["completion_estimate", "critical_path_remaining", "capabilities", "evidence.live_validation", "evidence.live_validation_preflight", "evidence", "next_step", "blockers"],
+        "next_actions": _goal_progress_next_actions(progress_items, blockers, live_validation_evidence, live_validation_preflight),
     }
 
 
@@ -21287,6 +21289,69 @@ def _goal_progress_policy_request(request: dict[str, Any]) -> dict[str, Any]:
         "config": request.get("config"),
         "base_dir": request.get("base_dir"),
     }
+
+
+def _goal_progress_live_validation_preflight(request: dict[str, Any], live_validation_evidence: dict[str, Any]) -> dict[str, Any]:
+    if live_validation_evidence.get("ready") is True:
+        return {
+            "kind": "ptcli.goal_live_validation_preflight",
+            "ready": True,
+            "status": "already_verified",
+            "skipped": True,
+            "reason": "live_validation_evidence_complete",
+            "blockers": [],
+            "next_actions": ["Live validation is already proven by evidence.live_validation.completion_evidence."],
+        }
+    try:
+        readiness = readiness_bundle_payload(request)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "kind": "ptcli.goal_live_validation_preflight",
+            "ready": False,
+            "status": "blocked",
+            "skipped": False,
+            "reason": "readiness_bundle_failed",
+            "blockers": [str(exc)],
+            "next_actions": ["Resolve goal_live_validation_preflight.blockers, then rerun goal_progress."],
+        }
+    live_execution_package = readiness.get("live_execution_package") if isinstance(readiness.get("live_execution_package"), dict) else {}
+    repair_plan = readiness.get("live_validation_repair_plan") if isinstance(readiness.get("live_validation_repair_plan"), dict) else {}
+    validation_report = readiness.get("seedbox_live_validation_report") if isinstance(readiness.get("seedbox_live_validation_report"), dict) else {}
+    validation_summary = readiness.get("live_validation_summary") if isinstance(readiness.get("live_validation_summary"), dict) else {}
+    validation_sequence = readiness.get("live_validation_sequence") if isinstance(readiness.get("live_validation_sequence"), dict) else {}
+    next_step = repair_plan.get("next_step") if isinstance(repair_plan.get("next_step"), dict) else validation_summary.get("next_step") if isinstance(validation_summary.get("next_step"), dict) else {}
+    ready = bool(live_execution_package.get("ready") or repair_plan.get("ready") or validation_report.get("ready"))
+    return {
+        "kind": "ptcli.goal_live_validation_preflight",
+        "ready": ready,
+        "status": live_execution_package.get("status") or repair_plan.get("status") or readiness.get("status"),
+        "skipped": False,
+        "readiness_ready": readiness.get("ready"),
+        "live_readiness_ready": (readiness.get("live_readiness") or {}).get("ready_for_ai") if isinstance(readiness.get("live_readiness"), dict) else None,
+        "live_execution_package": live_execution_package,
+        "live_validation_repair_plan": repair_plan,
+        "seedbox_live_validation_report": validation_report,
+        "live_validation_summary": validation_summary,
+        "live_validation_sequence": validation_sequence,
+        "next_step": next_step or None,
+        "recommended_tool": next_step.get("tool") if isinstance(next_step, dict) else None,
+        "recommended_endpoint": next_step.get("endpoint") if isinstance(next_step, dict) else None,
+        "recommended_method": next_step.get("method") if isinstance(next_step, dict) else None,
+        "recommended_request": next_step.get("request") if isinstance(next_step, dict) else None,
+        "read_order": ["goal_live_validation_preflight", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_sequence"],
+        "blockers": _string_list(readiness.get("blockers")) + _string_list(repair_plan.get("blockers")) + _string_list(validation_report.get("blockers")),
+        "next_actions": _goal_progress_live_validation_preflight_next_actions(ready, next_step, repair_plan, live_execution_package),
+    }
+
+
+def _goal_progress_live_validation_preflight_next_actions(ready: bool, next_step: dict[str, Any], repair_plan: dict[str, Any], live_execution_package: dict[str, Any]) -> list[str]:
+    if ready and next_step:
+        tool = next_step.get("tool") or "next tool"
+        return [f"Run goal_live_validation_preflight.next_step with tool={tool}, then collect job_id or summary_file and rerun goal_progress."]
+    blockers = _string_list(repair_plan.get("blockers")) + _string_list(live_execution_package.get("blockers"))
+    if blockers:
+        return ["Resolve live_validation_preflight blockers before running doctor or live check-and-submit."]
+    return ["Inspect goal_live_validation_preflight.read_order, then rerun readiness_bundle with source/target details if no next_step is available."]
 
 
 def _goal_progress_live_validation_evidence(request: dict[str, Any]) -> dict[str, Any]:
@@ -21708,7 +21773,7 @@ def _goal_progress_blockers(items: list[dict[str, Any]], deployment: dict[str, A
     return list(dict.fromkeys(blocker for blocker in blockers if blocker))
 
 
-def _goal_progress_next_step(items: list[dict[str, Any]], blockers: list[str], live_validation_evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+def _goal_progress_next_step(items: list[dict[str, Any]], blockers: list[str], live_validation_evidence: dict[str, Any] | None = None, live_validation_preflight: dict[str, Any] | None = None) -> dict[str, Any]:
     by_id = {str(item.get("id")): item for item in items}
     if by_id.get("site_policy_config", {}).get("status") != "complete":
         return {"tool": "site_policies", "endpoint": "/v1/site-policies", "method": "POST", "reason": "repair_site_policy_gate"}
@@ -21721,14 +21786,18 @@ def _goal_progress_next_step(items: list[dict[str, Any]], blockers: list[str], l
             return next_step
         if live_evidence.get("status") == "ready_to_submit" and next_step:
             return next_step
-        return {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "reason": "run_seedbox_live_validation_preflight"}
+        preflight = live_validation_preflight if isinstance(live_validation_preflight, dict) else {}
+        preflight_next = preflight.get("next_step") if isinstance(preflight.get("next_step"), dict) else {}
+        if preflight_next:
+            return {**preflight_next, "reason": preflight_next.get("reason") or "goal_live_validation_preflight"}
+        return {"tool": "readiness_bundle", "endpoint": "/v1/readiness/bundle", "method": "POST", "request": None, "reason": "run_seedbox_live_validation_preflight"}
     if blockers:
         return {"tool": "goal_progress", "endpoint": "/v1/goal/progress", "method": "GET", "reason": "inspect_remaining_blockers"}
     return {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "reason": "exercise_daily_candidate_workflow"}
 
 
-def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str], live_validation_evidence: dict[str, Any] | None = None) -> list[str]:
-    next_step = _goal_progress_next_step(items, blockers, live_validation_evidence)
+def _goal_progress_next_actions(items: list[dict[str, Any]], blockers: list[str], live_validation_evidence: dict[str, Any] | None = None, live_validation_preflight: dict[str, Any] | None = None) -> list[str]:
+    next_step = _goal_progress_next_step(items, blockers, live_validation_evidence, live_validation_preflight)
     actions = [f"Call {next_step['tool']} at {next_step['endpoint']} and inspect its blockers/next_actions."]
     if any(item.get("id") == "seedbox_live_validation" and item.get("status") == "ready_to_submit" for item in items):
         actions.append("Submit evidence.live_validation.live_submission_package.submit.request, then poll the returned job until live_user_report.report_allowed=true.")
@@ -22448,8 +22517,9 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "estimate_fields": ["estimated_percent", "implemented_or_partial_percent", "total_weight", "score", "by_status", "critical_path_ready", "confidence", "note"],
                 "capability_fields": ["id", "name", "status", "weight", "score", "evidence", "blockers"],
                 "capability_status_values": ["complete", "partial", "ready_to_submit", "submitted_running", "submitted_needs_resume", "submitted_ready_to_report", "submitted_blocked", "submitted_failed", "submitted_cancelled", "submitted_incomplete", "unverified", "missing", "not_started"],
-                "evidence_fields": ["deployment", "site_policies", "live_validation", "tool_count"],
+                "evidence_fields": ["deployment", "site_policies", "live_validation", "live_validation_preflight", "tool_count"],
                 "live_validation_evidence_fields": ["ready", "status", "submission_ready", "source", "job_dir", "requested_job_id", "requested_summary_file", "checked_jobs", "candidate_count", "best", "completion_evidence", "live_submission_package", "live_validation_submission", "live_validation_followup", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "required_condition", "blockers", "next_actions"],
+                "live_validation_preflight_fields": ["ready", "status", "skipped", "readiness_ready", "live_readiness_ready", "live_execution_package", "live_validation_repair_plan", "seedbox_live_validation_report", "live_validation_summary", "live_validation_sequence", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "blockers", "next_actions"],
                 "next_step_fields": ["tool", "endpoint", "method", "request", "reason"],
             },
             "workflow_hints": {"read_first": "completion_estimate", "then": "critical_path_remaining", "repair_with": "next_step"},

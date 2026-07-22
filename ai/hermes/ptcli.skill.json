@@ -28793,6 +28793,7 @@
           "deployment",
           "site_policies",
           "live_validation",
+          "live_validation_preflight",
           "tool_count"
         ],
         "live_validation_evidence_fields": [
@@ -28816,6 +28817,26 @@
           "recommended_method",
           "recommended_request",
           "required_condition",
+          "blockers",
+          "next_actions"
+        ],
+        "live_validation_preflight_fields": [
+          "ready",
+          "status",
+          "skipped",
+          "readiness_ready",
+          "live_readiness_ready",
+          "live_execution_package",
+          "live_validation_repair_plan",
+          "seedbox_live_validation_report",
+          "live_validation_summary",
+          "live_validation_sequence",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_method",
+          "recommended_request",
+          "read_order",
           "blockers",
           "next_actions"
         ],

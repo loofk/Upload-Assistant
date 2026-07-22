@@ -19288,10 +19288,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "critical_path_remaining" in tool_by_name["goal_progress"]["response_contract"]["required_fields"]
     assert "critical_path_ready" in tool_by_name["goal_progress"]["response_contract"]["estimate_fields"]
     assert "live_validation" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
+    assert "live_validation_preflight" in tool_by_name["goal_progress"]["response_contract"]["evidence_fields"]
     assert "completion_evidence" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "submission_ready" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_submission_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_followup" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+    assert "live_validation_preflight_fields" in tool_by_name["goal_progress"]["response_contract"]
+    assert "live_execution_package" in tool_by_name["goal_progress"]["response_contract"]["live_validation_preflight_fields"]
     assert "recommended_request" in tool_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
     assert "request" in tool_by_name["goal_progress"]["response_contract"]["next_step_fields"]
     assert "ready_to_submit" in tool_by_name["goal_progress"]["response_contract"]["capability_status_values"]
@@ -20053,6 +20056,8 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     assert "submitted_needs_resume" in goal_progress_tool["response_contract"]["capability_status_values"]
     assert "live_submission_package" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
     assert "live_validation_followup" in goal_progress_tool["response_contract"]["live_validation_evidence_fields"]
+    assert "live_validation_preflight" in goal_progress_tool["response_contract"]["evidence_fields"]
+    assert "live_validation_preflight_fields" in goal_progress_tool["response_contract"]
     assert "request" in goal_progress_tool["response_contract"]["next_step_fields"]
     assert manifest["openclaw"]["manifest_url"] == "http://ptcli.local:8080/v1/openclaw/skill.json"
     assert manifest["hermes"]["manifest_url"] == "http://ptcli.local:8080/v1/hermes/skill.json"
@@ -20094,6 +20099,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "submitted_running" in tools_by_name["goal_progress"]["response_contract"]["capability_status_values"]
         assert "live_submission_package" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
         assert "live_validation_followup" in tools_by_name["goal_progress"]["response_contract"]["live_validation_evidence_fields"]
+        assert "live_validation_preflight" in tools_by_name["goal_progress"]["response_contract"]["evidence_fields"]
+        assert "live_validation_preflight_fields" in tools_by_name["goal_progress"]["response_contract"]
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
@@ -21248,10 +21255,105 @@ services:
     assert payload["evidence"]["deployment"]["qbit_configured"] is True
     assert payload["evidence"]["live_validation"]["status"] == "missing"
     assert payload["evidence"]["live_validation"]["ready"] is False
+    assert payload["evidence"]["live_validation_preflight"]["kind"] == "ptcli.goal_live_validation_preflight"
+    assert payload["evidence"]["live_validation_preflight"]["ready"] is False
     assert payload["next_step"]["tool"] in {"site_policies", "readiness_bundle"}
     assert payload["read_order"][0] == "completion_estimate"
     assert "evidence.live_validation" in payload["read_order"]
+    assert "evidence.live_validation_preflight" in payload["read_order"]
     assert any(item["id"] == "seedbox_live_validation" for item in payload["critical_path_remaining"])
+
+
+def test_goal_progress_payload_embeds_ready_live_validation_preflight(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(ptcli_service.shutil, "which", lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe", "mediainfo"} else None)
+    data_dir = tmp_path / "data"
+    cookies_dir = data_dir / "cookies"
+    tmp_dir = tmp_path / "tmp"
+    job_dir = tmp_path / "jobs"
+    downloads_dir = tmp_path / "downloads"
+    for directory in (cookies_dir, tmp_dir, job_dir, downloads_dir):
+        directory.mkdir(parents=True)
+    (data_dir / "config.py").write_text("config = {}", encoding="utf-8")
+    (cookies_dir / "U2.txt").write_text("uid=1; pass=token", encoding="utf-8")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbittorrent", "img_host_1": "ptpimg"},
+        "TORRENT_CLIENTS": {"qbittorrent": {"torrent_client": "qbit", "qbit_url": "http://host.docker.internal", "qbit_port": "8080"}},
+        "TRACKERS": {"U2": {"passkey": "source-passkey"}, "MTEAM": {"api_key": "mteam-token"}},
+        "PTCLI": {
+            "SITE_POLICIES": {
+                "U2": {
+                    "allow_auto_download": True,
+                    "allow_retorrent": True,
+                    "download_rate_limit": "20MiB/s",
+                    "min_seed_time_hours": 72,
+                    "rule_review_fingerprint": "u2-review",
+                },
+                "MTEAM": {
+                    "allow_auto_upload": True,
+                    "allow_retorrent": True,
+                    "upload_rate_limit": "2MiB/s",
+                    "min_ratio": 1.0,
+                    "rule_review_fingerprint": "mteam-review",
+                },
+            }
+        },
+    }
+    monkeypatch.setattr(ptcli_service, "load_config", lambda _path=None: config)
+    (tmp_path / "docker-compose.yml").write_text(
+        """
+services:
+  ptcli-api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - PTCLI_API_TOKEN=${PTCLI_API_TOKEN:-}
+      - PTCLI_PUBLIC_BASE_URL=${PTCLI_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+      - PTCLI_JOB_DIR=/Upload-Assistant/tmp/ptcli-jobs
+    volumes:
+      - /downloads:/downloads/:rw
+      - /app/data/config.py:/Upload-Assistant/data/config.py:rw
+      - /app/data/cookies/:/Upload-Assistant/data/cookies/:rw
+      - /app/tmp/:/Upload-Assistant/tmp/:rw
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+  ptcli-daily-scheduler:
+    profiles:
+      - daily
+    command: ["daily-scheduler", "--summary-output-dir", "/Upload-Assistant/tmp/daily-candidates", "--write-notification", "--json"]
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TMPDIR", str(tmp_dir))
+    monkeypatch.setenv(
+        "PTCLI_DAILY_CANDIDATE_SCHEDULES",
+        '[{"name":"u2-to-mteam","source_tracker":"U2","target":"MTEAM","limit":10,"accept_rules":true}]',
+    )
+
+    payload = ptcli_service.goal_progress_payload(
+        {
+            "base_dir": str(tmp_path),
+            "job_dir": str(job_dir),
+            "downloads_path": str(downloads_dir),
+            "source_tracker": "U2",
+            "source_id": "60635",
+            "target": "MTEAM",
+            "accept_rules": True,
+            "confirm_upload": True,
+        }
+    )
+
+    preflight = payload["evidence"]["live_validation_preflight"]
+    assert preflight["ready"] is True
+    assert preflight["live_execution_package"]["ready"] is True
+    assert preflight["live_validation_repair_plan"]["ready"] is True
+    assert preflight["next_step"]["tool"] == "ptcli_doctor"
+    assert preflight["next_step"]["request"]["argv"] == preflight["live_execution_package"]["steps"][0]["request"]["argv"]
+    assert payload["next_step"]["tool"] == "ptcli_doctor"
+    assert payload["next_step"]["request"]["argv"] == preflight["next_step"]["request"]["argv"]
+    assert any("goal_live_validation_preflight.next_step" in action for action in preflight["next_actions"])
 
 
 def test_goal_progress_cli_outputs_read_only_audit(tmp_path, monkeypatch, capsys) -> None:
