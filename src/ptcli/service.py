@@ -22808,7 +22808,9 @@ def _job_material_chain_handoff(job: dict[str, Any], summary_payload: dict[str, 
     target_upload = _job_target_upload_handoff(job, summary_payload)
     if not any(isinstance(item, dict) for item in (final_report, evidence, gap_summary, materials_handoff, target_package, target_upload)):
         return None
-    steps = _material_chain_steps(evidence, final_report, gap_summary, target_package, target_upload)
+    payload = summary_payload if isinstance(summary_payload, dict) else job.get("result") if isinstance(job.get("result"), dict) else {}
+    direct_calls = _material_chain_direct_calls(job, payload)
+    steps = _material_chain_steps(evidence, final_report, gap_summary, target_package, target_upload, direct_calls)
     next_step = next((step for step in steps if step.get("ready") is not True), None)
     blockers = list(
         dict.fromkeys(
@@ -22833,6 +22835,7 @@ def _job_material_chain_handoff(job: dict[str, Any], summary_payload: dict[str, 
         "missing_step_count": sum(1 for step in steps if step.get("ready") is not True),
         "steps": steps,
         "next_step": next_step,
+        "direct_calls": direct_calls,
         "recommended_call": recommended_call,
         "recommended_tool": recommended_call.get("tool"),
         "recommended_endpoint": recommended_call.get("endpoint"),
@@ -22866,6 +22869,7 @@ def _material_chain_steps(
     gap_summary: dict[str, Any] | None,
     target_package: dict[str, Any] | None,
     target_upload: dict[str, Any] | None,
+    direct_calls: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     checks = evidence.get("checks_by_domain") if isinstance(evidence, dict) and isinstance(evidence.get("checks_by_domain"), dict) else {}
     metadata = evidence.get("metadata") if isinstance(evidence, dict) and isinstance(evidence.get("metadata"), dict) else {}
@@ -22873,13 +22877,14 @@ def _material_chain_steps(
     media = evidence.get("media") if isinstance(evidence, dict) and isinstance(evidence.get("media"), dict) else {}
     target_payload = final_report.get("target_payload") if isinstance(final_report, dict) and isinstance(final_report.get("target_payload"), dict) else {}
     gap_items = gap_summary.get("items") if isinstance(gap_summary, dict) and isinstance(gap_summary.get("items"), list) else []
+    direct_calls = direct_calls if isinstance(direct_calls, dict) else {}
     return [
-        _material_chain_step("source_content", "qBittorrent/local content", _material_chain_domain_ready(checks, "source_content"), checks, gap_items, evidence_ref="material_evidence_summary.checks_by_domain.source_content"),
-        _material_chain_step("metadata_ids", "IMDb/TMDb/Douban ids", bool(metadata.get("imdb_ready") and metadata.get("tmdb_ready") and metadata.get("douban_ready")), checks, gap_items, evidence_ref="material_evidence_summary.metadata"),
-        _material_chain_step("ptgen_description", "PTGen/Douban description", bool(description.get("ptgen_ready")), checks, gap_items, evidence_ref="material_evidence_summary.description"),
-        _material_chain_step("mediainfo_bdinfo", "MediaInfo or BDInfo", bool(media.get("mediainfo_or_bdinfo_ready")), checks, gap_items, evidence_ref="material_evidence_summary.media"),
-        _material_chain_step("screenshots", "Video screenshots", bool(media.get("screenshots_ready")), checks, gap_items, evidence_ref="material_evidence_summary.media"),
-        _material_chain_step("image_host", "Image-hosted screenshots", bool(media.get("image_host_urls")), checks, gap_items, evidence_ref="material_evidence_summary.media.image_host_urls"),
+        _material_chain_step("source_content", "qBittorrent/local content", _material_chain_domain_ready(checks, "source_content"), checks, gap_items, direct_calls, evidence_ref="material_evidence_summary.checks_by_domain.source_content"),
+        _material_chain_step("metadata_ids", "IMDb/TMDb/Douban ids", bool(metadata.get("imdb_ready") and metadata.get("tmdb_ready") and metadata.get("douban_ready")), checks, gap_items, direct_calls, evidence_ref="material_evidence_summary.metadata"),
+        _material_chain_step("ptgen_description", "PTGen/Douban description", bool(description.get("ptgen_ready")), checks, gap_items, direct_calls, evidence_ref="material_evidence_summary.description"),
+        _material_chain_step("mediainfo_bdinfo", "MediaInfo or BDInfo", bool(media.get("mediainfo_or_bdinfo_ready")), checks, gap_items, direct_calls, evidence_ref="material_evidence_summary.media"),
+        _material_chain_step("screenshots", "Video screenshots", bool(media.get("screenshots_ready")), checks, gap_items, direct_calls, evidence_ref="material_evidence_summary.media"),
+        _material_chain_step("image_host", "Image-hosted screenshots", bool(media.get("image_host_urls")), checks, gap_items, direct_calls, evidence_ref="material_evidence_summary.media.image_host_urls"),
         {
             "domain": "target_description",
             "label": "Target tracker description",
@@ -22889,6 +22894,10 @@ def _material_chain_steps(
             "recommended_tool": _material_chain_target_tool(final_report, "target_package_prepare_job"),
             "recommended_endpoint": _material_chain_target_endpoint(final_report, "/v1/jobs/target/package/prepare"),
             "recommended_request": _material_chain_target_request(final_report),
+            "direct_tool": _material_chain_direct_tool(direct_calls, "target_description"),
+            "direct_endpoint": _material_chain_direct_endpoint(direct_calls, "target_description"),
+            "direct_request": _material_chain_direct_request(direct_calls, "target_description"),
+            "direct_call": None if target_payload.get("description_ready") is True else _material_chain_direct_call(direct_calls, "target_description"),
             "continue_when": "target description contains PTGen/Douban text, external ids, MediaInfo/BDInfo, and hosted screenshots",
             "stop_when": "description missing remains after target_package_prepare",
         },
@@ -22901,6 +22910,10 @@ def _material_chain_steps(
             "recommended_tool": target_package.get("recommended_tool") if isinstance(target_package, dict) else None,
             "recommended_endpoint": target_package.get("recommended_endpoint") if isinstance(target_package, dict) else None,
             "recommended_request": target_package.get("recommended_request") if isinstance(target_package, dict) else None,
+            "direct_tool": _material_chain_direct_tool(direct_calls, "target_package"),
+            "direct_endpoint": _material_chain_direct_endpoint(direct_calls, "target_package"),
+            "direct_request": _material_chain_direct_request(direct_calls, "target_package"),
+            "direct_call": None if (not isinstance(target_package, dict) or target_package.get("ready") is True) else _material_chain_direct_call(direct_calls, "target_package"),
             "continue_when": "target_package_handoff.ready=true",
             "stop_when": "target_package_handoff.blockers is non-empty",
         },
@@ -22913,6 +22926,10 @@ def _material_chain_steps(
             "recommended_tool": target_upload.get("recommended_tool") if isinstance(target_upload, dict) else "target_upload_job",
             "recommended_endpoint": target_upload.get("recommended_endpoint") if isinstance(target_upload, dict) else "/v1/jobs/target/upload",
             "recommended_request": target_upload.get("recommended_request") if isinstance(target_upload, dict) else None,
+            "direct_tool": None,
+            "direct_endpoint": None,
+            "direct_request": None,
+            "direct_call": None,
             "continue_when": "target_upload_handoff.uploaded_seeding_ready=true",
             "stop_when": "confirm_upload missing, duplicate exists, or uploaded torrent injection evidence missing",
         },
@@ -22924,9 +22941,10 @@ def _material_chain_domain_ready(checks: dict[str, Any], domain: str) -> bool:
     return check.get("ready") is True
 
 
-def _material_chain_step(domain: str, label: str, ready: bool, checks: dict[str, Any], gap_items: list[Any], *, evidence_ref: str) -> dict[str, Any]:
+def _material_chain_step(domain: str, label: str, ready: bool, checks: dict[str, Any], gap_items: list[Any], direct_calls: dict[str, Any] | None = None, *, evidence_ref: str) -> dict[str, Any]:
     check = checks.get(domain) if isinstance(checks.get(domain), dict) else {}
     gap = next((item for item in gap_items if isinstance(item, dict) and item.get("domain") == domain), {})
+    direct_call = _material_chain_direct_call(direct_calls, domain)
     return {
         "domain": domain,
         "label": label,
@@ -22939,9 +22957,181 @@ def _material_chain_step(domain: str, label: str, ready: bool, checks: dict[str,
         "recommended_request": None if ready else gap.get("recommended_request"),
         "dry_run_request": None if ready else gap.get("dry_run_request"),
         "execute_request": None if ready else gap.get("execute_request"),
+        "direct_tool": None if ready else _material_chain_direct_tool(direct_calls, domain),
+        "direct_endpoint": None if ready else _material_chain_direct_endpoint(direct_calls, domain),
+        "direct_request": None if ready else _material_chain_direct_request(direct_calls, domain),
+        "direct_call": None if ready else direct_call,
         "continue_when": f"{domain} evidence is ready",
         "stop_when": gap.get("stop_when") if isinstance(gap, dict) else None,
     }
+
+
+def _material_chain_direct_calls(job: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    payload = payload if isinstance(payload, dict) else {}
+    source_info = _retorrent_stage_source_info(job, request, payload)
+    material_options = _retorrent_stage_material_options(request, payload)
+    content_path = _retorrent_stage_content_path(request, payload)
+    source_url = _material_chain_source_url(request)
+    calls: dict[str, Any] = {}
+    metadata_request = _material_chain_metadata_prepare_request(job, request, source_info, material_options, content_path, source_url)
+    if metadata_request:
+        metadata_call = _material_chain_call("metadata_prepare_job", "/v1/jobs/metadata/prepare", metadata_request, reason="prepare_metadata_and_ptgen", safe_to_call_now=True, requires_user_review=False, read_after="metadata_prepare_handoff")
+        calls["metadata_ids"] = metadata_call
+        calls["ptgen_description"] = metadata_call
+    for domain in ("mediainfo_bdinfo", "screenshots", "image_host"):
+        materials_request = _material_chain_materials_prepare_request(job, request, material_options, content_path, source_url, domain)
+        if materials_request:
+            materials_safe = bool(materials_request.get("path") or materials_request.get("content_path") or materials_request.get("screenshot_files"))
+            calls[domain] = _material_chain_call("materials_prepare_job", "/v1/jobs/materials/prepare", materials_request, reason=f"prepare_{domain}", safe_to_call_now=materials_safe, requires_user_review=False, read_after="materials_prepare_handoff")
+    package_request = _material_chain_target_package_prepare_request(job, request, payload, source_info, material_options, content_path)
+    if package_request:
+        package_call = _material_chain_call("target_package_prepare_job", "/v1/jobs/target/package/prepare", package_request, reason="prepare_target_description_and_package", safe_to_call_now=True, requires_user_review=False, read_after="target_package_handoff")
+        calls["target_description"] = package_call
+        calls["target_package"] = package_call
+    return calls
+
+
+def _material_chain_source_url(request: dict[str, Any]) -> str | None:
+    source_url = request.get("source_url") or request.get("source") or request.get("source_link") or request.get("url")
+    return str(source_url) if source_url not in (None, "") else None
+
+
+def _material_chain_metadata_prepare_request(
+    job: dict[str, Any],
+    request: dict[str, Any],
+    source_info: dict[str, Any],
+    material_options: dict[str, Any],
+    content_path: str | None,
+    source_url: str | None,
+) -> dict[str, Any] | None:
+    overrides = {key: material_options.get(key) or request.get(key) for key in ("metadata_file", "ptgen_description_file", "imdb_id", "tmdb_id", "tmdb_type", "douban_id", "douban_url") if material_options.get(key) not in (None, "") or request.get(key) not in (None, "")}
+    if not source_info and not source_url and not overrides:
+        return None
+    target = request.get("target") or request.get("target_tracker") or request.get("target_trackers")
+    prepare_request = {
+        "parent_job_id": job.get("job_id"),
+        "source_info": source_info,
+        "source_url": source_url,
+        "source": source_url,
+        "target": target,
+        "target_tracker": request.get("target_tracker"),
+        "target_trackers": request.get("target_trackers"),
+        "path": content_path,
+        "content_path": content_path,
+        "save_path": request.get("save_path"),
+        "accept_rules": request.get("accept_rules") is True,
+        "confirm_upload": request.get("confirm_upload") is True,
+        "fetch_ptgen": True,
+        **overrides,
+    }
+    for key in ("config", "base_dir", "qbit_category", "qbit_tags", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_category", "uploaded_qbit_tags", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit"):
+        if request.get(key) not in (None, ""):
+            prepare_request[key] = request[key]
+    return _material_chain_clean_request(prepare_request)
+
+
+def _material_chain_materials_prepare_request(job: dict[str, Any], request: dict[str, Any], material_options: dict[str, Any], content_path: str | None, source_url: str | None, domain: str) -> dict[str, Any] | None:
+    screenshot_files = _string_list(material_options.get("screenshot_files") or request.get("screenshot_files") or request.get("screenshot_file"))
+    prepare_request = {
+        "parent_job_id": job.get("job_id"),
+        "source_url": source_url,
+        "source": source_url,
+        "target": request.get("target") or request.get("target_tracker") or request.get("target_trackers"),
+        "target_tracker": request.get("target_tracker"),
+        "target_trackers": request.get("target_trackers"),
+        "path": content_path,
+        "content_path": content_path,
+        "output_dir": request.get("materials_output_dir") or request.get("output_dir") or "./tmp/materials",
+        "accept_rules": request.get("accept_rules") is True,
+        "confirm_upload": request.get("confirm_upload") is True,
+        "screenshot_count": request.get("screenshot_count") or 3,
+        **{key: value for key, value in material_options.items() if value not in (None, "", [], {})},
+    }
+    if domain == "mediainfo_bdinfo":
+        prepare_request["generate_mediainfo"] = True
+        if _material_chain_should_generate_bdinfo(content_path, request, material_options):
+            prepare_request["generate_bdinfo"] = True
+    elif domain == "screenshots":
+        prepare_request["generate_screenshots"] = True
+    elif domain == "image_host":
+        prepare_request["upload_screenshots"] = True
+        if screenshot_files:
+            prepare_request["screenshot_files"] = screenshot_files
+        else:
+            prepare_request["generate_screenshots"] = True
+    for key in ("config", "base_dir", "client", "qbit_category", "qbit_tags", "qbit_upload_limit", "qbit_download_limit", "uploaded_qbit_category", "uploaded_qbit_tags", "uploaded_qbit_upload_limit", "uploaded_qbit_download_limit", "image_host"):
+        if request.get(key) not in (None, ""):
+            prepare_request[key] = request[key]
+    return _material_chain_clean_request(prepare_request)
+
+
+def _material_chain_should_generate_bdinfo(content_path: str | None, request: dict[str, Any], material_options: dict[str, Any]) -> bool:
+    if request.get("generate_bdinfo") is True or material_options.get("generate_bdinfo") is True:
+        return True
+    return bool(content_path and ("BDMV" in content_path.upper() or content_path.upper().endswith((".ISO", ".ISO/"))))
+
+
+def _material_chain_target_package_prepare_request(job: dict[str, Any], request: dict[str, Any], payload: dict[str, Any], source_info: dict[str, Any], material_options: dict[str, Any], content_path: str | None) -> dict[str, Any] | None:
+    if not source_info and not material_options:
+        return None
+    duplicate_check = _job_duplicate_check(job)
+    rule_check = _retorrent_stage_rule_check(job, request, payload)
+    qbit_evidence = _retorrent_stage_qbit_evidence(request, payload, content_path)
+    package_request = _retorrent_stage_target_package_request(
+        job,
+        request,
+        source_info=source_info,
+        material_options=material_options,
+        duplicate_check=duplicate_check,
+        rule_check=rule_check,
+        qbit_evidence=qbit_evidence,
+        content_path=content_path,
+    )
+    return _material_chain_clean_request(package_request)
+
+
+def _material_chain_call(tool: str, endpoint: str, request: dict[str, Any], *, reason: str, safe_to_call_now: bool, requires_user_review: bool, read_after: str) -> dict[str, Any]:
+    return {
+        "tool": tool,
+        "endpoint": endpoint,
+        "method": "POST",
+        "request": request,
+        "safe_to_call_now": safe_to_call_now,
+        "requires_user_review": requires_user_review,
+        "reason": reason,
+        "read_after": read_after,
+    }
+
+
+def _material_chain_clean_request(request: dict[str, Any]) -> dict[str, Any]:
+    cleaned: dict[str, Any] = {}
+    for key, value in request.items():
+        if value in (None, "", [], {}):
+            continue
+        cleaned[key] = value
+    return cleaned
+
+
+def _material_chain_direct_call(direct_calls: dict[str, Any] | None, domain: str) -> dict[str, Any] | None:
+    call = direct_calls.get(domain) if isinstance(direct_calls, dict) else None
+    return call if isinstance(call, dict) else None
+
+
+def _material_chain_direct_tool(direct_calls: dict[str, Any] | None, domain: str) -> str | None:
+    call = _material_chain_direct_call(direct_calls, domain)
+    return str(call.get("tool")) if isinstance(call, dict) and call.get("tool") else None
+
+
+def _material_chain_direct_endpoint(direct_calls: dict[str, Any] | None, domain: str) -> str | None:
+    call = _material_chain_direct_call(direct_calls, domain)
+    return str(call.get("endpoint")) if isinstance(call, dict) and call.get("endpoint") else None
+
+
+def _material_chain_direct_request(direct_calls: dict[str, Any] | None, domain: str) -> dict[str, Any] | None:
+    call = _material_chain_direct_call(direct_calls, domain)
+    request = call.get("request") if isinstance(call, dict) else None
+    return request if isinstance(request, dict) else None
 
 
 def _material_chain_target_tool(final_report: dict[str, Any] | None, fallback: str) -> str | None:
@@ -22977,6 +23167,9 @@ def _material_chain_action(ready_for_target_upload: bool, ready_for_target_packa
 
 def _material_chain_recommended_call(next_step: dict[str, Any] | None, final_report: dict[str, Any] | None, gap_summary: dict[str, Any] | None) -> dict[str, Any]:
     if isinstance(next_step, dict):
+        direct_call = next_step.get("direct_call") if isinstance(next_step.get("direct_call"), dict) else None
+        if direct_call:
+            return direct_call
         request = next_step.get("dry_run_request") if isinstance(next_step.get("dry_run_request"), dict) else next_step.get("recommended_request")
         return {
             "tool": next_step.get("recommended_tool"),
@@ -32359,8 +32552,8 @@ def _job_response_contract() -> dict[str, Any]:
         "material_evidence_summary_fields": ["ready", "status", "can_prepare_upload_payload", "missing_domains", "missing_count", "next_missing_domain", "checks", "checks_by_domain", "metadata", "description", "media", "target_payload", "recommended_input_keys", "recommended_tool", "recommended_endpoint", "recommended_request", "dry_run_request", "execute_request", "read_fields", "complete_when", "stop_when", "blockers", "next_actions"],
         "material_gap_summary_fields": ["ready", "status", "missing_domains", "missing_count", "groups", "items", "next_item", "recommended_tool", "recommended_endpoint", "recommended_request", "dry_run_request", "execute_request", "resume_handoff", "target_package_handoff", "read_fields", "continue_when", "stop_when", "blockers", "next_actions"],
         "material_preparation_final_report_fields": ["ready", "ready_for_target_package", "ready_for_target_upload", "verdict", "status", "metadata", "description", "media", "target_payload", "target_package", "preparation_jobs", "missing_domains", "missing_count", "next_missing_domain", "recommended_call", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
-        "material_chain_handoff_fields": ["ready", "ready_for_target_package", "ready_for_target_upload", "status", "action", "step_count", "ready_step_count", "missing_step_count", "steps", "next_step", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "evidence_refs", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
-        "material_chain_step_fields": ["domain", "label", "ready", "status", "evidence_ref", "recommended_input_key", "recommended_tool", "recommended_endpoint", "recommended_request", "dry_run_request", "execute_request", "continue_when", "stop_when"],
+        "material_chain_handoff_fields": ["ready", "ready_for_target_package", "ready_for_target_upload", "status", "action", "step_count", "ready_step_count", "missing_step_count", "steps", "next_step", "direct_calls", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "evidence_refs", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+        "material_chain_step_fields": ["domain", "label", "ready", "status", "evidence_ref", "recommended_input_key", "recommended_tool", "recommended_endpoint", "recommended_request", "dry_run_request", "execute_request", "direct_tool", "direct_endpoint", "direct_request", "direct_call", "continue_when", "stop_when"],
         "material_gap_item_fields": ["domain", "group", "label", "ready", "status", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "recommended_tool", "recommended_endpoint", "dry_run_request", "execute_request", "recommended_request", "continue_when", "stop_when"],
         "material_evidence_check_fields": ["domain", "label", "ready", "status", "stage", "recommended_input_key", "accepted_keys", "blocking_keys", "resume_overrides", "next_step"],
         "metadata_prepare_handoff_fields": ["ready", "job_id", "status", "dry_run", "parent_job_id", "material_options", "material_evidence", "metadata_prepare_handoff", "resume_request", "execute_request", "source_url_check_and_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "next_step", "continue_when", "stop_when", "blockers", "next_actions"],

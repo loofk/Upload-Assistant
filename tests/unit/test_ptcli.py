@@ -13755,10 +13755,19 @@ def test_job_store_exposes_agent_material_summary(tmp_path) -> None:
     assert chain["next_step"]["domain"] == "source_content"
     chain_steps = {step["domain"]: step for step in chain["steps"]}
     assert chain_steps["metadata_ids"]["label"] == "IMDb/TMDb/Douban ids"
+    assert chain_steps["metadata_ids"]["direct_tool"] == "metadata_prepare_job"
+    assert chain_steps["metadata_ids"]["direct_endpoint"] == "/v1/jobs/metadata/prepare"
+    assert chain_steps["metadata_ids"]["direct_request"]["parent_job_id"] == job["job_id"]
+    assert chain_steps["metadata_ids"]["direct_request"]["fetch_ptgen"] is True
     assert chain_steps["ptgen_description"]["label"] == "PTGen/Douban description"
     assert chain_steps["screenshots"]["ready"] is True
     assert chain_steps["image_host"]["label"] == "Image-hosted screenshots"
+    assert chain_steps["image_host"]["direct_call"] is None
     assert chain_steps["target_description"]["evidence_ref"] == "material_preparation_final_report.target_payload.description_ready"
+    assert chain["direct_calls"]["metadata_ids"]["tool"] == "metadata_prepare_job"
+    assert chain["direct_calls"]["ptgen_description"]["request"]["fetch_ptgen"] is True
+    assert chain["direct_calls"]["image_host"]["tool"] == "materials_prepare_job"
+    assert chain["direct_calls"]["image_host"]["request"]["upload_screenshots"] is True
     assert chain["recommended_call"]["reason"] == "source_content"
     assert chain["safety"]["does_not_skip_image_host"] is True
     assert job["job_handoff"]["material_gap_summary"] == job["material_gap_summary"]
@@ -17528,10 +17537,21 @@ def test_candidate_retorrent_handoff_prefers_material_resume_request(tmp_path) -
     chain = job["material_chain_handoff"]
     assert chain["kind"] == "ptcli.material_chain_handoff"
     assert chain["next_step"]["domain"] == "metadata_ids"
-    assert chain["recommended_call"]["tool"] == "resume_job"
+    assert chain["next_step"]["direct_tool"] == "metadata_prepare_job"
+    assert chain["next_step"]["direct_request"]["parent_job_id"] == job["job_id"]
+    assert chain["next_step"]["direct_request"]["source_info"]["tracker"] == "U2"
+    assert chain["next_step"]["direct_request"]["source_info"]["torrent_id"] == "60635"
+    assert chain["next_step"]["direct_request"]["fetch_ptgen"] is True
+    assert chain["recommended_call"]["tool"] == "metadata_prepare_job"
+    assert chain["recommended_call"]["endpoint"] == "/v1/jobs/metadata/prepare"
+    assert chain["recommended_call"]["safe_to_call_now"] is True
     assert chain["steps"][1]["domain"] == "metadata_ids"
     assert chain["steps"][2]["domain"] == "ptgen_description"
     assert chain["steps"][5]["domain"] == "image_host"
+    assert chain["direct_calls"]["screenshots"]["tool"] == "materials_prepare_job"
+    assert chain["direct_calls"]["screenshots"]["request"]["generate_screenshots"] is True
+    assert chain["direct_calls"]["image_host"]["request"]["upload_screenshots"] is True
+    assert chain["direct_calls"]["target_package"]["tool"] == "target_package_prepare_job"
     assert job["job_handoff"]["material_gap_summary"] == gap_summary
     assert job["job_handoff"]["material_preparation_final_report"] == job["material_preparation_final_report"]
     assert job["job_handoff"]["material_chain_handoff"] == chain
@@ -20829,8 +20849,11 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_chain_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_chain_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "steps" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_handoff_fields"]
+    assert "direct_calls" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_handoff_fields"]
     assert "material_chain_step_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
     assert "evidence_ref" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_step_fields"]
+    assert "direct_call" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_step_fields"]
+    assert "direct_request" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_step_fields"]
     assert "material_evidence_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_gap_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_preparation_final_report" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
