@@ -14589,6 +14589,7 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_enforcement_bundle"]["request_default_sources"] == job["policy_execution_plan"]["request_default_sources"]
     assert job["policy_enforcement_bundle"]["qbit_enforcement"]["request_fields"]["qbit_download_limit"] == 20 * 1024 * 1024
     assert job["policy_enforcement_bundle"]["qbit_enforcement"]["request_fields"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
+    assert job["policy_enforcement_bundle"]["qbit_runtime_handoff"] == job["policy_execution_plan"]["qbit_runtime_handoff"]
     assert job["policy_enforcement_bundle"]["seeding_enforcement"]["ready"] is True
     assert job["policy_enforcement_bundle"]["rule_gate"]["ready"] is True
     assert job["policy_enforcement_bundle"]["runtime_contract"] == job["policy_runtime_contract"]
@@ -14596,11 +14597,13 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_runtime_contract"]["ready"] is True
     assert job["policy_runtime_contract"]["required_request_fields"] == ["source_url", "target", "accept_rules", "confirm_upload", "qbit_download_limit", "uploaded_qbit_upload_limit"]
     assert job["policy_runtime_contract"]["protected_fields"][0]["field"] == "qbit_download_limit"
+    assert job["policy_runtime_contract"]["qbit_runtime_handoff"] == job["policy_execution_plan"]["qbit_runtime_handoff"]
     assert job["request"]["policy_enforcement_bundle"] == job["policy_enforcement_bundle"]
     assert job["request"]["policy_runtime_contract"] == job["policy_runtime_contract"]
     assert job["policy_application_handoff"]["kind"] == "ptcli.job_policy_application_handoff"
     assert job["policy_application_handoff"]["application_ready"] is True
     assert job["policy_application_handoff"]["request_patch"] == job["policy_execution_plan"]["request_defaults"]
+    assert job["policy_application_handoff"]["qbit_runtime_handoff"] == job["policy_execution_plan"]["qbit_runtime_handoff"]
     assert job["policy_application_handoff"]["qbit_defaults_application_report"] == defaults_application
     assert job["policy_application_handoff"]["applied_request_fields"] == job["policy_execution_plan"]["request_defaults"]
     assert job["policy_application_handoff"]["missing_request_fields"] == []
@@ -14608,12 +14611,14 @@ def test_manual_retorrent_job_forces_execute_if_no_duplicate_path(monkeypatch, t
     assert job["policy_application_report"]["kind"] == "ptcli.policy_application_report"
     assert job["policy_application_report"]["ready_for_live_audit"] is True
     assert job["policy_application_report"]["qbit_defaults_application_report"] == defaults_application
+    assert job["policy_application_report"]["qbit_runtime_handoff"] == job["policy_application_handoff"]["qbit_runtime_handoff"]
     assert job["policy_application_report"]["request_patch_applied"] is True
     assert job["policy_application_report"]["protected_fields_ok"] is True
     assert job["policy_application_report"]["confirmations_ok"] is True
     assert job["policy_application_report"]["verdict"] == "await_qbit_evidence"
     assert job["policy_application_report"]["qbit_pending_roles"] == ["source", "uploaded"]
     assert job["policy_application_report"]["recommended_tool"] == "resume_job"
+    assert job["job_handoff"]["qbit_runtime_handoff"] == job["policy_application_handoff"]["qbit_runtime_handoff"]
     assert job["request"]["policy_application_handoff"]["kind"] == "ptcli.policy_application_handoff"
     assert job["policy_config_apply_handoff"]["kind"] == "ptcli.site_policy_config_apply_handoff"
     assert job["policy_config_apply_handoff"]["ready"] is True
@@ -19362,6 +19367,7 @@ def test_service_site_policies_payload_exposes_policy_matrix(monkeypatch) -> Non
     assert application_handoff["submit_overrides_template"]["uploaded_qbit_upload_limit"] == 2 * 1024 * 1024
     assert application_handoff["qbit"]["request_fields"]["qbit_download_limit"] == 20 * 1024 * 1024
     assert application_handoff["qbit"]["client_fields"]["target:MTEAM"]["upload_limit"] == 2 * 1024 * 1024
+    assert application_handoff["qbit_runtime_handoff"] == qbit_runtime
     assert application_handoff["seeding"]["by_role"]["source:U2"]["min_seed_time_hours"] == 72
     assert application_handoff["rules"]["ready"] is True
     assert "live_user_report" in application_handoff["completion"]["summary_fields"]
@@ -21019,6 +21025,8 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_handoff_fields"]
     assert "request_patch" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "qbit_defaults_application_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+    assert "qbit_runtime_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
+    assert "qbit_runtime_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_report_fields"]
     assert "applied_request_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "policy_config_apply_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["policy_application_handoff_fields"]
     assert "policy_application_report_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
@@ -21252,6 +21260,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_preparation_final_report" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "qbit_limit_audit" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "qbit_enforcement_summary" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
+    assert "qbit_runtime_handoff" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "qbit_execution_gate" in tool_by_name["get_job_status"]["response_contract"]["job_handoff_fields"]
     assert "job_control_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "job_control_summary" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
@@ -21622,6 +21631,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "request_field_sources" in tool_by_name["site_policies"]["response_contract"]["policy_execution_contract_role_fields"]
     assert "policy_application_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "request_patch" in tool_by_name["site_policies"]["response_contract"]["policy_application_handoff_fields"]
+    assert "qbit_runtime_handoff" in tool_by_name["site_policies"]["response_contract"]["policy_application_handoff_fields"]
     assert "submit_overrides_template" in tool_by_name["site_policies"]["response_contract"]["policy_application_handoff_fields"]
     assert "policy_runtime_protected_field_fields" in tool_by_name["site_policies"]["response_contract"]
     assert "override_requires" in tool_by_name["site_policies"]["response_contract"]["policy_runtime_protected_field_fields"]
