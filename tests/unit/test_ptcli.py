@@ -15474,6 +15474,7 @@ def test_source_url_retorrent_job_handoff_prepares_missing_materials(monkeypatch
             "source_info": {"tracker": "U2", "torrent_id": "60635", "name": "Example Movie", "imdb_id": "tt1234567"},
             "duplicate_check": {"searched": True, "status": "not_found", "exists": False, "count": 0, "dupes": []},
             "rule_check": {"ready": True, "rule_obligations": [{"tracker": "U2", "scope": "download_and_retorrent"}, {"tracker": "MTEAM", "scope": "upload_and_seed"}], "blockers": []},
+            "policy_execution_final_report": {"kind": "ptcli.policy_execution_final_report", "ready": True, "ready_for_live": True, "verdict": "ready", "blockers": []},
             "evidence": {"torrent_hash": "abc123", "content_path": "/downloads/Example.Movie.2024"},
             "material_diagnostics": {
                 "present": True,
@@ -15534,6 +15535,21 @@ def test_source_url_retorrent_job_handoff_prepares_missing_materials(monkeypatch
     assert "image_host" in handoff["material_preparation_handoff"]["missing_domains"]
     assert "material_preparation_final_report" in handoff["material_preparation_handoff"]["read"]
     assert job["material_preparation_final_report"]["verdict"] == "missing_materials"
+    remaining_sequence = job["manual_retorrent_remaining_sequence"]
+    assert remaining_sequence["kind"] == "ptcli.manual_retorrent_remaining_sequence"
+    assert remaining_sequence["action"] == "material_chain"
+    assert remaining_sequence["material_chain"]["available"] is True
+    assert remaining_sequence["material_chain"]["next_domain"] == "metadata_ids"
+    assert remaining_sequence["next_step"]["tool"] == "metadata_prepare_job"
+    assert remaining_sequence["next_step"]["request"]["fetch_ptgen"] is True
+    assert remaining_sequence["recommended_tool"] == "metadata_prepare_job"
+    assert remaining_sequence["steps"][2]["name"] == "material_chain"
+    assert "material_chain_handoff.direct_calls" in remaining_sequence["steps"][2]["read"]
+    assert job["manual_retorrent_final_report"]["remaining_sequence"] == remaining_sequence
+    assert job["workflow_context"]["manual_retorrent_remaining_sequence"] == remaining_sequence
+    summary = store.summary(job["job_id"])
+    assert summary["manual_retorrent_remaining_sequence"] == remaining_sequence
+    assert summary["manual_retorrent_final_report"]["remaining_sequence"] == remaining_sequence
 
 
 def test_source_url_retorrent_job_handoff_uploads_existing_target_package(monkeypatch, tmp_path) -> None:
@@ -20859,6 +20875,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_gap_summary" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_preparation_final_report" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_chain_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_remaining_sequence" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_prepare_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "retorrent_stage_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["manual_retorrent_job"]["response_contract"]["required_fields"]
@@ -20867,6 +20884,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_gap_summary" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_preparation_final_report" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "material_chain_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_remaining_sequence" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "materials_prepare_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "retorrent_stage_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["source_url_retorrent_job"]["response_contract"]["required_fields"]
@@ -20875,12 +20893,18 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "material_gap_summary" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "material_preparation_final_report" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "material_chain_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_remaining_sequence" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "materials_prepare_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "retorrent_stage_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "target_package_handoff" in tool_by_name["get_job_status"]["response_contract"]["required_fields"]
     assert "materials_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_chain_handoff" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
+    assert "manual_retorrent_remaining_sequence" in tool_by_name["get_job_summary"]["response_contract"]["required_fields"]
     assert "material_chain_handoff_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "manual_retorrent_remaining_sequence_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "manual_retorrent_remaining_step_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
+    assert "remaining_sequence" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_final_report_fields"]
+    assert "steps" in tool_by_name["manual_retorrent_job"]["response_contract"]["manual_retorrent_remaining_sequence_fields"]
     assert "steps" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_handoff_fields"]
     assert "direct_calls" in tool_by_name["manual_retorrent_job"]["response_contract"]["material_chain_handoff_fields"]
     assert "material_chain_step_fields" in tool_by_name["manual_retorrent_job"]["response_contract"]
