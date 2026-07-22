@@ -20579,6 +20579,13 @@ def test_site_policy_rule_review_requires_explicit_manual_evidence(monkeypatch) 
     assert final_report["merged_config_patch"] is None
     assert final_report["safety"]["must_not_fabricate_fingerprint"] is True
     assert final_report["recommended_tool"] == "site_policy_rule_review"
+    apply_report = payload["config_apply_final_report"]
+    assert apply_report["kind"] == "ptcli.site_policy_config_apply_final_report"
+    assert apply_report["ready"] is False
+    assert apply_report["verdict"] == "waiting_for_rule_review_evidence"
+    assert apply_report["action"] == "collect_manual_rule_review_evidence"
+    assert apply_report["safety"]["does_not_edit_config"] is True
+    assert apply_report["recommended_tool"] == "site_policy_rule_review"
 
 
 def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
@@ -20630,12 +20637,25 @@ def test_site_policy_rule_review_generates_config_patch(monkeypatch) -> None:
     assert final_report["merge_plan"]["fingerprint_patch_wins"] is True
     assert final_report["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert final_report["review_items"][0]["rule_review_fingerprint"] == reviews["U2"]["rule_review_fingerprint"]
+    apply_report = payload["config_apply_final_report"]
+    assert apply_report["ready"] is True
+    assert apply_report["verdict"] == "ready_to_apply_manually"
+    assert apply_report["action"] == "edit_config_then_verify"
+    assert apply_report["patch_source"] == "site_policy_rule_review.merged_config_patch"
+    assert apply_report["preferred_patch"] == payload["merged_config_patch"]["structured_patch"]
+    assert apply_report["verification"]["endpoint"] == "/v1/site-policies"
+    assert apply_report["verification"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert apply_report["verification"]["continue_when"] == "policy_config_apply_handoff.ready=true and policy_repair_gate.ready=true and policy_execution_handoff.ready=true"
+    assert apply_report["next_step"]["tool"] == "edit_config"
+    assert apply_report["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
+    assert apply_report["safety"]["safe_to_auto_apply"] is False
     assert payload["next_step"]["tool"] == "edit_config"
     assert payload["next_step"]["request"] == payload["merged_config_patch"]
     assert payload["next_step"]["after_edit"]["request"] == {"accept_rules": True, "source_tracker": "U2", "target": "MTEAM"}
     assert payload["recommended_request"] == payload["merged_config_patch"]
     assert payload["recommended_endpoint"] is None
     assert payload["read_order"][0] == "rule_review_final_report"
+    assert payload["read_order"][1] == "config_apply_final_report"
     assert "merged_config_patch" in payload["read_order"]
 
 
@@ -21673,9 +21693,13 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "merged_config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "rule_review_final_report" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+    assert "config_apply_final_report" in tool_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
     assert "rule_review_final_report_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
     assert "merged_config_patch" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
     assert "merge_plan" in tool_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
+    assert "config_apply_final_report_fields" in tool_by_name["site_policy_rule_review"]["response_contract"]
+    assert "verification" in tool_by_name["site_policy_rule_review"]["response_contract"]["config_apply_final_report_fields"]
+    assert "continue_when" in tool_by_name["site_policy_rule_review"]["response_contract"]["config_apply_verification_fields"]
     assert "rule_review_fingerprint" in tool_by_name["site_policy_rule_review"]["response_contract"]["review_fields"]
     assert tool_by_name["site_policy_rule_review"]["safety"]["does_not_edit_config"] is True
     assert "policy_execution_handoff_fields" in tool_by_name["site_policies"]["response_contract"]
@@ -22277,6 +22301,7 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "config_patch" in rule_review_schema["properties"]
     assert "merged_config_patch" in rule_review_schema["properties"]
     assert "rule_review_final_report" in rule_review_schema["properties"]
+    assert "config_apply_final_report" in rule_review_schema["properties"]
     assert "reviews" in rule_review_schema["properties"]
     site_profiles_schema = openapi["paths"]["/v1/sites"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert "capability_matrix" in site_profiles_schema["properties"]
@@ -22828,9 +22853,12 @@ def test_agent_manifest_exposes_ai_safe_workflows() -> None:
     rule_review_tool = next(tool for tool in manifest["tools"] if tool["name"] == "site_policy_rule_review")
     assert "merged_config_patch" in rule_review_tool["response_contract"]["required_fields"]
     assert "rule_review_final_report" in rule_review_tool["response_contract"]["required_fields"]
+    assert "config_apply_final_report" in rule_review_tool["response_contract"]["required_fields"]
     assert "rule_review_final_report_fields" in rule_review_tool["response_contract"]
     assert "merged_config_patch" in rule_review_tool["response_contract"]["rule_review_final_report_fields"]
     assert "merge_plan" in rule_review_tool["response_contract"]["rule_review_final_report_fields"]
+    assert "config_apply_final_report_fields" in rule_review_tool["response_contract"]
+    assert "verification" in rule_review_tool["response_contract"]["config_apply_final_report_fields"]
     goal_progress_tool = next(tool for tool in manifest["tools"] if tool["name"] == "goal_progress")
     assert "ready_to_submit" in goal_progress_tool["response_contract"]["capability_status_values"]
     assert "submitted_needs_resume" in goal_progress_tool["response_contract"]["capability_status_values"]
@@ -22948,9 +22976,11 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "request" in tools_by_name["goal_progress"]["response_contract"]["next_step_fields"]
         assert "rule_review_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
         assert "merged_config_patch" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
+        assert "config_apply_final_report" in tools_by_name["site_policy_rule_review"]["response_contract"]["required_fields"]
         assert "rule_review_final_report_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]
         assert "merged_config_patch" in tools_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
         assert "merge_plan" in tools_by_name["site_policy_rule_review"]["response_contract"]["rule_review_final_report_fields"]
+        assert "config_apply_final_report_fields" in tools_by_name["site_policy_rule_review"]["response_contract"]
         assert tools_by_name["agent_run_preview"]["path"] == "/v1/agent/run-preview"
         assert "closure_contract" in tools_by_name["agent_run_preview"]["response_contract"]["required_fields"]
         assert "daily_candidates" in tools_by_name["agent_run_preview"]["response_contract"]["workflows"]

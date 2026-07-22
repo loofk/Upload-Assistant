@@ -43757,6 +43757,7 @@
           "config_patch",
           "merged_config_patch",
           "rule_review_final_report",
+          "config_apply_final_report",
           "next_step",
           "blockers",
           "next_actions"
@@ -43805,6 +43806,38 @@
           "safety",
           "blockers",
           "next_actions"
+        ],
+        "config_apply_final_report_fields": [
+          "ready",
+          "report_allowed",
+          "verdict",
+          "action",
+          "config_path",
+          "patch_source",
+          "preferred_patch",
+          "fallback_patch",
+          "apply_order",
+          "manual_steps",
+          "verification",
+          "next_step",
+          "recommended_tool",
+          "recommended_endpoint",
+          "recommended_request",
+          "read_order",
+          "complete_when",
+          "stop_when",
+          "safety",
+          "blockers",
+          "next_actions"
+        ],
+        "config_apply_verification_fields": [
+          "tool",
+          "endpoint",
+          "method",
+          "request",
+          "read",
+          "continue_when",
+          "stop_when"
         ],
         "next_step_fields": [
           "tool",
