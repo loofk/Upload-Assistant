@@ -18369,6 +18369,15 @@ def test_daily_candidate_schedule_jobs_create_candidate_jobs(monkeypatch, tmp_pa
     assert run_handoff["shortfall_recovery"]["read_after"][0] == "after_batch.daily_candidate_batch_publish_payload"
     assert run_handoff["next_step"]["tool"] == "submit_daily_candidate_job"
     assert run_handoff["next_step"]["reason"] == "submit_candidate_after_user_approval"
+    assert run_handoff["next_call"]["kind"] == "ptcli.daily_candidate_run_next_call"
+    assert run_handoff["next_call"]["tool"] == "submit_daily_candidate_job"
+    assert run_handoff["next_call"]["safe_to_call_now"] is False
+    assert run_handoff["next_call"]["requires_user_review"] is True
+    assert run_handoff["next_call"]["uploads"] is True
+    assert run_handoff["next_call"]["approval"]["required"] is True
+    assert run_handoff["next_call"]["approval"]["first_submit_request"] == run_handoff["submit"]["first_submit_request"]
+    assert "daily_candidate_run_handoff.submit" in run_handoff["next_call"]["read_before_call"]
+    assert run_handoff["next_call"]["after_call"]["tool"] == "daily_candidates_schedule_job"
     assert run_handoff["safety"]["publish_uploads"] is False
     assert run_handoff["safety"]["submit_requires_human_approval"] is True
     operational_report = payload["daily_candidate_operational_final_report"]
@@ -21545,6 +21554,10 @@ def test_service_tools_and_openapi_include_job_endpoints() -> None:
     assert "daily_candidate_run_handoff_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "submit" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_run_handoff_fields"]
     assert "publish" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_run_handoff_fields"]
+    assert "next_call" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_run_handoff_fields"]
+    assert "daily_candidate_run_next_call_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
+    assert "safe_to_call_now" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_run_next_call_fields"]
+    assert "requires_user_review" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_run_next_call_fields"]
     assert "daily_schedule_gate_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
     assert "action" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_schedule_gate_fields"]
     assert "daily_candidate_delivery_plan_fields" in tool_by_name["daily_candidates_schedule_job"]["response_contract"]
@@ -23097,6 +23110,8 @@ def test_static_agent_skill_templates_are_valid_json() -> None:
         assert "shortfall_recovery" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_target_fulfillment_report_fields"]
         assert "daily_candidate_run_handoff_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "submit" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_run_handoff_fields"]
+        assert "next_call" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["daily_candidate_run_handoff_fields"]
+        assert "daily_candidate_run_next_call_fields" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]
         assert "top_submit_requests" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "push_payload" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]
         assert "approval_queue" in tools_by_name["daily_candidates_schedule_job"]["response_contract"]["digest_fields"]

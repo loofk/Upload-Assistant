@@ -10132,6 +10132,7 @@ def _daily_candidate_run_handoff(
     poll_step = _daily_candidate_run_poll_step(schedule_digest)
     shortfall_step = _daily_candidate_run_shortfall_step(delivery_final, delivery_plan, execution_context, schedule_digest)
     next_step = _daily_candidate_run_next_step(action, blockers, pending_count, shortfall_count, publish_step, submit_step, poll_step, shortfall_step)
+    next_call = _daily_candidate_run_next_call(action, next_step, blockers, schedule_digest)
     publish_ready = bool(delivery_final.get("delivery", {}).get("publish_ready")) if isinstance(delivery_final.get("delivery"), dict) else bool(delivery_plan.get("publish_ready") or notification_payload.get("ready"))
     submission_ready = bool(delivery_final.get("submission", {}).get("ready")) if isinstance(delivery_final.get("submission"), dict) else bool(delivery_plan.get("submission_ready"))
     ready = not blockers and action in {"publish_notification", "submit_candidate", "rerun_for_shortfall", "poll_jobs"}
@@ -10152,6 +10153,7 @@ def _daily_candidate_run_handoff(
         "poll": poll_step,
         "shortfall_recovery": shortfall_step,
         "next_step": next_step,
+        "next_call": next_call,
         "recommended_tool": next_step.get("tool"),
         "recommended_endpoint": next_step.get("endpoint"),
         "recommended_method": next_step.get("method"),
@@ -10263,6 +10265,102 @@ def _daily_candidate_run_next_step(
     if publish_step.get("ready"):
         return {**publish_step, "reason": "publish_available_digest"}
     return {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "request": None, "reason": "create_or_refresh_daily_candidates"}
+
+
+def _daily_candidate_run_next_call(action: str, next_step: dict[str, Any], blockers: list[str], schedule_digest: dict[str, Any]) -> dict[str, Any]:
+    tool = next_step.get("tool")
+    method = next_step.get("method") or "GET"
+    request = next_step.get("request")
+    requires_user_review = action == "submit_candidate" or tool == "submit_daily_candidate_job"
+    mutates_state = method == "POST" and tool not in {"daily_candidate_delivery", "get_job_status", "get_job_summary"}
+    uploads = tool in {"submit_daily_candidate_job", "target_upload", "target_upload_job"} or (tool == "resume_job" and isinstance(request, dict) and request.get("confirm_upload") is True)
+    safe_to_call_now = bool(tool) and not blockers and not requires_user_review and tool != "inspect_blockers"
+    return {
+        "kind": "ptcli.daily_candidate_run_next_call",
+        "ready": bool(tool) and not blockers,
+        "action": action,
+        "tool": tool,
+        "endpoint": next_step.get("endpoint"),
+        "method": method,
+        "request": request,
+        "safe_to_call_now": safe_to_call_now,
+        "requires_user_review": requires_user_review,
+        "mutates_state": mutates_state,
+        "uploads": uploads,
+        "contacts_trackers": tool not in {None, "daily_candidate_delivery", "get_job_status", "get_job_summary", "inspect_blockers"},
+        "contacts_qbittorrent": tool in {"submit_daily_candidate_job", "resume_job", "manual_retorrent_job", "source_url_retorrent_job", "qbit_inject_torrent", "qbit_wait_complete", "qbit_inspect"},
+        "reason": next_step.get("reason") or action,
+        "read_before_call": _daily_candidate_run_next_call_read_before(action),
+        "after_call": _daily_candidate_run_next_call_after_call(action, schedule_digest),
+        "approval": {
+            "required": requires_user_review,
+            "required_user_inputs": ["explicit candidate approval", "accept_rules=true", "confirm_upload=true", "save_path or path"] if requires_user_review else [],
+            "first_submit_request": next_step.get("first_submit_request") if isinstance(next_step.get("first_submit_request"), dict) else request if requires_user_review and isinstance(request, dict) else None,
+        },
+        "safety": {
+            "publish_does_not_upload": tool == "daily_candidate_delivery",
+            "submit_requires_explicit_approval": True,
+            "live_upload_requires_confirm_upload": True,
+            "does_not_bypass_site_rules": True,
+        },
+        "blockers": blockers,
+        "next_actions": _daily_candidate_run_next_call_next_actions(safe_to_call_now, requires_user_review, blockers),
+    }
+
+
+def _daily_candidate_run_next_call_read_before(action: str) -> list[str]:
+    reads = ["daily_candidate_run_handoff", "daily_candidate_run_handoff.next_step"]
+    if action == "submit_candidate":
+        reads.extend(["daily_candidate_run_handoff.submit", "daily_candidate_delivery_final_report.submission"])
+    elif action == "publish_notification":
+        reads.extend(["daily_candidate_run_handoff.publish", "notification_payload", "delivery_handoff"])
+    elif action == "rerun_for_shortfall":
+        reads.extend(["daily_candidate_run_handoff.shortfall_recovery", "schedule_digest.daily_candidate_batch_report.shortfall_recovery"])
+    elif action == "poll_jobs":
+        reads.extend(["daily_candidate_run_handoff.poll", "schedule_digest.items[].status_endpoint"])
+    return list(dict.fromkeys(reads))
+
+
+def _daily_candidate_run_next_call_after_call(action: str, schedule_digest: dict[str, Any]) -> dict[str, Any]:
+    request = _daily_candidate_run_refresh_request(schedule_digest)
+    if action in {"publish_notification", "rerun_for_shortfall", "poll_jobs"}:
+        return {"tool": "daily_candidate_run_and_deliver", "endpoint": "/v1/jobs/candidates/daily/run-and-deliver", "method": "POST", "request": request, "reason": "refresh_daily_candidate_run_handoff"}
+    return {"tool": "daily_candidates_schedule_job", "endpoint": "/v1/jobs/candidates/daily/schedule", "method": "POST", "request": request, "reason": "refresh_daily_candidate_schedule_after_next_call"}
+
+
+def _daily_candidate_run_refresh_request(schedule_digest: dict[str, Any]) -> dict[str, Any] | None:
+    schedules: list[dict[str, Any]] = []
+    for item in schedule_digest.get("items", []) if isinstance(schedule_digest.get("items"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        context = item.get("request_context") if isinstance(item.get("request_context"), dict) else {}
+        schedule = {
+            key: value
+            for key, value in {
+                "name": item.get("schedule_name"),
+                "source_tracker": context.get("source_tracker") or item.get("source_tracker"),
+                "target": context.get("target_trackers") or item.get("target_trackers"),
+                "limit": context.get("limit") or item.get("target_count"),
+                "scan_limit": context.get("scan_limit") or item.get("scan_limit"),
+                "accept_rules": context.get("accept_rules"),
+                "check_dupes": context.get("check_dupes", True),
+                "base_dir": context.get("base_dir"),
+            }.items()
+            if value is not None and value != ""
+        }
+        if schedule.get("source_tracker") and schedule.get("target"):
+            schedules.append(schedule)
+    return {"schedules": schedules} if schedules else None
+
+
+def _daily_candidate_run_next_call_next_actions(safe_to_call_now: bool, requires_user_review: bool, blockers: list[str]) -> list[str]:
+    if blockers:
+        return ["Resolve daily_candidate_run_handoff.next_call.blockers before continuing."]
+    if requires_user_review:
+        return ["Present daily_candidate_run_handoff.next_call.approval to the user and do not submit/upload until explicit approval is available."]
+    if safe_to_call_now:
+        return ["Call daily_candidate_run_handoff.next_call.tool, then call daily_candidate_run_handoff.next_call.after_call to refresh state."]
+    return ["Inspect daily_candidate_run_handoff.next_call.read_before_call before continuing."]
 
 
 def _daily_candidate_run_next_actions(action: str, pending_count: int, shortfall_count: int, blockers: list[str], publish_ready: bool, submission_ready: bool) -> list[str]:
@@ -31645,7 +31743,8 @@ def _agent_tool_schemas() -> list[dict[str, Any]]:
                 "daily_schedule_gate_fields": ["ready", "action", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "target_met", "pending_job_count", "publish_ready", "submission_ready", "notification_ready", "first_submit_request", "recommended_tool", "recommended_endpoint", "recommended_request", "read_order", "continue_when", "stop_when", "first_blocker", "blockers", "next_actions"],
                 "daily_candidate_delivery_plan_fields": ["ready", "action", "status", "publish_ready", "submission_ready", "notification_ready", "target_met", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "recommended_tool", "recommended_endpoint", "recommended_request", "delivery_tool", "delivery_endpoint", "delivery_method", "delivery_request", "publish_request", "first_submit_request", "candidate_executability_matrix", "safe_to_publish", "recommended_action_safety", "daily_candidate_schedule_execution_context", "daily_candidate_final_report", "daily_candidate_delivery_final_report", "daily_candidate_operational_final_report", "daily_candidate_target_fulfillment_report", "read_order", "continue_when", "stop_when", "blockers", "next_actions"],
                 "daily_candidate_schedule_execution_context_fields": ["ready", "action", "schedule_job_count", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "target_met", "approval_queue_ready", "publish_ready", "submission_ready", "notification_ready", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "first_submit_request", "first_candidate_execution_context", "candidate_executability_matrix", "approval_queue", "submission_handoff_ref", "notification_payload_ref", "publish_request", "shortfall_recovery", "required_user_inputs", "missing_user_inputs", "read_before_action", "continue_when", "stop_when", "safety", "blockers", "next_actions"],
-                "daily_candidate_run_handoff_fields": ["ready", "status", "action", "verdict", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "publish", "submit", "poll", "shortfall_recovery", "next_step", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_run_handoff_fields": ["ready", "status", "action", "verdict", "target_count", "selected_count", "ready_count", "safe_to_submit_count", "shortfall_count", "pending_job_count", "publish", "submit", "poll", "shortfall_recovery", "next_step", "next_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
+                "daily_candidate_run_next_call_fields": ["ready", "action", "tool", "endpoint", "method", "request", "safe_to_call_now", "requires_user_review", "mutates_state", "uploads", "contacts_trackers", "contacts_qbittorrent", "reason", "read_before_call", "after_call", "approval", "safety", "blockers", "next_actions"],
                 "daily_candidate_operational_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "delivery", "approval", "completion", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_target_fulfillment_report_fields": ["ready", "status", "action", "target", "delivery", "approval", "shortfall_recovery", "recommended_call", "recommended_tool", "recommended_endpoint", "recommended_method", "recommended_request", "read_order", "complete_when", "stop_when", "safety", "blockers", "next_actions"],
                 "daily_candidate_final_report_fields": ["ready", "report_allowed", "verdict", "action", "counts", "notification", "approval", "submission", "shortfall_recovery", "audit", "read_order", "complete_when", "stop_when", "blockers", "next_actions"],
